@@ -234,6 +234,9 @@ fn values_equal_nullable_with_catalog(
     if let Some(order) = super::super::datums::compare_jsonb_with_control(a, b, control)? {
         return Ok(Some(order.is_eq()));
     }
+    if let Some(order) = compare_physical_range(a, b, control, enums)? {
+        return Ok(Some(order.is_eq()));
+    }
     let equal = match (a, b) {
         (Value::Null, _) | (_, Value::Null) => None,
         (Value::Datum(datum), _) => {
@@ -329,6 +332,9 @@ fn compare_nullable_with_catalog(
         return Ok(Some(order));
     }
     if let Some(order) = super::super::datums::compare_jsonb_with_control(a, b, control)? {
+        return Ok(Some(order));
+    }
+    if let Some(order) = compare_physical_range(a, b, control, enums)? {
         return Ok(Some(order));
     }
     match (a, b) {
@@ -545,6 +551,9 @@ fn compare_typed_values_for_purpose(
     if let Some(order) = enum_key_order(left, right, enums, enum_order)? {
         return Ok(order);
     }
+    if let Some(order) = compare_physical_range(left, right, control, enums)? {
+        return Ok(order);
+    }
     match (left, right) {
         (Value::Datum(datum), _) => {
             return compare_typed_values_for_purpose(
@@ -712,6 +721,9 @@ fn equal_values(
             return Ok(left == right);
         }
     }
+    if let Some(order) = compare_physical_range(left, right, control, enums)? {
+        return Ok(order.is_eq());
+    }
     match (left, right) {
         (Value::Datum(datum), _) => equal_values(
             &*super::super::datums::read_with_value_catalog_and_control(datum, enums, control)?,
@@ -763,6 +775,23 @@ fn equal_values(
     }
 }
 
+fn compare_physical_range(
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    catalog: Option<&dyn EnumLabelCatalog>,
+) -> Result<Option<Ordering>> {
+    use crate::expr::range::RangeComparisonValue;
+    if matches!(left, Value::Null) || matches!(right, Value::Null) {
+        return Ok(None);
+    }
+    let oid = match RangeComparisonValue::declared_physical_oid(left, catalog)? {
+        Some(oid) => Some(oid),
+        None => RangeComparisonValue::declared_physical_oid(right, catalog)?,
+    };
+    compare_declared_range(left, right, oid, control, catalog)
+}
+
 fn compare_declared_range(
     left: &Value,
     right: &Value,
@@ -792,7 +821,8 @@ fn compare_declared_range(
         .ok_or_else(|| {
             SQLError::Internal("selected range identity changed during comparison".into())
         })?;
-    left.cmp_with_control(&right, control).map(Some)
+    left.cmp_with_catalog_and_control(&right, catalog, control)
+        .map(Some)
 }
 
 fn validate_array_element_types(

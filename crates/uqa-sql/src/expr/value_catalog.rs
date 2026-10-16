@@ -9,7 +9,10 @@
 use super::enums::{EnumTypeComparisonStates, EnumTypeLabels};
 use super::Result;
 use std::sync::Arc;
-use uqa_core::EnumValue;
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    EnumValue, Value,
+};
 
 mod records;
 pub use records::SQLRecordFields;
@@ -22,6 +25,31 @@ pub trait SQLValueCatalog {
         _oid: u32,
     ) -> Result<Option<Arc<super::range::RangeValueDescriptor>>> {
         Ok(None)
+    }
+
+    /// Compare admitted bounds with the range's captured operator class and collation. Invocation state belongs to the support-function owner; this operation must not perform endpoint input or range canonicalization.
+    fn compare_range_bounds(
+        &self,
+        _range_oid: u32,
+        _left: &Value,
+        _right: &Value,
+        _control: &ProductionControl<'_>,
+    ) -> Result<std::cmp::Ordering> {
+        Err(super::SQLError::Internal(
+            "selected range comparison support is unavailable".into(),
+        ))
+    }
+
+    /// Return an admitted exact equality key for one finite bound under the same selected operation. Keys must coincide exactly when `compare_range_bounds` returns Equal; an ordinary hash is not an exact key. Execution owns this encoding and any selected normalization.
+    fn range_bound_equality_key(
+        &self,
+        _range_oid: u32,
+        _value: &Value,
+        _control: &ProductionControl<'_>,
+    ) -> Result<Produced<Vec<u8>>> {
+        Err(super::SQLError::Internal(
+            "selected range equality-key support is unavailable".into(),
+        ))
     }
 
     /// The declared type for a physical OID, including domains, arrays and composites.
@@ -79,6 +107,37 @@ pub trait SQLValueCatalog {
 pub struct EngineValueCatalog<'a>(pub &'a dyn super::EngineHook);
 
 impl SQLValueCatalog for EngineValueCatalog<'_> {
+    fn compare_range_bounds(
+        &self,
+        range_oid: u32,
+        left: &Value,
+        right: &Value,
+        control: &ProductionControl<'_>,
+    ) -> Result<std::cmp::Ordering> {
+        self.0
+            .enum_labels()
+            .ok_or_else(|| {
+                super::SQLError::Internal("selected range comparison support is unavailable".into())
+            })?
+            .compare_range_bounds(range_oid, left, right, control)
+    }
+
+    fn range_bound_equality_key(
+        &self,
+        range_oid: u32,
+        value: &Value,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Vec<u8>>> {
+        self.0
+            .enum_labels()
+            .ok_or_else(|| {
+                super::SQLError::Internal(
+                    "selected range equality-key support is unavailable".into(),
+                )
+            })?
+            .range_bound_equality_key(range_oid, value, control)
+    }
+
     fn value_range_type(
         &self,
         oid: u32,

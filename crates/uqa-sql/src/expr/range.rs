@@ -57,6 +57,11 @@ impl CanonicalRange {
 }
 
 impl<I> CanonicalRange<I> {
+    #[must_use]
+    pub const fn identity(&self) -> &I {
+        &self.subtype
+    }
+
     fn empty(subtype: I) -> Self {
         Self {
             subtype,
@@ -152,6 +157,11 @@ pub struct CanonicalMultirange<I = RangeSubtype> {
 }
 
 impl<I> CanonicalMultirange<I> {
+    #[must_use]
+    pub const fn identity(&self) -> &I {
+        &self.subtype
+    }
+
     #[must_use]
     pub fn ranges(&self) -> &[CanonicalRange<I>] {
         &self.ranges

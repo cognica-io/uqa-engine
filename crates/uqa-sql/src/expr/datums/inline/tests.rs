@@ -23,6 +23,8 @@ struct Reference {
     labels: Arc<EnumTypeLabels>,
     record: Arc<CompositeTypeDescriptor>,
     observing: Cell<bool>,
+    comparisons: Cell<usize>,
+    fail_comparison: Cell<bool>,
 }
 
 impl Reference {
@@ -75,6 +77,8 @@ impl Reference {
             labels,
             record,
             observing: Cell::new(false),
+            comparisons: Cell::new(0),
+            fail_comparison: Cell::new(false),
         }
     }
 
@@ -107,6 +111,7 @@ impl Reference {
                 base: Box::new(ColumnType::Integer),
             },
             "text_window" => ColumnType::Text,
+            "reverse_window" => ColumnType::Integer,
             "array_window" => ColumnType::Array(Box::new(ColumnType::Integer)),
             "record_window" => ColumnType::Composite(CompositeTypeReference {
                 schema: "public".into(),
@@ -165,12 +170,49 @@ fn integer(value: &serde_json::Value) -> u32 {
 }
 
 impl SQLValueCatalog for Reference {
+    fn compare_range_bounds(
+        &self,
+        range_oid: u32,
+        left: &Value,
+        right: &Value,
+        control: &ProductionControl<'_>,
+    ) -> Result<std::cmp::Ordering, SQLError> {
+        self.comparisons.set(self.comparisons.get() + 1);
+        if self.fail_comparison.get() {
+            return Err(SQLError::Routine {
+                sqlstate: "22012".into(),
+                message: "selected comparison failed".into(),
+            });
+        }
+        let row = case(&self.data, "type_metadata")["results"][0]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| integer(&row[1]) == range_oid)
+            .unwrap();
+        let order = crate::expr::compare_typed_values_with_enum_catalog(
+            left,
+            right,
+            control,
+            Some(self),
+            None,
+        )?;
+        Ok(if row[0] == "reverse_window" {
+            order.reverse()
+        } else {
+            order
+        })
+    }
+
     fn value_type_by_oid(&self, oid: u32) -> Result<Option<ColumnType>, SQLError> {
         if oid == self.record.type_oid {
             return Ok(Some(self.endpoint("record_window")));
         }
-        for name in FAMILIES {
-            let row = self.metadata(name);
+        for row in case(&self.data, "type_metadata")["results"][0]["rows"]
+            .as_array()
+            .unwrap()
+        {
+            let name = row[0].as_str().unwrap();
             let range = self.range_type(name);
             if oid == integer(&row[1]) {
                 return Ok(Some(range));
@@ -178,14 +220,20 @@ impl SQLValueCatalog for Reference {
             if oid == integer(&row[2]) {
                 return Ok(Some(ColumnType::Array(Box::new(range))));
             }
-            if oid == integer(&row[6]) {
+            let array_oid = row.get(7).map(integer).unwrap_or(0);
+            if oid == integer(&row[6]) || (array_oid != 0 && oid == array_oid) {
                 let ColumnType::DeclaredRange(mut reference) = range else {
                     unreachable!()
                 };
-                reference.oid = oid;
+                reference.oid = integer(&row[6]);
                 reference.name.push_str("_multirange");
-                reference.array_oid = 0;
-                return Ok(Some(ColumnType::DeclaredMultirange(reference)));
+                reference.array_oid = array_oid;
+                let ty = ColumnType::DeclaredMultirange(reference);
+                return Ok(Some(if oid == array_oid {
+                    ColumnType::Array(Box::new(ty))
+                } else {
+                    ty
+                }));
             }
         }
         Ok(None)
@@ -194,16 +242,20 @@ impl SQLValueCatalog for Reference {
         &self,
         oid: u32,
     ) -> Result<Option<Arc<crate::expr::range::RangeValueDescriptor>>, SQLError> {
-        Ok(FAMILIES.iter().find_map(|name| {
-            let row = self.metadata(name);
-            (oid == integer(&row[1]) || oid == integer(&row[6])).then(|| {
-                Arc::new(crate::expr::range::RangeValueDescriptor {
-                    range_oid: integer(&row[1]),
-                    multirange_oid: integer(&row[6]),
-                    endpoint: self.endpoint(name),
+        Ok(case(&self.data, "type_metadata")["results"][0]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|row| {
+                let name = row[0].as_str().unwrap();
+                (oid == integer(&row[1]) || oid == integer(&row[6])).then(|| {
+                    Arc::new(crate::expr::range::RangeValueDescriptor {
+                        range_oid: integer(&row[1]),
+                        multirange_oid: integer(&row[6]),
+                        endpoint: self.endpoint(name),
+                    })
                 })
-            })
-        }))
+            }))
     }
     fn value_composite_type(
         &self,

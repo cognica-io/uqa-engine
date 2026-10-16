@@ -10534,6 +10534,58 @@
       "capability": "Anonymous row production ownership",
       "workload": "Produce empty and populated rows without field descriptors, then cancel each original owner after admitting their values.",
       "invariant": "Missing metadata retains the budget owner, transfers admitted buffers without copying and releases all storage on drop or cancellation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_comparisons_follow_selected_postgresql_operations_in_all_consumers",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests/ranges/comparison.rs",
+      "capability": "Selected declared range comparison and equality keys",
+      "workload": "Compare six PostgreSQL endpoint families and their multiranges in scalar, record and array consumers using 1,764 independent order/equality observations, including a reverse operator class.",
+      "invariant": "Physical identities select the captured bound operation; all consumers preserve PostgreSQL order and equality without text input or native canonicalization."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_comparison_preserves_lazy_errors_and_both_resource_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests/ranges/comparison.rs",
+      "capability": "Selected declared range comparison and equality keys",
+      "workload": "Compare empty and finite declared ranges with failing selected support, exhausted allowances and both independently cancelled producer owners.",
+      "invariant": "Empty comparisons stay lazy; selected support diagnostics survive, and all failed comparisons release admitted scratch."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "declared_range_exact_hash_reservation_and_spill_keys_match_postgresql_equality",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/encoding/declared_ranges.rs",
+      "capability": "Selected declared range comparison and equality keys",
+      "workload": "Check 1,764 PostgreSQL equality pairs through exact, hash and reservation keys, then deduplicate all six range/multirange families in memory and actual spill storage.",
+      "invariant": "Selected exact bound keys define the same equality classes in all consumers; spilling preserves membership and releases temporary files."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "declared_range_key_output_keeps_the_original_budget_and_releases_failure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/encoding/declared_ranges.rs",
+      "capability": "Selected declared range comparison and equality keys",
+      "workload": "Encode nested composite-bound multiranges with zero, exhausted and sufficient output budgets, then cancel the invoking owner.",
+      "invariant": "Bound decoding, selected key support and output share the original allowance; failures retain 53200/57014 and release all reservations."
     }
   ]
 }
