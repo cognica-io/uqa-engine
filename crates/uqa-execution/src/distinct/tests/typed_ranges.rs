@@ -6,6 +6,13 @@
 
 use super::*;
 
+#[derive(Clone, Copy)]
+enum Strategy {
+    All,
+    On,
+    Ordered,
+}
+
 #[test]
 fn scalar_range_distinct_preserves_postgresql_classes_in_memory_and_spill() {
     let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
@@ -48,7 +55,7 @@ fn scalar_range_distinct_preserves_postgresql_classes_in_memory_and_spill() {
             base: Box::new(ty.clone()),
         };
         for ty in [&ty, &domain] {
-            for on in [false, true] {
+            for on in [Strategy::All, Strategy::On, Strategy::Ordered] {
                 for budget in [1, 64 * 1024] {
                     let actual = distinct_values(Some(ty), &values, budget, on);
                     assert_eq!(actual.len(), expected.len(), "{kind}, work_mem={budget}");
@@ -73,7 +80,7 @@ fn text_distinct_does_not_infer_ranges_from_spelling() {
         Value::Null,
     ];
     for ty in [None, Some(&uqa_sql::ColumnType::Text)] {
-        for on in [false, true] {
+        for on in [Strategy::All, Strategy::On, Strategy::Ordered] {
             for budget in [1, 64 * 1024] {
                 assert_eq!(
                     distinct_values(ty, &values, budget, on),
@@ -88,15 +95,18 @@ fn distinct_values(
     ty: Option<&uqa_sql::ColumnType>,
     values: &[Value],
     budget: usize,
-    on: bool,
+    on: Strategy,
 ) -> Vec<Value> {
+    if matches!(on, Strategy::Ordered) {
+        return ordered_distinct_values(ty, values, budget);
+    }
     let directory = tempfile::tempdir().unwrap();
     let scan = Box::new(TableScan::from_typed_rows(
         vec!["v".into()],
         vec![ty.cloned()],
         values.iter().cloned().map(value_row).collect(),
     ));
-    let mut distinct = if on {
+    let mut distinct = if matches!(on, Strategy::On) {
         Distinct::on_with_work_mem(
             scan,
             vec![ScalarExpr::Column("v".into())],
@@ -121,5 +131,52 @@ fn distinct_values(
     distinct.close().unwrap();
     drop(distinct);
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    actual
+}
+
+fn ordered_distinct_values(
+    ty: Option<&uqa_sql::ColumnType>,
+    values: &[Value],
+    budget: usize,
+) -> Vec<Value> {
+    let types = vec![ty.cloned(), Some(uqa_sql::ColumnType::Record)];
+    let scan = TableScan::from_typed_rows(
+        vec!["v".into(), "marker".into()],
+        types.clone(),
+        values
+            .iter()
+            .map(|value| {
+                BTreeMap::from([
+                    ("v".into(), value.clone()),
+                    (
+                        "marker".into(),
+                        Value::Record(vec![("id".into(), Value::Int(1))].into()),
+                    ),
+                ])
+            })
+            .collect(),
+    );
+    let mut distinct = super::super::ordered::operator(
+        Box::new(scan),
+        vec![
+            ScalarExpr::Column("v".into()),
+            ScalarExpr::Column("marker".into()),
+        ],
+        types,
+        Arc::new(Evaluator),
+        budget,
+    );
+    distinct.open().unwrap();
+    let mut actual = Vec::new();
+    while let Some(batch) = distinct.next().unwrap() {
+        assert_eq!(batch.schema.column_type(0), ty);
+        actual.extend(
+            batch
+                .rows
+                .into_iter()
+                .map(|row| row.value(0).unwrap().clone()),
+        );
+    }
+    distinct.close().unwrap();
     actual
 }

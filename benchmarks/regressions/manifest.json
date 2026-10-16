@@ -11012,7 +11012,7 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/distinct/tests/typed_ranges.rs",
       "capability": "Scalar range DISTINCT",
-      "workload": "All twelve native families, range domains, DISTINCT and DISTINCT ON, with normal and forced-spill budgets.",
+      "workload": "All twelve native families, range domains, hash DISTINCT, DISTINCT ON and ordered mixed-record keys, with normal and forced-spill budgets.",
       "invariant": "Each PostgreSQL equality class emits its first input representation, including one NULL; temporary files are cleaned.",
       "case_names": [
         ""
@@ -11025,7 +11025,7 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/distinct/tests/typed_ranges.rs",
       "capability": "Declared equality domains",
-      "workload": "Unknown and TEXT columns containing equal-looking numeric range strings through DISTINCT and DISTINCT ON in memory and spill.",
+      "workload": "Unknown and TEXT columns containing equal-looking numeric range strings through hash DISTINCT, DISTINCT ON and ordered mixed-record keys in memory and spill.",
       "invariant": "Unselected and ordinary TEXT values retain string equality.",
       "case_names": [
         ""
@@ -11103,7 +11103,7 @@
       "cases": 1,
       "source": "crates/uqa-engine/tests/pg18_semantics/range_datums.rs",
       "capability": "Public scalar range equality consumers",
-      "workload": "96 independently captured PostgreSQL queries across twelve range/multirange types and eight relational consumers.",
+      "workload": "120 independently captured PostgreSQL queries across twelve range/multirange types, including hash and mixed-record ordered DISTINCT/DISTINCT ON, grouping, aggregate DISTINCT, joins and sets.",
       "invariant": "Actual Engine SQL counts match PostgreSQL for DISTINCT, DISTINCT ON, groups, aggregate DISTINCT, joins and set operations.",
       "case_names": [
         ""
