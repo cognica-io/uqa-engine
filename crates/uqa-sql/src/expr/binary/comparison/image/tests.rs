@@ -113,6 +113,16 @@ fn record_image_comparison_matches_postgresql_for_logical_and_physical_fields() 
                 crate::expr::cast_value(&Value::Str(text.into()), name).unwrap()
             })
         });
+        for (value, field) in values.iter().zip(["left_payload_hex", "right_payload_hex"]) {
+            if let Some(hex) = case[field].as_str() {
+                let expected = (0..hex.len())
+                    .step_by(2)
+                    .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
+                    .collect::<Vec<_>>();
+                let encoded = datums::encoding::encode(value, &ty, None, &control).unwrap();
+                assert_eq!(&*encoded, expected, "{case}");
+            }
+        }
         let expected = case["order"].as_i64().unwrap().cmp(&0);
         for left in [&values[0], &physical(&values[0], &ty, None)] {
             for right in [&values[1], &physical(&values[1], &ty, None)] {

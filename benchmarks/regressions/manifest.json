@@ -11285,7 +11285,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/expr/binary/comparison/image/tests.rs",
       "capability": "Selected record image comparison",
-      "workload": "36 independently captured PostgreSQL record-image pairs through logical and physical fields, both directions and NULLs.",
+      "workload": "44 independently captured PostgreSQL record-image pairs through logical and physical fields, both directions and NULLs.",
       "invariant": "Image order matches PostgreSQL across admitted scalar and container types without calling ordinary field operators; scratch is released.",
       "case_names": [
         ""
@@ -11350,7 +11350,7 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/distinct/encoding/record_images/tests.rs",
       "capability": "Selected record image exact keys",
-      "workload": "36 independently captured PostgreSQL image comparisons through exact keys, hashing, in-memory membership and one-byte forced spill.",
+      "workload": "44 independently captured PostgreSQL image comparisons through exact keys, hashing, in-memory membership and one-byte forced spill.",
       "invariant": "Key equality coincides with PostgreSQL image equality within selected field types; spill preserves complete keys and production retains only output capacity.",
       "case_names": [
         ""
@@ -11381,6 +11381,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_legacy_vectors_share_the_array_codec_and_caller_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/encoding/tests.rs",
+      "capability": "Selected record image comparison",
+      "workload": "Encode empty, one-element and 256-element int2vector/oidvector images through the shared array codec; reject a mismatched selected type and an exhausted caller allowance.",
+      "invariant": "Preserve vector element width, dimensions and lower bounds, retain each output reservation and release all temporary allocations on success or error."
     }
   ]
 }
