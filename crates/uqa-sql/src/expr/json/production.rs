@@ -23,7 +23,9 @@ mod pretty;
 mod values;
 mod writer;
 pub(in crate::expr) use binary::{compare_jsonb_datums_with_control, JsonbInput};
-pub(crate) use binary::{decode_jsonb_datum_with_control, encode_jsonb_datum};
+pub(crate) use binary::{
+    decode_jsonb_datum_with_control, encode_jsonb_datum, encode_jsonb_datum_with_control,
+};
 use values::Values;
 
 /// Container capacities and their elements own separate leases. Dropping a replaced or temporary node releases all of its payloads without a process-wide cache.

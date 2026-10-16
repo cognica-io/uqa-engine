@@ -4,155 +4,128 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Heap tuple data and header construction, using SQL's existing scalar Datum codecs.
+//! Heap tuple headers and fields use the shared admitted SQL Datum codec.
 
 use super::super::Descriptors;
-use super::{
-    align, datum, pg_type_align, pg_type_len, pg_type_storage, width, ColumnType,
-    CompositeTypeDescriptor, Value,
+use super::{align, pg_type_align, pg_type_len, pg_type_storage, CompositeTypeDescriptor, Value};
+use crate::{
+    expr::{
+        composites::CompositeTypeCatalog,
+        datums::encoding::{append, encode as encode_value, header, invalid, pad_to},
+    },
+    SQLError,
 };
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 mod arrays;
-pub(crate) use arrays::payload as array_payload;
+pub(crate) use arrays::{
+    payload as array_payload, payload_with_control as array_payload_with_control,
+};
+
+pub(super) struct EncodedTuple {
+    pub bytes: Produced<Vec<u8>>,
+    pub positions: Produced<Vec<Option<usize>>>,
+    pub start: usize,
+}
 
 pub(super) fn encode(
     fields: &[(String, Value)],
     descriptor: &CompositeTypeDescriptor,
     descriptors: &Descriptors,
 ) -> Option<(Vec<u8>, Vec<Option<usize>>, usize)> {
-    let count = descriptor
-        .attributes
-        .iter()
-        .map(|a| a.number)
-        .chain(descriptor.dropped.iter().map(|a| a.number))
-        .max()
-        .unwrap_or(0) as usize;
-    let has_null =
-        !descriptor.dropped.is_empty() || fields.iter().any(|(_, v)| matches!(v, Value::Null));
-    let start = align(23 + if has_null { count.div_ceil(8) } else { 0 }, b'd')?;
-    let mut bytes = vec![0; start];
-    bytes[4..8].copy_from_slice(&(-1_i32).to_le_bytes());
-    bytes[8..12].copy_from_slice(&descriptor.type_oid.to_le_bytes());
-    bytes[12..16].fill(0xff);
-    bytes[18..20].copy_from_slice(&u16::try_from(count).ok()?.to_le_bytes());
-    bytes[22] = u8::try_from(start).ok()?;
+    let output = encode_with_control(
+        fields,
+        descriptor,
+        Some(descriptors),
+        &ProductionControl::uncontrolled(),
+    )
+    .ok()?;
+    Some((
+        output
+            .bytes
+            .into_uncontrolled()
+            .expect("ordinary tuple encoding"),
+        output
+            .positions
+            .into_uncontrolled()
+            .expect("ordinary tuple positions"),
+        output.start,
+    ))
+}
+
+pub(super) fn encode_with_control(
+    fields: &[(String, Value)],
+    descriptor: &CompositeTypeDescriptor,
+    catalog: Option<&dyn CompositeTypeCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<EncodedTuple, SQLError> {
+    control.check()?;
+    let count = usize::try_from(descriptor.physical_width()).map_err(|_| invalid())?;
+    let has_null = !descriptor.dropped.is_empty()
+        || fields.iter().any(|(_, value)| matches!(value, Value::Null));
+    let start =
+        align(23 + if has_null { count.div_ceil(8) } else { 0 }, b'd').ok_or_else(invalid)?;
+    let mut bytes = ProductionVec::new(*control);
+    pad_to(&mut bytes, start)?;
+    bytes.as_mut_slice()[4..8].copy_from_slice(&(-1_i32).to_le_bytes());
+    bytes.as_mut_slice()[8..12].copy_from_slice(&descriptor.type_oid.to_le_bytes());
+    bytes.as_mut_slice()[12..16].fill(0xff);
+    bytes.as_mut_slice()[18..20]
+        .copy_from_slice(&u16::try_from(count).map_err(|_| invalid())?.to_le_bytes());
+    bytes.as_mut_slice()[22] = u8::try_from(start).map_err(|_| invalid())?;
     let mut mask = u16::from(has_null);
-    let mut positions = Vec::with_capacity(descriptor.attributes.len());
+    let mut positions = ProductionVec::new(*control);
+    positions.reserve(descriptor.attributes.len())?;
     for attribute in &descriptor.attributes {
-        let (_, value) = fields.iter().find(|(name, _)| *name == attribute.name)?;
+        control.check()?;
+        let (_, value) = fields
+            .iter()
+            .find(|(name, _)| *name == attribute.name)
+            .ok_or_else(invalid)?;
         if matches!(value, Value::Null) {
-            positions.push(None);
+            positions.push_copy(None)?;
             continue;
         }
         if has_null {
-            let bit = usize::try_from(attribute.number - 1).ok()?;
-            bytes[23 + bit / 8] |= 1 << (bit % 8);
+            let bit = usize::try_from(attribute.number - 1).map_err(|_| invalid())?;
+            *bytes
+                .as_mut_slice()
+                .get_mut(23 + bit / 8)
+                .ok_or_else(invalid)? |= 1 << (bit % 8);
         }
         let length = pg_type_len(&attribute.ty);
+        let payload = encode_value(value, &attribute.ty, catalog, control)?;
         if length == -1 {
             mask |= 2;
-            let payload = payload(value, &attribute.ty, descriptors)?;
             let short = payload.len() < 127 && pg_type_storage(&attribute.ty) != "p";
             if !short {
-                bytes.resize(
-                    align(bytes.len(), pg_type_align(&attribute.ty).as_bytes()[0])?,
-                    0,
-                );
+                let aligned = align(bytes.len(), pg_type_align(&attribute.ty).as_bytes()[0])
+                    .ok_or_else(invalid)?;
+                pad_to(&mut bytes, aligned)?;
             }
-            positions.push(Some(bytes.len()));
+            positions.push_copy(Some(bytes.len()))?;
             if short {
-                bytes.push(((payload.len() as u8 + 1) << 1) | 1);
+                bytes.push_copy(((payload.len() as u8 + 1) << 1) | 1)?;
             } else {
-                bytes.extend_from_slice(
-                    &(u32::try_from(payload.len().checked_add(4)?).ok()? << 2).to_le_bytes(),
-                );
+                append(&mut bytes, &header(payload.len())?)?;
             }
-            bytes.extend_from_slice(&payload);
         } else {
-            bytes.resize(
-                align(bytes.len(), pg_type_align(&attribute.ty).as_bytes()[0])?,
-                0,
-            );
-            positions.push(Some(bytes.len()));
-            if let Some(length) = width(length) {
-                bytes.extend_from_slice(
-                    &datum::encode_bits(value, &attribute.ty)?.to_le_bytes()[..length],
-                );
-            } else {
-                let encoded = fixed(value, &attribute.ty)?;
-                if encoded.len() != usize::try_from(length).ok()? {
-                    return None;
-                }
-                bytes.extend_from_slice(&encoded);
+            if payload.len() != usize::try_from(length).map_err(|_| invalid())? {
+                return Err(invalid());
             }
+            let aligned = align(bytes.len(), pg_type_align(&attribute.ty).as_bytes()[0])
+                .ok_or_else(invalid)?;
+            pad_to(&mut bytes, aligned)?;
+            positions.push_copy(Some(bytes.len()))?;
         }
+        append(&mut bytes, &payload)?;
     }
-    bytes[20..22].copy_from_slice(&mask.to_le_bytes());
-    let total = u32::try_from(bytes.len()).ok()?.checked_mul(4)?;
-    bytes[..4].copy_from_slice(&total.to_le_bytes());
-    Some((bytes, positions, start))
-}
-
-fn fixed(value: &Value, ty: &ColumnType) -> Option<Vec<u8>> {
-    if let ColumnType::Domain { base, .. } = ty {
-        return fixed(value, base);
-    }
-    match (value, ty) {
-        (Value::Str(text), ColumnType::Name) if text.len() < 64 => {
-            let mut bytes = text.as_bytes().to_vec();
-            bytes.resize(64, 0);
-            Some(bytes)
-        }
-        (Value::Str(text), ColumnType::Uuid) => {
-            Some(crate::expr::uuid::parse_uuid_bytes(text).ok()?.to_vec())
-        }
-        (Value::Temporal(value), _) if matches!(pg_type_len(ty), 12 | 16) => {
-            crate::catalog::node_tree::encode_temporal_datum(
-                value,
-                crate::catalog::type_metadata::pg_type_oid(ty),
-            )
-            .ok()
-        }
-        _ => None,
-    }
-}
-
-fn payload(value: &Value, ty: &ColumnType, descriptors: &Descriptors) -> Option<Vec<u8>> {
-    if let ColumnType::Domain { base, .. } = ty {
-        return payload(value, base, descriptors);
-    }
-    match (value, ty) {
-        (
-            Value::Str(text) | Value::FixedChar(text),
-            ColumnType::Text
-            | ColumnType::Varchar(_)
-            | ColumnType::Character(_)
-            | ColumnType::Bpchar
-            | ColumnType::RefCursor
-            | ColumnType::PgNodeTree,
-        ) => Some(text.as_bytes().to_vec()),
-        (Value::Json(text), ColumnType::Json) => Some(text.as_bytes().to_vec()),
-        (Value::JsonB(text), ColumnType::JsonB) => crate::expr::json::encode_jsonb_datum(text).ok(),
-        (Value::Bytes(bytes), ColumnType::Bytea) => Some(bytes.clone()),
-        (Value::Str(text), ColumnType::Range(_) | ColumnType::Multirange(_)) => {
-            crate::expr::range::datum::encode(text, ty).ok()
-        }
-        (Value::BitString(bits), ColumnType::Bit(_) | ColumnType::VarBit(_)) => {
-            let mut bytes = Vec::with_capacity(4 + bits.as_bytes().len());
-            bytes.extend_from_slice(&bits.bit_len().to_le_bytes());
-            bytes.extend_from_slice(bits.as_bytes());
-            Some(bytes)
-        }
-        (Value::Decimal(number), ColumnType::Numeric { .. }) => {
-            crate::catalog::node_tree::encode_numeric_datum(number).ok()
-        }
-        (Value::Array(array), ColumnType::Array(element)) => {
-            arrays::payload(array, element, descriptors)
-        }
-        (Value::Record(fields), ColumnType::Composite(reference)) => {
-            let (mut bytes, _, _) = encode(fields, descriptors.get(&reference.oid)?, descriptors)?;
-            Some(bytes.split_off(4))
-        }
-        _ => None,
-    }
+    bytes.as_mut_slice()[20..22].copy_from_slice(&mask.to_le_bytes());
+    let total = header(bytes.len().checked_sub(4).ok_or_else(invalid)?)?;
+    bytes.as_mut_slice()[..4].copy_from_slice(&total);
+    Ok(EncodedTuple {
+        bytes: bytes.finish()?,
+        positions: positions.finish()?,
+        start,
+    })
 }

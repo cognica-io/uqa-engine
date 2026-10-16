@@ -33,6 +33,13 @@ pub(crate) fn encode_jsonb_datum(text: &str) -> Result<Vec<u8>> {
     encode::encode(text)
 }
 
+pub(crate) fn encode_jsonb_datum_with_control(
+    text: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>> {
+    encode::encode_with_control(text, control)
+}
+
 pub(crate) fn decode_jsonb_datum_with_control(
     bytes: &[u8],
     control: &ProductionControl<'_>,

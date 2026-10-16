@@ -24,7 +24,8 @@ const ABSOLUTE_OFFSET: u32 = 1 << 31;
 mod catalog;
 mod encoding;
 use catalog::PhysicalRangeType;
-pub(crate) use encoding::encode;
+pub use encoding::{declared_multirange_datum_with_control, declared_range_datum_with_control};
+pub(crate) use encoding::{encode, encode_with_control};
 
 /// Observe already admitted bytes without rerunning input, canonicalization, or domain checks. Multirange members stream into the original output allowance.
 pub(crate) fn read(
@@ -328,7 +329,13 @@ fn read_bound(
 }
 
 fn align(offset: usize, endpoint: &ColumnType) -> Result<usize, SQLError> {
-    let mask = if pg_type_align(endpoint) == "d" { 7 } else { 3 };
+    let mask = match pg_type_align(endpoint) {
+        "c" => 0,
+        "s" => 1,
+        "i" => 3,
+        "d" => 7,
+        _ => return Err(corrupt("invalid range endpoint alignment")),
+    };
     offset
         .checked_add(mask)
         .map(|offset| offset & !mask)

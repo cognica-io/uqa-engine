@@ -9,6 +9,7 @@ use crate::result::format_postgres_text_with_catalog_and_control;
 use uqa_core::DatumValue;
 
 mod comparison;
+mod encoding;
 
 fn reference() -> Reference {
     Reference::from_data(serde_json::from_str(include_str!("ranges/postgresql.json")).unwrap())

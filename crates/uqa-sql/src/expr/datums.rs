@@ -15,6 +15,7 @@ use uqa_core::{
 mod arrays;
 mod bit_string;
 mod compression;
+pub(crate) mod encoding;
 mod fixed;
 pub(in crate::expr) mod inline;
 mod malformed;

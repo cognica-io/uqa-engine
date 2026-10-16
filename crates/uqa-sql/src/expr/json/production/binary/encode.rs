@@ -10,27 +10,46 @@ use super::{
     aligned, corrupt, ProductionControl, Result, SQLError, ARRAY, CONTAINER, COUNT_MASK, FALSE,
     HAS_OFFSET, NULL, NUMERIC, OBJECT, SCALAR, TRUE,
 };
+use crate::expr::datums::encoding::{append, pad_to};
 use crate::expr::json::production::{parsed, writer, Node};
-use uqa_core::DecimalValue;
+use uqa_core::{
+    memory::{Produced, ProductionVec},
+    DecimalValue,
+};
 
 pub(super) fn encode(text: &str) -> Result<Vec<u8>> {
-    let control = ProductionControl::uncontrolled();
-    let node = parsed::parse(text, &control)?;
-    let mut bytes = Vec::new();
-    container(&node, &mut bytes, &control)?;
-    Ok(bytes)
+    Ok(
+        encode_with_control(text, &ProductionControl::uncontrolled())?
+            .into_uncontrolled()
+            .expect("ordinary JSONB encoding"),
+    )
 }
 
-fn container(node: &Node, bytes: &mut Vec<u8>, control: &ProductionControl<'_>) -> Result<()> {
+pub(super) fn encode_with_control(
+    text: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>> {
+    let node = parsed::parse(text, control)?;
+    let mut bytes = ProductionVec::new(*control);
+    container(&node, &mut bytes, control)?;
+    Ok(bytes.finish()?)
+}
+
+fn container(
+    node: &Node,
+    bytes: &mut ProductionVec<'_, u8>,
+    control: &ProductionControl<'_>,
+) -> Result<()> {
+    control.check()?;
     let start = bytes.len();
-    bytes.resize(aligned(start)?, 0);
+    pad_to(bytes, aligned(start)?)?;
     let (count, flag) = match node {
         Node::Array(values) => (values.len(), ARRAY),
         Node::Object(fields) => (fields.len(), OBJECT),
         _ => (1, ARRAY | SCALAR),
     };
     let count_word = length(count, flag)?;
-    bytes.extend_from_slice(&(count_word | flag).to_le_bytes());
+    append(bytes, &(count_word | flag).to_le_bytes())?;
     let entries = bytes.len();
     let slots = count
         .checked_mul(if flag == OBJECT { 2 } else { 1 })
@@ -38,57 +57,79 @@ fn container(node: &Node, bytes: &mut Vec<u8>, control: &ProductionControl<'_>) 
     let data = entries
         .checked_add(slots.checked_mul(4).ok_or_else(corrupt)?)
         .ok_or_else(corrupt)?;
-    bytes.resize(data, 0);
+    pad_to(bytes, data)?;
     match node {
         Node::Object(fields) => {
             let ordered = writer::ordered(fields, true, control)?;
             for (index, (_, field)) in ordered.entries.iter().enumerate() {
                 let start = bytes.len();
-                bytes.extend_from_slice(field.key.as_bytes());
-                entry(bytes, entries, data, index, start, 0, flag)?;
+                append(bytes, field.key.as_bytes())?;
+                entry(bytes.as_mut_slice(), entries, data, index, start, 0, flag)?;
             }
             for (index, (_, field)) in ordered.entries.iter().enumerate() {
                 let start = bytes.len();
                 let kind = value(&field.value, bytes, control)?;
-                entry(bytes, entries, data, count + index, start, kind, flag)?;
+                entry(
+                    bytes.as_mut_slice(),
+                    entries,
+                    data,
+                    count + index,
+                    start,
+                    kind,
+                    flag,
+                )?;
             }
         }
         Node::Array(values) => {
             for (index, node) in values.iter().enumerate() {
                 let start = bytes.len();
                 let kind = value(node, bytes, control)?;
-                entry(bytes, entries, data, index, start, kind, flag)?;
+                entry(
+                    bytes.as_mut_slice(),
+                    entries,
+                    data,
+                    index,
+                    start,
+                    kind,
+                    flag,
+                )?;
             }
         }
         node => {
             let start = bytes.len();
             let kind = value(node, bytes, control)?;
-            entry(bytes, entries, data, 0, start, kind, flag)?;
+            entry(bytes.as_mut_slice(), entries, data, 0, start, kind, flag)?;
         }
     }
     length(bytes.len() - start, flag)?;
     Ok(())
 }
 
-fn value(node: &Node, bytes: &mut Vec<u8>, control: &ProductionControl<'_>) -> Result<u32> {
+fn value(
+    node: &Node,
+    bytes: &mut ProductionVec<'_, u8>,
+    control: &ProductionControl<'_>,
+) -> Result<u32> {
+    control.check()?;
     Ok(match node {
         Node::Null => NULL,
         Node::Bool(false) => FALSE,
         Node::Bool(true) => TRUE,
         Node::String(text) => {
-            bytes.extend_from_slice(text.as_bytes());
+            append(bytes, text.as_bytes())?;
             0
         }
         Node::Number(text) => {
-            let number = DecimalValue::parse(text).ok_or_else(corrupt)?;
-            let payload = crate::catalog::node_tree::encode_numeric_datum(&number)?;
-            bytes.resize(aligned(bytes.len())?, 0);
+            let number = DecimalValue::parse_with_control(text, control)?.ok_or_else(corrupt)?;
+            let payload =
+                crate::catalog::node_tree::encode_numeric_datum_with_control(&number, control)?;
+            pad_to(bytes, aligned(bytes.len())?)?;
             let total = u32::try_from(payload.len().checked_add(4).ok_or_else(corrupt)?)
                 .ok()
                 .and_then(|size| size.checked_mul(4))
                 .ok_or_else(corrupt)?;
-            bytes.extend_from_slice(&total.to_le_bytes());
-            bytes.extend_from_slice(&payload);
+            append(bytes, &total.to_le_bytes())?;
+            append(bytes, &payload)?;
             NUMERIC
         }
         Node::Array(_) | Node::Object(_) => {

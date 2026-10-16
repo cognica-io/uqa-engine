@@ -10664,6 +10664,110 @@
       "capability": "Selected range construction and canonical invocation",
       "workload": "Normalize 64 equal ranges whose canonical callback allocates replacement text endpoints on every union.",
       "invariant": "The output retains admitted input/member workspace and only the live canonical replacement; superseded replacement reservations do not accumulate."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_leaf_encoding_borrows_payloads_and_uses_inline_fixed_width_scratch",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/encoding/tests.rs",
+      "capability": "Admitted declared range physical production",
+      "workload": "Encode integer, date and TIMETZ scalars, an 8 KiB text leaf and a retained short varlena under a zero-byte scratch budget.",
+      "invariant": "Physical identity and selected endpoint layout are preserved without repeated input; all new output and scratch allocations remain admitted and every failure releases its temporary ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_array_encoding_bounds_workspace_and_releases_nested_failures",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/encoding/tests.rs",
+      "capability": "Admitted declared range physical production",
+      "workload": "Encode integer arrays with 32, 256 and 2,048 elements; fail the second nested physical JSONB field after the first output has been produced.",
+      "invariant": "Physical identity and selected endpoint layout are preserved without repeated input; all new output and scratch allocations remain admitted and every failure releases its temporary ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_production_matches_postgresql_bytes_from_fresh_typed_endpoints",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests/ranges/encoding.rs",
+      "capability": "Admitted declared range physical production",
+      "workload": "Construct and encode fresh enum, domain, text, array and composite endpoint ranges; compare both their physical bytes and catalog constants with PostgreSQL.",
+      "invariant": "Physical identity and selected endpoint layout are preserved without repeated input; all new output and scratch allocations remain admitted and every failure releases its temporary ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_and_multirange_serialization_preserves_postgresql_empty_and_nested_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests/ranges/encoding.rs",
+      "capability": "Admitted declared range physical production",
+      "workload": "Re-encode independently captured empty, unbounded and finite declared range/multirange values across five endpoint families.",
+      "invariant": "Physical identity and selected endpoint layout are preserved without repeated input; all new output and scratch allocations remain admitted and every failure releases its temporary ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_encoding_preserves_original_quota_and_cancellation_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests/ranges/encoding.rs",
+      "capability": "Admitted declared range physical production",
+      "workload": "Encode five typed endpoint families under seven budgets and independently cancel the original or invoking producer.",
+      "invariant": "Physical identity and selected endpoint layout are preserved without repeated input; all new output and scratch allocations remain admitted and every failure releases its temporary ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_fixed_and_variable_bounds_match_postgresql_physical_alignment",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/datum/tests/production.rs",
+      "capability": "Admitted declared range physical production",
+      "workload": "Read and produce fifteen PostgreSQL UUID, smallint, TIMETZ, JSONB and long-text constants, including nine-member multiranges and empty values, under six budgets.",
+      "invariant": "Physical identity and selected endpoint layout are preserved without repeated input; all new output and scratch allocations remain admitted and every failure releases its temporary ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "jsonb_physical_production_admits_parser_numeric_sort_and_output_buffers",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/json/production/binary/tests.rs",
+      "capability": "Admitted declared range physical production",
+      "workload": "Encode an independent nested PostgreSQL JSONB constant under seven budgets; independently cancel either producer owner.",
+      "invariant": "Physical identity and selected endpoint layout are preserved without repeated input; all new output and scratch allocations remain admitted and every failure releases its temporary ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_encoding_releases_partial_output_after_catalog_failure_or_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests/ranges/encoding.rs",
+      "capability": "Admitted declared range physical production",
+      "workload": "Cancel either owner or fail the selected composite descriptor lookup after range output construction has begun, beside an earlier retained value.",
+      "invariant": "The first catalog failure keeps its SQLSTATE; both independent cancellation owners return 57014, partial output is released and the earlier result stays owned."
     }
   ]
 }
