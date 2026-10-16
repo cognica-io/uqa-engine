@@ -36,7 +36,11 @@ impl fmt::Display for CatalogName<'_> {
         match self.0 {
             ColumnType::Named(name) => return f.write_str(name),
             ColumnType::Array(element) => return write!(f, "{}[]", Self(element)),
-            ty @ (ColumnType::Enum(_) | ColumnType::Composite(_) | ColumnType::Domain { .. }) => {
+            ty @ (ColumnType::Enum(_)
+            | ColumnType::Composite(_)
+            | ColumnType::Domain { .. }
+            | ColumnType::DeclaredRange(_)
+            | ColumnType::DeclaredMultirange(_)) => {
                 return super::identity::write_identity(ty, f);
             }
             _ => {}

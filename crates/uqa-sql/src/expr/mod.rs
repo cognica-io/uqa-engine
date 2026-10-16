@@ -44,7 +44,7 @@ pub use json::{validate_json_object_key_type, value_to_json_text};
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 pub use range::{
     multirange_from_ranges, parse_multirange, parse_range, CanonicalMultirange, CanonicalRange,
-    RangeComparisonValue,
+    RangeComparisonValue, RangeValueDescriptor,
 };
 pub use time::IntervalFields;
 use time::{
@@ -114,12 +114,14 @@ pub use conversion::{
 };
 pub(crate) use conversion::{
     bytea_to_string_with_control, tensor_items, vector_element, vector_items,
+    vector_value_to_string_with_control,
 };
 pub use conversion::{
     value_to_tensor, value_to_tensor_with_control, value_to_vector, value_to_vector_with_control,
 };
 pub(crate) use current_time::transaction_timestamp_or_clock;
 pub use current_time::{clock_timestamp_micros, transaction_clock_micros, TransactionClockScope};
+pub(crate) use floating::format_real_with_control;
 pub use floating::{
     eval_float_arithmetic, eval_float_arithmetic_with_control, format_real, FloatWidth,
 };

@@ -214,7 +214,7 @@ pub fn format_real(value: f32) -> String {
         .expect("ordinary real text")
 }
 
-pub(super) fn format_real_with_control(
+pub(crate) fn format_real_with_control(
     value: f32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {

@@ -115,7 +115,7 @@ impl RowValue {
                 let (types, memory) = types.into_parts();
                 (Some(types), memory)
             }
-            None => (None, None),
+            None => (None, control.empty_reservation()),
         };
         let memory = control.combine(control.combine(values_memory, types_memory), header);
         control.finish(Self::from_validated_parts(values, field_types), memory)

@@ -14,6 +14,8 @@ use uqa_core::{
 };
 
 mod comparison;
+mod descriptor;
+pub use descriptor::RangeValueDescriptor;
 pub(crate) mod datum;
 mod input;
 mod production;
@@ -34,8 +36,8 @@ use crate::error::Result;
 use crate::SQLError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalRange {
-    subtype: RangeSubtype,
+pub struct CanonicalRange<I = RangeSubtype> {
+    subtype: I,
     lower: Option<Value>,
     upper: Option<Value>,
     lower_inclusive: bool,
@@ -48,7 +50,14 @@ impl CanonicalRange {
         RangeSemantics::native(self.subtype)
     }
 
-    fn empty(subtype: RangeSubtype) -> Self {
+    #[must_use]
+    pub const fn subtype(&self) -> RangeSubtype {
+        self.subtype
+    }
+}
+
+impl<I> CanonicalRange<I> {
+    fn empty(subtype: I) -> Self {
         Self {
             subtype,
             lower: None,
@@ -57,11 +66,6 @@ impl CanonicalRange {
             upper_inclusive: false,
             empty: true,
         }
-    }
-
-    #[must_use]
-    pub const fn subtype(&self) -> RangeSubtype {
-        self.subtype
     }
 
     #[must_use]
@@ -88,7 +92,9 @@ impl CanonicalRange {
     pub fn upper(&self) -> Option<&Value> {
         self.upper.as_ref()
     }
+}
 
+impl CanonicalRange {
     #[must_use]
     pub fn overlaps(&self, other: &Self) -> bool {
         self.overlaps_with_control(other, &ProductionControl::uncontrolled())
@@ -140,14 +146,14 @@ impl CanonicalRange {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalMultirange {
-    subtype: RangeSubtype,
-    ranges: Vec<CanonicalRange>,
+pub struct CanonicalMultirange<I = RangeSubtype> {
+    subtype: I,
+    ranges: Vec<CanonicalRange<I>>,
 }
 
-impl CanonicalMultirange {
+impl<I> CanonicalMultirange<I> {
     #[must_use]
-    pub fn ranges(&self) -> &[CanonicalRange] {
+    pub fn ranges(&self) -> &[CanonicalRange<I>] {
         &self.ranges
     }
 
@@ -155,7 +161,9 @@ impl CanonicalMultirange {
     pub fn is_empty(&self) -> bool {
         self.ranges.is_empty()
     }
+}
 
+impl CanonicalMultirange {
     #[must_use]
     pub fn contains_range(&self, range: &CanonicalRange) -> bool {
         range.subtype == self.subtype

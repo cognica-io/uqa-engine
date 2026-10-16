@@ -16,6 +16,8 @@ use crate::{
 use std::{cell::Cell, sync::Arc};
 use uqa_core::{memory::MemoryBudget, CancellationToken, EnumLabelKey, EnumValue};
 
+mod ranges;
+
 struct Reference {
     data: serde_json::Value,
     labels: Arc<EnumTypeLabels>,
@@ -27,6 +29,10 @@ impl Reference {
     fn new() -> Self {
         let data: serde_json::Value =
             serde_json::from_str(include_str!("postgresql.json")).unwrap();
+        Self::from_data(data)
+    }
+
+    fn from_data(data: serde_json::Value) -> Self {
         let rows = |id| case(&data, id)["results"][0]["rows"].as_array().unwrap();
         let labels = rows("enum_labels");
         let labels = Arc::new(EnumTypeLabels {
@@ -113,6 +119,26 @@ impl Reference {
         }
     }
 
+    fn metadata(&self, name: &str) -> &serde_json::Value {
+        case(&self.data, "type_metadata")["results"][0]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row[0] == name)
+            .unwrap()
+    }
+
+    fn range_type(&self, name: &str) -> ColumnType {
+        let row = self.metadata(name);
+        ColumnType::DeclaredRange(crate::ast::RangeTypeReference {
+            schema: "public".into(),
+            name: name.into(),
+            oid: integer(&row[1]),
+            array_oid: integer(&row[2]),
+            alignment: crate::ast::RangeAlignment::for_endpoint(&self.endpoint(name)),
+        })
+    }
+
     fn bytes(&self, name: &str) -> Vec<u8> {
         let node = &case(&self.data, &format!("{name}_catalog"))["results"][0]["rows"][0][0];
         let Field::Node(node) = node_tree::parse(node.as_str().unwrap()).unwrap() else {
@@ -140,7 +166,44 @@ fn integer(value: &serde_json::Value) -> u32 {
 
 impl SQLValueCatalog for Reference {
     fn value_type_by_oid(&self, oid: u32) -> Result<Option<ColumnType>, SQLError> {
-        Ok((oid == self.record.type_oid).then(|| self.endpoint("record_window")))
+        if oid == self.record.type_oid {
+            return Ok(Some(self.endpoint("record_window")));
+        }
+        for name in FAMILIES {
+            let row = self.metadata(name);
+            let range = self.range_type(name);
+            if oid == integer(&row[1]) {
+                return Ok(Some(range));
+            }
+            if oid == integer(&row[2]) {
+                return Ok(Some(ColumnType::Array(Box::new(range))));
+            }
+            if oid == integer(&row[6]) {
+                let ColumnType::DeclaredRange(mut reference) = range else {
+                    unreachable!()
+                };
+                reference.oid = oid;
+                reference.name.push_str("_multirange");
+                reference.array_oid = 0;
+                return Ok(Some(ColumnType::DeclaredMultirange(reference)));
+            }
+        }
+        Ok(None)
+    }
+    fn value_range_type(
+        &self,
+        oid: u32,
+    ) -> Result<Option<Arc<crate::expr::range::RangeValueDescriptor>>, SQLError> {
+        Ok(FAMILIES.iter().find_map(|name| {
+            let row = self.metadata(name);
+            (oid == integer(&row[1]) || oid == integer(&row[6])).then(|| {
+                Arc::new(crate::expr::range::RangeValueDescriptor {
+                    range_oid: integer(&row[1]),
+                    multirange_oid: integer(&row[6]),
+                    endpoint: self.endpoint(name),
+                })
+            })
+        }))
     }
     fn value_composite_type(
         &self,

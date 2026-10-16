@@ -119,6 +119,17 @@ pub(super) fn range_comparison(
     super::range::datum::comparison(payload.bytes(), ty, catalog, control)
 }
 
+/// A selected range output function uses its declared class even after the physical type has been dropped from the catalog.
+pub(crate) fn read_range_with_type(
+    datum: &DatumValue,
+    ty: &crate::ColumnType,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let payload = payload(datum, control)?;
+    super::range::datum::read(payload.bytes(), ty, catalog, control)
+}
+
 /// Preserve the caller's output allowance and cancellation boundary during catalog-dependent physical reads.
 pub fn read_with_catalog_and_control(
     datum: &DatumValue,
@@ -220,12 +231,30 @@ fn read_payload(
         return super::range::datum::read(bytes, ty, catalog, control);
     }
     if crate::catalog::type_metadata::builtin_scalar_type(oid).is_none() {
+        if let Some(descriptor) = catalog
+            .map(|catalog| catalog.value_range_type(oid))
+            .transpose()?
+            .flatten()
+        {
+            if oid != descriptor.range_oid && oid != descriptor.multirange_oid {
+                return Err(corrupt("inconsistent range type descriptor"));
+            }
+            return super::range::datum::read_class(
+                bytes,
+                oid == descriptor.multirange_oid,
+                catalog,
+                control,
+            );
+        }
         if let Some(ty) = catalog
             .map(|catalog| catalog.value_type_by_oid(oid))
             .transpose()?
             .flatten()
         {
             match ty {
+                crate::ColumnType::DeclaredRange(_) | crate::ColumnType::DeclaredMultirange(_) => {
+                    return super::range::datum::read(bytes, &ty, catalog, control);
+                }
                 crate::ColumnType::Array(_) => return arrays::read(bytes, catalog, control),
                 crate::ColumnType::Composite(_) => return records::read(bytes, catalog, control),
                 crate::ColumnType::Domain { base, .. } => {

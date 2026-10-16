@@ -324,30 +324,38 @@ pub(super) fn write_range(
     output: &mut ProductionString<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<()> {
+    write_range_with(range, output, control, |value, control| {
+        range.semantics().output(value, control)
+    })
+}
+
+pub(super) fn write_range_with<I>(
+    range: &CanonicalRange<I>,
+    output: &mut ProductionString<'_>,
+    control: &ProductionControl<'_>,
+    render: impl Fn(&Value, &ProductionControl<'_>) -> Result<Produced<String>>,
+) -> Result<()> {
     if range.empty {
         output.push_str("empty")?;
         return Ok(());
     }
     output.push(if range.lower_inclusive { '[' } else { '(' })?;
-    let semantics = range.semantics();
     if let Some(lower) = range.lower() {
-        write_bound(lower, semantics, output, control)?;
+        write_bound(&render(lower, control)?, output, control)?;
     }
     output.push(',')?;
     if let Some(upper) = range.upper() {
-        write_bound(upper, semantics, output, control)?;
+        write_bound(&render(upper, control)?, output, control)?;
     }
     output.push(if range.upper_inclusive { ']' } else { ')' })?;
     Ok(())
 }
 
 fn write_bound(
-    value: &Value,
-    semantics: &RangeSemantics,
+    raw: &str,
     output: &mut ProductionString<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<()> {
-    let raw = semantics.output(value, control)?;
     let mut quoted = raw.is_empty();
     for character in raw.chars() {
         control.check()?;

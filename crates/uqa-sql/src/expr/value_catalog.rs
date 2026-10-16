@@ -16,6 +16,14 @@ pub use records::SQLRecordFields;
 
 /// Type metadata and enum support used to observe already admitted SQL values. Implementations borrow one statement catalog generation and never invoke type input.
 pub trait SQLValueCatalog {
+    /// The selected endpoint layout of a range or multirange in this statement generation. Observation does not execute input, domain checks or a canonical support function.
+    fn value_range_type(
+        &self,
+        _oid: u32,
+    ) -> Result<Option<Arc<super::range::RangeValueDescriptor>>> {
+        Ok(None)
+    }
+
     /// The declared type for a physical OID, including domains, arrays and composites.
     fn value_type_by_oid(&self, _oid: u32) -> Result<Option<crate::ColumnType>> {
         Ok(None)
@@ -71,6 +79,17 @@ pub trait SQLValueCatalog {
 pub struct EngineValueCatalog<'a>(pub &'a dyn super::EngineHook);
 
 impl SQLValueCatalog for EngineValueCatalog<'_> {
+    fn value_range_type(
+        &self,
+        oid: u32,
+    ) -> Result<Option<Arc<super::range::RangeValueDescriptor>>> {
+        self.0
+            .enum_labels()
+            .map(|catalog| catalog.value_range_type(oid))
+            .transpose()
+            .map(Option::flatten)
+    }
+
     fn value_regtype_output(&self, ty: &crate::ColumnType, oid: i64) -> Result<Option<String>> {
         self.0
             .resolve_regtype_output(ty, oid)

@@ -81,6 +81,15 @@ impl ColumnType {
                 let (reference, memory) = reference.clone_with_control(control)?.into_parts();
                 control.finish(Self::Composite(reference), memory)
             }
+            Self::DeclaredRange(reference) | Self::DeclaredMultirange(reference) => {
+                let (reference, memory) = reference.clone_with_control(control)?.into_parts();
+                let ty = if matches!(self, Self::DeclaredRange(_)) {
+                    Self::DeclaredRange(reference)
+                } else {
+                    Self::DeclaredMultirange(reference)
+                };
+                control.finish(ty, memory)
+            }
             Self::Domain {
                 schema,
                 name,

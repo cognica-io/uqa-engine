@@ -124,6 +124,10 @@ pub enum ColumnType {
     Range(RangeSubtype),
     /// The `PostgreSQL` multirange paired with one built-in range subtype.
     Multirange(RangeSubtype),
+    /// A catalog-bound range identity, independent of its endpoint type.
+    DeclaredRange(super::RangeTypeReference),
+    /// A catalog-bound multirange identity with its own name and array type.
+    DeclaredMultirange(super::RangeTypeReference),
     /// `VECTOR(N)` columns store an `N`-dimensional `f32` embedding.
     Vector(u32),
     /// `TENSOR(N)` columns store an array of `N`-dimensional `f32`

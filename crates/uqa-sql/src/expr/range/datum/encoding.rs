@@ -54,7 +54,7 @@ fn write_multirange(
     let count_word = u32::try_from(count).map_err(|_| corrupt("too many ranges"))?;
     append(bytes, &count_word.to_le_bytes())?;
     let flags_start = 8 + count.saturating_sub(1) * 4;
-    let start = align(flags_start + count + 4, ranges.subtype)? - 4;
+    let start = align(flags_start + count + 4, &ranges.subtype.scalar_type())? - 4;
     pad_to(bytes, start)?;
     let mut previous = 0;
     for (index, range) in ranges.ranges.iter().enumerate() {
@@ -75,7 +75,10 @@ fn write_multirange(
         previous = offset;
         bytes.as_mut_slice()[flags_start + index] = flags(range);
         write_bounds(range, bytes, control)?;
-        pad_to(bytes, align(bytes.len() + 4, ranges.subtype)? - 4)?;
+        pad_to(
+            bytes,
+            align(bytes.len() + 4, &ranges.subtype.scalar_type())? - 4,
+        )?;
     }
     Ok(())
 }
@@ -118,7 +121,7 @@ fn write_bounds(
             if payload.len() < 127 {
                 bytes.push_copy(((payload.len() as u8 + 1) << 1) | 1)?;
             } else {
-                pad_to(bytes, align(bytes.len() + 4, range.subtype)? - 4)?;
+                pad_to(bytes, align(bytes.len() + 4, &ty)? - 4)?;
                 let size = u32::try_from(payload.len() + 4)
                     .ok()
                     .and_then(|size| size.checked_mul(4))

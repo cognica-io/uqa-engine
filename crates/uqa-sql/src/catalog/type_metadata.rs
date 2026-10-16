@@ -137,6 +137,9 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Domain { oid, .. } => i64::from(*oid),
         ColumnType::Enum(reference) => i64::from(reference.oid),
         ColumnType::Composite(reference) => i64::from(reference.oid),
+        ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
+            i64::from(reference.oid)
+        }
     }
 }
 
@@ -328,6 +331,9 @@ pub fn pg_type_by_value(ty: &ColumnType) -> bool {
 
 pub fn pg_type_align(ty: &ColumnType) -> &'static str {
     match ty {
+        ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
+            reference.alignment.catalog_name()
+        }
         ColumnType::Named(name) => {
             unreachable!("unresolved declaration type {name} reached catalog projection")
         }
@@ -382,6 +388,8 @@ pub fn pg_type_storage(ty: &ColumnType) -> &'static str {
         | ColumnType::Array(_)
         | ColumnType::Range(_)
         | ColumnType::Multirange(_)
+        | ColumnType::DeclaredRange(_)
+        | ColumnType::DeclaredMultirange(_)
         | ColumnType::Vector(_)
         | ColumnType::Tensor(_)
         | ColumnType::Record
@@ -441,6 +449,9 @@ pub fn pg_type_array_oid(ty: &ColumnType) -> i64 {
         ColumnType::Tensor(_) => 380_003,
         ColumnType::Domain { oid, array_oid, .. } => pg_domain_array_oid(*oid, *array_oid),
         ColumnType::Enum(reference) => i64::from(reference.array_oid),
+        ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
+            i64::from(reference.array_oid)
+        }
         ColumnType::Composite(reference) => i64::from(reference.array_oid),
         ColumnType::Range(subtype) => match subtype {
             RangeSubtype::Integer => 3905,
@@ -659,12 +670,12 @@ pub fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         ColumnType::Record => PgTypeRoutineOids::new(2290, 2291, 2402, 2403),
         ColumnType::Uuid => PgTypeRoutineOids::new(2952, 2953, 2961, 2962),
         ColumnType::JsonB => PgTypeRoutineOids::new(3806, 3804, 3805, 3803),
-        ColumnType::Range(_) => {
+        ColumnType::Range(_) | ColumnType::DeclaredRange(_) => {
             let mut routines = PgTypeRoutineOids::new(3834, 3835, 3836, 3837);
             routines.analyze = 3916;
             routines
         }
-        ColumnType::Multirange(_) => {
+        ColumnType::Multirange(_) | ColumnType::DeclaredMultirange(_) => {
             let mut routines = PgTypeRoutineOids::new(4231, 4232, 4233, 4234);
             routines.analyze = 4242;
             routines
@@ -681,6 +692,9 @@ pub fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::Named(name) => name,
         ColumnType::Enum(reference) => &reference.name,
         ColumnType::Composite(reference) => &reference.name,
+        ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
+            &reference.name
+        }
         ColumnType::SmallInteger => "smallint",
         ColumnType::Integer => "integer",
         ColumnType::BigInteger => "bigint",

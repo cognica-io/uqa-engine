@@ -6,15 +6,15 @@
 
 //! Typed `PostgreSQL` text output for result consumers.
 
-use std::fmt::Write;
-
 use crate::ast::ColumnType;
 use crate::expr::{
-    format_regtype_value_with_catalog_and_control, value_to_string, vector_value_to_string,
-    EngineHook, EngineValueCatalog, SQLValueCatalog,
+    format_regtype_value_with_catalog_and_control, EngineHook, EngineValueCatalog, SQLValueCatalog,
 };
 use crate::SQLError;
-use uqa_core::{memory::ProductionControl, Value};
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionString},
+    Value,
+};
 
 /// Format a result with its live session output style and declared type.
 pub fn format_postgres_text(
@@ -43,63 +43,88 @@ pub fn format_postgres_text_with_catalog(
     ty: &ColumnType,
     catalog: Option<&dyn SQLValueCatalog>,
 ) -> Result<String, SQLError> {
-    if let Value::Datum(datum) = value {
-        return format_postgres_text_with_catalog(
-            &*crate::expr::datums::read_with_value_catalog_and_control(
-                datum,
-                catalog,
-                &ProductionControl::uncontrolled(),
-            )?,
-            ty,
-            catalog,
-        );
-    }
-    if let ColumnType::Domain { base, .. } = ty {
-        return format_postgres_text_with_catalog(value, base, catalog);
-    }
-    if matches!(ty, ColumnType::InternalChar) {
-        let byte = crate::expr::internal_char::value_byte(value)
-            .ok_or_else(|| SQLError::Internal("invalid internal char result carrier".into()))?;
-        return crate::expr::internal_char::output_with_control(
-            byte,
-            &uqa_core::memory::ProductionControl::uncontrolled(),
-        )?
-        .into_uncontrolled()
-        .map_err(|_| SQLError::Internal("ordinary internal char output owner".into()));
-    }
-    if let Some(text) = format_regtype_value_with_catalog_and_control(
+    format_postgres_text_with_catalog_and_control(
         value,
         ty,
         catalog,
         &ProductionControl::uncontrolled(),
-    )? {
-        return text
-            .into_uncontrolled()
-            .map_err(|_| SQLError::Internal("ordinary OID output owner".into()));
+    )?
+    .into_uncontrolled()
+    .map_err(|_| SQLError::Internal("ordinary typed output owner".into()))
+}
+
+/// Observe typed values into the caller's admitted output, including nested array and composite fields.
+pub fn format_postgres_text_with_catalog_and_control(
+    value: &Value,
+    ty: &ColumnType,
+    catalog: Option<&dyn SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
+    control.check()?;
+    if let Value::Datum(datum) = value {
+        let mut base = ty;
+        while let ColumnType::Domain { base: inner, .. } = base {
+            base = inner;
+        }
+        let value = if matches!(
+            base,
+            ColumnType::Range(_)
+                | ColumnType::Multirange(_)
+                | ColumnType::DeclaredRange(_)
+                | ColumnType::DeclaredMultirange(_)
+        ) {
+            crate::expr::datums::read_range_with_type(datum, base, catalog, control)?
+        } else {
+            crate::expr::datums::read_with_value_catalog_and_control(datum, catalog, control)?
+        };
+        return format_postgres_text_with_catalog_and_control(&value, ty, catalog, control);
+    }
+    if let ColumnType::Domain { base, .. } = ty {
+        return format_postgres_text_with_catalog_and_control(value, base, catalog, control);
+    }
+    if matches!(ty, ColumnType::InternalChar) {
+        let byte = crate::expr::internal_char::value_byte(value)
+            .ok_or_else(|| SQLError::Internal("invalid internal char result carrier".into()))?;
+        return Ok(crate::expr::internal_char::output_with_control(
+            byte, control,
+        )?);
+    }
+    if let Some(text) = format_regtype_value_with_catalog_and_control(value, ty, catalog, control)?
+    {
+        return Ok(text);
     }
     if matches!(ty, ColumnType::Int2Vector | ColumnType::OidVector) {
-        return vector_value_to_string(value)?
+        return crate::expr::vector_value_to_string_with_control(value, control)?
             .ok_or_else(|| SQLError::Internal("invalid catalog vector result carrier".into()));
     }
     if let ColumnType::Array(element) = ty {
-        return format_array(value, element, catalog);
+        return format_array(value, element, catalog, control);
     }
     if let (ColumnType::Composite(reference), Value::Record(fields)) = (ty, value) {
-        return format_record(fields, fields.type_oid().unwrap_or(reference.oid), catalog);
+        return format_record(
+            fields,
+            fields.type_oid().unwrap_or(reference.oid),
+            catalog,
+            control,
+        );
     }
     Ok(match value {
-        Value::Bool(value) => if *value { "t" } else { "f" }.into(),
-        Value::FixedChar(value) => value.clone(),
+        Value::Bool(value) => control.copy_text(if *value { "t" } else { "f" })?,
+        Value::FixedChar(value) => control.copy_text(value)?,
         Value::Float(value) if matches!(ty, ColumnType::Real) => {
-            crate::expr::format_real(*value as f32)
+            crate::expr::format_real_with_control(*value as f32, control)?
         }
-        Value::Float(value) => uqa_core::format_float_pg(*value),
-        Value::Enum(label) => crate::expr::enums::enum_label_text(catalog, label)?,
-        // Container output calls each enum field's output function, which reads the current label.
+        Value::Float(value) => uqa_core::format_float_pg_with_control(*value, control)?,
+        Value::Enum(label) => {
+            crate::expr::enums::enum_label_text_with_control(catalog, label, control)?
+        }
         _ if crate::expr::enums::contains_enum_carrier(value) => {
-            value_to_string(&crate::expr::enums::render_enum_labels(catalog, value)?)?
+            // Untyped legacy containers retain their established conversion semantics.
+            let rendered =
+                crate::expr::enums::render_enum_labels_with_control(catalog, value, control)?;
+            crate::expr::value_to_string_with_control(&rendered, control)?
         }
-        _ => value_to_string(value)?,
+        _ => crate::expr::value_to_string_with_control(value, control)?,
     })
 }
 
@@ -107,11 +132,11 @@ fn format_array(
     value: &Value,
     element: &ColumnType,
     catalog: Option<&dyn SQLValueCatalog>,
-) -> Result<String, SQLError> {
-    // SQL array type identity does not constrain value dimensions. Nested
-    // declarations still name the scalar element formatter at every depth.
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
     let mut element = element;
     while let ColumnType::Array(inner) = element {
+        control.check()?;
         element = inner;
     }
     let catalog_element;
@@ -127,46 +152,53 @@ fn format_array(
                     .ok_or_else(|| SQLError::Routine {
                         sqlstate: "XX000".into(),
                         message: format!("cache lookup failed for type {oid}"),
-                    })?;
+                    })?
+                    .retain_external_with_control(control)?;
                 element = &catalog_element;
             }
         }
     }
-    let (values, prefix) = match value {
-        Value::Array(array) => array_parts(array),
-        Value::LegacyVector(vector) => array_parts(vector.as_array()),
-        Value::List(values) => (values.as_slice(), String::new()),
+    let mut text = ProductionString::new(*control);
+    let values = match value {
+        Value::Array(array) => array_parts(array, &mut text, control)?,
+        Value::LegacyVector(vector) => array_parts(vector.as_array(), &mut text, control)?,
+        Value::List(values) => values.as_slice(),
         _ => return Err(SQLError::Internal("invalid array result carrier".into())),
     };
-    let mut fields = Vec::with_capacity(values.len());
-    for value in values {
-        fields.push(match value {
-            Value::Null => "NULL".into(),
-            Value::List(_) | Value::Array(_) => format_array(value, element, catalog)?,
-            _ => {
-                let text = format_postgres_text_with_catalog(value, element, catalog)?;
-                if text.is_empty()
-                    || text.eq_ignore_ascii_case("null")
-                    || text.chars().any(|c| {
-                        c.is_ascii_whitespace() || matches!(c, ',' | '{' | '}' | '"' | '\\')
-                    })
-                {
-                    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
-                } else {
-                    text
-                }
+    text.push('{')?;
+    for (index, value) in values.iter().enumerate() {
+        control.check()?;
+        if index != 0 {
+            text.push(',')?;
+        }
+        match value {
+            Value::Null => text.push_str("NULL")?,
+            Value::List(_) | Value::Array(_) => {
+                text.push_str(&format_array(value, element, catalog, control)?)?;
             }
-        });
+            _ => {
+                let rendered = format_postgres_text_with_catalog_and_control(
+                    value, element, catalog, control,
+                )?;
+                let quoted = rendered.is_empty()
+                    || rendered.eq_ignore_ascii_case("null")
+                    || rendered.chars().any(|c| {
+                        c.is_ascii_whitespace() || matches!(c, ',' | '{' | '}' | '"' | '\\')
+                    });
+                append_quoted(&mut text, &rendered, quoted, false)?;
+            }
+        }
     }
-    Ok(format!("{prefix}{{{}}}", fields.join(",")))
+    text.push('}')?;
+    Ok(text.finish()?)
 }
 
-/// `record_out`: each field through its attribute type's output function, an empty field for NULL, and double quotes around a field that is empty or holds a separator, parenthesis, quote, backslash or whitespace, doubling quotes and backslashes inside.
 fn format_record(
     fields: &[(String, Value)],
     type_oid: u32,
     catalog: Option<&dyn SQLValueCatalog>,
-) -> Result<String, SQLError> {
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
     let descriptor = catalog
         .ok_or_else(|| SQLError::Internal("composite type catalog is unavailable".into()))?
         .value_composite_type(type_oid)?
@@ -174,55 +206,74 @@ fn format_record(
             sqlstate: "42704".into(),
             message: format!("type with OID {type_oid} does not exist"),
         })?;
-    let mut text = String::from("(");
+    let mut text = ProductionString::new(*control);
+    text.push('(')?;
     for (index, (name, field)) in fields.iter().enumerate() {
+        control.check()?;
         if index != 0 {
-            text.push(',');
+            text.push(',')?;
         }
         if matches!(field, Value::Null) {
             continue;
         }
         let rendered = match descriptor.attribute(name) {
-            Some((_, attribute)) => {
-                format_postgres_text_with_catalog(field, &attribute.ty, catalog)?
-            }
-            None => format_postgres_text_with_catalog(
+            Some((_, attribute)) => format_postgres_text_with_catalog_and_control(
+                field,
+                &attribute.ty,
+                catalog,
+                control,
+            )?,
+            None => format_postgres_text_with_catalog_and_control(
                 field,
                 &crate::type_resolution::value_type(field).unwrap_or(ColumnType::Text),
                 catalog,
+                control,
             )?,
         };
         let quoted = rendered.is_empty()
-            || rendered.chars().any(|character| {
-                character.is_ascii_whitespace() || matches!(character, ',' | '(' | ')' | '"' | '\\')
-            });
-        if quoted {
-            text.push('"');
-            for character in rendered.chars() {
-                if matches!(character, '"' | '\\') {
-                    text.push(character);
-                }
-                text.push(character);
-            }
-            text.push('"');
-        } else {
-            text.push_str(&rendered);
-        }
+            || rendered
+                .chars()
+                .any(|c| c.is_ascii_whitespace() || matches!(c, ',' | '(' | ')' | '"' | '\\'));
+        append_quoted(&mut text, &rendered, quoted, true)?;
     }
-    text.push(')');
-    Ok(text)
+    text.push(')')?;
+    Ok(text.finish()?)
 }
 
-fn array_parts(array: &uqa_core::ArrayValue) -> (&[Value], String) {
-    let mut prefix = String::new();
+fn append_quoted(
+    text: &mut ProductionString<'_>,
+    rendered: &str,
+    quoted: bool,
+    doubled: bool,
+) -> Result<(), SQLError> {
+    if quoted {
+        text.push('"')?;
+    }
+    for character in rendered.chars() {
+        if quoted && matches!(character, '"' | '\\') {
+            text.push(if doubled { character } else { '\\' })?;
+        }
+        text.push(character)?;
+    }
+    if quoted {
+        text.push('"')?;
+    }
+    Ok(())
+}
+
+fn array_parts<'a>(
+    array: &'a uqa_core::ArrayValue,
+    text: &mut ProductionString<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<&'a [Value], SQLError> {
     if !array.elements().is_empty() && array.lower_bounds().iter().any(|lower| *lower != 1) {
         for (lower, length) in array.lower_bounds().iter().zip(array.dimensions()) {
             let upper = i64::from(*lower) + *length as i64 - 1;
-            write!(prefix, "[{lower}:{upper}]").expect("writing to String cannot fail");
+            text.push_str(&control.format(format_args!("[{lower}:{upper}]"))?)?;
         }
-        prefix.push('=');
+        text.push('=')?;
     }
-    (array.elements(), prefix)
+    Ok(array.elements())
 }
 
 #[cfg(test)]

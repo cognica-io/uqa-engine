@@ -13,6 +13,15 @@ pub fn resolve_declared_column_type(
     resolver: &dyn FunctionTypeResolver,
     ty: &ColumnType,
 ) -> Result<ColumnType, SQLError> {
+    if let ColumnType::Domain { base, .. } = ty {
+        let current = resolve_declared_column_type(resolver, base)?;
+        let mut domain = ty.clone();
+        let ColumnType::Domain { base, .. } = &mut domain else {
+            unreachable!()
+        };
+        **base = current;
+        return Ok(domain);
+    }
     let mut element = ty;
     let mut dimensions = 0;
     while let ColumnType::Array(inner) = element {
@@ -30,6 +39,22 @@ pub fn resolve_declared_column_type(
             .resolve_type_name(&name)?
             .map_or_else(|| ColumnType::from_sql_name(&name), Ok);
     }
+    if let ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) =
+        element
+    {
+        let current = resolver
+            .resolve_type_name(&ty.catalog_name())?
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("type with OID {} does not exist", reference.oid),
+            })?;
+        if current != *ty {
+            return Err(SQLError::Internal(
+                "bound range identity resolved to another type".into(),
+            ));
+        }
+        return Ok(current);
+    }
     Ok(ty.clone())
 }
 
@@ -45,6 +70,6 @@ pub fn resolve_alter_column_type(
         }
         ColumnType::Array(element) => resolve_alter_column_type(resolver, element)
             .map(|element| ColumnType::Array(Box::new(element))),
-        other => Ok(other.clone()),
+        other => resolve_declared_column_type(resolver, other),
     }
 }

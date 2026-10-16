@@ -63,6 +63,8 @@ pub fn has_default_btree_operator_class(ty: &ColumnType) -> bool {
         | ColumnType::IntervalWithFields { .. }
         | ColumnType::Range(_)
         | ColumnType::Multirange(_)
+        | ColumnType::DeclaredRange(_)
+        | ColumnType::DeclaredMultirange(_)
         | ColumnType::Vector(_)
         | ColumnType::Tensor(_)
         | ColumnType::Enum(_)

@@ -231,6 +231,56 @@ fn controlled_row_construction_transfers_buffers_and_releases_rejected_inputs() 
 }
 
 #[test]
+fn anonymous_row_production_preserves_ownership_and_releases_cancelled_inputs() {
+    for values in [Vec::new(), vec![Value::Str("kept".into()), Value::Null]] {
+        let budget = MemoryBudget::new(4096);
+        let previous = budget.reserve(17).unwrap();
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let admitted = control.copy_value(&Value::List(values.clone())).unwrap();
+        let (Value::List(admitted), memory) = admitted.into_parts() else {
+            panic!("list values");
+        };
+        let pointer = admitted.as_ptr();
+        let admitted = control.finish(admitted, memory).unwrap();
+        let row = RowValue::new_with_control(admitted, &control).unwrap();
+        assert_eq!(row.values(), values);
+        assert_eq!(row.values().as_ptr(), pointer);
+        assert_eq!(row.field_types(), None);
+        assert_eq!(budget.used(), previous.bytes() + row.reserved_bytes());
+        assert_eq!(
+            row.reserved_bytes(),
+            row.retained_buffer_bytes().unwrap() + if values.is_empty() { 0 } else { "kept".len() }
+        );
+        drop(row);
+        assert_eq!(budget.used(), previous.bytes());
+    }
+
+    for cancel_original in [false, true] {
+        let budget = MemoryBudget::new(4096);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let mut values = ProductionVec::new(control);
+        values
+            .push_produced(control.copy_value(&Value::Str("released".into())).unwrap())
+            .unwrap();
+        let values = values.finish().unwrap();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        assert!(matches!(
+            RowValue::new_with_control(values, &control),
+            Err(ValueRetentionError::Cancelled(_))
+        ));
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn row_copy_and_decode_cancellation_release_descriptor_storage() {
     let source =
         Value::Row(RowValue::typed(vec![Value::Null; 1024], vec![field(23); 1024]).unwrap());
