@@ -8,67 +8,18 @@
 
 use crate::{ColumnType, SQLError};
 
-/// Resolve the built-in default B-tree class of a selected type. Domains use their base class; arrays and records have generic classes, whose declaration does not require a scalar class for every element or field. Native vector and tensor keys retain UQA's existing ordering contract.
+mod btree;
+pub use btree::{
+    builtin_btree_operator_class, builtin_btree_operator_classes, default_btree_operator_class,
+    BuiltinBTreeOperatorClass,
+};
+
+/// Resolve default B-tree capability using the shared class identities. Domains use their base class; generic arrays and records do not require a scalar class for every element or field. UQA vectors and tensors retain their native ordering capability.
 pub fn has_default_btree_operator_class(ty: &ColumnType) -> bool {
     match ty {
         ColumnType::Domain { base, .. } => has_default_btree_operator_class(base),
-        ColumnType::Named(_)
-        | ColumnType::Xid
-        | ColumnType::Void
-        | ColumnType::RefCursor
-        | ColumnType::Json
-        | ColumnType::PgNodeTree
-        | ColumnType::AclItem => false,
-        ColumnType::SmallInteger
-        | ColumnType::Integer
-        | ColumnType::BigInteger
-        | ColumnType::Oid
-        | ColumnType::Boolean
-        | ColumnType::Text
-        | ColumnType::Name
-        | ColumnType::Uuid
-        | ColumnType::Varchar(_)
-        | ColumnType::Bpchar
-        | ColumnType::Character(_)
-        | ColumnType::Real
-        | ColumnType::DoublePrecision
-        | ColumnType::Numeric { .. }
-        | ColumnType::JsonB
-        | ColumnType::Bytea
-        | ColumnType::Bit(_)
-        | ColumnType::VarBit(_)
-        | ColumnType::InternalChar
-        | ColumnType::Regproc
-        | ColumnType::Regprocedure
-        | ColumnType::Regclass
-        | ColumnType::Regnamespace
-        | ColumnType::Regcollation
-        | ColumnType::Regrole
-        | ColumnType::Regtype
-        | ColumnType::Int2Vector
-        | ColumnType::OidVector
-        | ColumnType::AnyArray
-        | ColumnType::Record
-        | ColumnType::Array(_)
-        | ColumnType::Date
-        | ColumnType::Time
-        | ColumnType::TimePrecision(_)
-        | ColumnType::TimeTz
-        | ColumnType::TimeTzPrecision(_)
-        | ColumnType::Timestamp
-        | ColumnType::TimestampPrecision(_)
-        | ColumnType::TimestampTz
-        | ColumnType::TimestampTzPrecision(_)
-        | ColumnType::Interval
-        | ColumnType::IntervalWithFields { .. }
-        | ColumnType::Range(_)
-        | ColumnType::Multirange(_)
-        | ColumnType::DeclaredRange(_)
-        | ColumnType::DeclaredMultirange(_)
-        | ColumnType::Vector(_)
-        | ColumnType::Tensor(_)
-        | ColumnType::Enum(_)
-        | ColumnType::Composite(_) => true,
+        ColumnType::Vector(_) | ColumnType::Tensor(_) => true,
+        _ => default_btree_operator_class(ty).is_some(),
     }
 }
 

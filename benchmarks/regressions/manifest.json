@@ -10937,6 +10937,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "builtin_btree_class_identities_match_postgresql_catalog_support",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/operator_classes/btree/tests.rs",
+      "capability": "B-tree support identities",
+      "workload": "Verify every built-in B-tree class, family, input and comparison function against an independent PostgreSQL catalog query.",
+      "invariant": "All 44 identities match PostgreSQL; class OIDs are unique and missing identities are rejected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "default_btree_class_selection_matches_actual_postgresql_indexes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/operator_classes/btree/tests.rs",
+      "capability": "B-tree default class selection",
+      "workload": "Compile 38 independent PostgreSQL CREATE INDEX input declarations and select classes for those types and their domains.",
+      "invariant": "Default, alias and generic class selection preserves PostgreSQL identities and existing UQA vector/tensor capability.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
