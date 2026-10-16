@@ -12,7 +12,7 @@ use super::{
 };
 
 impl CanonicalRange {
-    /// Compare admitted ranges of one subtype in PostgreSQL B-tree order, retaining the caller's comparison workspace and cancellation boundary.
+    /// Compare admitted ranges of one subtype in `PostgreSQL` B-tree order, retaining the caller's comparison workspace and cancellation boundary.
     pub fn cmp_with_control(
         &self,
         other: &Self,

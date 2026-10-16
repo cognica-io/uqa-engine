@@ -401,3 +401,53 @@ fn grouped_row_consumer_does_not_pull_past_the_second_row() {
     assert_eq!(error.sqlstate(), Some("21000"));
     assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 2);
 }
+
+#[test]
+fn range_membership_preserves_selected_equality_in_cached_and_streamed_rows() {
+    let range = |text: &str| {
+        Value::Array(
+            uqa_core::ArrayValue::try_new(vec![Value::Str(text.into())])
+                .unwrap()
+                .with_element_type_oid(Some(3906)),
+        )
+    };
+    let first = range("[1.0,3.00)");
+    let equivalent = range("[1.00,3.0)");
+    let other = range("[10,12)");
+    for budget in [1, 64 * 1024] {
+        let services = Services::default();
+        let catalog = uqa_sql::expr::EngineValueCatalog(&services);
+        let rows = materialized(vec![first.clone(), Value::Null], budget);
+        let membership = rows.membership(budget, Some(&catalog)).unwrap();
+        for (needle, expected) in [
+            (&equivalent, Some(true)),
+            (&other, None),
+            (&Value::Null, None),
+        ] {
+            assert_eq!(
+                membership.contains(needle, Some(&catalog)).unwrap(),
+                expected
+            );
+            assert_eq!(
+                rows.result()
+                    .unwrap()
+                    .contains_with_catalog(needle, &catalog)
+                    .unwrap(),
+                expected
+            );
+        }
+        let scope = CteScope::new();
+        scope.cache_subquery(0, ScalarSubqueryCacheEntry::Materialized(rows));
+        let context = services.context(&scope);
+        let query = plan("SELECT 1");
+        for _ in 0..2 {
+            assert_eq!(
+                context
+                    .subquery_contains(0, &query, &equivalent, PhysicalOuterRow::Absent, &[])
+                    .unwrap(),
+                Some(true)
+            );
+        }
+        assert_eq!(*services.events.lock(), ["memory"]);
+    }
+}

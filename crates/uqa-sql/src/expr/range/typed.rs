@@ -36,7 +36,9 @@ impl RangeComparisonValue {
         let ty = catalog
             .map(|catalog| catalog.value_type_by_oid(oid))
             .transpose()?
-            .flatten();
+            .flatten()
+            .map(|ty| ty.retain_external_with_control(control))
+            .transpose()?;
         match ty {
             Some(ty) => Self::from_type(value, &ty, control),
             None => Ok(None),

@@ -137,7 +137,11 @@ pub fn materialize_recursive_cte<S: Clone>(
     let mut accumulated = crate::SpillBuffer::new(state_budget);
     let mut seen = (!*all).then(|| crate::ExactRowSet::new(state_budget));
     if let Some(seen) = seen.as_mut() {
-        working = filter_new_recursive_rows(&working, seen)?;
+        working = filter_new_recursive_rows(
+            &working,
+            seen,
+            &uqa_sql::expr::EngineValueCatalog(context.functions),
+        )?;
     }
 
     let mut iterations = 0usize;
@@ -157,7 +161,11 @@ pub fn materialize_recursive_cte<S: Clone>(
         let step = step_result?;
         working = alias_query_output_to_shared(context, step, &anchor_columns)?;
         if let Some(seen) = seen.as_mut() {
-            working = filter_new_recursive_rows(&working, seen)?;
+            working = filter_new_recursive_rows(
+                &working,
+                seen,
+                &uqa_sql::expr::EngineValueCatalog(context.functions),
+            )?;
         }
     }
 
@@ -248,6 +256,7 @@ fn materialize_controlled_recursive_cte<S: Clone>(
         cycle_positions.as_deref(),
         cycle_marks.as_ref(),
         seen.as_mut(),
+        &uqa_sql::expr::EngineValueCatalog(context.functions),
         None,
         0,
     )?;
@@ -284,6 +293,7 @@ fn materialize_controlled_recursive_cte<S: Clone>(
             cycle_positions.as_deref(),
             cycle_marks.as_ref(),
             seen.as_mut(),
+            &uqa_sql::expr::EngineValueCatalog(context.functions),
             &controlled_step,
             iterations,
         )?;
@@ -439,6 +449,7 @@ fn annotate_recursive_rows(
     cycle_positions: Option<&[usize]>,
     cycle_marks: Option<&(Value, Value)>,
     mut seen: Option<&mut crate::ExactRowSet>,
+    catalog: &dyn uqa_sql::expr::SQLValueCatalog,
     parent: Option<&RecursiveParentState>,
     depth: usize,
 ) -> Result<(crate::SharedSpill, crate::SharedSpill), SQLError> {
@@ -459,12 +470,14 @@ fn annotate_recursive_rows(
                 cycle_marks,
                 parent,
                 depth,
+                catalog,
             )?;
             collect_annotated_recursive_row(
                 row,
                 is_cycle,
                 generated_schema,
                 &mut seen,
+                catalog,
                 &mut emitted_rows,
                 &mut expandable_rows,
             )?;
@@ -500,6 +513,7 @@ fn annotate_recursive_step_rows(
     cycle_positions: Option<&[usize]>,
     cycle_marks: Option<&(Value, Value)>,
     mut seen: Option<&mut crate::ExactRowSet>,
+    catalog: &dyn uqa_sql::expr::SQLValueCatalog,
     controlled_step: &ControlledRecursiveStep,
     depth: usize,
 ) -> Result<(crate::SharedSpill, crate::SharedSpill), SQLError> {
@@ -573,12 +587,14 @@ fn annotate_recursive_step_rows(
                 cycle_marks,
                 Some(&parent),
                 depth,
+                catalog,
             )?;
             collect_annotated_recursive_row(
                 row,
                 is_cycle,
                 generated_schema,
                 &mut seen,
+                catalog,
                 &mut emitted_rows,
                 &mut expandable_rows,
             )?;
@@ -601,6 +617,10 @@ fn annotate_recursive_step_rows(
     ))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "preserves recursive row metadata and selected comparison catalog"
+)]
 fn annotate_recursive_row(
     base: &crate::OwnedPhysicalRow,
     cte: &CtePlan,
@@ -609,6 +629,7 @@ fn annotate_recursive_row(
     cycle_marks: Option<&(Value, Value)>,
     parent: Option<&RecursiveParentState>,
     depth: usize,
+    catalog: &dyn uqa_sql::expr::SQLValueCatalog,
 ) -> Result<(crate::PhysicalRow, bool), SQLError> {
     let mut values = base
         .view()
@@ -669,7 +690,17 @@ fn annotate_recursive_row(
                 _ => None,
             })
             .unwrap_or_default();
-        is_cycle = path.iter().any(|existing| existing == &key);
+        for existing in &path {
+            if uqa_sql::expr::equal_typed_values_with_enum_catalog(
+                existing,
+                &key,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+                Some(catalog),
+            )? {
+                is_cycle = true;
+                break;
+            }
+        }
         path.push(key);
         values.push(if is_cycle {
             mark.clone()
@@ -688,12 +719,13 @@ fn collect_annotated_recursive_row(
     is_cycle: bool,
     generated_schema: &crate::RowSchema,
     seen: &mut Option<&mut crate::ExactRowSet>,
+    catalog: &dyn uqa_sql::expr::SQLValueCatalog,
     emitted: &mut Vec<crate::PhysicalRow>,
     expandable: &mut Vec<crate::PhysicalRow>,
 ) -> Result<(), SQLError> {
     let is_new = match seen.as_deref_mut() {
         Some(seen) => seen
-            .insert_physical(&row, generated_schema)
+            .insert_sql_physical(&row, generated_schema, Some(catalog))
             .map_err(physical_exec_error)?,
         None => true,
     };
@@ -806,6 +838,7 @@ pub fn append_shared_spill(
 pub fn filter_new_recursive_rows(
     input: &crate::SharedSpill,
     seen: &mut crate::ExactRowSet,
+    catalog: &dyn uqa_sql::expr::SQLValueCatalog,
 ) -> Result<crate::SharedSpill, SQLError> {
     // The source is already disk-backed. Retain no cardinality-sized tail
     // while constructing the next working set.
@@ -817,7 +850,7 @@ pub fn filter_new_recursive_rows(
         let mut rows = Vec::with_capacity(batch.rows.len().min(crate::DEFAULT_BATCH_SIZE));
         for row in batch.rows {
             if seen
-                .insert_physical(&row, &batch.schema)
+                .insert_sql_physical(&row, &batch.schema, Some(catalog))
                 .map_err(physical_exec_error)?
             {
                 rows.push(row);

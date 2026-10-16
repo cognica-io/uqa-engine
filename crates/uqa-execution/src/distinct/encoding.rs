@@ -291,22 +291,14 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
                         }
                     }
                     Value::List(values) => {
-                        output.push_byte(if matches!(value, Value::List(_)) {
-                            5
-                        } else {
-                            10
-                        })?;
+                        output.push_byte(5)?;
                         encode_len(values.len(), output)?;
                         if !values.is_empty() {
                             stack.push(Children::Values(values.iter()))?;
                         }
                     }
                     Value::Row(values) => {
-                        output.push_byte(if matches!(value, Value::List(_)) {
-                            5
-                        } else {
-                            10
-                        })?;
+                        output.push_byte(10)?;
                         encode_len(values.len(), output)?;
                         if !values.is_empty() {
                             if output.uses_declared_field_types() {

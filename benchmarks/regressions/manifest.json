@@ -9337,8 +9337,8 @@
       ],
       "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
       "capability": "Range composite consumers",
-      "workload": "Replay 177 independent PostgreSQL observations across all twelve builtin range families on four providers, including thirteen observations after reopening.",
-      "invariant": "Records and arrays retain the selected field order and equal numeric bounds across groups, windows, joins, set operations, indexed lookup and UNIQUE diagnostics."
+      "workload": "Replay 190 independent PostgreSQL observations across all twelve builtin range families on four providers, including thirteen observations after reopening.",
+      "invariant": "Records and arrays retain selected field equality across relational consumers, recursive UNION/CYCLE, cached/correlated membership, indexed FK actions, upsert/rollback and UNIQUE diagnostics."
     },
     {
       "package": "uqa-execution",
@@ -9352,6 +9352,71 @@
       "capability": "Range unique reservation compatibility",
       "workload": "Opaque physical and invalid vector fields, enum identities and scalar values alongside selected range fields.",
       "invariant": "Selected range equivalence changes the current reservation while all predecessor addresses remain; unrelated fields are not eagerly read."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_distinct_preserves_equivalence_and_first_values_after_forced_spill",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/tests.rs",
+      "capability": "Range DISTINCT spill",
+      "workload": "Equal decimal bounds in row and array range/multirange keys with 1-byte and 64 KiB budgets.",
+      "invariant": "SQL-equivalent keys collapse, the first original value is retained, actual spill releases memory keys and temporary state."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_join_preserves_direct_encoded_and_spilled_multiplicities",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/tests/range_keys.rs",
+      "capability": "Range join strategies",
+      "workload": "Record and array range/multirange keys through both smaller build sides and direct, computed and forced-spill keys.",
+      "invariant": "Actual strategy selection preserves the full Cartesian multiplicity of SQL-equal keys."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "spilled_range_full_join_retains_unmatched_and_null_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/tests/range_keys.rs",
+      "capability": "Range outer join spill",
+      "workload": "Duplicate equivalent ranges, unmatched keys and NULL rows under a one-byte allowance.",
+      "invariant": "Hash, input and output state spill while matching multiplicities and all unmatched rows remain intact."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_exact_sql_set_preserves_equivalence_after_spill_without_changing_raw_keys",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/tests.rs",
+      "capability": "Range fixpoint SQL keys",
+      "workload": "Positional and physical range-array keys with one-byte and 64 KiB budgets.",
+      "invariant": "SQL-equivalent spellings share exact seen state across memory and disk; raw Core keys keep their existing representation domain."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_membership_preserves_selected_equality_in_cached_and_streamed_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/subqueries/tests.rs",
+      "capability": "Range subquery membership",
+      "workload": "Cached, promoted and streamed range-array membership with equivalent values, absent values and NULLs.",
+      "invariant": "SQL equality and three-valued NULL behavior agree; a cached set is reused without new query contexts."
     },
     {
       "package": "uqa-engine",
