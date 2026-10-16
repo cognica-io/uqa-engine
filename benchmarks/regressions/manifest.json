@@ -9245,6 +9245,32 @@
       "capability": "Padded character composite output and consumers",
       "workload": "Replay the bpchar family of the independent PostgreSQL 18.4 consumer reference on all four providers, including scalar and nested container output and actual persistent reopening.",
       "invariant": "Container output and unique-key detail retain trailing spaces while scalar text casts trim them; equality, hashing and indexed lookup keep their existing padding-insensitive classes."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_and_multirange_order_matches_postgresql_bound_semantics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/comparison/tests.rs",
+      "capability": "Range subtype ordering",
+      "workload": "1,264 independent PostgreSQL 18.4 comparisons across twelve built-in range and multirange families, under one shared memory allowance.",
+      "invariant": "Empty, unbounded, inclusive, numeric-scale, NaN and temporal bounds and multirange prefixes follow PostgreSQL order; all temporary reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_range_comparison_preserves_zero_copy_and_cancellation_boundaries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/comparison/tests.rs",
+      "capability": "Bounded admitted range comparison",
+      "workload": "Compare admitted integer ranges and multiranges with a zero-byte allowance, then with cancellation requested.",
+      "invariant": "Borrowed integer bounds require no allocation; cancellation is 57014 and leaves no retained memory."
     }
   ]
 }

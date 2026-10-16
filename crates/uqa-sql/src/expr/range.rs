@@ -13,6 +13,7 @@ use uqa_core::{
     TemporalValue, Value,
 };
 
+mod comparison;
 mod production;
 mod relationships;
 pub(super) use production::{
