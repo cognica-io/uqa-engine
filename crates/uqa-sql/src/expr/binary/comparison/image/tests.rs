@@ -252,3 +252,40 @@ fn record_image_comparison_retains_named_tuple_field_images() {
         }
     }
 }
+
+#[test]
+fn record_image_observation_borrows_fields_and_checks_callback_cancellation() {
+    let text = "image".repeat(32 * 1024);
+    let source = text.as_ptr();
+    let value = row(
+        vec![Value::Str(text), Value::Null],
+        &[ColumnType::Text, ColumnType::Text],
+    );
+    for cancellation in [0, 1, 2] {
+        let memory = MemoryBudget::new(0);
+        let statement = CancellationToken::new();
+        let session = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &statement, &session);
+        let result =
+            visit_record_image_fields_with_catalog(&value, None, &control, |oid, image| {
+                assert_eq!(oid, Some(25));
+                if let Some(image) = image {
+                    assert_eq!(image.as_ptr(), source);
+                }
+                if cancellation == 1 {
+                    statement.cancel();
+                }
+                if cancellation == 2 {
+                    session.cancel();
+                }
+                Ok(())
+            });
+        if cancellation == 0 {
+            assert_eq!(result.unwrap(), 2);
+        } else {
+            assert_eq!(result.unwrap_err().sqlstate(), Some("57014"));
+        }
+        assert_eq!(memory.used(), 0);
+        assert_eq!(memory.peak(), 0);
+    }
+}

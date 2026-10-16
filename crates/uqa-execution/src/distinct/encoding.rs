@@ -17,9 +17,11 @@ use uqa_storage::read_control::StorageReadControl;
 
 mod output;
 mod ranges;
+mod record_images;
 mod reservations;
 mod traversal;
 use output::{BudgetedOutput, KeyOutput};
+pub use record_images::record_image_key_with_catalog_and_control;
 pub(crate) use reservations::canonical_row_lock_keys_with_catalog;
 use traversal::{Children, Frames};
 
@@ -147,11 +149,15 @@ pub fn canonical_typed_row_key_with_catalog_and_control<'a>(
         }
         Ok(())
     })();
-    result.map_err(|error| match error {
+    result.map_err(sql_error)?;
+    Ok(output.values.finish()?)
+}
+
+fn sql_error(error: ExecError) -> uqa_sql::SQLError {
+    match error {
         ExecError::SQL(error) => error,
         ExecError::Other(message) => uqa_sql::SQLError::Internal(message),
-    })?;
-    Ok(output.values.finish()?)
+    }
 }
 
 /// Collision-free binary key encoding. Numeric values deliberately share one

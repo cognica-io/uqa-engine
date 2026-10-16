@@ -14,7 +14,7 @@ use uqa_core::memory::ProductionControl;
 mod image;
 mod records;
 mod support;
-pub use image::compare_record_images_with_catalog;
+pub use image::{compare_record_images_with_catalog, visit_record_image_fields_with_catalog};
 pub(in crate::expr) use support::{require_array_element_support, ComparisonSupport};
 
 #[cfg(test)]

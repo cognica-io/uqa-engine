@@ -28,7 +28,8 @@ pub(crate) use encoding::canonical_row_lock_keys_with_catalog;
 pub use encoding::{
     canonical_row_key, canonical_row_key_budgeted, canonical_row_key_with_catalog_and_control,
     canonical_typed_row_key_with_catalog_and_control, hash_canonical_row,
-    hash_canonical_row_with_enum_catalog, try_pack_compact_text_pair,
+    hash_canonical_row_with_enum_catalog, record_image_key_with_catalog_and_control,
+    try_pack_compact_text_pair,
 };
 pub(crate) use encoding::{encode_key, EncodedKey};
 pub(crate) use encoding::{

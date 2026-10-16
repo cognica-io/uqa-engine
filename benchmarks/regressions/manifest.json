@@ -11329,6 +11329,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "record_image_observation_borrows_fields_and_checks_callback_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/image/tests.rs",
+      "capability": "Borrowed record field images",
+      "workload": "A 160 KiB text field and NULL observed under zero scratch allowance, with either owner cancelled inside the callback.",
+      "invariant": "Observation borrows the original bytes, retains field identities, allocates no scratch and propagates either callback cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "record_image_keys_match_postgresql_classes_in_memory_and_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/record_images/tests.rs",
+      "capability": "Selected record image exact keys",
+      "workload": "36 independently captured PostgreSQL image comparisons through exact keys, hashing, in-memory membership and one-byte forced spill.",
+      "invariant": "Key equality coincides with PostgreSQL image equality within selected field types; spill preserves complete keys and production retains only output capacity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "record_image_key_framing_preserves_nulls_arity_and_physical_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/record_images/tests.rs",
+      "capability": "Record image key framing",
+      "workload": "Ambiguous text concatenations, NULL versus empty text, different arities, logical text and packed/full varlena fields.",
+      "invariant": "Exact framing prevents concatenation/NULL/arity collisions while storage header variants retain equal payload keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "record_image_key_errors_release_output_and_preserve_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/record_images/tests.rs",
+      "capability": "Controlled record image keys",
+      "workload": "Large borrowed text under four exhausted allowances, a malformed later field after partial output, and either cancelled owner.",
+      "invariant": "Failure releases all output/scratch and preserves 53200, XX001 and 57014 without changing the input.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
