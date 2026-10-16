@@ -11277,6 +11277,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "record_image_comparison_matches_postgresql_for_logical_and_physical_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/image/tests.rs",
+      "capability": "Selected record image comparison",
+      "workload": "36 independently captured PostgreSQL record-image pairs through logical and physical fields, both directions and NULLs.",
+      "invariant": "Image order matches PostgreSQL across admitted scalar and container types without calling ordinary field operators; scratch is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "record_image_comparison_keeps_reached_type_and_byte_errors_lazy",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/image/tests.rs",
+      "capability": "Lazy record image diagnostics",
+      "workload": "Earlier unequal fields, malformed later datums, reached field type disagreement and unequal arity.",
+      "invariant": "Earlier decisions suppress later errors; reached type identities precede bytes and preserve PostgreSQL SQLSTATEs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "record_image_comparison_shares_the_callers_allowance_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/image/tests.rs",
+      "capability": "Controlled record image production",
+      "workload": "Numeric field encoding under an exhausted caller allowance and independently cancelled statement/session owners.",
+      "invariant": "Quota exhaustion is 53200, either cancellation is 57014, and failed production releases all scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "record_image_comparison_retains_named_tuple_field_images",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/image/tests.rs",
+      "capability": "Named physical record images",
+      "workload": "A catalog-bound numeric record with scale-distinct fields through all logical/physical outer tuple combinations.",
+      "invariant": "Outer tuple observation retains field storage differences and releases admitted decoding scratch.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

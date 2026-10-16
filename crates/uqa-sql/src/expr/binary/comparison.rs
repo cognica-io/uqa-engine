@@ -11,8 +11,10 @@ use super::{BinaryOp, Result, SQLError, Value};
 use std::cmp::Ordering;
 use uqa_core::memory::ProductionControl;
 
+mod image;
 mod records;
 mod support;
+pub use image::compare_record_images_with_catalog;
 pub(in crate::expr) use support::{require_array_element_support, ComparisonSupport};
 
 #[cfg(test)]
@@ -589,10 +591,10 @@ fn compare_typed_values_for_purpose(
                 right,
                 enums,
                 control,
-                match enum_order {
+                Some(match enum_order {
                     EnumKeyOrder::Declaration => ComparisonSupport::Ordering,
                     EnumKeyOrder::Identity => ComparisonSupport::Equality,
-                },
+                }),
                 Ordering::Equal,
                 |left, right, oid| {
                     let order = match compare_declared_range(left, right, oid, control, enums)? {
@@ -754,7 +756,7 @@ fn equal_values(
             right,
             enums,
             control,
-            ComparisonSupport::Equality,
+            Some(ComparisonSupport::Equality),
             true,
             |left, right, oid| {
                 let equal = match compare_declared_range(left, right, oid, control, enums)? {

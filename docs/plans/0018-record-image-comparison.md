@@ -1,0 +1,23 @@
+# Selected record image comparison
+
+This is one SQL-owned prerequisite for original #638 record 65's selected range support. PostgreSQL's `record_image_ops` observes field storage, including distinctions that ordinary value equality deliberately removes. The implementation is prepared after the separate #946, #948 and #949 corrections; it does not publish range declarations, an operator class, generated constructors or a public support routine.
+
+## Ownership and behavior
+
+SQL reuses the existing record walker for live attribute identities, NULL handling, reached-field diagnostics and delayed arity checks. Image comparison skips the ordinary field-operator availability check because PostgreSQL admits images of fields such as JSON without a value equality operator. Ordinary record comparisons still request and validate their existing field operators. The new operation uses the existing controlled SQL Datum codec, including physical-byte views, rather than introducing a second representation or performing input, domain checks or canonicalization.
+
+Corresponding non-NULL fields of the same selected type compare as unsigned Datum words when passed by value and as storage bytes when passed by reference. Variable-width images exclude their outer storage header. The existing reader admits physical outer tuples and retains each field's image. Both cancellation scopes and all decoding/encoding allocations use the supplied production control; borrowed and inline images do not acquire an output buffer. Execution remains responsible for exact-key encoding and selected range dispatch; those connections remain open.
+
+## Preservation argument
+
+For a fixed reached field type $T$, let $I_T(v)$ be the existing admitted Datum image of $v$. The by-value operation compares the unsigned fixed-width word; the by-reference operation compares its byte sequence lexicographically. Each is a total order on its admitted images, so $I_T(a)=I_T(b)$ exactly when the selected field comparison returns zero. Numeric scale, signed floating zero and other image distinctions are intentionally preserved even when ordinary SQL equality identifies the values. NULL adds one greatest element, matching PostgreSQL's record-image rule.
+
+For records with corresponding field identities, the operation is the lexicographic product of these field orders. Thus antisymmetry and transitivity follow from the first unequal field, and equality requires equal images at every live position. The shared walker preserves PostgreSQL's partial diagnostic domain: a deciding earlier field suppresses later type, byte and arity errors, while a reached type disagreement precedes observing that field's bytes. This argument does not substitute image equality for ordinary value equality or establish an Execution exact key; the future image-key consumer must retain these same classes.
+
+The production owner bounds each temporary image before allocation and retains its lease until that field has been compared. Decoded outer tuples retain their existing controlled owner until comparison exits. Success and every error path drop both fields' scratch and all decoded owners. Byte comparison checks cancellation between bounded chunks without copying borrowed payloads. No existing persistent encoding, default operator class, dependency direction or public behavior changes.
+
+## Verification and remaining work
+
+The compact owner fixture records 36 PostgreSQL 18.4 comparisons, their SQL and Docker image identity. It covers fixed-width signed values, numeric storage, floating zero and NaN, text and padded character types, JSON and JSONB, bit strings, temporal values, arrays, native ranges, multiranges and NULLs. Owner tests cross logical/physical fields in both directions, test outer named tuple retention, reached diagnostics, exhausted allowances and both cancellation owners. They reuse the crate's existing test executable. All 18 focused comparison tests and strict SQL library/test Clippy pass. Formatting, the 109-edge workspace dependency policy, single-harness inventory, source-size checks and the updated regression manifest pass. The manifest adds four checks for 838 checks / 1,234 cases. Actual Linux/macOS work, memory, output and independent-process acceptance remains required before delivery; no timing measurement is claimed.
+
+Selected class/collation dispatch, matching Execution image keys, definition-derived range callbacks, declarations, generated constructors, lifecycle/operators and provider/binding acceptance remain required in [the parent plan](0018-user-defined-ranges.md). Original record 65 remains unchecked.
