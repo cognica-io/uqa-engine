@@ -4,7 +4,7 @@ This plan preserves original record 65 of the [extension task ledger](0018-exten
 
 ## Current boundary
 
-SQL's `RangeSubtype` identifies six built-in families. `CanonicalRange` and `CanonicalMultirange` retain admitted transient bounds, while stored built-in range values use text with a declared SQL identity. `expr/range/production.rs` selects canonicalization from the built-in subtype; `RangeComparisonValue` supplies admitted bounds to comparison and exact-key consumers. User-defined range and shell declarations are not implemented by this correction.
+SQL's `RangeSubtype` identifies six built-in families. `CanonicalRange` and `CanonicalMultirange` retain admitted transient bounds, while stored built-in range values use text with a declared SQL identity. `expr/range/production.rs` selects canonicalization from the built-in subtype; `RangeComparisonValue` supplies admitted bounds to comparison and exact-key consumers. User-defined range declarations remain unimplemented; the shared shell prerequisite described below is implemented and awaits automatic acceptance.
 
 [#299](https://github.com/cognica-io/uqa-engine/issues/299), in [PR #916](https://github.com/cognica-io/uqa-engine/pull/916), separately validates default B-tree capability. [#917 input acceptance](0018-range-input-acceptance.md) corrects independently reproduced built-in input differences before the subtype path is generalized. That source passes the focused owner/provider references and final combined-source review; its acceptance record distinguishes completed evidence from the automatic runs stopped by the maintainer for this delivery. Neither prerequisite completes record 65.
 
