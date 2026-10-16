@@ -29,6 +29,43 @@ for language, feature in BINDING_FEATURES.items():
 NORI_FEATURE = BINDING_FEATURES["nori"]
 
 
+def test_packed_bit_values_survive_python_conversion_and_reopen(tmp_path):
+    fixture = json.loads((Path(__file__).parents[1] / "parity" / "bit_strings.json").read_text())
+    assert fixture["schema_version"] == 1
+    path = str(tmp_path / "bits.db")
+    engine = uqa.open(path)
+
+    def check(sql, expected):
+        rows = [dict(row) for row in fixture[expected]]
+        for row in rows:
+            if "fields" in row:
+                row["fields"] = tuple(row["fields"])
+        assert engine.sql(sql).rows == rows
+
+    try:
+        check(fixture["literal_query"], "literal_rows")
+        for sql in fixture["setup"]:
+            engine.sql(sql)
+        check(fixture["query"], "initial_rows")
+        engine.sql(fixture["parameter_sql"], fixture["params"])
+        check(fixture["query"], "rows")
+        engine.sql(fixture["index_sql"])
+        check(fixture["probe_sql"], "probe_rows")
+        with pytest.raises(RuntimeError) as caught:
+            engine.sql(fixture["invalid_sql"])
+        assert fixture["error_contains"] in str(caught.value)
+        engine.sql(fixture["rollback_sql"])
+        check(fixture["query"], "rows")
+        engine.close()
+        engine = None
+        engine = uqa.open(path)
+        check(fixture["query"], "rows")
+        check(fixture["probe_sql"], "probe_rows")
+    finally:
+        if engine is not None:
+            engine.close()
+
+
 @pytest.mark.parametrize("input_mode", ["stdin", "script"])
 def test_installed_usql_dispatches_python_arguments(tmp_path, input_mode):
     executable = Path(sysconfig.get_path("scripts")) / (

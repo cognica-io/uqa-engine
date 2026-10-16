@@ -11,6 +11,9 @@ use super::Result;
 use std::sync::Arc;
 use uqa_core::EnumValue;
 
+mod records;
+pub use records::SQLRecordFields;
+
 /// Type metadata and enum support used to observe already admitted SQL values. Implementations borrow one statement catalog generation and never invoke type input.
 pub trait SQLValueCatalog {
     /// The declared type for a physical OID, including domains, arrays and composites.

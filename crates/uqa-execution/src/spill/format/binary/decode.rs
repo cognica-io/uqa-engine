@@ -500,6 +500,16 @@ impl<'a> BinaryReader<'a> {
                 )))
             }
             16 => Ok(Value::Void),
+            24 => {
+                let length = u32::from_le_bytes(self.read_i32("bit length")?.to_le_bytes());
+                let bytes = self.read_bytes("packed bit data")?;
+                if bytes.len() != length.div_ceil(8) as usize {
+                    return Err(spill_error("invalid packed bit length in spill file"));
+                }
+                uqa_core::BitStringValue::try_from_packed(bytes.to_vec(), length)
+                    .map(Value::BitString)
+                    .ok_or_else(|| spill_error("invalid packed bit padding in spill file"))
+            }
             tag @ (18 | 22) => {
                 let type_oid = u32::from_le_bytes(self.read_i32("enum type OID")?.to_le_bytes());
                 let label_oid = if tag == 22 {

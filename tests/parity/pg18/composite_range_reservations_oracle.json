@@ -1,0 +1,20 @@
+{
+"postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+"provenance": {"capture_sha256": "04bf556b243420a90ef3ff24ee2a465e9d64bc6b16b27295d65c2f356bd0475d", "collector_sha256": "80c1db412e81d6cc552f700c0462f957202749e0991076a4eb8743a84f099c06", "capture_method": "Two libpq connections to Docker PostgreSQL 18.4; each numbered session command completed before the next. No elapsed-time acceptance."},
+"cases": [
+{"session": "holder", "sql": "SELECT version()", "command_tag": "SELECT 1", "sqlstate": null, "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"},
+{"session": "holder", "sql": "CREATE TYPE cr_unique_row AS (v numrange)", "command_tag": "CREATE TYPE", "sqlstate": null},
+{"session": "holder", "sql": "CREATE TABLE cr_unique_reservation(id int PRIMARY KEY,v cr_unique_row UNIQUE)", "command_tag": "CREATE TABLE", "sqlstate": null},
+{"session": "holder", "sql": "BEGIN", "command_tag": "BEGIN", "sqlstate": null},
+{"session": "holder", "sql": "INSERT INTO cr_unique_reservation VALUES(1,ROW('[1.0,3.00)'::numrange))", "command_tag": "INSERT 0 1", "sqlstate": null},
+{"session": "contender", "sql": "SET lock_timeout='50ms'", "command_tag": "SET", "sqlstate": null},
+{"session": "contender", "sql": "SET statement_timeout='2s'", "command_tag": "SET", "sqlstate": null},
+{"session": "contender", "sql": "INSERT INTO cr_unique_reservation VALUES(2,ROW('[1.00,3.0)'::numrange))", "command_tag": "", "sqlstate": "55P03", "message": "canceling statement due to lock timeout"},
+{"session": "contender", "sql": "INSERT INTO cr_unique_reservation VALUES(4,ROW('[10,12)'::numrange))", "command_tag": "INSERT 0 1", "sqlstate": null},
+{"session": "holder", "sql": "ROLLBACK", "command_tag": "ROLLBACK", "sqlstate": null},
+{"session": "contender", "sql": "INSERT INTO cr_unique_reservation VALUES(2,ROW('[1.00,3.0)'::numrange))", "command_tag": "INSERT 0 1", "sqlstate": null},
+{"session": "holder", "sql": "INSERT INTO cr_unique_reservation VALUES(3,ROW('[1.0,3.00)'::numrange))", "command_tag": "", "sqlstate": "23505", "message": "duplicate key value violates unique constraint \"cr_unique_reservation_v_key\""},
+{"session": "holder", "sql": "DROP TABLE cr_unique_reservation", "command_tag": "DROP TABLE", "sqlstate": null},
+{"session": "holder", "sql": "DROP TYPE cr_unique_row", "command_tag": "DROP TYPE", "sqlstate": null}
+]
+}

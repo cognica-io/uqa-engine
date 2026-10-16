@@ -125,6 +125,30 @@ pub fn convert_value_to_column_type_with_control(
         }
         ColumnType::Json => cast_value_from_with_control(&value, "json", None, control),
         ColumnType::JsonB => cast_value_from_with_control(&value, "jsonb", None, control),
+        ColumnType::Bit(length) | ColumnType::VarBit(length) => {
+            use crate::expr::bit_string::{input_with_control, BitStringKind};
+            let kind = if matches!(ty, ColumnType::Bit(_)) {
+                BitStringKind::Fixed
+            } else {
+                BitStringKind::Varying
+            };
+            let modifier = length.map_or(-1, |length| length as i32);
+            match &*value {
+                Value::BitString(bits) => {
+                    kind.check_length(bits.bit_len(), modifier)?;
+                    Ok(value)
+                }
+                Value::Str(text) | Value::FixedChar(text) => {
+                    let (bits, memory) =
+                        input_with_control(text, kind, modifier, control)?.into_parts();
+                    Ok(control.finish(Value::BitString(bits), memory)?)
+                }
+                other => Err(SQLError::TypeMismatch(format!(
+                    "cannot assign {other:?} to {}",
+                    ty.regtype_name()
+                ))),
+            }
+        }
         // Text reaches a bytea column through its input function, `byteain`, which decodes the hex and escape formats; no other type has an assignment cast to bytea.
         ColumnType::Bytea => match &*value {
             Value::Bytes(_) => Ok(value),

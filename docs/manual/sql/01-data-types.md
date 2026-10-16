@@ -32,6 +32,7 @@ UQA Engine maps PostgreSQL 18 type identities to the value carriers implemented 
 | `JSON` | Validated JSON value |
 | `JSONB` | Canonical JSON value with JSONB operations |
 | `BYTEA` | Byte string |
+| `BIT(n)`, `BIT VARYING(n)`, `VARBIT(n)` | Packed bit sequence with an exact logical length; [development-source bit-string support](#bit-strings) |
 | `REFCURSOR` | PostgreSQL cursor-name identity over a text-compatible carrier for PL/pgSQL session portals |
 | `type[]`, `ARRAY` | Homogeneous array of a supported element type |
 | `INT4RANGE`, `INT8RANGE`, `NUMRANGE`, `DATERANGE`, `TSRANGE`, `TSTZRANGE` | PostgreSQL built-in range identities with canonical text I/O over their scalar subtype |
@@ -56,6 +57,21 @@ PostgreSQL's internal `"char"` differs from `CHAR(n)`: empty text denotes byte z
 Text input to an integer type reads what PostgreSQL's `int2in`, `int4in` and `int8in` read: surrounding whitespace, an optional sign, and decimal digits or `0x`, `0o` and `0b` digits that single underscores may separate, so `'0x1F'::integer` is 31 and `' 1_000 '::bigint` is 1000. A text outside the type's range reports `22003`, `value "40000" is out of range for type smallint`, and any other text `22P02`.
 
 Serial declarations allocate generated integer values through an owned sequence. `GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY` creates an identity-owned sequence; `ALTER TABLE ... ALTER COLUMN` can add, change, restart or remove that identity declaration. Sequence functions `nextval`, `currval`, `lastval`, and `setval` and standalone sequences are available. See [sequence and identity behavior](02-ddl.md#sequences) for options, write rules and transaction effects.
+
+## Bit strings
+
+The development source after 0.5.4 supports `BIT(n)`, `BIT VARYING(n)` and its alias `VARBIT(n)`. The length is a number of bits. An omitted length on the `BIT` keyword means one bit; unmodified quoted `"bit"` or catalog-qualified `pg_catalog.bit` has no length constraint. An omitted varying length also has no declared bound. Binary literals use `B'101'`, hexadecimal literals use `X'9a'`, and both produce a `bit` value with the literal's exact length, including an empty literal.
+
+Assignment to `BIT(n)` requires exactly `n` bits, while assignment to `BIT VARYING(n)` accepts at most `n`. An explicit cast to `BIT(n)` truncates excess bits on the right or pads with zeroes on the right; a varying-length cast truncates excess bits without padding. Text output contains exactly the logical binary digits, preserving leading zeroes and empty values. Arrays and composite fields retain that value and their declared fixed/varying type. Equality compares the bit sequence; ordering is lexicographic with zero before one and a shorter prefix before its extension. Grouping, joins and indexes preserve the same equality classes.
+
+Writes retain the ordinary transaction and rollback contract, including persistent reopening. Existing databases require the [development-source all-owner upgrade](../reference/10-upgrading.md#development-source). The declared length must be from 1 through 83,886,080; invalid lengths report `22023`. A fixed-length assignment mismatch reports `22026`, an overlong varying assignment reports `22001`, and an invalid binary or hexadecimal digit reports `22P02`. Explicit casts validate the entire input before truncating it.
+
+```sql execute
+SELECT B'101' AS b, X'9a' AS x, B'' AS empty,
+       pg_typeof(B'101')::text AS type;
+```
+
+The result is `101`, `10011010`, an empty string, and `bit`. Rust exposes `Value::BitString(BitStringValue)` with packed bytes and an exact bit length; the [source upgrade notes](../reference/10-upgrading.md#development-source) describe adapter requirements. Python, Node.js and WASM SQL results render binary text. HTTP text parameters require an explicit SQL cast to select the bit type.
 
 ## Array dimensions and input
 
@@ -114,7 +130,7 @@ Use exact decimal for financial values. Do not substitute floating point where e
 
 `TEXT`, `VARCHAR(n)`, `NAME`, and `UUID` retain distinct declared identities while using text-compatible carriers. `VARCHAR(n)` rejects overlength assignment except for discarded trailing spaces, explicit casts follow PostgreSQL truncation behavior, `NAME` preserves its catalog identity, and UUID input is validated and emitted canonically.
 
-`CHARACTER(n)` pads shorter values with ASCII spaces to its fixed width. Comparisons follow the implemented character coercion behavior; normalize at application boundaries when exchanging data with another database.
+`CHARACTER(n)` pads shorter values with ASCII spaces to its fixed width; `CHAR` and `CHARACTER` without a modifier use length one. The catalog type name `bpchar` without a modifier preserves the input length, including in table and composite declarations. A cast to `TEXT` removes trailing ASCII spaces; array and composite text output preserve them and quote fields as required.
 
 ## Temporal types
 
@@ -184,6 +200,8 @@ SELECT '[1,4]'::int4range AS canonical_integer_range,
 ```
 
 Discrete integer and date ranges canonicalize inclusive upper bounds and exclusive lower bounds to PostgreSQL's inclusive-lower, exclusive-upper form when the adjacent subtype value exists. Multiranges discard empty members, order members, and merge overlapping or adjacent members. The declared range or multirange identity survives storage, query planning, generated expressions, schema rewrites, foreign-table boundaries, reopen, and `pg_typeof`; `pg_type` and `pg_range` expose the corresponding PostgreSQL 18 built-in OIDs and subtype relationships.
+
+Record fields and array elements use the declared range subtype's comparison rather than the text spelling. Empty ranges precede nonempty ranges; nonempty ranges compare their lower bound and then their upper bound, including inclusivity. Multiranges compare their normalized members in order. Equal numeric bounds with different decimal scales remain equal in record/array comparisons, grouping, joins, recursive UNION/CYCLE, IN membership, UNIQUE reservations and foreign-key actions. SQL spill keys preserve those equality classes. Concurrent writers must all use the corrected reservation implementation; predecessor reservation addresses preserve existing physical-key coordination but cannot supply missing semantics to an older writer.
 
 This implemented surface is limited to PostgreSQL's six built-in range families and text-form values. User-defined range types, binary range I/O, range indexes and exclusion-index planning, and complete comparison ordering remain open compatibility bugs.
 

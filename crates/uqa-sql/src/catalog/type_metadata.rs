@@ -32,6 +32,10 @@ pub fn catalog_type_name(oid: i64) -> &'static str {
         705 => "unknown",
         1184 => "timestamp with time zone",
         1186 => "interval",
+        1560 => "bit",
+        1561 => "bit[]",
+        1562 => "bit varying",
+        1563 => "bit varying[]",
         1700 => "numeric",
         2249 => "record",
         2277 => "anyarray",
@@ -86,6 +90,8 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Json => 114,
         ColumnType::JsonB => 3802,
         ColumnType::Bytea => 17,
+        ColumnType::Bit(_) => 1560,
+        ColumnType::VarBit(_) => 1562,
         ColumnType::InternalChar => 18,
         ColumnType::Regproc => 24,
         ColumnType::Regprocedure => 2202,
@@ -369,6 +375,8 @@ pub fn pg_type_storage(ty: &ColumnType) -> &'static str {
         | ColumnType::Json
         | ColumnType::JsonB
         | ColumnType::Bytea
+        | ColumnType::Bit(_)
+        | ColumnType::VarBit(_)
         | ColumnType::PgNodeTree
         | ColumnType::AnyArray
         | ColumnType::Array(_)
@@ -407,6 +415,8 @@ pub fn pg_type_array_oid(ty: &ColumnType) -> i64 {
         ColumnType::Json => 199,
         ColumnType::JsonB => 3807,
         ColumnType::Bytea => 1001,
+        ColumnType::Bit(_) => 1561,
+        ColumnType::VarBit(_) => 1563,
         ColumnType::InternalChar => 1002,
         ColumnType::Regproc => 1008,
         ColumnType::Regprocedure => 2207,
@@ -526,6 +536,7 @@ pub fn pg_type_modifier(ty: &ColumnType) -> i64 {
         }
         // PostgreSQL stores varlena type modifiers with a four-byte header.
         ColumnType::Character(length) | ColumnType::Varchar(Some(length)) => i64::from(*length) + 4,
+        ColumnType::Bit(Some(length)) | ColumnType::VarBit(Some(length)) => i64::from(*length),
         ColumnType::Numeric {
             precision: Some(precision),
             scale,
@@ -590,6 +601,12 @@ pub fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         ColumnType::Composite(_) => PgTypeRoutineOids::new(2290, 2291, 2402, 2403),
         ColumnType::Void => PgTypeRoutineOids::new(2298, 2299, 3120, 3121),
         ColumnType::Bytea => PgTypeRoutineOids::new(1244, 31, 2412, 2413),
+        ColumnType::Bit(_) => {
+            PgTypeRoutineOids::new(1564, 1565, 2456, 2457).with_modifier(2919, 2920)
+        }
+        ColumnType::VarBit(_) => {
+            PgTypeRoutineOids::new(1579, 1580, 2458, 2459).with_modifier(2902, 2921)
+        }
         ColumnType::InternalChar => PgTypeRoutineOids::new(1245, 33, 2434, 2435),
         ColumnType::Name => PgTypeRoutineOids::new(34, 35, 2422, 2423),
         ColumnType::BigInteger => PgTypeRoutineOids::new(460, 461, 2408, 2409),
@@ -684,6 +701,8 @@ pub fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::Json => "json",
         ColumnType::JsonB => "jsonb",
         ColumnType::Bytea => "bytea",
+        ColumnType::Bit(_) => "bit",
+        ColumnType::VarBit(_) => "bit varying",
         ColumnType::InternalChar => "\"char\"",
         ColumnType::Regproc => "regproc",
         ColumnType::Regprocedure => "regprocedure",

@@ -104,6 +104,10 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
             3_u8.hash(state);
             value.hash(state);
         }
+        Value::BitString(value) => {
+            17_u8.hash(state);
+            value.hash(state);
+        }
         Value::Temporal(value) => hash_temporal(value, state),
         Value::Json(value) => {
             8_u8.hash(state);

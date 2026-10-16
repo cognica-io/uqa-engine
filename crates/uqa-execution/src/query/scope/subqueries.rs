@@ -77,7 +77,11 @@ pub struct CachedSubqueryMembership {
 }
 
 impl CachedSubqueryMembership {
-    pub fn contains(&self, needle: &Value) -> Result<Option<bool>, SQLError> {
+    pub fn contains(
+        &self,
+        needle: &Value,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> Result<Option<bool>, SQLError> {
         if !self.has_column {
             return Ok(Some(false));
         }
@@ -85,7 +89,7 @@ impl CachedSubqueryMembership {
             && self
                 .values
                 .lock()
-                .contains_values(std::slice::from_ref(needle))
+                .contains_sql_values(std::slice::from_ref(needle), catalog)
                 .map_err(physical_exec_error)?
         {
             return Ok(Some(true));
@@ -119,7 +123,11 @@ impl CachedScalarSubquery {
         })
     }
 
-    pub fn membership(&self, work_mem_bytes: usize) -> Result<CachedSubqueryMembership, SQLError> {
+    pub fn membership(
+        &self,
+        work_mem_bytes: usize,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> Result<CachedSubqueryMembership, SQLError> {
         let Some(first_column) = self.columns.first() else {
             return Ok(CachedSubqueryMembership {
                 values: parking_lot::Mutex::new(crate::ExactRowSet::new(work_mem_bytes)),
@@ -144,7 +152,7 @@ impl CachedScalarSubquery {
                     Some(Value::Null) | None => saw_null = true,
                     Some(value) => {
                         values
-                            .insert_values(std::slice::from_ref(value))
+                            .insert_sql_values(std::slice::from_ref(value), catalog)
                             .map_err(physical_exec_error)?;
                     }
                 }

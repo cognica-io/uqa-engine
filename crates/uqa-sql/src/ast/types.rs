@@ -64,6 +64,10 @@ pub enum ColumnType {
     JsonB,
     /// `BYTEA` columns store opaque bytes.
     Bytea,
+    /// Fixed-length bit sequence; the unmodified catalog type has no length constraint.
+    Bit(Option<u32>),
+    /// Varying bit sequence with an optional maximum logical length.
+    VarBit(Option<u32>),
     /// `PostgreSQL`'s internal single-byte `"char"` catalog type.
     InternalChar,
     Regproc,
@@ -166,6 +170,8 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
         "_oidvector" => "oidvector",
         "_bpchar" => "bpchar",
         "_varchar" => "varchar",
+        "_bit" => "\"bit\"",
+        "_varbit" => "varbit",
         "_float4" => "float4",
         "_float8" => "float8",
         "_aclitem" => "aclitem",
@@ -202,7 +208,7 @@ impl ColumnType {
     /// Whether modifier removal changes this type; a domain retains its declared base.
     pub(crate) fn has_type_modifiers(&self) -> bool {
         match self {
-            Self::Varchar(length) => length.is_some(),
+            Self::Varchar(length) | Self::Bit(length) | Self::VarBit(length) => length.is_some(),
             Self::Numeric { precision, scale } => precision.is_some() || scale.is_some(),
             Self::Array(element) => element.has_type_modifiers(),
             Self::Character(_)

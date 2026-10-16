@@ -24,6 +24,7 @@ pub(super) fn render_value(value: &Value) -> Result<String, SQLError> {
         Value::Json(text) => format!("{}::json", quote_str(text)),
         Value::JsonB(text) => format!("{}::jsonb", quote_str(text)),
         Value::Bytes(bytes) => format!("decode('{}', 'hex')", hex_encode(bytes)?),
+        Value::BitString(_) => format!("B'{}'", uqa_sql::expr::value_to_string(value)?),
         Value::Temporal(t) => quote_str(&t.to_sql_string()),
         // A filter compares against the label text, which the caller supplies as a string literal.
         Value::Enum(value) => return Err(uqa_sql::expr::catalog_output_required(value)),

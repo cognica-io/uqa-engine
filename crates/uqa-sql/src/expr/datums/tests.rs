@@ -7,6 +7,7 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod bit_string;
 mod catalog_arrays;
 
 #[test]

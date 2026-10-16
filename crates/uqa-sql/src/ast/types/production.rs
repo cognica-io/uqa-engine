@@ -120,6 +120,8 @@ impl ColumnType {
             | Self::Json
             | Self::JsonB
             | Self::Bytea
+            | Self::Bit(_)
+            | Self::VarBit(_)
             | Self::InternalChar
             | Self::Regproc
             | Self::Regprocedure
@@ -161,6 +163,8 @@ impl ColumnType {
     ) -> Result<Produced<Self>, ValueRetentionError> {
         let scalar = match self {
             Self::Varchar(_) => Self::Varchar(None),
+            Self::Bit(_) => Self::Bit(None),
+            Self::VarBit(_) => Self::VarBit(None),
             Self::Character(_) => Self::Bpchar,
             Self::Numeric { .. } => Self::Numeric {
                 precision: None,

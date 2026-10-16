@@ -20,6 +20,7 @@ pub fn value_type_name(v: &Value) -> &'static str {
         Value::Str(_) => "text",
         Value::FixedChar(_) => "character",
         Value::Bytes(_) => "bytea",
+        Value::BitString(_) => "bit",
         Value::Temporal(TemporalValue::Interval { .. }) => "interval",
         Value::Temporal(_) => "timestamp",
         Value::Decimal(_) => "numeric",

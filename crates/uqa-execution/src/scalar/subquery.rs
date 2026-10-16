@@ -157,6 +157,30 @@ impl SubqueryResult {
     }
 
     pub fn contains(self, needle: &Value) -> Result<Option<bool>, SQLError> {
+        self.contains_matching(needle, |value| Ok(value == needle))
+    }
+
+    /// Test a streamed SQL subquery with the same selected field operators as its cached membership path.
+    pub fn contains_with_catalog(
+        self,
+        needle: &Value,
+        catalog: &dyn uqa_sql::expr::SQLValueCatalog,
+    ) -> Result<Option<bool>, SQLError> {
+        self.contains_matching(needle, |value| {
+            uqa_sql::expr::equal_typed_values_with_enum_catalog(
+                value,
+                needle,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+                Some(catalog),
+            )
+        })
+    }
+
+    fn contains_matching(
+        self,
+        needle: &Value,
+        mut equal: impl FnMut(&Value) -> Result<bool, SQLError>,
+    ) -> Result<Option<bool>, SQLError> {
         if self.columns.is_empty() {
             return Ok(Some(false));
         }
@@ -167,7 +191,7 @@ impl SubqueryResult {
             saw_row = true;
             match row.positional_column(0) {
                 Some(Value::Null) | None => saw_null = true,
-                Some(value) if !matches!(needle, Value::Null) && value == needle => {
+                Some(value) if !matches!(needle, Value::Null) && equal(value)? => {
                     return Ok(Some(true));
                 }
                 Some(_) => {}

@@ -138,6 +138,7 @@ pub(super) fn infer_arrow_type(column_index: usize, column: &str, result: &SQLRe
             | Value::Json(_)
             | Value::JsonB(_)
             | Value::Bytes(_)
+            | Value::BitString(_)
             | Value::Temporal(_)
             | Value::Array(_)
             | Value::LegacyVector(_)
@@ -298,6 +299,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Json(_) => "json",
         Value::JsonB(_) => "jsonb",
         Value::Bytes(_) => "bytes",
+        Value::BitString(_) => "bit",
         Value::Temporal(_) => "temporal",
         Value::Array(_) => "array",
         Value::LegacyVector(vector) => vector.kind().type_name(),
@@ -327,7 +329,11 @@ fn value_to_arrow_string(value: &Value) -> Result<Option<String>, ArrowError> {
         Value::Bytes(v) => Some(format!("{v:?}")),
         Value::Temporal(v) => Some(v.to_sql_string()),
         Value::List(v) => Some(format!("{v:?}")),
-        Value::Array(_) | Value::Row(_) | Value::Record(_) | Value::LegacyVector(_) => {
+        Value::Array(_)
+        | Value::Row(_)
+        | Value::Record(_)
+        | Value::LegacyVector(_)
+        | Value::BitString(_) => {
             let text = uqa_sql::expr::value_to_string_with_control(
                 value,
                 &uqa_core::memory::ProductionControl::uncontrolled(),

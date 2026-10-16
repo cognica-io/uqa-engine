@@ -20,6 +20,9 @@ mod comparison_capabilities;
 #[path = "sql_composites/key_semantics.rs"]
 mod key_semantics;
 
+#[path = "sql_composites/consumer_matrix.rs"]
+mod consumer_matrix;
+
 #[path = "sql_composites/join_semantics.rs"]
 mod join_semantics;
 

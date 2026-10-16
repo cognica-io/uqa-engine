@@ -25,6 +25,50 @@ fn fixture(values: &[(DocId, Value)]) -> (ManagedConnection, SQLiteBTreeIndexSto
 }
 
 #[test]
+fn bit_string_scalar_and_tuple_probes_seek_without_conflating_zero_padded_lengths() {
+    let bits = |bytes, length| {
+        Value::BitString(uqa_core::BitStringValue::try_from_packed(bytes, length).unwrap())
+    };
+    for tuple in [false, true] {
+        let wrap = |value| {
+            if tuple {
+                Value::Row(vec![Value::Str("bits".into()), value].into())
+            } else {
+                value
+            }
+        };
+        for count in [64_u64, 2048] {
+            let mut values = (1..=count)
+                .map(|id| (id, wrap(bits(id.to_be_bytes().to_vec(), 64))))
+                .collect::<Vec<_>>();
+            values.push((count + 1, wrap(bits(vec![0x80], 1))));
+            values.push((count + 2, wrap(bits(vec![0x80], 8))));
+            let (connection, index) = fixture(&values);
+            connection
+                .bind_native_records(VersionedSessionOptions::default())
+                .unwrap();
+            for (target, expected) in [
+                (wrap(bits(42_u64.to_be_bytes().to_vec(), 64)), vec![42]),
+                (wrap(bits(vec![0x80], 1)), vec![count + 1]),
+                (wrap(bits(vec![0x80], 8)), vec![count + 2]),
+                (wrap(bits(vec![0x80, 0], 9)), vec![]),
+            ] {
+                PROBE_VM_STEPS.set(0);
+                assert_eq!(
+                    index.probe_equal("items", &"key".into(), &target).unwrap(),
+                    Some(expected)
+                );
+                let steps = PROBE_VM_STEPS.get();
+                assert!(
+                    steps > 0 && steps < 400,
+                    "{count} rows: {steps} instructions"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn cold_scalar_probes_seek_instead_of_visiting_the_posting_collection() {
     for tuple in [false, true] {
         for count in [128, 8192] {

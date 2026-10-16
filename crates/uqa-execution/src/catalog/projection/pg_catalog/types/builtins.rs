@@ -34,6 +34,8 @@ pub(super) const CATALOG_TYPES: &[(ColumnType, &str, bool, &str)] = &[
     (ColumnType::AclItem, "U", false, "b"),
     (ColumnType::Bpchar, "S", false, "b"),
     (ColumnType::Varchar(None), "S", false, "b"),
+    (ColumnType::Bit(None), "V", false, "b"),
+    (ColumnType::VarBit(None), "V", true, "b"),
     (ColumnType::Date, "D", false, "b"),
     (ColumnType::Time, "D", false, "b"),
     (ColumnType::Timestamp, "D", false, "b"),

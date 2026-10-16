@@ -254,6 +254,10 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
             add_size(total, 8, "byte value length")?;
             add_size(total, value.len(), "byte value")
         }
+        Value::BitString(value) => {
+            add_size(total, 12, "bit and byte lengths")?;
+            add_size(total, value.as_bytes().len(), "packed bit value")
+        }
         Value::Temporal(value) => add_size(total, temporal_payload_size(value), "temporal value"),
         Value::Decimal(value) => {
             add_size(total, 8, "decimal value length")?;
@@ -579,6 +583,11 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
         Value::Bytes(value) => {
             write_tag(writer, 5)?;
             write_bytes(writer, value)
+        }
+        Value::BitString(value) => {
+            write_tag(writer, 24)?;
+            write_raw(writer, &value.bit_len().to_le_bytes(), "bit length")?;
+            write_bytes(writer, value.as_bytes())
         }
         Value::Temporal(value) => {
             write_tag(writer, 6)?;

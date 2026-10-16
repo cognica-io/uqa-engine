@@ -19,6 +19,7 @@ use super::{
     retention_error, Budgeted, BudgetedVec, JsonReadError, StorageReadControl, Value,
 };
 
+mod bit_string;
 mod decimal;
 mod structured;
 
@@ -112,6 +113,7 @@ fn payload(
             return Ok(Budgeted::new(value, memory));
         }
         "decimal" => return decimal::decode(content, control, depth),
+        "bit_string" => return bit_string::decode(content, control, depth, buffered),
         "bytes" => {
             let mut container = array(content, control, depth)?;
             let mut values = BudgetedVec::new(control.memory());

@@ -293,6 +293,8 @@ pub fn sql_column_type_to_fdw(column_type: &uqa_sql::ast::ColumnType) -> uqa_fdw
             uqa_fdw::ColumnType::Multirange(sql_range_subtype_to_fdw(*subtype))
         }
         uqa_sql::ast::ColumnType::Bytea => uqa_fdw::ColumnType::Bytes,
+        uqa_sql::ast::ColumnType::Bit(length) => uqa_fdw::ColumnType::Bit(*length),
+        uqa_sql::ast::ColumnType::VarBit(length) => uqa_fdw::ColumnType::VarBit(*length),
         uqa_sql::ast::ColumnType::InternalChar => uqa_fdw::ColumnType::InternalChar,
         uqa_sql::ast::ColumnType::Regproc => uqa_fdw::ColumnType::Regproc,
         uqa_sql::ast::ColumnType::Regprocedure => uqa_fdw::ColumnType::Regprocedure,

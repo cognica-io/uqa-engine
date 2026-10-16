@@ -10,6 +10,9 @@ use super::{out_of_range, ArrayValue, DecimalValue, Result, SQLError, Value};
 
 use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
 
+#[cfg(test)]
+mod tests;
+
 /// A value whose text is owned by the SQL catalog reached a context-free conversion. Catalog-aware callers render these carriers before delegating here.
 pub fn catalog_output_required(value: &uqa_core::EnumValue) -> SQLError {
     SQLError::Internal(format!(
@@ -60,6 +63,7 @@ pub fn value_to_string_with_control(
             )
         }
         Value::Bytes(values) => bytea_to_string_with_control(values, control)?,
+        Value::BitString(value) => super::bit_string::output_with_control(value, control)?,
     })
 }
 
@@ -157,7 +161,7 @@ fn append_array_elements(
             Value::List(values) => append_array_elements(text, values, control)?,
             Value::Array(array) => append_array(text, array, control)?,
             other => {
-                let value = value_to_string_with_control(other, control)?;
+                let value = container_field_to_string(other, control)?;
                 let mut quoted = value.is_empty() || value.eq_ignore_ascii_case("null");
                 for character in value.chars() {
                     control.check()?;
@@ -185,10 +189,7 @@ fn composite_value_to_string<'a>(
         if matches!(value, Value::Null) {
             continue;
         }
-        let value = match value {
-            Value::Bool(value) => control.copy_text(if *value { "t" } else { "f" })?,
-            other => value_to_string_with_control(other, control)?,
-        };
+        let value = container_field_to_string(value, control)?;
         let mut quoted = value.is_empty();
         for byte in value.bytes() {
             control.check()?;
@@ -199,6 +200,21 @@ fn composite_value_to_string<'a>(
     }
     text.push(')')?;
     Ok(text.finish()?)
+}
+
+/// Container fields use type output, preserving bpchar padding independently of scalar text coercion.
+fn container_field_to_string(
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    match value {
+        Value::Bool(value) => Ok(control.copy_text(if *value { "t" } else { "f" })?),
+        Value::FixedChar(value) => Ok(control.copy_text(value)?),
+        Value::Datum(value) => {
+            container_field_to_string(&*super::datums::read_with_control(value, control)?, control)
+        }
+        other => value_to_string_with_control(other, control),
+    }
 }
 
 fn append_escaped(

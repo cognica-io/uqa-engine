@@ -334,6 +334,7 @@ pub(crate) fn value_type_with_control(
             u32::try_from(count).ok().map(ColumnType::Character)
         }
         Value::Bytes(_) => Some(ColumnType::Bytea),
+        Value::BitString(_) => Some(ColumnType::Bit(None)),
         Value::Temporal(value) => Some(match value {
             uqa_core::TemporalValue::Date { .. } => ColumnType::Date,
             uqa_core::TemporalValue::Time { .. } => ColumnType::Time,

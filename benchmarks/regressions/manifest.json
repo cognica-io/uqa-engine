@@ -9200,6 +9200,488 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "composite_consumer_matrix_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
+      "capability": "Composite field equality across consumers",
+      "workload": "172 independent PostgreSQL 18.4 observations across twelve field families on memory, native SQLite, SQLite Key/Value and redb, including thirteen fresh-connection observations.",
+      "invariant": "Comparison laws, DISTINCT/groups/window peers/joins/set operations, indexed probes and uniqueness retain the same field equality and ordering before and after persistent reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "padded_container_output_keeps_memory_and_cancellation_limits",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/conversion/tests.rs",
+      "capability": "Bounded padded character output",
+      "workload": "Render a padded character field whose container output exceeds the existing memory allowance, then repeat with cancellation already requested.",
+      "invariant": "Padding is retained without bypassing the caller's memory or cancellation boundary; errors release all temporary reservations."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "bpchar_composite_output_and_consumers_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
+      "capability": "Padded character composite output and consumers",
+      "workload": "Replay the bpchar family of the independent PostgreSQL 18.4 consumer reference on all four providers, including scalar and nested container output and actual persistent reopening.",
+      "invariant": "Container output and unique-key detail retain trailing spaces while scalar text casts trim them; equality, hashing and indexed lookup keep their existing padding-insensitive classes."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_and_multirange_order_matches_postgresql_bound_semantics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/comparison/tests.rs",
+      "capability": "Range subtype ordering",
+      "workload": "1,264 independent PostgreSQL 18.4 comparisons across twelve built-in range and multirange families, under one shared memory allowance.",
+      "invariant": "Empty, unbounded, inclusive, numeric-scale, NaN and temporal bounds and multirange prefixes follow PostgreSQL order; all temporary reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_range_comparison_preserves_zero_copy_and_cancellation_boundaries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/comparison/tests.rs",
+      "capability": "Bounded admitted range comparison",
+      "workload": "Compare admitted integer ranges and multiranges with a zero-byte allowance, then with cancellation requested.",
+      "invariant": "Borrowed integer bounds require no allocation; cancellation is 57014 and leaves no retained memory."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_range_fields_preserve_postgresql_order_and_equality_in_nested_containers",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/comparison/tests.rs",
+      "capability": "Selected range field comparison",
+      "workload": "Replay the 1,264 independent PostgreSQL comparisons through named records, anonymous rows, arrays, nested records and ordinary ROW operators.",
+      "invariant": "Selected subtype bounds preserve equality and order while every temporary reservation is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_range_fields_keep_text_semantics_and_release_failed_parse_reservations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/comparison/tests.rs",
+      "capability": "Range comparison resource boundaries",
+      "workload": "Compare range fields with an exhausted allowance and cancellation, and compare identical spellings declared as ordinary text.",
+      "invariant": "Range normalization retains 53200/57014 and releases reservations; text semantics are unchanged."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_sql_hash_and_exact_keys_preserve_postgresql_equality_classes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/encoding/range_tests.rs",
+      "capability": "Range equality keys",
+      "workload": "Check the independent twelve-family PostgreSQL matrix through record and array SQL hash and exact-key paths.",
+      "invariant": "Exact key equality agrees with the PostgreSQL relation, and equal values have equal hashes regardless of numeric scale or canonical text spelling."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_key_normalization_respects_the_original_allowance_and_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/encoding/range_tests.rs",
+      "capability": "Bounded range key normalization",
+      "workload": "Normalize an 8,192-digit numeric range field with a 4 KiB allowance, then with cancellation requested.",
+      "invariant": "Admission and cancellation preserve SQLSTATE and release traversal, parsed bounds and output allocations."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "range_composite_consumers_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
+      "capability": "Range composite consumers",
+      "workload": "Replay 190 independent PostgreSQL observations across all twelve builtin range families on four providers, including thirteen observations after reopening.",
+      "invariant": "Records and arrays retain selected field equality across relational consumers, recursive UNION/CYCLE, cached/correlated membership, indexed FK actions, upsert/rollback and UNIQUE diagnostics."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_reservations_preserve_deferred_fields_and_existing_nonrange_addresses",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/encoding/range_tests.rs",
+      "capability": "Range unique reservation compatibility",
+      "workload": "Opaque physical and invalid vector fields, enum identities and scalar values alongside selected range fields.",
+      "invariant": "Selected range equivalence changes the current reservation while all predecessor addresses remain; unrelated fields are not eagerly read."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_distinct_preserves_equivalence_and_first_values_after_forced_spill",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/tests.rs",
+      "capability": "Range DISTINCT spill",
+      "workload": "Equal decimal bounds in row and array range/multirange keys with 1-byte and 64 KiB budgets.",
+      "invariant": "SQL-equivalent keys collapse, the first original value is retained, actual spill releases memory keys and temporary state."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_join_preserves_direct_encoded_and_spilled_multiplicities",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/tests/range_keys.rs",
+      "capability": "Range join strategies",
+      "workload": "Record and array range/multirange keys through both smaller build sides and direct, computed and forced-spill keys.",
+      "invariant": "Actual strategy selection preserves the full Cartesian multiplicity of SQL-equal keys."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "spilled_range_full_join_retains_unmatched_and_null_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/tests/range_keys.rs",
+      "capability": "Range outer join spill",
+      "workload": "Duplicate equivalent ranges, unmatched keys and NULL rows under a one-byte allowance.",
+      "invariant": "Hash, input and output state spill while matching multiplicities and all unmatched rows remain intact."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_exact_sql_set_preserves_equivalence_after_spill_without_changing_raw_keys",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/tests.rs",
+      "capability": "Range fixpoint SQL keys",
+      "workload": "Positional and physical range-array keys with one-byte and 64 KiB budgets.",
+      "invariant": "SQL-equivalent spellings share exact seen state across memory and disk; raw Core keys keep their existing representation domain."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_membership_preserves_selected_equality_in_cached_and_streamed_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/subqueries/tests.rs",
+      "capability": "Range subquery membership",
+      "workload": "Cached, promoted and streamed range-array membership with equivalent values, absent values and NULLs.",
+      "invariant": "SQL equality and three-valued NULL behavior agree; a cached set is reused without new query contexts."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "range_unique_reservations_follow_postgresql_across_sessions",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
+      "capability": "Concurrent range UNIQUE reservations",
+      "workload": "Replay fourteen two-session PostgreSQL 18.4 observations on SQLite, SQLite Key/Value and redb.",
+      "invariant": "Equal numeric range fields wait on the same reservation with 55P03; unrelated ranges remain writable, rollback releases the reservation and committed duplicates report 23505."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bit_string_order_and_equality_match_postgresql_without_unpacking",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/bit_string/tests.rs",
+      "capability": "Packed bit-string comparison",
+      "workload": "144 independent PostgreSQL comparisons plus packed-byte traversal boundaries with zero scratch allowance.",
+      "invariant": "Bit order agrees with PostgreSQL, equality agrees with order/hash and comparison does not allocate."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bit_string_rejects_noncanonical_lengths_and_padding_at_every_constructor",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/bit_string/tests.rs",
+      "capability": "Packed bit-string canonical form",
+      "workload": "Direct construction and serialization of valid empty/partial-byte values and invalid lengths/padding.",
+      "invariant": "Only the unique canonical representation of a logical bit sequence is admitted."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bit_string_copy_and_adoption_preserve_allowance_and_cancellation_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/bit_string/tests.rs",
+      "capability": "Bounded packed bit-string ownership",
+      "workload": "Packed copies at exact and insufficient byte allowances, malformed admitted input and either cancellation owner.",
+      "invariant": "Copies reserve packed bytes before allocation; errors release reservations and cancellation remains owned by both callers."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_input_lengths_casts_and_integers_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/bit_string/tests.rs",
+      "capability": "Bit-string scalar input and conversion",
+      "workload": "466 independent PostgreSQL 18.4 scalar observations for binary/hex input, assignment and explicit coercion, modifiers and int4/int8 conversions.",
+      "invariant": "Values, SQLSTATE, messages and validation order match independently captured PostgreSQL; all temporary reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_input_and_length_changes_keep_packed_allowances",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/bit_string/tests.rs",
+      "capability": "Packed bit-string conversion allowances",
+      "workload": "Parse 32,776 bits with 4,097 admitted bytes, exercise exact and insufficient allowances, truncate and pad across byte boundaries, and reject oversized integer expansion.",
+      "invariant": "Packed input and conversions admit bytes before allocation, preserve canonical tail padding and the borrowed source, and keep output under its original allowance."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_failures_release_partial_input_and_preserve_cancellation_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/bit_string/tests.rs",
+      "capability": "Bit-string cancellation and error cleanup",
+      "workload": "Reject an invalid final digit after more than 4 KiB of packed production, then invoke input, conversion, integer expansion and output under each cancelled owner.",
+      "invariant": "Failure releases partial buffers; original and invoking cancellation remain 57014 without retained reservations."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bit_string_tag_roundtrips_nested_values_without_losing_length_or_payload_ownership",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/value/tagged/bit_string.rs",
+      "capability": "Packed bit retention",
+      "workload": "Nested controlled decode and copy plus zero-allocation comparison.",
+      "invariant": "Logical length, canonical bytes and original reservations survive every owned copy."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bit_string_tags_reject_noncanonical_data_in_controlled_and_ordinary_decoding",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/value/tagged/bit_string.rs",
+      "capability": "Packed bit validation",
+      "workload": "Malformed lengths, hex, padding and missing tagged fields.",
+      "invariant": "Both decoders reject malformed representations and release partial ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_assignment_and_cast_dispatch_keep_the_independent_scalar_contract",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/bit_string/tests/integration.rs",
+      "capability": "Typed bit conversion dispatch",
+      "workload": "420 independent PostgreSQL scalar observations through assignment and cast entry points.",
+      "invariant": "Selected input, modifier, integer and diagnostic semantics reach the packed kernels unchanged."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_keyword_and_catalog_declarations_preserve_type_identity_and_modifiers",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/bit_string/tests/integration.rs",
+      "capability": "Bit declaration identity",
+      "workload": "Keyword, quoted/catalog names, modifiers and array identities.",
+      "invariant": "BIT keyword length one remains distinct from unconstrained catalog bit; OIDs and modifiers survive round trips."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_datums_keep_logical_length_owned_bounds_and_read_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/tests/bit_string.rs",
+      "capability": "Physical bit retention",
+      "workload": "Both physical OIDs, exact two-byte allowance, short allowance and truncated/malformed owners.",
+      "invariant": "Reads retain only packed bytes, reject out-of-bounds values with XX001 and release failed allocations."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bit_string_exact_keys_preserve_lengths_and_agree_with_physical_value_hashes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/encoding/tests.rs",
+      "capability": "Bit equality keys",
+      "workload": "Empty and equal-byte/different-length carriers, physical Datums and nested containers.",
+      "invariant": "Exact keys separate distinct lengths and other carriers; logical and physical equals hash identically."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bit_string_lengths_and_nested_values_survive_actual_binary_spill",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/tests/datums.rs",
+      "capability": "Bit spill retention",
+      "workload": "Zero-budget actual spill of partial bytes, distinct lengths and nested values, plus truncated and malformed records.",
+      "invariant": "Binary restoration preserves complete representation and rejects corrupt padding."
+    },
+    {
+      "package": "uqa-client",
+      "kind": "lib",
+      "test": "bit_string_parameters_do_not_silently_change_type_on_the_existing_wire_protocol",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-client/src/sql_parameter.rs",
+      "capability": "HTTP bit parameter boundary",
+      "workload": "Direct and nested bit carriers at the existing parameter encoder.",
+      "invariant": "Unsupported typed carriers fail before a request; explicit text input preserves every bit digit."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "bit_string_scalar_and_tuple_probes_seek_without_conflating_zero_padded_lengths",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/btree_index/probe/tests.rs",
+      "capability": "Native bit index seeks",
+      "workload": "Scalar and tuple lookups over 64 and 2048 unrelated entries, equal packed bytes with different logical lengths and absent targets.",
+      "invariant": "Exact and missing probes retain distinct lengths and consume fewer than 400 SQLite instructions independent of collection size."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "bit_string_values_and_retained_consumers_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
+      "capability": "Bit statement and provider retention",
+      "workload": "31 independently captured PostgreSQL statements including three observations after actual persistent reopening on four providers.",
+      "invariant": "Types, modifiers, values, diagnostics, arrays/records, index uniqueness and rollback remain unchanged after provider serialization."
+    },
+    {
+      "package": "uqa-pg-query",
+      "kind": "lib",
+      "test": "message_oneof_matches_prost_wire_state_errors_and_consumption",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-query/src/protobuf_oneof/tests.rs",
+      "capability": "PostgreSQL protobuf decoding",
+      "workload": "Unboxed and boxed variants, same-tag merges, variant switches, every byte prefix, unknown fields and malformed message payloads.",
+      "invariant": "Bounded message construction preserves the independently derived Prost wire bytes, encoded lengths, diagnostics, retained partial-failure state and consumed input."
+    },
+    {
+      "package": "uqa-pg-query",
+      "kind": "lib",
+      "test": "message_oneof_preserves_prost_recursion_limit",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-query/src/protobuf_oneof/tests.rs",
+      "capability": "PostgreSQL protobuf decoding",
+      "workload": "A 120-level nested message decoded into absent, same-variant and different-variant fields.",
+      "invariant": "Isolating variant construction retains the original Prost recursion bound and the same failure, partial state and remaining bytes."
+    },
+    {
+      "package": "uqa-pg-query",
+      "kind": "lib",
+      "test": "node_postprocessing_preserves_generated_tags_types_and_other_messages",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-query/src/protobuf_oneof/tests.rs",
+      "capability": "PostgreSQL protobuf decoding",
+      "workload": "The complete generated PostgreSQL Node schema and malformed/already-transformed generator output.",
+      "invariant": "Deterministic frame isolation preserves every generated tag, payload type and unrelated message and rejects an unexpected generator shape."
     }
   ]
 }

@@ -29,6 +29,8 @@ const TYPES: &[(ColumnType, &str)] = &[
     (ColumnType::AclItem, "aclitem"),
     (ColumnType::Bpchar, "bpchar"),
     (ColumnType::Varchar(None), "varchar"),
+    (ColumnType::Bit(None), "bit"),
+    (ColumnType::VarBit(None), "varbit"),
     (ColumnType::Date, "date"),
     (ColumnType::Time, "time"),
     (ColumnType::TimeTz, "timetz"),

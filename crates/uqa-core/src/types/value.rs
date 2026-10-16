@@ -7,9 +7,9 @@
 //! Dynamic document values, serialization, and cross-numeric ordering.
 
 use super::{
-    jsonb::compare_jsonb_text, ArrayValue, BTreeMap, DatumValue, DecimalValue, Deserialize,
-    Deserializer, EnumValue, LegacyVectorValue, RecordValue, RowValue, Serialize, Serializer,
-    TemporalValue,
+    jsonb::compare_jsonb_text, ArrayValue, BTreeMap, BitStringValue, DatumValue, DecimalValue,
+    Deserialize, Deserializer, EnumValue, LegacyVectorValue, RecordValue, RowValue, Serialize,
+    Serializer, TemporalValue,
 };
 
 pub(super) mod comparison_control;
@@ -68,6 +68,8 @@ pub enum Value {
     Enum(EnumValue),
     /// A retained SQL field that has not been physically interpreted. SQL must read it before value-based operations; NULL tests and type inspection do not read its bytes.
     Datum(DatumValue),
+    /// A finite packed bit sequence. SQL's declaration descriptor distinguishes fixed and varying length constraints.
+    BitString(BitStringValue),
 }
 
 impl Value {
@@ -98,6 +100,14 @@ struct TaggedUnit {
 struct TaggedBytes<'a> {
     #[serde(rename = "$uqa_type")]
     kind: &'static str,
+    hex: &'a str,
+}
+
+#[derive(Serialize)]
+struct TaggedBitString<'a> {
+    #[serde(rename = "$uqa_type")]
+    kind: &'static str,
+    bit_len: u32,
     hex: &'a str,
 }
 
@@ -150,6 +160,12 @@ impl Serialize for Value {
             Self::Bytes(value) => TaggedBytes {
                 kind: "bytes",
                 hex: &hex_text::<S::Error>(value)?,
+            }
+            .serialize(serializer),
+            Self::BitString(value) => TaggedBitString {
+                kind: "bit_string",
+                bit_len: value.bit_len(),
+                hex: &hex_text::<S::Error>(value.as_bytes())?,
             }
             .serialize(serializer),
             Self::Temporal(value) => value.serialize(serializer),
@@ -470,6 +486,7 @@ impl Ord for Value {
                 fixed_char_text(a).cmp(fixed_char_text(b))
             }
             (Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
+            (Value::BitString(a), Value::BitString(b)) => a.cmp(b),
             (Value::Temporal(a), Value::Temporal(b)) => a.cmp(b),
             (Value::Array(a), Value::Array(b)) => compare_postgres_arrays(a, b),
             (Value::LegacyVector(a), Value::LegacyVector(b)) => a.cmp(b),
@@ -503,6 +520,7 @@ fn discriminant(v: &Value) -> u8 {
         Value::LegacyVector(_) => 14,
         Value::Enum(_) => 15,
         Value::Datum(_) => 16,
+        Value::BitString(_) => 17,
     }
 }
 

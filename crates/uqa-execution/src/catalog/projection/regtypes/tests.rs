@@ -200,6 +200,8 @@ fn builtin_output_distinguishes_keyword_aliases_from_catalog_identifiers() {
         (25, 11, "text"),
         (23, 11, "int4"),
         (1042, 11, "bpchar"),
+        (1560, 11, "bit"),
+        (1562, 11, "varbit"),
         (50_001, 20_000, "text"),
         (50_002, 20_000, "int4"),
         (50_003, 20_000, "bpchar"),
@@ -223,6 +225,8 @@ fn builtin_output_distinguishes_keyword_aliases_from_catalog_identifiers() {
         (25, "pg_catalog.text"),
         (23, "integer"),
         (1042, "character"),
+        (1560, "bit"),
+        (1562, "bit varying"),
     ] {
         assert_eq!(
             format_regtype(&visibility, &catalog, oid).as_deref(),
@@ -236,6 +240,12 @@ fn builtin_output_distinguishes_keyword_aliases_from_catalog_identifiers() {
     ] {
         assert_eq!(
             format_type::format_catalog_type(&catalog, &visibility, 1042, modifier).unwrap(),
+            name
+        );
+    }
+    for (modifier, name) in [(Some(-1), "\"bit\""), (None, "bit"), (Some(3), "bit(3)")] {
+        assert_eq!(
+            format_type::format_catalog_type(&catalog, &visibility, 1560, modifier).unwrap(),
             name
         );
     }

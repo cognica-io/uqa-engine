@@ -1,0 +1,705 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "bpchar_declarations",
+      "sql": "CREATE TEMP TABLE cm_decl (catalog_name bpchar, quoted_name \"bpchar\", qualified pg_catalog.bpchar, keyword character, keyword_n char(4)); SELECT attname,atttypid::integer,atttypmod FROM pg_attribute WHERE attrelid='cm_decl'::regclass AND attnum>0 ORDER BY attnum; DROP TABLE cm_decl"
+    },
+    {
+      "id": "float8_setup",
+      "sql": "CREATE TYPE cm_float8_row AS (value double precision); CREATE TABLE cm_float8 (id integer PRIMARY KEY, v cm_float8_row); INSERT INTO cm_float8 VALUES (1,ROW('-0'::float8)),(2,ROW('0'::float8)),(3,ROW('NaN'::float8)),(4,ROW('NaN'::float8)),(5,ROW('infinity'::float8)),(6,ROW(1::float8)),(7,ROW(NULL)),(8,NULL)"
+    },
+    {
+      "id": "float8_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_float8 a CROSS JOIN cm_float8 b"
+    },
+    {
+      "id": "float8_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_float8 a CROSS JOIN cm_float8 b CROSS JOIN cm_float8 c"
+    },
+    {
+      "id": "float8_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_float8) q"
+    },
+    {
+      "id": "float8_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_float8 GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "float8_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_float8 ORDER BY v,id"
+    },
+    {
+      "id": "float8_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_float8 a JOIN cm_float8 b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "float8_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_float8 INTERSECT SELECT v FROM cm_float8) q"
+    },
+    {
+      "id": "float8_lookup",
+      "sql": "SELECT id FROM cm_float8 WHERE v=ROW('-0'::float8)::cm_float8_row ORDER BY id"
+    },
+    {
+      "id": "float8_index",
+      "sql": "CREATE INDEX cm_float8_v_idx ON cm_float8(v)"
+    },
+    {
+      "id": "float8_indexed_lookup",
+      "sql": "SELECT id FROM cm_float8 WHERE v=ROW('-0'::float8)::cm_float8_row ORDER BY id"
+    },
+    {
+      "id": "float8_unique_setup",
+      "sql": "CREATE TABLE cm_float8_unique(v cm_float8_row UNIQUE); INSERT INTO cm_float8_unique SELECT v FROM cm_float8 WHERE id=1"
+    },
+    {
+      "id": "float8_unique_duplicate",
+      "sql": "INSERT INTO cm_float8_unique SELECT v FROM cm_float8 WHERE id=2"
+    },
+    {
+      "id": "numeric_setup",
+      "sql": "CREATE TYPE cm_numeric_row AS (value numeric); CREATE TABLE cm_numeric (id integer PRIMARY KEY, v cm_numeric_row); INSERT INTO cm_numeric VALUES (1,ROW(1.0::numeric)),(2,ROW(1.000::numeric)),(3,ROW('NaN'::numeric)),(4,ROW('NaN'::numeric)),(5,ROW('infinity'::numeric)),(6,ROW(2::numeric)),(7,ROW(NULL)),(8,NULL)"
+    },
+    {
+      "id": "numeric_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_numeric a CROSS JOIN cm_numeric b"
+    },
+    {
+      "id": "numeric_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_numeric a CROSS JOIN cm_numeric b CROSS JOIN cm_numeric c"
+    },
+    {
+      "id": "numeric_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_numeric) q"
+    },
+    {
+      "id": "numeric_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_numeric GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "numeric_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_numeric ORDER BY v,id"
+    },
+    {
+      "id": "numeric_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_numeric a JOIN cm_numeric b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "numeric_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_numeric INTERSECT SELECT v FROM cm_numeric) q"
+    },
+    {
+      "id": "numeric_lookup",
+      "sql": "SELECT id FROM cm_numeric WHERE v=ROW(1.0::numeric)::cm_numeric_row ORDER BY id"
+    },
+    {
+      "id": "numeric_index",
+      "sql": "CREATE INDEX cm_numeric_v_idx ON cm_numeric(v)"
+    },
+    {
+      "id": "numeric_indexed_lookup",
+      "sql": "SELECT id FROM cm_numeric WHERE v=ROW(1.0::numeric)::cm_numeric_row ORDER BY id"
+    },
+    {
+      "id": "numeric_unique_setup",
+      "sql": "CREATE TABLE cm_numeric_unique(v cm_numeric_row UNIQUE); INSERT INTO cm_numeric_unique SELECT v FROM cm_numeric WHERE id=1"
+    },
+    {
+      "id": "numeric_unique_duplicate",
+      "sql": "INSERT INTO cm_numeric_unique SELECT v FROM cm_numeric WHERE id=2"
+    },
+    {
+      "id": "bpchar_setup",
+      "sql": "CREATE TYPE cm_bpchar_row AS (value bpchar); CREATE TABLE cm_bpchar (id integer PRIMARY KEY, v cm_bpchar_row); INSERT INTO cm_bpchar VALUES (1,ROW('a'::bpchar)),(2,ROW('a   '::bpchar)),(3,ROW('b'::bpchar)),(4,ROW(''::bpchar)),(5,ROW('   '::bpchar)),(6,ROW(NULL)),(7,NULL)"
+    },
+    {
+      "id": "bpchar_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_bpchar a CROSS JOIN cm_bpchar b"
+    },
+    {
+      "id": "bpchar_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_bpchar a CROSS JOIN cm_bpchar b CROSS JOIN cm_bpchar c"
+    },
+    {
+      "id": "bpchar_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_bpchar) q"
+    },
+    {
+      "id": "bpchar_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_bpchar GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "bpchar_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_bpchar ORDER BY v,id"
+    },
+    {
+      "id": "bpchar_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_bpchar a JOIN cm_bpchar b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "bpchar_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_bpchar INTERSECT SELECT v FROM cm_bpchar) q"
+    },
+    {
+      "id": "bpchar_lookup",
+      "sql": "SELECT id FROM cm_bpchar WHERE v=ROW('a'::bpchar)::cm_bpchar_row ORDER BY id"
+    },
+    {
+      "id": "bpchar_index",
+      "sql": "CREATE INDEX cm_bpchar_v_idx ON cm_bpchar(v)"
+    },
+    {
+      "id": "bpchar_indexed_lookup",
+      "sql": "SELECT id FROM cm_bpchar WHERE v=ROW('a'::bpchar)::cm_bpchar_row ORDER BY id"
+    },
+    {
+      "id": "bpchar_unique_setup",
+      "sql": "CREATE TABLE cm_bpchar_unique(v cm_bpchar_row UNIQUE); INSERT INTO cm_bpchar_unique SELECT v FROM cm_bpchar WHERE id=1"
+    },
+    {
+      "id": "bpchar_unique_duplicate",
+      "sql": "INSERT INTO cm_bpchar_unique SELECT v FROM cm_bpchar WHERE id=2"
+    },
+    {
+      "id": "timetz_setup",
+      "sql": "CREATE TYPE cm_timetz_row AS (value timetz); CREATE TABLE cm_timetz (id integer PRIMARY KEY, v cm_timetz_row); INSERT INTO cm_timetz VALUES (1,ROW('10:00+01'::timetz)),(2,ROW('09:00+00'::timetz)),(3,ROW('09:00+00'::timetz)),(4,ROW('10:00+00'::timetz)),(5,ROW('24:00+00'::timetz)),(6,ROW(NULL)),(7,NULL)"
+    },
+    {
+      "id": "timetz_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_timetz a CROSS JOIN cm_timetz b"
+    },
+    {
+      "id": "timetz_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_timetz a CROSS JOIN cm_timetz b CROSS JOIN cm_timetz c"
+    },
+    {
+      "id": "timetz_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_timetz) q"
+    },
+    {
+      "id": "timetz_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_timetz GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "timetz_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_timetz ORDER BY v,id"
+    },
+    {
+      "id": "timetz_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_timetz a JOIN cm_timetz b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "timetz_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_timetz INTERSECT SELECT v FROM cm_timetz) q"
+    },
+    {
+      "id": "timetz_lookup",
+      "sql": "SELECT id FROM cm_timetz WHERE v=ROW('10:00+01'::timetz)::cm_timetz_row ORDER BY id"
+    },
+    {
+      "id": "timetz_index",
+      "sql": "CREATE INDEX cm_timetz_v_idx ON cm_timetz(v)"
+    },
+    {
+      "id": "timetz_indexed_lookup",
+      "sql": "SELECT id FROM cm_timetz WHERE v=ROW('10:00+01'::timetz)::cm_timetz_row ORDER BY id"
+    },
+    {
+      "id": "timetz_unique_setup",
+      "sql": "CREATE TABLE cm_timetz_unique(v cm_timetz_row UNIQUE); INSERT INTO cm_timetz_unique SELECT v FROM cm_timetz WHERE id=1"
+    },
+    {
+      "id": "timetz_unique_duplicate",
+      "sql": "INSERT INTO cm_timetz_unique SELECT v FROM cm_timetz WHERE id=2"
+    },
+    {
+      "id": "interval_setup",
+      "sql": "CREATE TYPE cm_interval_row AS (value interval); CREATE TABLE cm_interval (id integer PRIMARY KEY, v cm_interval_row); INSERT INTO cm_interval VALUES (1,ROW('1 mon'::interval)),(2,ROW('30 days'::interval)),(3,ROW('720 hours'::interval)),(4,ROW('1 day'::interval)),(5,ROW('24 hours'::interval)),(6,ROW('infinity'::interval)),(7,ROW(NULL)),(8,NULL)"
+    },
+    {
+      "id": "interval_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_interval a CROSS JOIN cm_interval b"
+    },
+    {
+      "id": "interval_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_interval a CROSS JOIN cm_interval b CROSS JOIN cm_interval c"
+    },
+    {
+      "id": "interval_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_interval) q"
+    },
+    {
+      "id": "interval_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_interval GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "interval_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_interval ORDER BY v,id"
+    },
+    {
+      "id": "interval_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_interval a JOIN cm_interval b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "interval_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_interval INTERSECT SELECT v FROM cm_interval) q"
+    },
+    {
+      "id": "interval_lookup",
+      "sql": "SELECT id FROM cm_interval WHERE v=ROW('1 mon'::interval)::cm_interval_row ORDER BY id"
+    },
+    {
+      "id": "interval_index",
+      "sql": "CREATE INDEX cm_interval_v_idx ON cm_interval(v)"
+    },
+    {
+      "id": "interval_indexed_lookup",
+      "sql": "SELECT id FROM cm_interval WHERE v=ROW('1 mon'::interval)::cm_interval_row ORDER BY id"
+    },
+    {
+      "id": "interval_unique_setup",
+      "sql": "CREATE TABLE cm_interval_unique(v cm_interval_row UNIQUE); INSERT INTO cm_interval_unique SELECT v FROM cm_interval WHERE id=1"
+    },
+    {
+      "id": "interval_unique_duplicate",
+      "sql": "INSERT INTO cm_interval_unique SELECT v FROM cm_interval WHERE id=2"
+    },
+    {
+      "id": "jsonb_setup",
+      "sql": "CREATE TYPE cm_jsonb_row AS (value jsonb); CREATE TABLE cm_jsonb (id integer PRIMARY KEY, v cm_jsonb_row); INSERT INTO cm_jsonb VALUES (1,ROW('{\"a\":1,\"b\":2}'::jsonb)),(2,ROW('{\"b\":2,\"a\":1.0}'::jsonb)),(3,ROW('null'::jsonb)),(4,ROW('null'::jsonb)),(5,ROW('[]'::jsonb)),(6,ROW('{}'::jsonb)),(7,ROW(NULL)),(8,NULL)"
+    },
+    {
+      "id": "jsonb_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_jsonb a CROSS JOIN cm_jsonb b"
+    },
+    {
+      "id": "jsonb_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_jsonb a CROSS JOIN cm_jsonb b CROSS JOIN cm_jsonb c"
+    },
+    {
+      "id": "jsonb_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_jsonb) q"
+    },
+    {
+      "id": "jsonb_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_jsonb GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "jsonb_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_jsonb ORDER BY v,id"
+    },
+    {
+      "id": "jsonb_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_jsonb a JOIN cm_jsonb b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "jsonb_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_jsonb INTERSECT SELECT v FROM cm_jsonb) q"
+    },
+    {
+      "id": "jsonb_lookup",
+      "sql": "SELECT id FROM cm_jsonb WHERE v=ROW('{\"a\":1,\"b\":2}'::jsonb)::cm_jsonb_row ORDER BY id"
+    },
+    {
+      "id": "jsonb_index",
+      "sql": "CREATE INDEX cm_jsonb_v_idx ON cm_jsonb(v)"
+    },
+    {
+      "id": "jsonb_indexed_lookup",
+      "sql": "SELECT id FROM cm_jsonb WHERE v=ROW('{\"a\":1,\"b\":2}'::jsonb)::cm_jsonb_row ORDER BY id"
+    },
+    {
+      "id": "jsonb_unique_setup",
+      "sql": "CREATE TABLE cm_jsonb_unique(v cm_jsonb_row UNIQUE); INSERT INTO cm_jsonb_unique SELECT v FROM cm_jsonb WHERE id=1"
+    },
+    {
+      "id": "jsonb_unique_duplicate",
+      "sql": "INSERT INTO cm_jsonb_unique SELECT v FROM cm_jsonb WHERE id=2"
+    },
+    {
+      "id": "bytea_setup",
+      "sql": "CREATE TYPE cm_bytea_row AS (value bytea); CREATE TABLE cm_bytea (id integer PRIMARY KEY, v cm_bytea_row); INSERT INTO cm_bytea VALUES (1,ROW('\\x0001'::bytea)),(2,ROW('\\x0001'::bytea)),(3,ROW('\\x00'::bytea)),(4,ROW('\\xff'::bytea)),(5,ROW('\\x'::bytea)),(6,ROW(NULL)),(7,NULL)"
+    },
+    {
+      "id": "bytea_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_bytea a CROSS JOIN cm_bytea b"
+    },
+    {
+      "id": "bytea_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_bytea a CROSS JOIN cm_bytea b CROSS JOIN cm_bytea c"
+    },
+    {
+      "id": "bytea_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_bytea) q"
+    },
+    {
+      "id": "bytea_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_bytea GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "bytea_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_bytea ORDER BY v,id"
+    },
+    {
+      "id": "bytea_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_bytea a JOIN cm_bytea b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "bytea_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_bytea INTERSECT SELECT v FROM cm_bytea) q"
+    },
+    {
+      "id": "bytea_lookup",
+      "sql": "SELECT id FROM cm_bytea WHERE v=ROW('\\x0001'::bytea)::cm_bytea_row ORDER BY id"
+    },
+    {
+      "id": "bytea_index",
+      "sql": "CREATE INDEX cm_bytea_v_idx ON cm_bytea(v)"
+    },
+    {
+      "id": "bytea_indexed_lookup",
+      "sql": "SELECT id FROM cm_bytea WHERE v=ROW('\\x0001'::bytea)::cm_bytea_row ORDER BY id"
+    },
+    {
+      "id": "bytea_unique_setup",
+      "sql": "CREATE TABLE cm_bytea_unique(v cm_bytea_row UNIQUE); INSERT INTO cm_bytea_unique SELECT v FROM cm_bytea WHERE id=1"
+    },
+    {
+      "id": "bytea_unique_duplicate",
+      "sql": "INSERT INTO cm_bytea_unique SELECT v FROM cm_bytea WHERE id=2"
+    },
+    {
+      "id": "bits_setup",
+      "sql": "CREATE TYPE cm_bits_row AS (value varbit); CREATE TABLE cm_bits (id integer PRIMARY KEY, v cm_bits_row); INSERT INTO cm_bits VALUES (1,ROW(B'1'::varbit)),(2,ROW(B'1'::varbit)),(3,ROW(B'10'::varbit)),(4,ROW(B'0'::varbit)),(5,ROW(B''::varbit)),(6,ROW(NULL)),(7,NULL)"
+    },
+    {
+      "id": "bits_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_bits a CROSS JOIN cm_bits b"
+    },
+    {
+      "id": "bits_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_bits a CROSS JOIN cm_bits b CROSS JOIN cm_bits c"
+    },
+    {
+      "id": "bits_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_bits) q"
+    },
+    {
+      "id": "bits_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_bits GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "bits_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_bits ORDER BY v,id"
+    },
+    {
+      "id": "bits_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_bits a JOIN cm_bits b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "bits_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_bits INTERSECT SELECT v FROM cm_bits) q"
+    },
+    {
+      "id": "bits_lookup",
+      "sql": "SELECT id FROM cm_bits WHERE v=ROW(B'1'::varbit)::cm_bits_row ORDER BY id"
+    },
+    {
+      "id": "bits_index",
+      "sql": "CREATE INDEX cm_bits_v_idx ON cm_bits(v)"
+    },
+    {
+      "id": "bits_indexed_lookup",
+      "sql": "SELECT id FROM cm_bits WHERE v=ROW(B'1'::varbit)::cm_bits_row ORDER BY id"
+    },
+    {
+      "id": "bits_unique_setup",
+      "sql": "CREATE TABLE cm_bits_unique(v cm_bits_row UNIQUE); INSERT INTO cm_bits_unique SELECT v FROM cm_bits WHERE id=1"
+    },
+    {
+      "id": "bits_unique_duplicate",
+      "sql": "INSERT INTO cm_bits_unique SELECT v FROM cm_bits WHERE id=2"
+    },
+    {
+      "id": "array_setup",
+      "sql": "CREATE TYPE cm_array_row AS (value integer[]); CREATE TABLE cm_array (id integer PRIMARY KEY, v cm_array_row); INSERT INTO cm_array VALUES (1,ROW(ARRAY[1,NULL])),(2,ROW(ARRAY[1,NULL])),(3,ROW('[0:1]={1,NULL}'::integer[])),(4,ROW(ARRAY[1,2])),(5,ROW(ARRAY[]::integer[])),(6,ROW(NULL)),(7,NULL)"
+    },
+    {
+      "id": "array_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_array a CROSS JOIN cm_array b"
+    },
+    {
+      "id": "array_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_array a CROSS JOIN cm_array b CROSS JOIN cm_array c"
+    },
+    {
+      "id": "array_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_array) q"
+    },
+    {
+      "id": "array_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_array GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "array_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_array ORDER BY v,id"
+    },
+    {
+      "id": "array_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_array a JOIN cm_array b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "array_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_array INTERSECT SELECT v FROM cm_array) q"
+    },
+    {
+      "id": "array_lookup",
+      "sql": "SELECT id FROM cm_array WHERE v=ROW(ARRAY[1,NULL])::cm_array_row ORDER BY id"
+    },
+    {
+      "id": "array_index",
+      "sql": "CREATE INDEX cm_array_v_idx ON cm_array(v)"
+    },
+    {
+      "id": "array_indexed_lookup",
+      "sql": "SELECT id FROM cm_array WHERE v=ROW(ARRAY[1,NULL])::cm_array_row ORDER BY id"
+    },
+    {
+      "id": "array_unique_setup",
+      "sql": "CREATE TABLE cm_array_unique(v cm_array_row UNIQUE); INSERT INTO cm_array_unique SELECT v FROM cm_array WHERE id=1"
+    },
+    {
+      "id": "array_unique_duplicate",
+      "sql": "INSERT INTO cm_array_unique SELECT v FROM cm_array WHERE id=2"
+    },
+    {
+      "id": "range_setup",
+      "sql": "CREATE TYPE cm_range_row AS (value int4range); CREATE TABLE cm_range (id integer PRIMARY KEY, v cm_range_row); INSERT INTO cm_range VALUES (1,ROW('[1,3)'::int4range)),(2,ROW('(0,2]'::int4range)),(3,ROW('empty'::int4range)),(4,ROW('empty'::int4range)),(5,ROW('[3,5)'::int4range)),(6,ROW(NULL)),(7,NULL)"
+    },
+    {
+      "id": "range_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_range a CROSS JOIN cm_range b"
+    },
+    {
+      "id": "range_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_range a CROSS JOIN cm_range b CROSS JOIN cm_range c"
+    },
+    {
+      "id": "range_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_range) q"
+    },
+    {
+      "id": "range_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_range GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "range_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_range ORDER BY v,id"
+    },
+    {
+      "id": "range_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_range a JOIN cm_range b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "range_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_range INTERSECT SELECT v FROM cm_range) q"
+    },
+    {
+      "id": "range_lookup",
+      "sql": "SELECT id FROM cm_range WHERE v=ROW('[1,3)'::int4range)::cm_range_row ORDER BY id"
+    },
+    {
+      "id": "range_index",
+      "sql": "CREATE INDEX cm_range_v_idx ON cm_range(v)"
+    },
+    {
+      "id": "range_indexed_lookup",
+      "sql": "SELECT id FROM cm_range WHERE v=ROW('[1,3)'::int4range)::cm_range_row ORDER BY id"
+    },
+    {
+      "id": "range_unique_setup",
+      "sql": "CREATE TABLE cm_range_unique(v cm_range_row UNIQUE); INSERT INTO cm_range_unique SELECT v FROM cm_range WHERE id=1"
+    },
+    {
+      "id": "range_unique_duplicate",
+      "sql": "INSERT INTO cm_range_unique SELECT v FROM cm_range WHERE id=2"
+    },
+    {
+      "id": "multirange_setup",
+      "sql": "CREATE TYPE cm_multirange_row AS (value int4multirange); CREATE TABLE cm_multirange (id integer PRIMARY KEY, v cm_multirange_row); INSERT INTO cm_multirange VALUES (1,ROW('{[1,3),[3,5)}'::int4multirange)),(2,ROW('{[1,5)}'::int4multirange)),(3,ROW('{}'::int4multirange)),(4,ROW('{}'::int4multirange)),(5,ROW('{[8,9)}'::int4multirange)),(6,ROW(NULL)),(7,NULL)"
+    },
+    {
+      "id": "multirange_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_multirange a CROSS JOIN cm_multirange b"
+    },
+    {
+      "id": "multirange_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_multirange a CROSS JOIN cm_multirange b CROSS JOIN cm_multirange c"
+    },
+    {
+      "id": "multirange_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_multirange) q"
+    },
+    {
+      "id": "multirange_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_multirange GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "multirange_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_multirange ORDER BY v,id"
+    },
+    {
+      "id": "multirange_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_multirange a JOIN cm_multirange b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "multirange_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_multirange INTERSECT SELECT v FROM cm_multirange) q"
+    },
+    {
+      "id": "multirange_lookup",
+      "sql": "SELECT id FROM cm_multirange WHERE v=ROW('{[1,3),[3,5)}'::int4multirange)::cm_multirange_row ORDER BY id"
+    },
+    {
+      "id": "multirange_index",
+      "sql": "CREATE INDEX cm_multirange_v_idx ON cm_multirange(v)"
+    },
+    {
+      "id": "multirange_indexed_lookup",
+      "sql": "SELECT id FROM cm_multirange WHERE v=ROW('{[1,3),[3,5)}'::int4multirange)::cm_multirange_row ORDER BY id"
+    },
+    {
+      "id": "multirange_unique_setup",
+      "sql": "CREATE TABLE cm_multirange_unique(v cm_multirange_row UNIQUE); INSERT INTO cm_multirange_unique SELECT v FROM cm_multirange WHERE id=1"
+    },
+    {
+      "id": "multirange_unique_duplicate",
+      "sql": "INSERT INTO cm_multirange_unique SELECT v FROM cm_multirange WHERE id=2"
+    },
+    {
+      "id": "oidvector_setup",
+      "sql": "CREATE TYPE cm_oidvector_row AS (value oidvector); CREATE TABLE cm_oidvector (id integer PRIMARY KEY, v cm_oidvector_row); INSERT INTO cm_oidvector VALUES (1,ROW('1 2'::oidvector)),(2,ROW('1 2'::oidvector)),(3,ROW('0 9 8'::oidvector)),(4,ROW('2'::oidvector)),(5,ROW(''::oidvector)),(6,ROW(NULL)),(7,NULL)"
+    },
+    {
+      "id": "oidvector_comparison",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_oidvector a CROSS JOIN cm_oidvector b"
+    },
+    {
+      "id": "oidvector_laws",
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_oidvector a CROSS JOIN cm_oidvector b CROSS JOIN cm_oidvector c"
+    },
+    {
+      "id": "oidvector_distinct",
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_oidvector) q"
+    },
+    {
+      "id": "oidvector_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_oidvector GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "oidvector_order",
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_oidvector ORDER BY v,id"
+    },
+    {
+      "id": "oidvector_join",
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_oidvector a JOIN cm_oidvector b ON a.v=b.v GROUP BY a.id ORDER BY a.id"
+    },
+    {
+      "id": "oidvector_set",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_oidvector INTERSECT SELECT v FROM cm_oidvector) q"
+    },
+    {
+      "id": "oidvector_lookup",
+      "sql": "SELECT id FROM cm_oidvector WHERE v=ROW('1 2'::oidvector)::cm_oidvector_row ORDER BY id"
+    },
+    {
+      "id": "oidvector_index",
+      "sql": "CREATE INDEX cm_oidvector_v_idx ON cm_oidvector(v)"
+    },
+    {
+      "id": "oidvector_indexed_lookup",
+      "sql": "SELECT id FROM cm_oidvector WHERE v=ROW('1 2'::oidvector)::cm_oidvector_row ORDER BY id"
+    },
+    {
+      "id": "oidvector_unique_setup",
+      "sql": "CREATE TABLE cm_oidvector_unique(v cm_oidvector_row UNIQUE); INSERT INTO cm_oidvector_unique SELECT v FROM cm_oidvector WHERE id=1"
+    },
+    {
+      "id": "oidvector_unique_duplicate",
+      "sql": "INSERT INTO cm_oidvector_unique SELECT v FROM cm_oidvector WHERE id=2"
+    },
+    {
+      "id": "bpchar_output",
+      "sql": "SELECT ('a   '::bpchar)::text AS scalar_text,ROW('a   '::bpchar)::text AS anonymous,ROW('a   '::bpchar)::cm_bpchar_row::text AS named,ARRAY['a   '::bpchar]::text AS array,ROW(ARRAY['a   '::bpchar])::text AS nested"
+    },
+    {
+      "id": "float8_reopen",
+      "sql": "SELECT id FROM cm_float8 WHERE v=ROW('-0'::float8)::cm_float8_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "numeric_reopen",
+      "sql": "SELECT id FROM cm_numeric WHERE v=ROW(1.0::numeric)::cm_numeric_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "bpchar_reopen",
+      "sql": "SELECT id FROM cm_bpchar WHERE v=ROW('a'::bpchar)::cm_bpchar_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "timetz_reopen",
+      "sql": "SELECT id FROM cm_timetz WHERE v=ROW('10:00+01'::timetz)::cm_timetz_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "interval_reopen",
+      "sql": "SELECT id FROM cm_interval WHERE v=ROW('1 mon'::interval)::cm_interval_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "jsonb_reopen",
+      "sql": "SELECT id FROM cm_jsonb WHERE v=ROW('{\"a\":1,\"b\":2}'::jsonb)::cm_jsonb_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "bytea_reopen",
+      "sql": "SELECT id FROM cm_bytea WHERE v=ROW('\\x0001'::bytea)::cm_bytea_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "bits_reopen",
+      "sql": "SELECT id FROM cm_bits WHERE v=ROW(B'1'::varbit)::cm_bits_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "array_reopen",
+      "sql": "SELECT id FROM cm_array WHERE v=ROW(ARRAY[1,NULL])::cm_array_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "range_reopen",
+      "sql": "SELECT id FROM cm_range WHERE v=ROW('[1,3)'::int4range)::cm_range_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "multirange_reopen",
+      "sql": "SELECT id FROM cm_multirange WHERE v=ROW('{[1,3),[3,5)}'::int4multirange)::cm_multirange_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "oidvector_reopen",
+      "sql": "SELECT id FROM cm_oidvector WHERE v=ROW('1 2'::oidvector)::cm_oidvector_row ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "bpchar_output_reopen",
+      "sql": "SELECT id,v::text AS value FROM cm_bpchar ORDER BY id",
+      "reopen": true
+    }
+  ]
+}

@@ -16,7 +16,10 @@ use uqa_sql::ResultRow;
 
 use crate::{ExecResult, PhysicalRow, RowSchema};
 
-use super::encoding::{encode_key, encode_key_borrowed, hash_canonical_row_with_enum_catalog};
+use super::encoding::{
+    encode_key, encode_key_borrowed, encode_sql_key_with_enum_catalog,
+    hash_canonical_row_with_enum_catalog,
+};
 use super::spill::SeenKeySet;
 
 /// Collision-safe in-memory set for positional SQL rows.
@@ -218,6 +221,44 @@ impl ExactRowSet {
     /// row. Disk-backed sets perform an exact full-key comparison.
     pub fn contains_values(&mut self, values: &[Value]) -> ExecResult<bool> {
         self.seen.contains(&encode_key(values)?)
+    }
+
+    /// Insert selected SQL keys with the statement's retained type catalog.
+    pub fn insert_sql_values(
+        &mut self,
+        values: &[Value],
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> ExecResult<bool> {
+        self.seen.insert(encode_sql_key_with_enum_catalog(
+            values.iter().map(Some),
+            catalog,
+        )?)
+    }
+
+    /// Probe the same SQL equality domain used during insertion, including after spill.
+    pub fn contains_sql_values(
+        &mut self,
+        values: &[Value],
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> ExecResult<bool> {
+        self.seen.contains(&encode_sql_key_with_enum_catalog(
+            values.iter().map(Some),
+            catalog,
+        )?)
+    }
+
+    /// Insert selected SQL fields in logical schema order without cloning their payloads.
+    pub fn insert_sql_physical(
+        &mut self,
+        row: &PhysicalRow,
+        schema: &RowSchema,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> ExecResult<bool> {
+        let view = schema.view(row);
+        self.seen.insert(encode_sql_key_with_enum_catalog(
+            (0..schema.len()).map(|position| view.value_at(position)),
+            catalog,
+        )?)
     }
 
     /// Insert a physical row directly in logical schema order without constructing a named row or cloning its values.

@@ -170,6 +170,9 @@ fn from_value(value: &Value, core_carrier: bool, control: &ProductionControl<'_>
         },
         Value::Str(value) => Node::String(control.copy_text(value)?),
         Value::FixedChar(value) => Node::String(control.copy_text(value.trim_end_matches(' '))?),
+        Value::BitString(value) => Node::String(crate::expr::bit_string::output_with_control(
+            value, control,
+        )?),
         Value::Bytes(bytes) if core_carrier => {
             Node::String(utf8_lossy_with_control(bytes, control)?)
         }

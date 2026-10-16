@@ -8,6 +8,60 @@ use super::*;
 use crate::spill::format::{decode_physical_row_record, encode_physical_row_record};
 
 #[test]
+fn bit_string_lengths_and_nested_values_survive_actual_binary_spill() {
+    let values = [
+        (vec![], 0),
+        (vec![0x80], 1),
+        (vec![0x80], 8),
+        (vec![0xaa, 0x80], 9),
+    ]
+    .into_iter()
+    .map(|(bytes, length)| {
+        Value::BitString(uqa_core::BitStringValue::try_from_packed(bytes, length).unwrap())
+    })
+    .collect::<Vec<_>>();
+    let nested = Value::Record(vec![("bits".into(), Value::List(values.clone()))].into());
+    let mut row_values = values;
+    row_values.push(nested);
+    let width = row_values.len();
+    let row = PhysicalRow::from_values(row_values);
+    let encoded = encode_physical_row_record(&row, width).unwrap();
+    for length in 0..encoded.len() {
+        assert!(decode_physical_row_record(&encoded[..length], width).is_err());
+    }
+    let decoded = decode_physical_row_record(&encoded, width).unwrap();
+    for slot in 0..width {
+        assert!(decoded
+            .value(slot)
+            .unwrap()
+            .has_same_representation(row.value(slot).unwrap()));
+    }
+    let mut spill = SpillBuffer::new(0);
+    spill
+        .push(Batch::from_physical_rows(
+            RowSchema::new((0..width).map(|i| format!("b{i}")).collect()),
+            vec![row.clone()],
+        ))
+        .unwrap();
+    let restored = spill.drain_all().unwrap();
+    for slot in 0..width {
+        assert!(restored[0].rows[0]
+            .value(slot)
+            .unwrap()
+            .has_same_representation(row.value(slot).unwrap()));
+    }
+    let one = PhysicalRow::from_values(vec![Value::BitString(
+        uqa_core::BitStringValue::try_from_packed(vec![0x80], 1).unwrap(),
+    )]);
+    let mut malformed = encode_physical_row_record(&one, 1).unwrap();
+    *malformed.last_mut().unwrap() = 0x81;
+    assert!(decode_physical_row_record(&malformed, 1)
+        .unwrap_err()
+        .to_string()
+        .contains("invalid packed bit padding"));
+}
+
+#[test]
 fn retained_array_element_identity_survives_binary_spill() {
     let array = uqa_core::ArrayValue::with_lower_bounds(vec![Value::Int(1)], vec![-2])
         .unwrap()

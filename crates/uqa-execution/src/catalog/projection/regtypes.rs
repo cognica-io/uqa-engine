@@ -847,12 +847,13 @@ fn pg_catalog_type_output(typname: &str) -> String {
     if let Some(element) = typname.strip_prefix('_') {
         return format!("{}[]", pg_catalog_type_output(element));
     }
-    match typname {
-        "char" => "\"char\"".into(),
-        "bpchar" => "character".into(),
-        other => ColumnType::from_sql_name(other)
-            .map_or_else(|_| uqa_sql::expr::quote_ident(other), |ty| ty.sql_name()),
+    if let Some(ty) = uqa_sql::catalog::type_metadata::builtin_scalar_type_by_name(typname) {
+        return ty.regtype_name();
     }
+    ColumnType::from_sql_name(typname).map_or_else(
+        |_| uqa_sql::expr::quote_ident(typname),
+        |ty| ty.regtype_name(),
+    )
 }
 
 fn format_regtype(

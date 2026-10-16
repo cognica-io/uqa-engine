@@ -74,6 +74,11 @@ pub(super) unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<s
                 value_to_napi(env, value_from_json(parsed))
             }
             Value::Bytes(value) => Buffer::to_napi_value(env, Buffer::from(value)),
+            value @ Value::BitString(_) => String::to_napi_value(
+                env,
+                uqa_sql::expr::value_to_string(&value)
+                    .map_err(|error| Error::from_reason(error.to_string()))?,
+            ),
             Value::Temporal(value) => String::to_napi_value(env, value.to_sql_string()),
             // Result conversion renders enum columns through the engine catalog before reaching this context-free converter.
             Value::Enum(value) => Err(Error::from_reason(

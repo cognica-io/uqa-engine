@@ -318,7 +318,11 @@ pub(super) fn value_to_display(v: Option<&Value>) -> Result<String, SQLError> {
         Some(Value::Json(text) | Value::JsonB(text)) => text.clone(),
         Some(Value::List(items)) => pg_array_display(items)?,
         Some(
-            value @ (Value::Array(_) | Value::Row(_) | Value::Record(_) | Value::LegacyVector(_)),
+            value @ (Value::BitString(_)
+            | Value::Array(_)
+            | Value::Row(_)
+            | Value::Record(_)
+            | Value::LegacyVector(_)),
         ) => uqa_sql::expr::value_to_string(value)?,
         // Maps come from JSON/JSONB values: render canonical JSON the
         // way psql prints jsonb, not a Rust-debug-ish map.
@@ -367,7 +371,7 @@ pub(super) fn json_value_display(v: &Value) -> Result<String, SQLError> {
         Value::Float(f) => uqa_graph::agtype::format_float_pg(*f),
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) | Value::FixedChar(s) => serde_json::Value::String(s.clone()).to_string(),
-        Value::Bytes(_) | Value::Temporal(_) => {
+        Value::Bytes(_) | Value::Temporal(_) | Value::BitString(_) => {
             serde_json::Value::String(value_to_display(Some(v))?).to_string()
         }
         Value::Json(text) | Value::JsonB(text) => text.clone(),

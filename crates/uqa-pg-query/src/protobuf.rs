@@ -26,8 +26,9 @@ pub struct Node {
 }
 /// Nested message and enum types in `Node`.
 pub mod node {
+    bounded_message_oneof! {
     #[derive(serde::Serialize)]
-    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    #[derive(Clone, PartialEq)]
     pub enum Node {
         #[prost(message, tag = "1")]
         Alias(super::Alias),
@@ -579,6 +580,7 @@ pub mod node {
         OidList(super::OidList),
         #[prost(message, tag = "271")]
         AConst(super::AConst),
+    }
     }
 }
 #[derive(serde::Serialize)]

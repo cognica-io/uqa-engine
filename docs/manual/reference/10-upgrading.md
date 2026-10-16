@@ -1,6 +1,12 @@
 # Upgrading UQA Engine
 
-This page describes upgrade requirements for UQA Engine 0.5.4 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.4/docs/manual/reference/10-upgrading.md) when installing the 0.5.4 packages.
+This page describes development-source requirements and UQA Engine 0.5.4 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.4/docs/manual/reference/10-upgrading.md) when installing the 0.5.4 packages.
+
+## Development source
+
+Packed bit values and BIT/VARBIT type descriptors require SQLite record format 63 and redb record format 59. Every database owner must use compatible binaries; an older owner could otherwise interpret the new tagged value as a different carrier or lose its logical length. Close all owners and retain a pre-upgrade backup before first open. The existing atomic format upgrade preserves records, histories, receipts and identifier watermarks without rewriting user rows. Native SQLite mapping 17 and shared coordination format 2 are unchanged. Older binaries reject the upgraded database; restore the pre-upgrade backup to return to an older version.
+
+Rust adapters matching dynamic values must handle `Value::BitString(BitStringValue)`; SQL type adapters must handle `ColumnType::Bit(Option<u32>)` and `ColumnType::VarBit(Option<u32>)`. Packed bytes use most-significant-bit-first order, and unused low bits in the last byte must be zero. Preserve the exact logical bit length: `B'1'` and `B'10'` have identical padded bytes but are different values. Use `BitStringValue::try_from_packed` to validate owned representations and the controlled constructor/copy interfaces when retaining query-owned values. Native language results use binary text; the existing HTTP parameter protocol and optional Arrow/DuckDB parameter adapters reject unsupported direct or nested typed bit carriers. HTTP callers can bind text with an explicit SQL cast. See [bit-string SQL behavior](../sql/01-data-types.md#bit-strings).
 
 ## 0.5.4
 

@@ -24,7 +24,7 @@ use crate::{
     SharedExpressionEvaluator,
 };
 
-pub(crate) use encoding::canonical_row_lock_keys;
+pub(crate) use encoding::canonical_row_lock_keys_with_catalog;
 use encoding::encode_sql_key_with_enum_catalog;
 pub(crate) use encoding::encode_sql_key_with_enum_catalog as canonical_sql_key;
 pub use encoding::{

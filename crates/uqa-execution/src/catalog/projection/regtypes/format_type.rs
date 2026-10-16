@@ -79,6 +79,13 @@ pub(super) fn format_catalog_type(
         23 => "integer".into(),
         700 => "real".into(),
         701 => "double precision".into(),
+        1560 => match modifier {
+            Some(modifier) if modifier >= 0 => format!("bit({modifier})"),
+            Some(_) => {
+                format_catalog_identifier(visibility, catalog, oid).unwrap_or_else(|| "???".into())
+            }
+            None => "bit".into(),
+        },
         1042 | 1043 => {
             let name = if oid == 1043 {
                 "character varying".into()

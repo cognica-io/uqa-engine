@@ -61,7 +61,10 @@ pub fn lock_referencing_child<S: Clone + 'static>(
         .map(|column| child_doc.get(column).cloned().unwrap_or(Value::Null))
         .collect();
     let actual = comparison.normalize_local(actual)?;
-    Ok((actual == expected).then_some((identity, child_doc)))
+    Ok(
+        normalized_keys_equal(context.constraints.values, &actual, expected)?
+            .then_some((identity, child_doc)),
+    )
 }
 
 pub fn referencing_rows<S: Clone + 'static>(
@@ -109,7 +112,11 @@ pub fn referencing_rows<S: Clone + 'static>(
                 .iter()
                 .map(|column| doc.get(column).cloned().unwrap_or(Value::Null))
                 .collect();
-            if comparison.normalize_local(values)? == expected {
+            if normalized_keys_equal(
+                context.constraints.values,
+                &comparison.normalize_local(values)?,
+                expected,
+            )? {
                 if matches!(
                     action,
                     ForeignKeyAction::Cascade
@@ -123,6 +130,31 @@ pub fn referencing_rows<S: Clone + 'static>(
         }
     }
     Ok(out)
+}
+
+/// Recheck already-coerced FK columns with their SQL field operators, including nested records and arrays.
+pub(super) fn normalized_keys_equal(
+    catalog: &dyn uqa_sql::expr::SQLValueCatalog,
+    actual: &[Value],
+    expected: &[Value],
+) -> Result<bool, SQLError> {
+    if actual.len() != expected.len() {
+        return Err(SQLError::Internal(
+            "foreign-key comparison widths differ after normalization".into(),
+        ));
+    }
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    for (actual, expected) in actual.iter().zip(expected) {
+        if !uqa_sql::expr::equal_typed_values_with_enum_catalog(
+            actual,
+            expected,
+            &control,
+            Some(catalog),
+        )? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 pub fn apply_set_action_to_child<S: Clone + 'static>(

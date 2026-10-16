@@ -235,6 +235,7 @@ fn canonical_value(value: &Value) -> String {
             value.clone()
         }
         Value::Temporal(value) => value.to_sql_string(),
+        Value::BitString(_) => uqa_sql::expr::value_to_string(value).expect("SQL bit output"),
         Value::Enum(value) => panic!("TPC-H results contain no enum values: {value:?}"),
         Value::Bytes(value) => {
             let mut encoded = String::with_capacity(value.len() * 2);

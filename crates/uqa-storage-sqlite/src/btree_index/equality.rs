@@ -114,6 +114,11 @@ pub(super) fn key(value: &Value, control: &StorageReadControl) -> Result<Option<
             }
             Value::Str(value) => bytes(3, value.as_bytes(), &mut output)?,
             Value::Bytes(value) => bytes(4, value, &mut output)?,
+            Value::BitString(value) => {
+                output.push(6)?;
+                output.extend_from_slice(&value.bit_len().to_be_bytes())?;
+                bytes(4, value.as_bytes(), &mut output)?;
+            }
             Value::Row(values) => {
                 output.push(5)?;
                 output.extend_from_slice(&(values.len() as u64).to_be_bytes())?;

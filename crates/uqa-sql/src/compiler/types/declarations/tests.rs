@@ -32,6 +32,37 @@ struct Types {
     names: Mutex<Vec<String>>,
 }
 
+#[test]
+fn bpchar_catalog_declarations_keep_the_absent_length_modifier() {
+    for (name, expected) in [
+        ("bpchar", ColumnType::Bpchar),
+        (r#""bpchar""#, ColumnType::Bpchar),
+        ("pg_catalog.bpchar", ColumnType::Bpchar),
+        (r#"pg_catalog."bpchar""#, ColumnType::Bpchar),
+        ("character", ColumnType::Character(1)),
+        ("char", ColumnType::Character(1)),
+        ("bpchar(4)", ColumnType::Character(4)),
+        ("character(4)", ColumnType::Character(4)),
+    ] {
+        let Some(Statement::CreateCompositeType(composite)) =
+            crate::compiler::compile(&format!("CREATE TYPE t AS (a {name})"))
+                .unwrap()
+                .pop()
+        else {
+            panic!("expected composite declaration")
+        };
+        assert_eq!(composite.attributes[0].ty, expected, "{name}");
+        let Some(Statement::CreateTable(table)) =
+            crate::compiler::compile(&format!("CREATE TABLE t (a {name})"))
+                .unwrap()
+                .pop()
+        else {
+            panic!("expected table declaration")
+        };
+        assert_eq!(table.columns[0].ty, expected, "{name}");
+    }
+}
+
 impl FunctionTypeResolver for Types {
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
         self.names.lock().unwrap().push(name.to_owned());

@@ -81,6 +81,10 @@ pub enum ColumnType {
     Bool,
     Void,
     Bytes,
+    /// Fixed bit strings retain packed values and an optional declared logical length.
+    Bit(Option<u32>),
+    /// Varying bit strings retain packed values and an optional maximum length.
+    VarBit(Option<u32>),
     InternalChar,
     Regproc,
     Regprocedure,

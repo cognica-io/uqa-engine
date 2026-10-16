@@ -327,6 +327,31 @@ pub(super) fn compile_pg_type_name(
             "refcursor" => Ok(ColumnType::RefCursor),
             "name" => Ok(ColumnType::Name),
             "uuid" => Ok(ColumnType::Uuid),
+            "bit" | "varbit" => {
+                use crate::expr::bit_string::BitStringKind;
+                let kind = if raw == "bit" {
+                    BitStringKind::Fixed
+                } else {
+                    BitStringKind::Varying
+                };
+                if type_name.typmods.len() > 1 {
+                    return Err(SQLError::Routine {
+                        sqlstate: "22023".into(),
+                        message: "invalid type modifier".into(),
+                    });
+                }
+                let length = type_name
+                    .typmods
+                    .first()
+                    .map(|node| kind.validate_length(expect_integer_const(node)?))
+                    .transpose()?;
+                // The BIT keyword supplies length one in the parser; quoted/catalog bit retains the absent modifier.
+                Ok(if raw == "bit" {
+                    ColumnType::Bit(length)
+                } else {
+                    ColumnType::VarBit(length)
+                })
+            }
             "varchar" | "character varying" => {
                 if type_name.typmods.len() > 1 {
                     return Err(SQLError::TypeMismatch(format!(
@@ -353,9 +378,13 @@ pub(super) fn compile_pg_type_name(
                     .typmods
                     .first()
                     .map(|node| expect_positive_character_length(node, "bpchar"))
-                    .transpose()?
-                    .unwrap_or(1);
-                Ok(ColumnType::Character(length))
+                    .transpose()?;
+                // The parser supplies length one for CHAR/CHARACTER; the catalog name without a modifier is unconstrained.
+                Ok(match length {
+                    Some(length) => ColumnType::Character(length),
+                    None if raw == "bpchar" => ColumnType::Bpchar,
+                    None => ColumnType::Character(1),
+                })
             }
             "bool" | "boolean" => Ok(ColumnType::Boolean),
             "real" | "float4" => Ok(ColumnType::Real),

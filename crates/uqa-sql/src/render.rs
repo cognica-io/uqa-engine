@@ -721,6 +721,9 @@ fn value_sql(value: &Value) -> Result<String, SQLError> {
         Value::Float(value) if value.is_finite() => value.to_string(),
         Value::Float(value) => format!("{}::double precision", string_literal(&value.to_string())),
         Value::Str(value) => string_literal(value),
+        Value::BitString(_) => {
+            format!("B{}", string_literal(&crate::expr::value_to_string(value)?))
+        }
         Value::Enum(value) => return Err(crate::expr::catalog_output_required(value)),
         Value::FixedChar(value) => format!("{}::character", string_literal(value)),
         Value::Bytes(value) => {

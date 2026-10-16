@@ -417,7 +417,11 @@ fn period_key_referenced<S: Clone + 'static>(
             else {
                 continue;
             };
-            if lookup.values[..ordinary] != expected[..ordinary] {
+            if !super::references::normalized_keys_equal(
+                context.constraints.values,
+                &lookup.values[..ordinary],
+                &expected[..ordinary],
+            )? {
                 continue;
             }
             if !period_foreign_key_coverage(

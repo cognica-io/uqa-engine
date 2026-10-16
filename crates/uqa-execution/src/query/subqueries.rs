@@ -204,16 +204,20 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
         outer_row: PhysicalOuterRow<'_>,
         params: &[SQLParam],
     ) -> Result<Option<bool>, SQLError> {
+        let catalog = uqa_sql::expr::EngineValueCatalog(self.function_hook);
         let cached = self.ctes.cached_subquery(subquery);
         if let Some(entry) = cached {
             return match entry {
                 ScalarSubqueryCacheEntry::Correlated => self
                     .execute_correlated_subquery(plan, outer_row, params)?
-                    .contains(needle),
-                ScalarSubqueryCacheEntry::Membership(membership) => membership.contains(needle),
+                    .contains_with_catalog(needle, &catalog),
+                ScalarSubqueryCacheEntry::Membership(membership) => {
+                    membership.contains(needle, Some(&catalog))
+                }
                 ScalarSubqueryCacheEntry::Materialized(result) => {
-                    let membership = Arc::new(result.membership(self.memory.work_mem_bytes()?)?);
-                    let found = membership.contains(needle)?;
+                    let membership =
+                        Arc::new(result.membership(self.memory.work_mem_bytes()?, Some(&catalog))?);
+                    let found = membership.contains(needle, Some(&catalog))?;
                     self.ctes
                         .cache_subquery(subquery, ScalarSubqueryCacheEntry::Membership(membership));
                     Ok(found)
@@ -231,12 +235,13 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
                 .cache_subquery(subquery, ScalarSubqueryCacheEntry::Correlated);
             return self
                 .execute_correlated_subquery(plan, outer_row, params)?
-                .contains(needle);
+                .contains_with_catalog(needle, &catalog);
         }
 
         let result = self.execute_uncorrelated_subquery(plan, params)?;
-        let membership = Arc::new(result.membership(self.memory.work_mem_bytes()?)?);
-        let found = membership.contains(needle)?;
+        let membership =
+            Arc::new(result.membership(self.memory.work_mem_bytes()?, Some(&catalog))?);
+        let found = membership.contains(needle, Some(&catalog))?;
         self.ctes
             .cache_subquery(subquery, ScalarSubqueryCacheEntry::Membership(membership));
         Ok(found)

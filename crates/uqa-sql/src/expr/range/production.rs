@@ -451,7 +451,7 @@ pub(super) fn compare_values(
     }
 }
 
-fn compare_lower_bounds(
+pub(super) fn compare_lower_bounds(
     left: &CanonicalRange,
     right: &CanonicalRange,
     control: &ProductionControl<'_>,

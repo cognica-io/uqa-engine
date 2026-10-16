@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Support PostgreSQL `BIT` and `BIT VARYING` declarations, binary and hexadecimal literals, length-constrained assignment and casts, and exact comparison through arrays, composite fields, indexes and persistent storage. Packed values preserve leading zeroes, empty values and logical bit lengths across Rust, Python, Node.js and WASM consumers; see [bit strings](docs/manual/sql/01-data-types.md#bit-strings).
+
+### Changed
+
+- Upgrade persistent databases to SQLite record format 63 and redb record format 59 for packed bit values and their type descriptors. Close all owners, retain a pre-upgrade backup and update every owner together; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).
+
+### Fixed
+
+- Restore ordinary debug WASM initialization and array/row SQL decoding by bounding catalog construction and parser message construction frames. Preserve catalog layouts, protobuf wire behavior, partial decoding errors and recursion limits.
+
+- Preserve unmodified `bpchar` declarations without an implicit one-character limit and retain trailing `CHARACTER`/`bpchar` spaces in array and composite text output, including unique-constraint detail; scalar casts to `TEXT` still trim trailing spaces as PostgreSQL does.
+
+- Compare built-in range and multirange fields through their selected subtype bounds in rows, records and arrays. Preserve the same equality classes in grouping, joins, exact spill keys, concurrent UNIQUE reservations, recursive queries, IN subqueries and foreign-key actions, including equal numeric bounds with different decimal scales, empty ranges and nested containers.
+
 ## [0.5.4] - 2026-10-15
 
 ### Changed

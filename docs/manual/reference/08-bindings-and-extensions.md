@@ -15,8 +15,8 @@ UQA Engine exposes the same durable embedded engine through Rust, Python, Node.j
 | Native Kuromoji, completion and Japanese diagnostics | Feature-enabled | Default | Default | Default |
 | Cypher | Yes | Yes | Yes | Yes |
 | Runtime scalar/table/aggregate callbacks | Yes | Yes | Yes | Yes |
-| Memory FDW | `fdw` feature | Custom `fdw` build | Custom `fdw` build | Custom `fdw` build |
-| Native Arrow / DuckDB FDWs | `fdw` / `duckdb` feature | Custom feature build | Custom feature build | No |
+| Memory FDW | Included | Included | Included | Included |
+| Native Arrow / DuckDB FDWs | `arrow` / `duckdb` feature | Custom feature build | Custom feature build | No |
 | Independent persistent sessions | Yes | Engine dependent | Yes | Yes |
 | Local and Cloud HTTP SQL/batch/stream | Yes | Yes | Yes | Yes, subject to CORS |
 | Project lookup through installed `uqa` CLI | Yes | Yes | Yes | No |

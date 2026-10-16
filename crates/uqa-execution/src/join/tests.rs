@@ -13,6 +13,7 @@ use crate::physical::run_to_rows;
 use crate::scan::TableScan;
 
 mod enum_keys;
+mod range_keys;
 
 fn row(values: &[(&str, Value)]) -> ResultRow {
     values

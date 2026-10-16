@@ -142,6 +142,8 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
             | ("regprocedure", "regproc")
             | ("numeric", "float4" | "float8")
             | ("float4", "float8")
+            | ("bit", "varbit")
+            | ("varbit", "bit")
             | ("bpchar", "varchar" | "name" | "text")
             | ("varchar", "bpchar" | "name" | "text" | "regclass")
             | ("text", "bpchar" | "varchar" | "name" | "regclass")
@@ -177,6 +179,7 @@ fn canonical_type_category(canonical: &str) -> char {
         "anyarray" | "record" => 'P',
         "bpchar" | "name" | "text" | "varchar" => 'S',
         "interval" => 'T',
+        "bit" | "varbit" => 'V',
         "\"char\"" | "pg_node_tree" => 'Z',
         _ => 'U',
     }
@@ -190,7 +193,7 @@ pub fn routine_type_is_preferred(type_name: &str) -> bool {
 fn canonical_type_is_preferred(type_name: &str) -> bool {
     matches!(
         type_name,
-        "bool" | "float8" | "oid" | "text" | "timestamptz" | "interval"
+        "bool" | "float8" | "oid" | "text" | "timestamptz" | "interval" | "varbit"
     )
 }
 

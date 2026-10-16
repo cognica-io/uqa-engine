@@ -68,6 +68,80 @@ fn sql_hash_distinct_normalizes_physical_and_admitted_fields_before_spill() {
     }
 }
 
+#[test]
+fn range_distinct_preserves_equivalence_and_first_values_after_forced_spill() {
+    for (oid, first, equal, other) in [
+        (3906, "[1.0,3.00)", "[1.00,3.0)", "[5,7)"),
+        (
+            4532,
+            "{[1.0,2.00),[5,6)}",
+            "{[1.00,2.0),[5.0,6.00)}",
+            "{[8,9)}",
+        ),
+    ] {
+        for array in [false, true] {
+            let wrap = |text: &str| {
+                if array {
+                    Value::Array(
+                        uqa_core::ArrayValue::try_new(vec![Value::Str(text.into())])
+                            .unwrap()
+                            .with_element_type_oid(Some(oid)),
+                    )
+                } else {
+                    Value::Row(
+                        uqa_core::RowValue::typed(
+                            vec![Value::Str(text.into())],
+                            vec![uqa_core::RecordFieldType {
+                                oid,
+                                type_modifier: -1,
+                            }],
+                        )
+                        .unwrap(),
+                    )
+                }
+            };
+            for budget in [1, 64 * 1024] {
+                let directory = tempfile::tempdir().unwrap();
+                let values = [
+                    wrap(first),
+                    wrap(equal),
+                    wrap(other),
+                    wrap(equal),
+                    Value::Null,
+                    Value::Null,
+                ];
+                let scan = TableScan::from_rows(
+                    vec!["v".into()],
+                    values.iter().cloned().map(value_row).collect(),
+                );
+                let mut distinct = Distinct::all_with_work_mem(Box::new(scan), budget)
+                    .with_spill_directory(directory.path().to_path_buf());
+                distinct.open().unwrap();
+                let mut actual = Vec::new();
+                while let Some(batch) = distinct.next().unwrap() {
+                    actual.extend(
+                        batch
+                            .rows
+                            .into_iter()
+                            .map(|row| row.value(0).unwrap().clone()),
+                    );
+                }
+                assert_eq!(actual.len(), 3);
+                for (actual, expected) in actual.iter().zip([&values[0], &values[2], &values[4]]) {
+                    assert!(actual.has_same_representation(expected));
+                }
+                assert_eq!(distinct.has_spilled(), budget == 1);
+                if budget == 1 {
+                    assert_eq!(distinct.in_memory_key_bytes(), 0);
+                }
+                distinct.close().unwrap();
+                drop(distinct);
+                assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+            }
+        }
+    }
+}
+
 fn row(a: i64, b: i64) -> ResultRow {
     [("a".into(), Value::Int(a)), ("b".into(), Value::Int(b))]
         .into_iter()
@@ -417,4 +491,55 @@ fn distinct_rejects_a_child_batch_with_a_different_schema() {
     let error = run_to_rows(&mut distinct).unwrap_err();
 
     assert!(error.to_string().contains("DISTINCT input schema mismatch"));
+}
+
+#[test]
+fn range_exact_sql_set_preserves_equivalence_after_spill_without_changing_raw_keys() {
+    let value = |text: &str| {
+        Value::Array(
+            uqa_core::ArrayValue::try_new(vec![Value::Str(text.into())])
+                .unwrap()
+                .with_element_type_oid(Some(3906)),
+        )
+    };
+    let first = value("[1.0,3.00)");
+    let equal = value("[1.00,3.0)");
+    let other = value("[10,12)");
+    let schema = RowSchema::new(vec!["v".into()]);
+    let directory = tempfile::tempdir().unwrap();
+    for budget in [1, 64 * 1024] {
+        let mut seen = ExactRowSet::with_spill_directory(budget, directory.path());
+        assert!(seen
+            .insert_sql_values(std::slice::from_ref(&first), None)
+            .unwrap());
+        assert!(seen
+            .contains_sql_values(std::slice::from_ref(&equal), None)
+            .unwrap());
+        assert!(!seen
+            .insert_sql_physical(
+                &PhysicalRow::from_values(vec![equal.clone()]),
+                &schema,
+                None
+            )
+            .unwrap());
+        assert!(!seen
+            .contains_sql_values(std::slice::from_ref(&other), None)
+            .unwrap());
+        assert!(seen
+            .insert_sql_physical(
+                &PhysicalRow::from_values(vec![other.clone()]),
+                &schema,
+                None
+            )
+            .unwrap());
+        assert_eq!(seen.has_spilled(), budget == 1);
+        if budget == 1 {
+            assert_eq!(seen.in_memory_key_bytes(), 0);
+        }
+        drop(seen);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+    let mut raw = ExactRowSet::new(1);
+    assert!(raw.insert_values(&[first]).unwrap());
+    assert!(!raw.contains_values(&[equal]).unwrap());
 }

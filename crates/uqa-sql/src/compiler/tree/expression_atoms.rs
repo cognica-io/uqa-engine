@@ -57,10 +57,18 @@ pub(in crate::compiler) fn compile_const(c: &pg_query::protobuf::AConst) -> Resu
             |d| Ok(Value::Decimal(d)),
         )?,
         Val::Sval(s) => Value::Str(s.sval.clone()),
-        Val::Boolval(b) => Value::Bool(b.boolval),
-        other => {
-            return Err(SQLError::Unsupported(format!("constant: {other:?}")));
+        Val::Bsval(bits) => {
+            let value = crate::expr::bit_string::input_with_control(
+                &bits.bsval,
+                crate::expr::bit_string::BitStringKind::Fixed,
+                -1,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?
+            .into_uncontrolled()
+            .expect("literal compilation has an ordinary owner");
+            Value::BitString(value)
         }
+        Val::Boolval(b) => Value::Bool(b.boolval),
     };
     Ok(Expr::Literal(value))
 }

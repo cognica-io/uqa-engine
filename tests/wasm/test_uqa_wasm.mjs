@@ -19,6 +19,7 @@ import { concurrentIsolationLevels, runConcurrentWriterCase } from "../parity/co
 import { runDirectNotifications } from "./notifications/direct.mjs";
 import { registerHTTPLimitTests } from "../parity/http_limits.mjs";
 import { registerHTTPTemporalTests } from "../parity/http_temporal.mjs";
+import { runBitStringBinding } from "../parity/bit_strings.core.mjs";
 
 const {
   Engine,
@@ -36,6 +37,11 @@ const {
 registerHTTPLimitTests("Browser", HttpEngine, HttpEngineError);
 registerHTTPTemporalTests("Browser", HttpEngine, { browser: true });
 const concurrentWriterOracle = JSON.parse(readFileSync(new URL("../parity/pg18/concurrent_writes.expected.json", import.meta.url), "utf8"));
+
+test("packed bit values survive WASM conversion and reopen", async () => {
+  const fixture = JSON.parse(readFileSync(new URL("../parity/bit_strings.json", import.meta.url), "utf8"));
+  await runBitStringBinding((path) => Engine.open(path), `${UQA.persistDir}/bits.db`, fixture, assert.deepEqual);
+});
 
 test("direct WASM notification acceptance", { timeout: 60000 }, async () => {
   await runDirectNotifications({ Engine, NotificationSubscription, NotificationError }, async (_name, body) => body());
