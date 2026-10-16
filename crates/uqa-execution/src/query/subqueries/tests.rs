@@ -10,6 +10,8 @@ use crate::query::scope::subqueries::{CachedCorrelatedExists, CorrelatedExistsOu
 use crate::query::CteScope;
 use crate::{CanonicalRowHashSet, PhysicalRow, RowSchema, ScalarExpr};
 
+mod typed_ranges;
+
 #[test]
 fn cached_consumers_skip_metadata_memory_and_query_contexts() {
     let services = Services::default();

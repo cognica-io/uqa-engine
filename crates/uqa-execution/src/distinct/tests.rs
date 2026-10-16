@@ -18,6 +18,7 @@ use crate::scan::TableScan;
 use crate::{ExpressionEvaluator, PhysicalRow, ScalarEvalContext};
 
 mod typed_ranges;
+mod typed_rowsets;
 
 #[test]
 fn collision_verification_requires_equality_without_ordering() {

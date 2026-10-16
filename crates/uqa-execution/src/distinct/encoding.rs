@@ -176,6 +176,7 @@ pub(super) fn encode_key_with_enum_catalog<'a>(
 }
 
 /// A selected SQL hash path observes physical values through their declared input-free reader before forming the exact spill key.
+#[cfg(test)]
 pub(crate) fn encode_sql_key_with_enum_catalog<'a>(
     values: impl ExactSizeIterator<Item = Option<&'a Value>>,
     enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,

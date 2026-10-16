@@ -115,7 +115,11 @@ fn collect_exists_keys(
         )));
     }
     let key_positions = (0..columns.len()).collect::<Vec<_>>();
-    let mut keys = crate::CanonicalRowHashSet::new();
+    let types = key_positions
+        .iter()
+        .map(|position| operator.row_schema().column_type(*position).cloned())
+        .collect();
+    let mut keys = crate::CanonicalRowHashSet::with_sql_types(types);
     if let Err(error) = operator.open() {
         return Err(close_after_physical_failure(
             operator,

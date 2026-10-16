@@ -23,21 +23,13 @@ pub fn collect_exists_key_operator<'a>(
     let internal_schema = operator.row_schema().clone();
     let column_types = projections
         .iter()
-        .map(|projection| {
-            crate::scalar_type(
-                &projection.expr,
-                operator.row_schema(),
-                evaluator.parameters(),
-            )
-            .ok()
-            .flatten()
-        })
-        .collect();
+        .map(|projection| evaluator.expression_type(&projection.expr, operator.row_schema()))
+        .collect::<Result<Vec<_>, _>>()?;
     let direct_columns = projections
         .iter()
         .map(|projection| DirectColumnKey::compile(&projection.expr))
         .collect::<Option<Vec<_>>>();
-    let mut keys = crate::CanonicalRowHashSet::new();
+    let mut keys = crate::CanonicalRowHashSet::with_sql_types(column_types.clone());
     if let Err(error) = operator.open() {
         return Err(close_after_physical_failure(
             operator.as_mut(),
