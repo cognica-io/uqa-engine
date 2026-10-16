@@ -22,7 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Preserve selected scalar range types through DISTINCT, grouping, aggregate DISTINCT, joins and set operations, so equal numeric bounds with different decimal spellings share PostgreSQL equality in memory and spill.
+- Preserve selected scalar range types through DISTINCT, grouping, aggregate DISTINCT, MODE, joins and set operations, so equal numeric bounds with different decimal spellings share PostgreSQL equality in memory and spill.
 
 - Report the selected B-tree operator class for range/list partition keys, including arrays, ranges, bit strings and OID aliases, through the shared SQL class metadata.
 

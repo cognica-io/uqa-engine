@@ -11103,8 +11103,8 @@
       "cases": 1,
       "source": "crates/uqa-engine/tests/pg18_semantics/range_datums.rs",
       "capability": "Public scalar range equality consumers",
-      "workload": "120 independently captured PostgreSQL queries across twelve range/multirange types, including hash and mixed-record ordered DISTINCT/DISTINCT ON, grouping, aggregate DISTINCT, joins and sets.",
-      "invariant": "Actual Engine SQL counts match PostgreSQL for DISTINCT, DISTINCT ON, groups, aggregate DISTINCT, joins and set operations.",
+      "workload": "122 independently captured PostgreSQL queries across twelve range/multirange types, including hash and mixed-record ordered DISTINCT/DISTINCT ON, grouping, aggregate DISTINCT, MODE, joins and sets.",
+      "invariant": "Actual Engine SQL counts match PostgreSQL for DISTINCT, DISTINCT ON, groups, aggregate DISTINCT, MODE, joins and set operations.",
       "case_names": [
         ""
       ]
@@ -11118,6 +11118,19 @@
       "capability": "Join selected type lifecycle",
       "workload": "One typed scalar range join with a resolver that rejects any lookup after the two keys are selected.",
       "invariant": "Open resolves each key once; matching preserves PostgreSQL equality and close performs no new type resolution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_range_mode_preserves_classes_in_memory_and_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/tests/ranges.rs",
+      "capability": "Selected scalar range MODE classes",
+      "workload": "Numeric range and multirange spellings, domains and TEXT controls with ascending/descending order, reversed input, NULL and one-byte forced spill.",
+      "invariant": "MODE counts the same equivalence classes as sorting, matches the independent PostgreSQL winner, and preserves TEXT separation and spill bounds.",
       "case_names": [
         ""
       ]
