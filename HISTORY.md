@@ -18,9 +18,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Read infinite interval endpoints without allocating a normalized input string. Preserve signs, case, whitespace, finite interval parsing and cancellation under the caller's memory allowance.
 
+- Replace the yanked ZIP build dependency through maintained DuckDB bindings, retaining native DuckDB 1.5.5 and bundled Parquet support. Rust callers sharing DuckDB types must use the matching package alias; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).
+
 - Reject B-tree key declarations whose selected SQL type has no default operator class, including domains, expressions and indexes affected by column type changes. Preserve PostgreSQL diagnostics, statement rollback, generic array/record classes and unordered included values.
 
 - Restore compact dynamic value slots after bit-string and physical enum metadata additions. Retain indirect payload headers under the existing memory allowance without changing packed values, enum identity, comparisons or persistent formats.
+
+- Read range bounds through their selected scalar input functions, preserving PostgreSQL integer spellings, overflow and temporal diagnostics. Validate complete range syntax before its bounds and retain member-by-member multirange error order, quoted inputs and separator checks.
 
 - Restore ordinary debug WASM initialization and array/row SQL decoding by bounding catalog construction and parser message construction frames. Preserve catalog layouts, protobuf wire behavior, partial decoding errors and recursion limits.
 

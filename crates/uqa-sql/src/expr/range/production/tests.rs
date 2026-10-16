@@ -8,6 +8,7 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 mod infinity;
+mod input;
 
 #[test]
 fn admitted_range_text_preserves_discrete_numeric_temporal_and_empty_canonicalization() {

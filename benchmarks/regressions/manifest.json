@@ -9805,6 +9805,61 @@
     },
     {
       "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_input_and_diagnostics_match_independent_postgresql_reference",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/production/tests/input.rs",
+      "capability": "Range input semantics",
+      "workload": "117 independent PostgreSQL input observations across all twelve built-in range/multirange families, subtype errors, quoting, escapes and structural error order.",
+      "invariant": "Values and complete diagnostics match the independent reference; each success or failure releases its admitted temporary ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_structure_errors_precede_bound_admission",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/production/tests/input.rs",
+      "capability": "Borrowed range structural validation",
+      "workload": "Malformed bounds and trailing input under a zero-byte production allowance.",
+      "invariant": "Complete structural errors precede subtype input and require no admitted bound copy; peak and retained temporary bytes remain zero."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "range_input_matches_postgresql_and_durable_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_input.rs",
+      "capability": "Range input and durable values",
+      "workload": "128 independent PostgreSQL observations on memory, native SQLite, SQLite K/V and redb, including failed-assignment savepoint recovery and actual persistent close/reopen.",
+      "invariant": "Correct subtype inputs and ordered diagnostics preserve canonical values, transaction state and observing range operators after reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "empty_multirange_members_do_not_retain_workspace",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/production/tests/input.rs",
+      "capability": "Bounded empty multirange input",
+      "workload": "One or 512 repeated empty members, including ranges that become empty after their scalar bounds are read.",
+      "invariant": "Empty members contribute no retained range workspace; peak admitted bytes are independent of member count, output remains empty and all leases are released."
+    },
+    {
+      "package": "uqa-sql",
       "kind": "test",
       "test": "temporal_infinity_input_matches_postgresql",
       "cases": 1,
