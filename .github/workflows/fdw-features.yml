@@ -2,13 +2,6 @@ name: Foreign handler features
 
 on:
   pull_request:
-    paths:
-      - "crates/**"
-      - Cargo.toml
-      - Cargo.lock
-      - rust-toolchain.toml
-      - .github/workflows/fdw-features.yml
-      - scripts/check-fdw-feature-isolation.py
   workflow_call:
 
 permissions:
@@ -16,7 +9,8 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-fdw-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A documentation update must not cancel the source qualification it can reuse.
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -27,7 +21,38 @@ env:
   CARGO_PROFILE_TEST_OPT_LEVEL: "2"
 
 jobs:
+  scope:
+    name: Select foreign-handler validation
+    runs-on: ubuntu-24.04
+    outputs:
+      required: ${{ steps.select.outputs.required }}
+      fingerprint: ${{ steps.select.outputs.fingerprint }}
+      reused: ${{ steps.reuse.outputs.reused }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Inspect changed ownership boundaries
+        id: select
+        run: python3 scripts/fdw_ci.py select
+      - uses: actions/cache/restore@v6.1.0
+        id: qualified
+        if: steps.select.outputs.required == 'true'
+        with:
+          path: ${{ runner.temp }}/fdw-qualification
+          key: fdw-qualified-${{ steps.select.outputs.fingerprint }}
+      - name: Verify previously completed validation for identical inputs
+        id: reuse
+        if: steps.qualified.outputs.cache-hit == 'true'
+        run: >-
+          python3 scripts/fdw_ci.py reuse
+          --fingerprint '${{ steps.select.outputs.fingerprint }}'
+          --proof '${{ runner.temp }}/fdw-qualification/passed.json'
+
   features:
+    needs: scope
+    if: needs.scope.outputs.required == 'true' && needs.scope.outputs.reused != 'true'
     name: FDW ${{ matrix.configuration }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -91,3 +116,22 @@ jobs:
       - name: Check combined handlers and benchmark targets
         if: matrix.configuration == 'duckdb'
         run: cargo clippy -p uqa-engine -p uqa-fdw -p uqa-cli --all-targets --no-default-features --features uqa-engine/arrow,uqa-engine/duckdb,uqa-cli/arrow,uqa-cli/duckdb,uqa-fdw/arrow,uqa-fdw/duckdb --locked -- -D warnings
+
+  qualify:
+    name: Retain completed foreign-handler validation
+    needs: [scope, features]
+    if: needs.features.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Record only the completed six-configuration matrix
+        run: >-
+          python3 scripts/fdw_ci.py record
+          --fingerprint '${{ needs.scope.outputs.fingerprint }}'
+          --proof '${{ runner.temp }}/fdw-qualification/passed.json'
+      - uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ runner.temp }}/fdw-qualification
+          key: fdw-qualified-${{ needs.scope.outputs.fingerprint }}
