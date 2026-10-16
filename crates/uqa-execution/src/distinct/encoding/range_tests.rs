@@ -111,6 +111,28 @@ fn range_sql_hash_and_exact_keys_preserve_postgresql_equality_classes() {
                         family["kind"]
                     );
                     if equal {
+                        let left_locks = reservations::canonical_row_lock_keys_with_catalog(
+                            std::slice::from_ref(left),
+                            &catalog,
+                        )
+                        .unwrap();
+                        let right_locks = reservations::canonical_row_lock_keys_with_catalog(
+                            std::slice::from_ref(&right),
+                            &catalog,
+                        )
+                        .unwrap();
+                        assert_eq!(left_locks[0], right_locks[0]);
+                        for (value, locks) in [(left, &left_locks), (&right, &right_locks)] {
+                            for old in
+                                reservations::canonical_row_lock_keys(std::slice::from_ref(value))
+                                    .unwrap()
+                            {
+                                assert!(
+                                    locks.contains(&old),
+                                    "a predecessor reservation alias was removed"
+                                );
+                            }
+                        }
                         let hash = |value| {
                             hash_canonical_row_with_enum_catalog(
                                 &hasher,
@@ -123,6 +145,67 @@ fn range_sql_hash_and_exact_keys_preserve_postgresql_equality_classes() {
                     }
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn range_reservations_preserve_deferred_fields_and_existing_nonrange_addresses() {
+    let catalog = Catalog(Arc::new(CompositeTypeDescriptor {
+        type_oid: 16_384,
+        relation_oid: 16_385,
+        dropped: vec![],
+        attributes: vec![],
+    }));
+    let deferred = Value::Datum(uqa_core::DatumValue::new(23, u32::MAX, vec![]));
+    let invalid_vector = Value::LegacyVector(
+        uqa_core::LegacyVectorValue::try_from_array(
+            uqa_core::LegacyVectorKind::Oid,
+            uqa_core::ArrayValue::try_new(vec![]).unwrap(),
+        )
+        .unwrap(),
+    );
+    for value in [
+        deferred.clone(),
+        invalid_vector.clone(),
+        Value::Int(1),
+        Value::Float(0.1),
+        Value::Enum(
+            uqa_core::EnumValue::new(
+                16_384,
+                uqa_core::EnumLabelKey::initial(1).unwrap().remove(0),
+            )
+            .with_label_oid(Some(42)),
+        ),
+        Value::Str("[1.0,3.00)".into()),
+    ] {
+        let values = [value];
+        let old = reservations::canonical_row_lock_keys(&values).unwrap();
+        let new = reservations::canonical_row_lock_keys_with_catalog(&values, &catalog).unwrap();
+        assert_eq!(new.as_slice(), &old);
+    }
+    for opaque in [deferred, invalid_vector] {
+        let value = Value::Row(
+            uqa_core::RowValue::typed(
+                vec![Value::Str("[1.0,3.00)".into()), opaque],
+                vec![
+                    uqa_core::RecordFieldType {
+                        oid: 3906,
+                        type_modifier: -1,
+                    },
+                    uqa_core::RecordFieldType {
+                        oid: 23,
+                        type_modifier: -1,
+                    },
+                ],
+            )
+            .unwrap(),
+        );
+        let values = [value];
+        let keys = reservations::canonical_row_lock_keys_with_catalog(&values, &catalog).unwrap();
+        assert_eq!(keys.len(), 4);
+        for old in reservations::canonical_row_lock_keys(&values).unwrap() {
+            assert!(keys.contains(&old));
         }
     }
 }

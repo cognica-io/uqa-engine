@@ -16,7 +16,7 @@ pub(super) fn encode_declared_range(
     output: &mut impl KeyOutput,
 ) -> ExecResult<bool> {
     let Some(oid) = oid else { return Ok(false) };
-    if !output.invokes_sql_hash_operator() || !matches!(value, Value::Str(_)) {
+    if !output.uses_declared_field_types() || !matches!(value, Value::Str(_)) {
         return Ok(false);
     }
     let read = output.control().cloned();
@@ -34,13 +34,14 @@ pub(super) fn encode_declared_range(
     else {
         return Ok(false);
     };
+    output.encoded_range_field();
     match value {
         RangeComparisonValue::Range(value) => {
-            output.push_byte(17)?;
+            output.push_byte(18)?;
             encode_range(&value, output)?;
         }
         RangeComparisonValue::Multirange(value) => {
-            output.push_byte(18)?;
+            output.push_byte(19)?;
             encode_len(value.ranges().len(), output)?;
             for range in value.ranges() {
                 output.check()?;

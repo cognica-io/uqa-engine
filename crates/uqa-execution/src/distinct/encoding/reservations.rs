@@ -7,8 +7,38 @@
 //! Reservation aliases keep mixed-version processes on the same conflict lock.
 
 use super::{canonical_row_key, encode_len, encode_value, ExecResult, KeyOutput, Value};
+use smallvec::{smallvec, SmallVec};
+use uqa_sql::expr::SQLValueCatalog;
 
+#[cfg(test)]
 pub(crate) fn canonical_row_lock_keys(values: &[Value]) -> ExecResult<[Vec<u8>; 3]> {
+    let [previous, legacy] = legacy_row_lock_keys(values)?;
+    Ok([canonical_row_key(values)?, previous, legacy])
+}
+
+/// Selected range fields use their SQL equality class for reservations. Retain predecessor aliases without invoking SQL hash support or decoding deferred physical fields merely to acquire a lock.
+pub(crate) fn canonical_row_lock_keys_with_catalog(
+    values: &[Value],
+    catalog: &dyn SQLValueCatalog,
+) -> ExecResult<SmallVec<[Vec<u8>; 4]>> {
+    let mut current = DeclaredReservation {
+        bytes: Vec::new(),
+        catalog,
+        range_field: false,
+    };
+    encode_len(values.len(), &mut current)?;
+    for value in values {
+        encode_value(value, &mut current)?;
+    }
+    let [previous, legacy] = legacy_row_lock_keys(values)?;
+    let mut keys = smallvec![current.bytes, previous, legacy];
+    if current.range_field {
+        keys.push(canonical_row_key(values)?);
+    }
+    Ok(keys)
+}
+
+fn legacy_row_lock_keys(values: &[Value]) -> ExecResult<[Vec<u8>; 2]> {
     let mut previous = ReservationAlias {
         bytes: Vec::new(),
         legacy_numeric: false,
@@ -23,7 +53,33 @@ pub(crate) fn canonical_row_lock_keys(values: &[Value]) -> ExecResult<[Vec<u8>; 
             encode_value(value, output)?;
         }
     }
-    Ok([canonical_row_key(values)?, previous.bytes, legacy.bytes])
+    Ok([previous.bytes, legacy.bytes])
+}
+
+struct DeclaredReservation<'a> {
+    bytes: Vec<u8>,
+    catalog: &'a dyn SQLValueCatalog,
+    range_field: bool,
+}
+
+impl KeyOutput for DeclaredReservation<'_> {
+    fn enum_catalog(&self) -> Option<&dyn SQLValueCatalog> {
+        Some(self.catalog)
+    }
+    fn uses_declared_field_types(&self) -> bool {
+        true
+    }
+    fn encoded_range_field(&mut self) {
+        self.range_field = true;
+    }
+    fn push_byte(&mut self, value: u8) -> ExecResult<()> {
+        self.bytes.push(value);
+        Ok(())
+    }
+    fn extend_bytes(&mut self, values: &[u8]) -> ExecResult<()> {
+        self.bytes.extend_from_slice(values);
+        Ok(())
+    }
 }
 
 struct ReservationAlias {

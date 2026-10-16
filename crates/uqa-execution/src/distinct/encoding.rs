@@ -17,7 +17,7 @@ mod ranges;
 mod reservations;
 mod traversal;
 use output::{BudgetedOutput, KeyOutput};
-pub(crate) use reservations::canonical_row_lock_keys;
+pub(crate) use reservations::canonical_row_lock_keys_with_catalog;
 use traversal::{Children, Frames};
 
 use crate::{ExecError, ExecResult};
@@ -309,7 +309,7 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
                         })?;
                         encode_len(values.len(), output)?;
                         if !values.is_empty() {
-                            if output.invokes_sql_hash_operator() {
+                            if output.uses_declared_field_types() {
                                 stack.push(Children::SQLRecord(
                                     uqa_sql::expr::SQLRecordFields::new(
                                         value,
@@ -326,7 +326,7 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
                         output.push_byte(11)?;
                         encode_len(fields.len(), output)?;
                         if !fields.is_empty() {
-                            if output.invokes_sql_hash_operator() {
+                            if output.uses_declared_field_types() {
                                 stack.push(Children::SQLRecord(
                                     uqa_sql::expr::SQLRecordFields::new(
                                         value,
@@ -374,7 +374,10 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
 
 /// Encode a value without nested values; containers are framed by [`encode_value`].
 fn encode_leaf(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
-    if let Some(catalog) = output.enum_catalog() {
+    if let Some(catalog) = output
+        .enum_catalog()
+        .filter(|_| output.invokes_sql_hash_operator())
+    {
         if let Some(oid) = uqa_sql::expr::enums::comparison_identity(catalog, value)? {
             output.push_byte(17)?;
             return output.extend_bytes(&oid.to_be_bytes());

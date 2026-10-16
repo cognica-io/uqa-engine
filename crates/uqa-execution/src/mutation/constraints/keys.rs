@@ -108,8 +108,9 @@ pub fn lock_document_key_dependencies(
         } else {
             values.as_slice()
         };
-        let keys = crate::distinct::canonical_row_lock_keys(lock_values)
-            .map_err(crate::physical::physical_exec_error)?;
+        let keys =
+            crate::distinct::canonical_row_lock_keys_with_catalog(lock_values, context.values)
+                .map_err(crate::physical::physical_exec_error)?;
         let mut digest = Sha256::new();
         digest.update(b"uqa-key-lock-v2");
         update_key_lock_digest(&mut digest, canonical_table.as_bytes())?;

@@ -23,6 +23,12 @@ pub(super) trait KeyOutput {
         false
     }
 
+    fn uses_declared_field_types(&self) -> bool {
+        self.invokes_sql_hash_operator()
+    }
+
+    fn encoded_range_field(&mut self) {}
+
     fn legacy_numeric_reservation(&self) -> bool {
         false
     }
