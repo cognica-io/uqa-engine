@@ -90,15 +90,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
-name = "arbitrary"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
-dependencies = [
- "derive_arbitrary",
-]
-
-[[package]]
 name = "argon2"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -904,17 +895,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_arbitrary"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -934,23 +914,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
-]
-
-[[package]]
-name = "duckdb"
-version = "1.10505.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "970e05eedd3f55c435194d9104f90a9b4a79a80d6e73251bc9ff43e178130c4e"
-dependencies = [
- "arrow",
- "cast",
- "comfy-table",
- "fallible-iterator",
- "fallible-streaming-iterator",
- "hashlink 0.10.0",
- "libduckdb-sys",
- "num-integer",
- "strum 0.27.2",
 ]
 
 [[package]]
@@ -1873,23 +1836,6 @@ name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
-
-[[package]]
-name = "libduckdb-sys"
-version = "1.10505.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb514dab5e271e849235c1cb98bd65a2ae107fbd619a6740219319c54a71d95"
-dependencies = [
- "cc",
- "flate2",
- "pkg-config",
- "serde",
- "serde_json",
- "tar",
- "ureq",
- "vcpkg",
- "zip",
-]
 
 [[package]]
 name = "libloading"
@@ -3566,6 +3512,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 
 [[package]]
+name = "typed-path"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
+
+[[package]]
 name = "typenum"
 version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3746,6 +3698,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "uqa-duckdb"
+version = "1.10505.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e42976f200dad6df951b277d68baf4a66deec214ad9d0f99e1c2fc6bb171837"
+dependencies = [
+ "arrow",
+ "cast",
+ "comfy-table",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink 0.10.0",
+ "num-integer",
+ "strum 0.27.2",
+ "uqa-libduckdb-sys",
+]
+
+[[package]]
 name = "uqa-engine"
 version = "0.5.4"
 dependencies = [
@@ -3755,7 +3724,6 @@ dependencies = [
  "arrow-schema",
  "ciborium",
  "criterion",
- "duckdb",
  "fs2",
  "getrandom 0.3.4",
  "libc",
@@ -3772,6 +3740,7 @@ dependencies = [
  "thiserror 1.0.69",
  "uqa-analysis",
  "uqa-core",
+ "uqa-duckdb",
  "uqa-execution",
  "uqa-fdw",
  "uqa-fusion",
@@ -3829,11 +3798,11 @@ dependencies = [
  "arrow-array",
  "arrow-ipc",
  "arrow-schema",
- "duckdb",
  "proptest",
  "tempfile",
  "thiserror 1.0.69",
  "uqa-core",
+ "uqa-duckdb",
 ]
 
 [[package]]
@@ -3881,6 +3850,23 @@ version = "0.5.4"
 dependencies = [
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "uqa-libduckdb-sys"
+version = "1.10505.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "769d5ed996b0fd00fa72d9f49d4d88a72b0089a4708b2f408118526e7d589cdb"
+dependencies = [
+ "cc",
+ "flate2",
+ "pkg-config",
+ "serde",
+ "serde_json",
+ "tar",
+ "ureq",
+ "vcpkg",
+ "zip",
 ]
 
 [[package]]
@@ -4790,15 +4776,16 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "6.0.0"
+version = "9.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb2a05c7c36fde6c09b08576c9f7fb4cda705990f73b58fe011abf7dfb24168b"
+checksum = "c2d98561b612a84ae525331a7a094429ef8a5772514ed507ff6db5f54badc971"
 dependencies = [
- "arbitrary",
  "crc32fast",
  "flate2",
  "indexmap",
  "memchr",
+ "nix",
+ "typed-path",
  "zopfli",
 ]
 

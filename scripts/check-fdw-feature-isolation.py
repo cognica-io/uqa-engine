@@ -14,7 +14,8 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE_PACKAGES = ("uqa-engine", "uqa", "uqa-cli", "uqa-python", "uqa-node", "uqa-api", "uqa-pg-server")
 DEFAULT_PACKAGES = (*NATIVE_PACKAGES, "uqa-execution", "uqa-wasm")
-EXTERNAL = {"uqa-fdw", "duckdb", "libduckdb-sys", "arrow-array", "arrow-ipc", "arrow-schema"}
+EXTERNAL = {"uqa-fdw", "duckdb", "libduckdb-sys", "uqa-duckdb", "uqa-libduckdb-sys",
+            "arrow-array", "arrow-ipc", "arrow-schema"}
 
 
 def verify(package, *, default=True, features=(), target=None):
@@ -38,7 +39,7 @@ def verify(package, *, default=True, features=(), target=None):
     expected = {"uqa-fdw"}
     native = target != "wasm32-unknown-emscripten"
     if "duckdb" in selected and native:
-        expected |= {"duckdb", "libduckdb-sys", "arrow-array", "arrow-schema"}
+        expected |= {"uqa-duckdb", "uqa-libduckdb-sys", "arrow-array", "arrow-schema"}
     if ("arrow" in selected and native) or package == "uqa-api":
         # The fluent API already provides Arrow/Parquet result conversion independently of FDWs.
         expected |= {"arrow-array", "arrow-ipc", "arrow-schema"}
