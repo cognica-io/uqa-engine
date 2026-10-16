@@ -161,15 +161,17 @@ fn ordering_call_state_is_private_while_tie_equality_reads_raw_oids() {
         .unwrap(),
         Ordering::Less
     );
-    assert!(crate::relational::equal_sort_key_values(
+    assert!(crate::relational::equal_typed_sort_key_values(
         &[physical(1)],
         &[physical(1)],
+        &[],
         Some(&catalog)
     )
     .unwrap());
-    assert!(!crate::relational::equal_sort_key_values(
+    assert!(!crate::relational::equal_typed_sort_key_values(
         &[physical(1)],
         &[physical(3)],
+        &[],
         Some(&catalog)
     )
     .unwrap());
