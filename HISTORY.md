@@ -20,6 +20,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Match PostgreSQL range-constructor flag diagnostics, quoted endpoint output and numeric multirange bound spelling, including large groups of equal bounds and typed constructors with empty members.
+
 - Preserve the invoking memory owner when constructing anonymous rows without field metadata, preventing a panic while retaining cancellation and resource release.
 
 - Encode built-in range and multirange constants in PostgreSQL catalog Datums, including arrays and retained composite fields. Preserve `pg_attrdef.adbin`, `pg_get_expr`, DEFAULT values, prepared observations and persistent reopening with bounded physical reads. Retained fields keep their physical range identity and bound-based comparison, grouping, joins and spill keys after composite attribute changes, with PostgreSQL diagnostics for missing or wrong-kind payload types.

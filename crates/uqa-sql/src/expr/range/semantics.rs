@@ -58,10 +58,6 @@ impl RangeSemantics {
         }
     }
 
-    pub(super) const fn identity(&self) -> RangeSubtype {
-        self.identity
-    }
-
     pub(super) fn input(
         &self,
         value: &Value,
@@ -87,12 +83,65 @@ impl RangeSemantics {
     ) -> Result<Produced<String>> {
         (self.output)(value, control)
     }
+}
 
-    pub(super) fn canonicalize(&self, range: &mut CanonicalRange) -> Result<()> {
-        if let Some(canonical) = &self.canonical {
-            canonical.apply(range)?;
+impl super::RangeConstruction for RangeSemantics {
+    type Identity = RangeSubtype;
+
+    fn identity(&self) -> RangeSubtype {
+        self.identity
+    }
+
+    fn has_canonical_function(&self) -> bool {
+        self.canonical.is_some()
+    }
+
+    fn input_bound(
+        &self,
+        value: &Value,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        self.input(value, control)
+    }
+
+    fn compare_bounds(
+        &self,
+        left: &Value,
+        right: &Value,
+        control: &ProductionControl<'_>,
+    ) -> Result<Ordering> {
+        self.compare(left, right, control)
+    }
+
+    fn canonicalize(
+        &self,
+        range: &CanonicalRange,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<CanonicalRange>>> {
+        let Some(canonical) = &self.canonical else {
+            return Ok(None);
+        };
+        // Only the selected discrete definitions reach this branch; their endpoints are inline values.
+        let lower = super::construction::copy_bound(range.lower(), control)?;
+        let upper = super::construction::copy_bound(range.upper(), control)?;
+        let (lower, lower_memory) = lower.into_parts();
+        let (upper, upper_memory) = upper.into_parts();
+        let mut owned = super::construction::RangeWorkspace {
+            value: CanonicalRange {
+                subtype: range.subtype,
+                lower,
+                upper,
+                lower_inclusive: range.lower_inclusive,
+                upper_inclusive: range.upper_inclusive,
+                empty: false,
+            },
+            memory: control.combine(lower_memory, upper_memory),
+        };
+        canonical.apply(&mut owned.value)?;
+        if super::construction::bounds_are_empty(&owned.value, self, control)? {
+            owned.value = CanonicalRange::empty(self.identity);
         }
-        Ok(())
+        Ok(Some(control.finish(owned.value, owned.memory)?))
     }
 }
 

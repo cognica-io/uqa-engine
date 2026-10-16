@@ -44,6 +44,7 @@ NPM_PACKAGES = (
 )
 BINDING_PACKAGES = (*NPM_PACKAGES, ROOT / "python" / "uqa")
 MIT_PARSER_CRATE = "uqa-pg-query"
+SQL_SORT_NOTICE = "THIRD-PARTY/POSTGRESQL-SORT-NOTICE.txt"
 PROJECT_TABLE = re.compile(
     r"^\[project\][ \t]*(?:#.*)?$(.*?)(?=^\[[^\n]+\][ \t]*(?:#.*)?$|\Z)",
     re.MULTILINE | re.DOTALL,
@@ -183,7 +184,7 @@ def check_npm_sources(payloads: dict[str, bytes]) -> None:
 
 
 def binding_dictionary_payloads() -> dict[str, bytes]:
-    """The same complete attribution and source-resource identity in every binding."""
+    """The same complete third-party attribution and resource identity in every binding."""
     payloads = {}
     for language, files in (("nori", NORI_FILES), ("kuromoji", KUROMOJI_FILES)):
         data = ROOT / f"crates/uqa-{language}-data"
@@ -196,6 +197,7 @@ def binding_dictionary_payloads() -> dict[str, bytes]:
         for kind in ("resource", "model"):
             payloads[f"THIRD-PARTY/{language.upper()}-{kind.upper()}-MANIFEST.json"] = (data / f"data/{kind}_manifest.json").read_bytes()
     payloads["THIRD-PARTY/LUCENE-SOURCE.md"] = (ROOT / "crates/uqa-analysis/THIRD-PARTY/LUCENE-SOURCE.md").read_bytes()
+    payloads[SQL_SORT_NOTICE] = (ROOT / "crates/uqa-sql" / SQL_SORT_NOTICE).read_bytes()
     return payloads
 
 
@@ -204,7 +206,7 @@ def check_binding_sources() -> None:
         for relative, expected in binding_dictionary_payloads().items():
             path = directory / relative
             if not path.is_file() or path.read_bytes() != expected:
-                raise RuntimeError(f"binding morphology attribution or source-resource identity differs: {path}")
+                raise RuntimeError(f"binding attribution or source-resource identity differs: {path}")
 
 
 def workspace_packages() -> list[dict[str, object]]:
@@ -413,7 +415,12 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: 
         for relative, expected in binding_dictionary_payloads().items():
             matches = matching_members(members, relative)
             if not matches or any(payload != expected for _, payload in matches):
-                raise RuntimeError(f"{path} omits or changes morphology attribution or source-resource identity: {relative}")
+                raise RuntimeError(f"{path} omits or changes attribution or source-resource identity: {relative}")
+    if path.name.startswith("uqa-sql-") and path.name.endswith(".crate"):
+        matches = matching_members(members, SQL_SORT_NOTICE)
+        expected = (ROOT / "crates/uqa-sql" / SQL_SORT_NOTICE).read_bytes()
+        if len(matches) != 1 or matches[0][1] != expected:
+            raise RuntimeError(f"{path} omits or changes {SQL_SORT_NOTICE}")
     for language, required in (("nori", require_nori), ("kuromoji", require_kuromoji)):
         if required:
             check_embedded_dictionary(path, members, language)

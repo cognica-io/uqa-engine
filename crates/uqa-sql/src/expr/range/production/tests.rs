@@ -72,7 +72,7 @@ fn admitted_multiranges_merge_in_stable_bound_order_without_cloning_numeric_payl
         (
             "{[1.00,2.000),[1.0,3.00),[3,4.0)}",
             RangeSubtype::Numeric,
-            "{[1.00,4.0)}",
+            "{[1.0,4.0)}",
         ),
         ("{(1,2),(2,3)}", RangeSubtype::Numeric, "{(1,2),(2,3)}"),
         ("{(1,2],[2,3)}", RangeSubtype::Numeric, "{(1,3)}"),

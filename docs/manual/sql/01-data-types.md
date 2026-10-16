@@ -196,6 +196,8 @@ Use `TIMESTAMPTZ` for instants and `TIMESTAMP` for timezone-independent wall-clo
 
 The six PostgreSQL built-in range families are implemented as declared SQL identities: `INT4RANGE` / `INT4MULTIRANGE`, `INT8RANGE` / `INT8MULTIRANGE`, `NUMRANGE` / `NUMMULTIRANGE`, `DATERANGE` / `DATEMULTIRANGE`, `TSRANGE` / `TSMULTIRANGE`, and `TSTZRANGE` / `TSTZMULTIRANGE`. Range literals use PostgreSQL bound notation, including unbounded and `empty` values, and multirange literals use braces around comma-separated range members.
 
+Range constructors accept two bounds and an optional flags string: `[]`, `[)`, `(]` or `()`. Omitted flags mean `[)`, and a NULL endpoint is unbounded. An explicit NULL flags argument raises `22000`; invalid flags raise `42601` with PostgreSQL's valid-flags HINT. Multirange normalization preserves PostgreSQL's selected numeric endpoint spelling, including equal bounds with different display scales.
+
 Range structure is validated before either bound is converted, then the lower and upper bounds use their selected scalar input functions in that order. Integer bounds accept PostgreSQL base prefixes and digit separators; overflow reports `22003`. Temporal bounds retain the scalar SQLSTATE, message and DateStyle hint. Malformed range structure reports `22P02` with its specific DETAIL. In a multirange, an earlier member's input error precedes a malformed later separator or member. Quoted segments, doubled quotes and backslash escapes are decoded before scalar input. See the [input acceptance record](../../plans/0018-range-input-acceptance.md) for the independent reference and resource contract.
 
 ```sql execute

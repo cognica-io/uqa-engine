@@ -83,7 +83,7 @@ class RepositoryPolicyCheckerTest(unittest.TestCase):
                 with self.subTest(relative=relative, mode=mode), self.assertRaisesRegex(RuntimeError, "benchmark source input"):
                     LICENSES.check_benchmark_sources(path, changed)
 
-    def test_binding_archives_require_every_morphology_notice_and_provenance_file(self) -> None:
+    def test_binding_archives_require_every_third_party_notice_and_provenance_file(self) -> None:
         canonical = LICENSES.binding_dictionary_payloads()
         files = {**canonical, "LICENSE": b"license", "LICENSE-NOTICE.md": b"notice"}
         for suffix in (".whl", ".tgz"):
@@ -99,7 +99,7 @@ class RepositoryPolicyCheckerTest(unittest.TestCase):
                     else: changed[f"licenses/{relative}"] = b"changed"
                     with self.subTest(suffix=suffix, relative=relative, mode=mode), \
                          mock.patch.object(LICENSES, "archive_members", return_value=changed), \
-                         self.assertRaisesRegex(RuntimeError, "morphology attribution or source-resource identity"):
+                         self.assertRaisesRegex(RuntimeError, "attribution or source-resource identity"):
                         LICENSES.check_archive(path, {"LICENSE": b"license"})
 
     def test_release_bundle_check_rejects_partial_missing_and_duplicate_runtimes(self) -> None:

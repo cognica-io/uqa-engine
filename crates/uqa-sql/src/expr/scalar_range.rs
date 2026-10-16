@@ -7,14 +7,14 @@
 //! `PostgreSQL` range and multirange scalar functions and lowered operators.
 
 use super::{
-    conversion::value_to_string_with_control,
     range::{
         multirange_from_produced_ranges, parse_multirange_with_control, parse_range_with_control,
+        range_bound_flags, range_from_values_with_control,
     },
     CanonicalMultirange, CanonicalRange, Result, SQLError, Value,
 };
 use crate::ast::{RangeFunctionOperation, RangeSubtype};
-use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 mod sets;
 use sets::RangeSet;
@@ -135,31 +135,17 @@ fn range_constructor(
         )));
     }
     let bounds = match args.get(2) {
-        None => "[)",
-        Some(Value::Str(bounds) | Value::FixedChar(bounds)) => bounds,
+        None => Some("[)"),
+        Some(Value::Null) => None,
+        Some(Value::Str(bounds) | Value::FixedChar(bounds)) => Some(bounds.as_str()),
         Some(other) => {
             return Err(SQLError::TypeMismatch(format!(
                 "range bounds must be text, got {other:?}"
             )))
         }
     };
-    if bounds.len() != 2
-        || !matches!(bounds.as_bytes()[0], b'[' | b'(')
-        || !matches!(bounds.as_bytes()[1], b']' | b')')
-    {
-        return Err(SQLError::Routine {
-            sqlstate: "22000".into(),
-            message: format!("invalid range bound flags: \"{bounds}\""),
-        });
-    }
-    let mut text = ProductionString::new(*control);
-    text.push_str(&bounds[..1])?;
-    text.push_str(&value_to_string_with_control(&args[0], control)?)?;
-    text.push(',')?;
-    text.push_str(&value_to_string_with_control(&args[1], control)?)?;
-    text.push_str(&bounds[1..])?;
-    let text = text.finish()?;
-    let range = parse_range_with_control(&text, subtype, control)?;
+    let flags = range_bound_flags(bounds)?;
+    let range = range_from_values_with_control(&args[0], &args[1], flags, subtype, control)?;
     text_value(range.to_text_with_control(control)?, control)
 }
 
