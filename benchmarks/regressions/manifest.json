@@ -9470,7 +9470,7 @@
       "source": "crates/uqa-core/src/types/bit_string/tests.rs",
       "capability": "Bounded packed bit-string ownership",
       "workload": "Packed copies at exact and insufficient payload-plus-header allowances, malformed admitted input and either cancellation owner.",
-      "invariant": "Copies reserve packed bytes and their indirect header before allocation; errors release reservations and cancellation remains owned by both callers."
+      "invariant": "Copies admit their complete packed payload and header before allocating; rejected copies allocate nothing, errors release reservations and cancellation remains owned by both callers."
     },
     {
       "package": "uqa-sql",

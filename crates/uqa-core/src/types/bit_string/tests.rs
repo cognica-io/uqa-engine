@@ -97,7 +97,10 @@ fn bit_string_copy_and_adoption_preserve_allowance_and_cancellation_owners() {
 
     let tiny = MemoryBudget::new(retained - 1);
     let limited = ProductionControl::new(&tiny, &original, &invoking);
-    assert!(value.clone_with_control(&limited).is_err());
+    let allocations = allocation_counter::measure(|| {
+        assert!(value.clone_with_control(&limited).is_err());
+    });
+    assert_eq!(allocations.count_total, 0);
     assert_eq!(tiny.used(), 0);
 
     let mut bytes = ProductionVec::new(control);

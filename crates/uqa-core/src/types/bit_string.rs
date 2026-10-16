@@ -115,6 +115,7 @@ impl BitStringValue {
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, ValueRetentionError> {
         control.check()?;
+        let header = control.reserve(Self::retained_header_bytes())?;
         let mut bytes = ProductionVec::new(*control);
         bytes.reserve(self.as_bytes().len())?;
         for chunk in self.as_bytes().chunks(4096) {
@@ -123,9 +124,10 @@ impl BitStringValue {
                 bytes.push_copy(*byte)?;
             }
         }
-        Ok(
-            Self::try_from_packed_with_control(bytes.finish()?, self.bit_len(), control)?
-                .expect("copy preserves canonical packed bits"),
+        let (bytes, memory) = bytes.finish()?.into_parts();
+        control.finish(
+            Self::from_validated_parts(bytes, self.bit_len()),
+            control.combine(memory, header),
         )
     }
 
