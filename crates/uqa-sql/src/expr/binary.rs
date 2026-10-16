@@ -23,13 +23,15 @@ mod production_tests;
 pub(super) use comparison::eval_comparison_op;
 pub use comparison::{
     compare_grouping_values_with_enum_catalog, compare_nullable_with_control,
-    compare_typed_values_with_control, compare_typed_values_with_enum_catalog,
-    compare_with_control, equal_typed_values_with_enum_catalog, eval_comparison_truth,
+    compare_record_images_with_catalog, compare_typed_values_with_control,
+    compare_typed_values_with_enum_catalog, compare_with_control,
+    equal_typed_values_with_enum_catalog, eval_comparison_truth,
     eval_comparison_truth_with_control, eval_comparison_truth_with_deferred_state,
     eval_comparison_truth_with_engine, eval_comparison_truth_with_enum_catalog,
     eval_record_comparison_truth_with_engine, eval_value_comparison_truth_with_engine,
     type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control,
+    visit_record_image_fields_with_catalog,
 };
 pub(in crate::expr) use comparison::{require_array_element_support, ComparisonSupport};
 

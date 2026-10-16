@@ -271,6 +271,8 @@ fn read_payload(
         }
     }
     match oid {
+        22 => arrays::read_legacy_vector(bytes, uqa_core::LegacyVectorKind::SmallInteger, control),
+        30 => arrays::read_legacy_vector(bytes, uqa_core::LegacyVectorKind::Oid, control),
         17 => {
             let mut output = ProductionVec::new(*control);
             output.reserve(bytes.len())?;

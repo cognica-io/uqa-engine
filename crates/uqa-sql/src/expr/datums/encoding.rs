@@ -115,6 +115,9 @@ pub(crate) fn encode<'a>(
             composites::retained::array_payload_with_control(array, element, catalog, control)
                 .map(EncodedDatum::Owned)
         }
+        (Value::LegacyVector(vector), ColumnType::Int2Vector | ColumnType::OidVector) => {
+            legacy_vector(vector, ty, catalog, control).map(EncodedDatum::Owned)
+        }
         (Value::Record(fields), ColumnType::Composite(reference)) => {
             let descriptor =
                 composites::descriptor(catalog, fields.type_oid().unwrap_or(reference.oid))?;
@@ -130,6 +133,22 @@ pub(crate) fn encode<'a>(
         }
         _ => Err(invalid()),
     }
+}
+
+fn legacy_vector(
+    vector: &uqa_core::LegacyVectorValue,
+    ty: &ColumnType,
+    catalog: Option<&dyn CompositeTypeCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>, SQLError> {
+    let element = match (vector.kind(), ty) {
+        (uqa_core::LegacyVectorKind::SmallInteger, ColumnType::Int2Vector) => {
+            &ColumnType::SmallInteger
+        }
+        (uqa_core::LegacyVectorKind::Oid, ColumnType::OidVector) => &ColumnType::Oid,
+        _ => return Err(invalid()),
+    };
+    composites::retained::array_payload_with_control(vector.as_array(), element, catalog, control)
 }
 
 fn retained<'a>(

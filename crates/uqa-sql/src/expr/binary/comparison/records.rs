@@ -31,7 +31,7 @@ pub(super) fn compare<T>(
     right: &Value,
     catalog: Option<&dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
-    support: ComparisonSupport,
+    support: Option<ComparisonSupport>,
     equal: T,
     mut compare: impl FnMut(&Value, &Value, Option<u32>) -> Result<Option<T>, SQLError>,
 ) -> Result<T, SQLError> {
@@ -64,8 +64,10 @@ pub(super) fn compare<T>(
                     ),
                 });
             }
-            if !support.available_for_oid(left_oid, catalog, control)? {
-                return Err(support.error("42883", type_name(&left, index, left_oid, catalog)?));
+            if let Some(support) = support {
+                if !support.available_for_oid(left_oid, catalog, control)? {
+                    return Err(support.error("42883", type_name(&left, index, left_oid, catalog)?));
+                }
             }
         }
         if let Some(result) = compare(left_value, right_value, left_oid.or(right_oid))? {

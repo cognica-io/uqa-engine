@@ -104,3 +104,74 @@ fn physical_array_encoding_bounds_workspace_and_releases_nested_failures() {
     assert_eq!(error.sqlstate(), Some("XX001"));
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn physical_legacy_vectors_share_the_array_codec_and_caller_allowance() {
+    use uqa_core::{LegacyVectorKind, LegacyVectorValue};
+
+    let token = CancellationToken::new();
+    for (kind, ty, element) in [
+        (
+            LegacyVectorKind::SmallInteger,
+            ColumnType::Int2Vector,
+            ColumnType::SmallInteger,
+        ),
+        (
+            LegacyVectorKind::Oid,
+            ColumnType::OidVector,
+            ColumnType::Oid,
+        ),
+    ] {
+        for count in [0, 1, 256] {
+            let vector =
+                LegacyVectorValue::try_new(kind, (0..count).map(Value::Int).collect()).unwrap();
+            let memory = MemoryBudget::new(8192);
+            let control = ProductionControl::new(&memory, &token, &token);
+            let expected = composites::retained::array_payload_with_control(
+                vector.as_array(),
+                &element,
+                None,
+                &control,
+            )
+            .unwrap();
+            let value = Value::LegacyVector(vector);
+            let encoded = encode(&value, &ty, None, &control).unwrap();
+            assert_eq!(&*encoded, &*expected);
+            assert_eq!(
+                encoded.len(),
+                20 + count as usize * pg_type_len(&element) as usize
+            );
+            let EncodedDatum::Owned(bytes) = encoded else {
+                panic!("owned vector image");
+            };
+            assert_eq!(
+                memory.used(),
+                expected.reserved_bytes() + bytes.reserved_bytes()
+            );
+            drop((expected, bytes));
+            assert_eq!(memory.used(), 0);
+            let wrong_type = if ty == ColumnType::Int2Vector {
+                ColumnType::OidVector
+            } else {
+                ColumnType::Int2Vector
+            };
+            assert_eq!(
+                encode(&value, &wrong_type, None, &control)
+                    .err()
+                    .unwrap()
+                    .sqlstate(),
+                Some("XX001")
+            );
+            let exhausted = MemoryBudget::new(0);
+            let control = ProductionControl::new(&exhausted, &token, &token);
+            assert_eq!(
+                encode(&value, &ty, None, &control)
+                    .err()
+                    .unwrap()
+                    .sqlstate(),
+                Some("53200")
+            );
+            assert_eq!(exhausted.used(), 0);
+        }
+    }
+}

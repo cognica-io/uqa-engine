@@ -11277,6 +11277,165 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "record_image_comparison_matches_postgresql_for_logical_and_physical_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/image/tests.rs",
+      "capability": "Selected record image comparison",
+      "workload": "44 independently captured PostgreSQL record-image pairs through logical and physical fields, both directions and NULLs.",
+      "invariant": "Image order matches PostgreSQL across admitted scalar and container types without calling ordinary field operators; scratch is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "record_image_comparison_keeps_reached_type_and_byte_errors_lazy",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/image/tests.rs",
+      "capability": "Lazy record image diagnostics",
+      "workload": "Earlier unequal fields, malformed later datums, reached field type disagreement and unequal arity.",
+      "invariant": "Earlier decisions suppress later errors; reached type identities precede bytes and preserve PostgreSQL SQLSTATEs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "record_image_comparison_shares_the_callers_allowance_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/image/tests.rs",
+      "capability": "Controlled record image production",
+      "workload": "Numeric field encoding under an exhausted caller allowance and independently cancelled statement/session owners.",
+      "invariant": "Quota exhaustion is 53200, either cancellation is 57014, and failed production releases all scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "record_image_comparison_retains_named_tuple_field_images",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/image/tests.rs",
+      "capability": "Named physical record images",
+      "workload": "A catalog-bound numeric record with scale-distinct fields through all logical/physical outer tuple combinations.",
+      "invariant": "Outer tuple observation retains field storage differences and releases admitted decoding scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "record_image_observation_borrows_fields_and_checks_callback_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/image/tests.rs",
+      "capability": "Borrowed record field images",
+      "workload": "A 160 KiB text field and NULL observed under zero scratch allowance, with either owner cancelled inside the callback.",
+      "invariant": "Observation borrows the original bytes, retains field identities, allocates no scratch and propagates either callback cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "record_image_keys_match_postgresql_classes_in_memory_and_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/record_images/tests.rs",
+      "capability": "Selected record image exact keys",
+      "workload": "44 independently captured PostgreSQL image comparisons through exact keys, hashing, in-memory membership and one-byte forced spill.",
+      "invariant": "Key equality coincides with PostgreSQL image equality within selected field types; spill preserves complete keys and production retains only output capacity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "record_image_key_framing_preserves_nulls_arity_and_physical_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/record_images/tests.rs",
+      "capability": "Record image key framing",
+      "workload": "Ambiguous text concatenations, NULL versus empty text, different arities, logical text and packed/full varlena fields.",
+      "invariant": "Exact framing prevents concatenation/NULL/arity collisions while storage header variants retain equal payload keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "record_image_key_errors_release_output_and_preserve_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/record_images/tests.rs",
+      "capability": "Controlled record image keys",
+      "workload": "Large borrowed text under four exhausted allowances, a malformed later field after partial output, and either cancelled owner.",
+      "invariant": "Failure releases all output/scratch and preserves 53200, XX001 and 57014 without changing the input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_legacy_vectors_share_the_array_codec_and_caller_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/encoding/tests.rs",
+      "capability": "Selected record image comparison",
+      "workload": "Encode empty, one-element and 256-element int2vector/oidvector images through the shared array codec; reject a mismatched selected type and an exhausted caller allowance.",
+      "invariant": "Preserve vector element width, dimensions and lower bounds, retain each output reservation and release all temporary allocations on success or error."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_legacy_vector_reads_preserve_postgresql_values_and_output_leases",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/tests/legacy_vectors.rs",
+      "capability": "Retained SQL vector fields",
+      "workload": "Read all sixteen independently captured PostgreSQL int2vector/oidvector payloads at a retained offset, including empty and boundary values.",
+      "invariant": "Preserve native vector kinds, dimensions, lower bounds and exact SQL output; charge the decoded owner until release."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_legacy_vector_read_errors_release_memory_and_preserve_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/tests/legacy_vectors.rs",
+      "capability": "Retained SQL vector fields",
+      "workload": "Read both wrong-element headers, every truncated prefix, exhausted allowances and both cancelled scopes for int2vector and oidvector.",
+      "invariant": "Match PostgreSQL header diagnostics, reject out-of-bounds bytes with XX001 and release every allocation on errors, quota exhaustion and cancellation."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "retained_vector_fields_match_postgresql_after_domain_rebinding",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/type_changes.rs",
+      "capability": "Retained SQL vector fields",
+      "workload": "Observe stored and prepared composite vectors before and after domain rebinding on four providers, then reopen each persistent provider.",
+      "invariant": "Match eight independently captured PostgreSQL observations and retain the same stored vector fields after persistent reopening."
     }
   ]
 }

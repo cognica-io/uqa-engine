@@ -42,6 +42,58 @@ fn composite_attribute_types_match_postgresql(#[case] provider: usize) {
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn retained_vector_fields_match_postgresql_after_domain_rebinding(#[case] provider: usize) {
+    fn execute(engine: &uqa_engine::Engine, sql: &str) -> serde_json::Value {
+        let result = crate::pg18_oracle::run_case(engine, sql);
+        assert!(result["error"].is_null(), "{sql}: {result}");
+        result
+    }
+
+    let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../uqa-sql/src/expr/binary/comparison/image/postgresql.json"
+    )))
+    .unwrap();
+    let cases = reference["retained_vector_cases"].as_array().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("retained-vector.db");
+    let engine = super::addition::open(provider, &path);
+    for case in cases {
+        execute(&engine, case["setup"].as_str().unwrap());
+        for phase in ["before", "after"] {
+            if phase == "after" {
+                execute(&engine, case["alter"].as_str().unwrap());
+            }
+            for (index, operation) in ["observe", "prepared"].into_iter().enumerate() {
+                let result = execute(&engine, case[operation].as_str().unwrap());
+                assert_eq!(
+                    result["results"][0]["rows"],
+                    serde_json::json!([[case[phase][index]]]),
+                    "{case} {phase} {operation}",
+                );
+            }
+        }
+    }
+    let engine = if provider == 0 {
+        engine
+    } else {
+        drop(engine);
+        super::addition::open(provider, &path)
+    };
+    for case in cases {
+        let result = execute(&engine, case["observe"].as_str().unwrap());
+        assert_eq!(
+            result["results"][0]["rows"],
+            serde_json::json!([[case["after"][0]]])
+        );
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn composite_attribute_dependents_match_postgresql(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("composite-dependents.db");

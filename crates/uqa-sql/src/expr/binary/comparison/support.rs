@@ -10,7 +10,7 @@ pub(in crate::expr) use crate::type_resolution::ComparisonSupport;
 use crate::{expr::SQLValueCatalog, SQLError};
 use uqa_core::{memory::ProductionControl, ArrayValue};
 
-struct ValueCompositeCatalog<'a>(Option<&'a dyn SQLValueCatalog>);
+pub(super) struct ValueCompositeCatalog<'a>(pub(super) Option<&'a dyn SQLValueCatalog>);
 
 impl crate::expr::composites::CompositeTypeCatalog for ValueCompositeCatalog<'_> {
     fn composite_type(
