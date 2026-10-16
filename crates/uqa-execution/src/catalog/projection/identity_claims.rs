@@ -140,6 +140,11 @@ pub fn largest_catalog_oid(
         );
     }
     oids.extend(catalog.shells().map(|definition| i64::from(definition.oid)));
+    oids.extend(
+        catalog
+            .ranges()
+            .flat_map(|definition| definition.type_oids().map(i64::from)),
+    );
     for domain in catalog.domains() {
         let ty = domain.column_type();
         oids.push(uqa_sql::catalog::type_metadata::pg_type_oid(&ty));
@@ -219,7 +224,15 @@ fn rewrite_oid_in_use(catalog: &CatalogReadView, oid: i64) -> Result<bool, SQLEr
 }
 
 /// Every projected `pg_type` row and every relation row type occupies the type OID space.
-fn type_oid_in_use(catalog: &CatalogReadView, oid: i64) -> bool {
+pub(crate) fn type_oid_in_use(catalog: &CatalogReadView, oid: i64) -> bool {
+    catalog
+        .ranges()
+        .any(|definition| definition.type_oids().map(i64::from).contains(&oid))
+        || non_range_type_oid_in_use(catalog, oid)
+}
+
+/// Check claims outside the range registry without projecting catalog rows.
+pub(crate) fn non_range_type_oid_in_use(catalog: &CatalogReadView, oid: i64) -> bool {
     if super::pg_catalog::builtin_type_oid_in_use(oid)
         || catalog
             .shells()

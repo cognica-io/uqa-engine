@@ -28,9 +28,11 @@ pub fn named_type_exists<'a>(
     mut enums: impl Iterator<Item = &'a uqa_sql::catalog::enum_type::StoredEnum>,
     mut composites: impl Iterator<Item = &'a uqa_sql::catalog::composite_type::StoredComposite>,
     mut shells: impl Iterator<Item = &'a uqa_sql::catalog::shell_type::StoredShellType>,
+    mut ranges: impl Iterator<Item = &'a uqa_sql::catalog::range_type::StoredRange>,
     identity: &uqa_core::RelationIdentity,
 ) -> bool {
     shells.any(|definition| definition.identity == *identity)
+        || ranges.any(|definition| definition.has_type_name(identity))
         || domains.any(|domain| {
             domain.identity == *identity
                 || (domain.identity.schema == identity.schema
@@ -67,7 +69,14 @@ pub fn catalog_user_type_identity(
     identity: uqa_sql::ast::UserTypeIdentity,
 ) -> Option<ColumnType> {
     let mut resolved = match identity.kind {
-        uqa_sql::ast::UserTypeKind::Range | uqa_sql::ast::UserTypeKind::Multirange => return None,
+        uqa_sql::ast::UserTypeKind::Range => catalog
+            .ranges()
+            .find(|definition| definition.oid == identity.oid)?
+            .column_type(),
+        uqa_sql::ast::UserTypeKind::Multirange => catalog
+            .ranges()
+            .find(|definition| definition.multirange.oid == identity.oid)?
+            .multirange_type(),
         uqa_sql::ast::UserTypeKind::Enum => catalog
             .enums()
             .find(|definition| definition.oid == identity.oid)?
@@ -119,6 +128,11 @@ pub fn resolve_catalog_user_type_by_oid(
                 .map(uqa_sql::catalog::composite_type::StoredComposite::column_type),
         )
         .chain(CATALOG_NAMED_TYPES.iter().cloned())
+        .chain(
+            catalog
+                .ranges()
+                .flat_map(|definition| [definition.column_type(), definition.multirange_type()]),
+        )
     {
         if pg_type_oid(&domain) == i64::from(oid) {
             return Some(domain);
@@ -217,6 +231,9 @@ pub fn catalog_type_display_name(
         }
         ColumnType::Enum(reference) => qualified(&reference.schema, &reference.name),
         ColumnType::Composite(reference) => qualified(&reference.schema, &reference.name),
+        ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
+            qualified(&reference.schema, &reference.name)
+        }
         ColumnType::Domain { schema, name, .. } => qualified(schema, name),
         other => other.sql_name(),
     }
@@ -229,6 +246,14 @@ pub struct CatalogEnumLabels<'a> {
 }
 
 impl uqa_sql::expr::enums::EnumLabelCatalog for CatalogEnumLabels<'_> {
+    fn value_range_type(
+        &self,
+        oid: u32,
+    ) -> Result<Option<std::sync::Arc<uqa_sql::expr::RangeValueDescriptor>>, uqa_sql::SQLError>
+    {
+        self.catalog.range_value_descriptor(oid)
+    }
+
     fn enum_label_position(
         &self,
         label_oid: u32,

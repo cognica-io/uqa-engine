@@ -76,6 +76,13 @@ impl Engine {
 }
 
 impl EnumLabelCatalog for Engine {
+    fn value_range_type(
+        &self,
+        oid: u32,
+    ) -> Result<Option<std::sync::Arc<uqa_sql::expr::RangeValueDescriptor>>, SQLError> {
+        self.catalog_read_view().range_value_descriptor(oid)
+    }
+
     fn value_type_by_oid(&self, oid: u32) -> Result<Option<uqa_sql::ColumnType>, SQLError> {
         uqa_sql::expr::EngineHook::resolve_type_oid(self, oid).map_err(SQLError::Internal)
     }

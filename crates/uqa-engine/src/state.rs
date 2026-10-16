@@ -80,6 +80,7 @@ pub(crate) use uqa_execution::catalog::view::{StoredView, StoredViewKind};
 pub(super) struct DurableCatalogState {
     pub(super) domains: CatalogCell<BTreeMap<String, super::domains::StoredDomain>>,
     pub(super) enums: CatalogCell<uqa_execution::catalog::enum_type::EnumRegistry>,
+    pub(super) ranges: CatalogCell<uqa_execution::catalog::range_type::RangeRegistry>,
     pub(super) shells: CatalogCell<uqa_execution::catalog::shell_type::ShellRegistry>,
     pub(super) comments: CatalogCell<uqa_execution::catalog::comments::CommentRegistry>,
     pub(super) composites: CatalogCell<uqa_execution::catalog::composite_type::CompositeRegistry>,
@@ -129,6 +130,7 @@ pub(super) struct DurableCatalogState {
 pub(super) struct DurableCatalogSnapshot {
     pub(super) domains: Arc<BTreeMap<String, super::domains::StoredDomain>>,
     pub(super) enums: Arc<uqa_execution::catalog::enum_type::EnumRegistry>,
+    pub(super) ranges: Arc<uqa_execution::catalog::range_type::RangeRegistry>,
     pub(super) shells: Arc<uqa_execution::catalog::shell_type::ShellRegistry>,
     pub(super) comments: Arc<uqa_execution::catalog::comments::CommentRegistry>,
     pub(super) composites: Arc<uqa_execution::catalog::composite_type::CompositeRegistry>,
@@ -174,6 +176,7 @@ impl DurableCatalogState {
         Self {
             domains: CatalogCell::new(BTreeMap::new()),
             enums: CatalogCell::new(BTreeMap::new()),
+            ranges: CatalogCell::new(BTreeMap::new()),
             shells: CatalogCell::new(BTreeMap::new()),
             comments: CatalogCell::new(BTreeMap::new()),
             composites: CatalogCell::new(BTreeMap::new()),
@@ -215,6 +218,7 @@ impl DurableCatalogState {
         DurableCatalogSnapshot {
             domains: self.domains.snapshot(),
             enums: self.enums.snapshot(),
+            ranges: self.ranges.snapshot(),
             shells: self.shells.snapshot(),
             comments: self.comments.snapshot(),
             composites: self.composites.snapshot(),
@@ -283,6 +287,7 @@ impl DurableCatalogState {
         self.sql_user_functions
             .restore(&snapshot.sql_user_functions);
         self.enums.restore(&snapshot.enums);
+        self.ranges.restore(&snapshot.ranges);
         self.shells.restore(&snapshot.shells);
         self.comments.restore(&snapshot.comments);
         self.composites.restore(&snapshot.composites);

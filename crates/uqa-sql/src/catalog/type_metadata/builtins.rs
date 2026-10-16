@@ -112,6 +112,8 @@ pub fn builtin_type_name(ty: &ColumnType) -> Option<&'static str> {
             | ColumnType::Domain { .. }
             | ColumnType::Enum(_)
             | ColumnType::Composite(_)
+            | ColumnType::DeclaredRange(_)
+            | ColumnType::DeclaredMultirange(_)
     ) {
         return None;
     }
@@ -130,6 +132,9 @@ pub fn pg_type_name(ty: &ColumnType) -> String {
         ColumnType::Domain { name, .. } => name.clone(),
         ColumnType::Enum(reference) => reference.name.clone(),
         ColumnType::Composite(reference) => reference.name.clone(),
+        ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
+            reference.name.clone()
+        }
         ColumnType::Array(element) => match element.as_ref() {
             ColumnType::Array(_) => pg_type_name(element),
             element => format!("_{}", pg_type_name(element)),

@@ -133,6 +133,7 @@ fn recorded_names(
                 snapshot.enums(),
                 snapshot.composites(),
                 snapshot.shells(),
+                snapshot.ranges(),
                 &identity,
             )
         {
@@ -174,6 +175,7 @@ fn prepare(
                         snapshot.enums(),
                         snapshot.composites(),
                         snapshot.shells(),
+                        snapshot.ranges(),
                         &identity,
                     )
             })

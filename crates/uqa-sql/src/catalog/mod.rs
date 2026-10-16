@@ -915,6 +915,7 @@ pub mod events;
 pub mod foreign_server;
 pub mod foreign_wrapper;
 pub mod index;
+pub mod range_type;
 pub mod roles;
 pub mod shell_type;
 

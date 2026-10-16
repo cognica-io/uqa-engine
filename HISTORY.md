@@ -16,9 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Upgrade persistent databases to SQLite record format 64 and redb record format 60 for shell type identities and transactional descriptions, including packed bit values and their type descriptors. Close all owners, retain a pre-upgrade backup and update every owner together; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).
+- Upgrade persistent databases to SQLite record format 65 and redb record format 61 for declared range definitions, shell type identities and transactional descriptions, including packed bit values and their type descriptors. Close all owners, retain a pre-upgrade backup and update every owner together; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).
 
 ### Fixed
+
+- Preserve declared range and multirange names in type metadata instead of treating them as built-in types. Retain stored type identities, catalog generations and physical value descriptors across provider refresh and rollback.
 
 - Preserve PostgreSQL endpoint alignment when observing declared multirange physical values, including UUID and smallint bounds.
 

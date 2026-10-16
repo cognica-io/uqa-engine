@@ -1,0 +1,265 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+  "setup": "CREATE TYPE r AS RANGE(subtype=integer)",
+  "cases": [
+    {
+      "sql": "SELECT oid,typname,typtype,typowner::oid,typarray,typalign,typstorage,typcollation,typrelid,typlen,typbyval,typcategory,typsubscript::oid,typelem,typinput::oid,typoutput::oid,typreceive::oid,typsend::oid,typanalyze::oid FROM pg_type WHERE typname IN ('r','_r','r_multirange','_r_multirange') ORDER BY oid",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "typname",
+            "typtype",
+            "typowner",
+            "typarray",
+            "typalign",
+            "typstorage",
+            "typcollation",
+            "typrelid",
+            "typlen",
+            "typbyval",
+            "typcategory",
+            "typsubscript",
+            "typelem",
+            "typinput",
+            "typoutput",
+            "typreceive",
+            "typsend",
+            "typanalyze"
+          ],
+          "type_oids": [
+            26,
+            19,
+            18,
+            26,
+            26,
+            18,
+            18,
+            26,
+            26,
+            21,
+            16,
+            18,
+            26,
+            26,
+            26,
+            26,
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "36790",
+              "_r",
+              "b",
+              "10",
+              "0",
+              "i",
+              "x",
+              "0",
+              "0",
+              "-1",
+              "f",
+              "A",
+              "6179",
+              "36793",
+              "750",
+              "751",
+              "2400",
+              "2401",
+              "3816"
+            ],
+            [
+              "36791",
+              "r_multirange",
+              "m",
+              "10",
+              "36792",
+              "i",
+              "x",
+              "0",
+              "0",
+              "-1",
+              "f",
+              "R",
+              "0",
+              "0",
+              "4231",
+              "4232",
+              "4233",
+              "4234",
+              "4242"
+            ],
+            [
+              "36792",
+              "_r_multirange",
+              "b",
+              "10",
+              "0",
+              "i",
+              "x",
+              "0",
+              "0",
+              "-1",
+              "f",
+              "A",
+              "6179",
+              "36791",
+              "750",
+              "751",
+              "2400",
+              "2401",
+              "3816"
+            ],
+            [
+              "36793",
+              "r",
+              "r",
+              "10",
+              "36790",
+              "i",
+              "x",
+              "0",
+              "0",
+              "-1",
+              "f",
+              "R",
+              "0",
+              "0",
+              "3834",
+              "3835",
+              "3836",
+              "3837",
+              "3916"
+            ]
+          ]
+        }
+      ],
+      "id": "types"
+    },
+    {
+      "sql": "SELECT rngtypid,rngsubtype,rngmultitypid,rngcollation,rngsubopc,rngcanonical::oid,rngsubdiff::oid FROM pg_range WHERE rngtypid='r'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rngtypid",
+            "rngsubtype",
+            "rngmultitypid",
+            "rngcollation",
+            "rngsubopc",
+            "rngcanonical",
+            "rngsubdiff"
+          ],
+          "type_oids": [
+            26,
+            26,
+            26,
+            26,
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "36793",
+              "23",
+              "36791",
+              "0",
+              "1978",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "range"
+    },
+    {
+      "sql": "SELECT classid::regclass::text,objid,objsubid,refclassid::regclass::text,refobjid,refobjsubid,deptype FROM pg_depend WHERE classid='pg_type'::regclass AND objid IN (SELECT oid FROM pg_type WHERE typname IN ('r','_r','r_multirange','_r_multirange')) ORDER BY classid,objid,refclassid,refobjid",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "classid",
+            "objid",
+            "objsubid",
+            "refclassid",
+            "refobjid",
+            "refobjsubid",
+            "deptype"
+          ],
+          "type_oids": [
+            25,
+            26,
+            23,
+            25,
+            26,
+            23,
+            18
+          ],
+          "rows": [
+            [
+              "pg_type",
+              "36790",
+              "0",
+              "pg_type",
+              "36793",
+              "0",
+              "i"
+            ],
+            [
+              "pg_type",
+              "36791",
+              "0",
+              "pg_namespace",
+              "2200",
+              "0",
+              "n"
+            ],
+            [
+              "pg_type",
+              "36791",
+              "0",
+              "pg_type",
+              "36793",
+              "0",
+              "i"
+            ],
+            [
+              "pg_type",
+              "36792",
+              "0",
+              "pg_type",
+              "36791",
+              "0",
+              "i"
+            ],
+            [
+              "pg_type",
+              "36793",
+              "0",
+              "pg_namespace",
+              "2200",
+              "0",
+              "n"
+            ]
+          ]
+        }
+      ],
+      "id": "dependencies"
+    }
+  ]
+}

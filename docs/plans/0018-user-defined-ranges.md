@@ -1,5 +1,7 @@
 # User-defined ranges and multiranges
 
+The active record-65 work is [declared range catalog generations](0018-declared-range-catalog.md), including metadata panic #943, durable claims, retained descriptors and catalog projections. [Physical production](0018-declared-range-encoding.md) is verified and merged in PR #942 as `fb86fa9fc`, closing #941 after both actual platform reports pass 798 checks / 1,192 cases and eight independent-process histories. [Selected construction](0018-declared-range-construction.md) is verified and merged in #940; observation #937 and comparison/key consumers #938 are also merged. SQL declarations, selected support invocation, generated constructors, full lifecycle/operators and final provider/binding acceptance remain open; no prerequisite alone completes record 65.
+
 This plan preserves original record 65 of the [extension task ledger](0018-extension-progress.md) and the range contract in the [type extension design](../design/data-model-and-type-extensions.md). The completed composite prerequisite does not implement this unit. Keep each implementation boundary in a focused PR, retain all original task records in successors, and record actual verification before closing a boundary.
 
 ## Current boundary

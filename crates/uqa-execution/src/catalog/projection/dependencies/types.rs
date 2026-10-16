@@ -8,7 +8,8 @@
 
 use super::{ColumnScope, ConstraintOwner, DependencyBuilder, MemberObject, References};
 use uqa_sql::catalog::dependencies::{
-    DependencyKind, ObjectAddress, CONSTRAINT_CLASS, RELATION_CLASS, TYPE_CLASS,
+    DependencyKind, ObjectAddress, COLLATION_CLASS, CONSTRAINT_CLASS, OPCLASS_CLASS,
+    PROCEDURE_CLASS, RELATION_CLASS, TYPE_CLASS,
 };
 use uqa_sql::SQLError;
 
@@ -26,6 +27,39 @@ impl DependencyBuilder<'_> {
             self.record_array_type(definition.array_oid, definition.oid);
             let enum_type = ObjectAddress::whole(TYPE_CLASS, definition.oid);
             self.record_namespace(enum_type, &definition.identity.schema);
+        }
+        for definition in catalog.ranges() {
+            let range = ObjectAddress::whole(TYPE_CLASS, definition.oid);
+            let multirange = ObjectAddress::whole(TYPE_CLASS, definition.multirange.oid);
+            self.record_array_type(definition.array_oid, definition.oid);
+            self.record_array_type(definition.multirange.array_oid, definition.multirange.oid);
+            self.record_namespace(range, &definition.identity.schema);
+            self.record_namespace(multirange, &definition.multirange.identity.schema);
+            self.recorder
+                .record(multirange, range, DependencyKind::Internal);
+            for (class, oid) in [
+                (
+                    TYPE_CLASS,
+                    super::catalog_oid(uqa_sql::catalog::type_metadata::pg_type_oid(
+                        &definition.subtype,
+                    ))?,
+                ),
+                (OPCLASS_CLASS, definition.subtype_operator_class),
+                (COLLATION_CLASS, definition.collation_oid),
+                (PROCEDURE_CLASS, definition.canonical_oid.unwrap_or(0)),
+                (
+                    PROCEDURE_CLASS,
+                    definition.subtype_difference_oid.unwrap_or(0),
+                ),
+            ] {
+                if oid != 0 {
+                    self.recorder.record(
+                        range,
+                        ObjectAddress::whole(class, oid),
+                        DependencyKind::Normal,
+                    );
+                }
+            }
         }
         for definition in catalog.composites() {
             // `heap_create_with_catalog`: each attribute depends on its type; `AddNewRelationType`: the array type, and then the row type, which a standalone composite relation belongs to.

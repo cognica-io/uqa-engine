@@ -283,6 +283,7 @@ impl Engine {
 
             domains: durable.domains.clone(),
             enums: durable.enums.clone(),
+            ranges: durable.ranges.clone(),
             shells: durable.shells.clone(),
             comments: durable.comments.clone(),
             composites: durable.composites.clone(),
@@ -519,6 +520,7 @@ mod composites;
 mod domains;
 mod enums;
 mod namespaces;
+mod range_types;
 mod shell_types;
 
 mod object_removal;

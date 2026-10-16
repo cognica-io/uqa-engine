@@ -63,6 +63,7 @@
         "crates/uqa-engine/src/capabilities/query_scope.rs",
         "crates/uqa-engine/src/capabilities/query_semantics.rs",
         "crates/uqa-engine/src/capabilities/query_sources.rs",
+        "crates/uqa-engine/src/capabilities/range_types.rs",
         "crates/uqa-engine/src/capabilities/referential.rs",
         "crates/uqa-engine/src/capabilities/relation_alteration.rs",
         "crates/uqa-engine/src/capabilities/relation_removal.rs",

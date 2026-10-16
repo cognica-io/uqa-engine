@@ -347,6 +347,15 @@ impl CatalogObjects {
                 },
             );
         }
+        for definition in catalog.ranges() {
+            for (oid, array) in [
+                (definition.oid, definition.array_oid),
+                (definition.multirange.oid, definition.multirange.array_oid),
+            ] {
+                self.add_type(oid, TypeObject::Defined);
+                self.add_type(array, TypeObject::Array { element: oid });
+            }
+        }
         for definition in catalog.composites() {
             self.add_type(definition.oid, TypeObject::Defined);
             self.add_type(
