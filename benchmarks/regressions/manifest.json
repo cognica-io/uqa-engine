@@ -9656,7 +9656,7 @@
       ],
       "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
       "capability": "Bit statement and provider retention",
-      "workload": "31 independently captured PostgreSQL statements including three observations after actual persistent reopening on four providers.",
+      "workload": "36 independently captured PostgreSQL statements including three observations after actual persistent reopening on four providers.",
       "invariant": "Types, modifiers, values, diagnostics, arrays/records, index uniqueness and rollback remain unchanged after provider serialization."
     },
     {
@@ -11444,8 +11444,8 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/index/operator_classes/btree/binding/tests.rs",
       "capability": "Selected B-tree input binding",
-      "workload": "31 independently captured PostgreSQL selected range subtype/class declarations, including domains, aliases, arrays, records, enums and binary-compatible non-default inputs.",
-      "invariant": "All 23 accepted bindings and eight exact errors match PostgreSQL; binding retains the original class/type references and releases every cast lookup allocation.",
+      "workload": "36 independently captured PostgreSQL selected range subtype/class declarations, including domains, aliases, arrays, records, enums and binary-compatible non-default inputs.",
+      "invariant": "All 23 accepted bindings and thirteen exact errors match PostgreSQL; binding retains the original class/type references and releases every cast lookup allocation.",
       "case_names": [
         ""
       ]

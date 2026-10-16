@@ -22,19 +22,21 @@ pub struct BoundBTreeOperatorClass<'a> {
 }
 
 impl BuiltinBTreeOperatorClass {
-    /// Bind an explicitly selected class as `PostgreSQL`'s `IsBinaryCoercible` check does. Function and assignment-only casts do not make an input acceptable.
+    /// Bind an explicitly selected class as `PostgreSQL`'s `IsBinaryCoercible` check does. The caller supplies the selected name's diagnostic spelling, including any schema qualifier. Function and assignment-only casts do not make an input acceptable.
     pub fn bind_input<'a>(
         &'static self,
         declared_type: &'a ColumnType,
+        selected_name: &str,
         control: &ProductionControl<'_>,
     ) -> Result<BoundBTreeOperatorClass<'a>, SQLError> {
         if !accepts_input(self.input_type_oid, declared_type, control)? {
+            let diagnostic_type = declared_type.without_type_modifiers_with_control(control)?;
             return Err(SQLError::Routine {
                 sqlstate: "42804".into(),
                 message: format!(
                     "operator class \"{}\" does not accept data type {}",
-                    self.name,
-                    declared_type.display_name()
+                    selected_name,
+                    diagnostic_type.display_name()
                 ),
             });
         }
