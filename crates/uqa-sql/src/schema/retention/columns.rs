@@ -118,6 +118,10 @@ impl<'a> Walker<'a> {
                 self.text(&reference.schema)?;
                 self.text(&reference.name)
             }
+            ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
+                self.text(&reference.schema)?;
+                self.text(&reference.name)
+            }
             ColumnType::Array(element) => self.boxed(element.as_ref(), Node::Type),
             ColumnType::Domain {
                 schema,

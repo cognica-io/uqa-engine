@@ -11,11 +11,17 @@ use super::ColumnType;
 const ENUM_PREFIX: &str = "enum#";
 const DOMAIN_PREFIX: &str = "domain#";
 const COMPOSITE_PREFIX: &str = "composite#";
+const RANGE_PREFIX: &str = "range#";
+const MULTIRANGE_PREFIX: &str = "multirange#";
 
 pub(super) fn write_identity(ty: &ColumnType, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match ty {
         ColumnType::Enum(reference) => write!(f, "{ENUM_PREFIX}{}", reference.oid),
         ColumnType::Composite(reference) => write!(f, "{COMPOSITE_PREFIX}{}", reference.oid),
+        ColumnType::DeclaredRange(reference) => write!(f, "{RANGE_PREFIX}{}", reference.oid),
+        ColumnType::DeclaredMultirange(reference) => {
+            write!(f, "{MULTIRANGE_PREFIX}{}", reference.oid)
+        }
         ColumnType::Domain { oid, .. } => write!(f, "{DOMAIN_PREFIX}{oid}"),
         _ => unreachable!("catalog identity formatter requires a user-defined scalar type"),
     }
@@ -26,6 +32,8 @@ pub enum UserTypeKind {
     Enum,
     Domain,
     Composite,
+    Range,
+    Multirange,
 }
 
 /// A parsed identity: the type's kind and OID, and the number of array dimensions around it.
@@ -50,6 +58,10 @@ impl UserTypeIdentity {
             (UserTypeKind::Enum, oid)
         } else if let Some(oid) = element.strip_prefix(COMPOSITE_PREFIX) {
             (UserTypeKind::Composite, oid)
+        } else if let Some(oid) = element.strip_prefix(RANGE_PREFIX) {
+            (UserTypeKind::Range, oid)
+        } else if let Some(oid) = element.strip_prefix(MULTIRANGE_PREFIX) {
+            (UserTypeKind::Multirange, oid)
         } else {
             (UserTypeKind::Domain, element.strip_prefix(DOMAIN_PREFIX)?)
         };
@@ -74,6 +86,12 @@ impl ColumnType {
                 Some(format!("{COMPOSITE_PREFIX}{}", reference.oid))
             }
             ColumnType::Domain { oid, .. } => Some(format!("{DOMAIN_PREFIX}{oid}")),
+            ColumnType::DeclaredRange(reference) => {
+                Some(format!("{RANGE_PREFIX}{}", reference.oid))
+            }
+            ColumnType::DeclaredMultirange(reference) => {
+                Some(format!("{MULTIRANGE_PREFIX}{}", reference.oid))
+            }
             ColumnType::Array(element) => element
                 .user_type_identity()
                 .map(|element| format!("{element}[]")),

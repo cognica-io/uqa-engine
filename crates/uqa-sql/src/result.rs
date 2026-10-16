@@ -16,6 +16,7 @@ use crate::RowSchema;
 mod labels;
 mod text;
 pub use labels::render_result_enum_labels;
+pub use text::format_postgres_text_with_catalog_and_control;
 pub use text::{format_postgres_text, format_postgres_text_with_catalog};
 
 pub type ResultRow = BTreeMap<String, Value>;

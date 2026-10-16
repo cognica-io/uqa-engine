@@ -21,7 +21,9 @@ const LOWER_INFINITE: u8 = 8;
 const UPPER_INFINITE: u8 = 16;
 const ABSOLUTE_OFFSET: u32 = 1 << 31;
 
+mod catalog;
 mod encoding;
+use catalog::PhysicalRangeType;
 pub(crate) use encoding::encode;
 
 /// Observe already admitted bytes without rerunning input, canonicalization, or domain checks. Multirange members stream into the original output allowance.
@@ -31,28 +33,49 @@ pub(crate) fn read(
     catalog: Option<&dyn crate::expr::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    read_class(bytes, catalog::is_multirange(ty)?, catalog, control)
+}
+
+pub(crate) fn read_class(
+    bytes: &[u8],
+    multirange: bool,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
     control.check()?;
-    let subtype = physical_subtype(bytes, ty, catalog)?;
+    let selected = catalog::resolve_class(bytes, multirange, catalog)?;
+    let native_endpoint;
+    let (oid, endpoint) = match &selected {
+        PhysicalRangeType::Native(subtype) => {
+            native_endpoint = subtype.scalar_type();
+            (
+                crate::catalog::type_metadata::pg_type_oid(&ColumnType::Range(*subtype)) as u32,
+                &native_endpoint,
+            )
+        }
+        PhysicalRangeType::Declared(descriptor) => (descriptor.range_oid, &descriptor.endpoint),
+    };
     let mut output = ProductionString::new(*control);
-    match ty {
-        ColumnType::Range(_) => {
-            let range = read_range(bytes, subtype, control)?;
-            super::production::write_range(&range, &mut output, control)?;
-        }
-        ColumnType::Multirange(_) => {
-            let mut ranges = Members::new(bytes, subtype)?;
-            output.push('{')?;
-            let mut separator = false;
-            while let Some(range) = ranges.next(control)? {
-                if separator {
-                    output.push(',')?;
-                }
-                super::production::write_range(&range, &mut output, control)?;
-                separator = true;
+    let render = |value: &Value, control: &ProductionControl<'_>| {
+        crate::result::format_postgres_text_with_catalog_and_control(
+            value, endpoint, catalog, control,
+        )
+    };
+    if multirange {
+        let mut ranges = Members::new(bytes, oid, endpoint, catalog)?;
+        output.push('{')?;
+        let mut separator = false;
+        while let Some(range) = ranges.next(control)? {
+            if separator {
+                output.push(',')?;
             }
-            output.push('}')?;
+            super::production::write_range_with(&range, &mut output, control, render)?;
+            separator = true;
         }
-        _ => return Err(corrupt("non-range payload type")),
+        output.push('}')?;
+    } else {
+        let range = read_range(bytes, oid, endpoint, catalog, control)?;
+        super::production::write_range_with(&range, &mut output, control, render)?;
     }
     let (text, memory) = output.finish()?.into_parts();
     Ok(control.finish(Value::Str(text), memory)?)
@@ -67,12 +90,13 @@ pub(in crate::expr) fn comparison(
 ) -> Result<RangeComparisonValue, SQLError> {
     control.check()?;
     let subtype = physical_subtype(bytes, ty, catalog)?;
+    let endpoint = subtype.scalar_type();
     match ty {
         ColumnType::Range(_) => Ok(RangeComparisonValue::Range(read_range(
-            bytes, subtype, control,
+            bytes, subtype, &endpoint, catalog, control,
         )?)),
         ColumnType::Multirange(_) => {
-            let mut input = Members::new(bytes, subtype)?;
+            let mut input = Members::new(bytes, subtype, &endpoint, catalog)?;
             let mut ranges = ProductionVec::new(*control);
             while let Some(range) = input.next(control)? {
                 ranges.push_produced(range)?;
@@ -91,74 +115,52 @@ fn physical_subtype(
     declared: &ColumnType,
     catalog: Option<&dyn crate::expr::SQLValueCatalog>,
 ) -> Result<RangeSubtype, SQLError> {
-    use crate::catalog::type_metadata::{
-        builtin_array_element, builtin_scalar_type, routine_pseudo_type_name,
-    };
-    let oid = word(bytes)?;
-    let actual = builtin_scalar_type(oid);
-    match (declared, actual) {
-        (ColumnType::Range(_), Some(ColumnType::Range(subtype)))
-        | (ColumnType::Multirange(_), Some(ColumnType::Multirange(subtype))) => {
-            return Ok(*subtype)
-        }
-        (ColumnType::Range(_) | ColumnType::Multirange(_), _) => {}
-        _ => return Err(corrupt("non-range payload type")),
+    match catalog::resolve(bytes, declared, catalog)? {
+        PhysicalRangeType::Native(subtype) => Ok(subtype),
+        PhysicalRangeType::Declared(_) => Err(SQLError::Internal(
+            "declared range comparison requires selected endpoint operations".into(),
+        )),
     }
-    let exists = actual.is_some()
-        || builtin_array_element(oid).is_some()
-        || routine_pseudo_type_name(i64::from(oid)).is_some()
-        || catalog
-            .map(|catalog| catalog.value_type_exists(oid))
-            .transpose()?
-            .unwrap_or(false);
-    if !exists {
-        return Err(SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("type with OID {oid} does not exist"),
-        });
-    }
-    Err(SQLError::Routine {
-        sqlstate: "XX000".into(),
-        message: format!(
-            "type {oid} is not a {} type",
-            if matches!(declared, ColumnType::Range(_)) {
-                "range"
-            } else {
-                "multirange"
-            }
-        ),
-    })
 }
 
-fn read_range(
+fn read_range<I: Copy>(
     bytes: &[u8],
-    subtype: RangeSubtype,
+    subtype: I,
+    endpoint: &ColumnType,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
     control: &ProductionControl<'_>,
-) -> Result<Produced<CanonicalRange>, SQLError> {
+) -> Result<Produced<CanonicalRange<I>>, SQLError> {
     let flags = *bytes
         .last()
         .filter(|_| bytes.len() >= 5)
         .ok_or_else(|| corrupt("truncated range payload"))?;
     let bounds = &bytes[4..bytes.len() - 1];
-    let (range, consumed) = read_bounds(bounds, flags, subtype, control)?;
+    let (range, consumed) = read_bounds(bounds, flags, subtype, endpoint, catalog, control)?;
     if consumed != bounds.len() {
         return Err(corrupt("invalid range bound length"));
     }
     Ok(range)
 }
 
-struct Members<'a> {
+struct Members<'a, I> {
     bytes: &'a [u8],
     bounds: &'a [u8],
     flags: &'a [u8],
-    subtype: RangeSubtype,
+    subtype: I,
+    endpoint: &'a ColumnType,
+    catalog: Option<&'a dyn crate::expr::SQLValueCatalog>,
     index: usize,
     offset: usize,
     previous: usize,
 }
 
-impl<'a> Members<'a> {
-    fn new(bytes: &'a [u8], subtype: RangeSubtype) -> Result<Self, SQLError> {
+impl<'a, I: Copy> Members<'a, I> {
+    fn new(
+        bytes: &'a [u8],
+        subtype: I,
+        endpoint: &'a ColumnType,
+        catalog: Option<&'a dyn crate::expr::SQLValueCatalog>,
+    ) -> Result<Self, SQLError> {
         let count = word(bytes.get(4..).unwrap_or_default())? as usize;
         let flags_start = count
             .saturating_sub(1)
@@ -169,7 +171,7 @@ impl<'a> Members<'a> {
             .checked_add(count)
             .filter(|end| *end <= bytes.len())
             .ok_or_else(|| corrupt("invalid multirange count"))?;
-        let start = align(flags_end + 4, subtype)? - 4;
+        let start = align(flags_end + 4, endpoint)? - 4;
         let bounds = bytes
             .get(start..)
             .ok_or_else(|| corrupt("truncated multirange payload"))?;
@@ -178,6 +180,8 @@ impl<'a> Members<'a> {
             bounds,
             flags: &bytes[flags_start..flags_end],
             subtype,
+            endpoint,
+            catalog,
             index: 0,
             offset: 0,
             previous: 0,
@@ -187,7 +191,7 @@ impl<'a> Members<'a> {
     fn next(
         &mut self,
         control: &ProductionControl<'_>,
-    ) -> Result<Option<Produced<CanonicalRange>>, SQLError> {
+    ) -> Result<Option<Produced<CanonicalRange<I>>>, SQLError> {
         control.check()?;
         if self.index == self.flags.len() {
             if self.offset != self.bounds.len() {
@@ -217,22 +221,31 @@ impl<'a> Members<'a> {
             .bounds
             .get(self.offset..)
             .ok_or_else(|| corrupt("invalid multirange offset"))?;
-        let (range, consumed) = read_bounds(remaining, flag, self.subtype, control)?;
+        let (range, consumed) = read_bounds(
+            remaining,
+            flag,
+            self.subtype,
+            self.endpoint,
+            self.catalog,
+            control,
+        )?;
         self.offset = self
             .offset
-            .checked_add(align(consumed, self.subtype)?)
+            .checked_add(align(consumed, self.endpoint)?)
             .ok_or_else(|| corrupt("invalid multirange length"))?;
         self.index += 1;
         Ok(Some(range))
     }
 }
 
-fn read_bounds(
+fn read_bounds<I>(
     bytes: &[u8],
     flags: u8,
-    subtype: RangeSubtype,
+    subtype: I,
+    endpoint: &ColumnType,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
     control: &ProductionControl<'_>,
-) -> Result<(Produced<CanonicalRange>, usize), SQLError> {
+) -> Result<(Produced<CanonicalRange<I>>, usize), SQLError> {
     if flags & !31 != 0
         || (flags & EMPTY != 0 && flags != EMPTY)
         || flags & (LOWER_INFINITE | LOWER_INCLUSIVE) == LOWER_INFINITE | LOWER_INCLUSIVE
@@ -251,14 +264,16 @@ fn read_bounds(
         bytes,
         &mut offset,
         flags & LOWER_INFINITE != 0,
-        subtype,
+        endpoint,
+        catalog,
         control,
     )?;
     let upper = read_bound(
         bytes,
         &mut offset,
         flags & UPPER_INFINITE != 0,
-        subtype,
+        endpoint,
+        catalog,
         control,
     )?;
     let (lower, lower_memory) = lower.into_parts();
@@ -281,25 +296,21 @@ fn read_bound(
     bytes: &[u8],
     offset: &mut usize,
     infinite: bool,
-    subtype: RangeSubtype,
+    endpoint: &ColumnType,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Option<Value>>, SQLError> {
     control.check()?;
     if infinite {
         return Ok(control.finish(None, control.empty_reservation())?);
     }
-    let value =
-        crate::expr::datums::inline::read(bytes, offset, 0, &subtype.scalar_type(), None, control)?;
+    let value = crate::expr::datums::inline::read(bytes, offset, 0, endpoint, catalog, control)?;
     let (value, memory) = value.into_parts();
     Ok(control.finish(Some(value), memory)?)
 }
 
-fn align(offset: usize, subtype: RangeSubtype) -> Result<usize, SQLError> {
-    let mask = if pg_type_align(&subtype.scalar_type()) == "d" {
-        7
-    } else {
-        3
-    };
+fn align(offset: usize, endpoint: &ColumnType) -> Result<usize, SQLError> {
+    let mask = if pg_type_align(endpoint) == "d" { 7 } else { 3 };
     offset
         .checked_add(mask)
         .map(|offset| offset & !mask)

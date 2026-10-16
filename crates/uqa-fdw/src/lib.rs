@@ -110,6 +110,18 @@ pub enum ColumnType {
     Interval,
     Range(RangeSubtype),
     Multirange(RangeSubtype),
+    /// Catalog-bound range. Predicates require the SQL-selected endpoint operations.
+    DeclaredRange {
+        schema: String,
+        name: String,
+        oid: u32,
+    },
+    /// Catalog-bound multirange, independently named from its range type.
+    DeclaredMultirange {
+        schema: String,
+        name: String,
+        oid: u32,
+    },
     Vector(u32),
     Tensor(u32),
     Domain {

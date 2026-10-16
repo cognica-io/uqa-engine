@@ -67,6 +67,7 @@ pub fn catalog_user_type_identity(
     identity: uqa_sql::ast::UserTypeIdentity,
 ) -> Option<ColumnType> {
     let mut resolved = match identity.kind {
+        uqa_sql::ast::UserTypeKind::Range | uqa_sql::ast::UserTypeKind::Multirange => return None,
         uqa_sql::ast::UserTypeKind::Enum => catalog
             .enums()
             .find(|definition| definition.oid == identity.oid)?

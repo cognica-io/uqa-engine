@@ -76,6 +76,15 @@ pub fn convert_value_to_column_type_with_control(
                 reference.oid
             ))),
         },
+        ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
+            match &*value {
+                Value::Datum(datum) if datum.type_oid() == reference.oid => Ok(value),
+                _ => Err(SQLError::Internal(format!(
+                    "range input for type OID {} requires catalog-aware conversion",
+                    reference.oid
+                ))),
+            }
+        }
         ColumnType::SmallInteger => cast_value_from_with_control(&value, "smallint", None, control),
         ColumnType::Integer => cast_value_from_with_control(&value, "integer", None, control),
         ColumnType::BigInteger => cast_value_from_with_control(&value, "bigint", None, control),

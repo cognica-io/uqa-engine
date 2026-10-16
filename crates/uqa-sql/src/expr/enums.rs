@@ -19,7 +19,10 @@ use super::{Result, SQLError};
 use crate::ast::ColumnType;
 
 mod functions;
+mod output;
 mod physical;
+pub(crate) use output::label_text_with_control as enum_label_text_with_control;
+pub(crate) use output::render_with_control as render_enum_labels_with_control;
 #[cfg(test)]
 mod tests;
 pub use functions::{

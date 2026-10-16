@@ -10432,6 +10432,97 @@
       "invariant": "Private names and descriptions survive committed peer refresh while other sessions observe only committed catalog generations."
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_output_preserves_postgresql_identity_and_typed_endpoints",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests/ranges.rs",
+      "capability": "Declared range value observation",
+      "workload": "Read five declared endpoint families and observe an enum rename through unchanged PostgreSQL-owned range bytes.",
+      "invariant": "Declared identity and bounds remain intact; output neither executes input nor rechecks a changed domain."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_output_rejects_truncation_exhaustion_and_both_cancellations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests/ranges.rs",
+      "capability": "Declared range value observation",
+      "workload": "Truncate every range at every byte and exhaust or cancel either original producer owner.",
+      "invariant": "Every failed read releases admitted endpoint and output buffers; no out-of-bounds access or partial result."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_multirange_array_and_empty_output_match_postgresql_owned_payloads",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests/ranges.rs",
+      "capability": "Declared range value observation",
+      "workload": "Read PostgreSQL multiranges, range arrays, empty and unbounded constants across five endpoint families under varying allowances.",
+      "invariant": "Typed nested payload output matches the independent reference; output and member scratch share the original allowance."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_output_admits_nested_enum_labels_and_preserves_container_text",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests/ranges.rs",
+      "capability": "Declared range value observation",
+      "workload": "Render enum labels inside legacy rows, lists, maps and records with sufficient and insufficient output budgets.",
+      "invariant": "Existing container text remains intact and failed output releases all transformed buffers."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_identity_survives_rename_arrays_and_controlled_copy",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/ast/ranges/tests.rs",
+      "capability": "Declared range value observation",
+      "workload": "Rename and copy a declared range inside an array while retaining its immutable OID.",
+      "invariant": "Names do not define equality; owned names and array metadata require the invoking allowance."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_and_multirange_keep_distinct_catalog_and_array_identities",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/ast/ranges/tests.rs",
+      "capability": "Declared range value observation",
+      "workload": "Observe separate scalar and array identities of one range and multirange pair.",
+      "invariant": "Range and multirange remain separate variable-width, by-reference SQL types."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_references_require_a_current_definition_before_publication",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/ast/ranges/tests.rs",
+      "capability": "Declared range value observation",
+      "workload": "Resolve retained range references through direct, array, domain and ALTER declaration paths.",
+      "invariant": "Missing identities are rejected before publication; valid identities refresh current names without changing the bound type."
+    },
+    {
       "package": "uqa-core",
       "kind": "lib",
       "test": "anonymous_row_production_preserves_ownership_and_releases_cancelled_inputs",

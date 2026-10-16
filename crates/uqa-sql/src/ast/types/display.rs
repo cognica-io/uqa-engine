@@ -101,6 +101,9 @@ impl ColumnType {
             ColumnType::Composite(reference) => {
                 visible_type_name_with_control(&reference.schema, &reference.name, control)
             }
+            ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
+                visible_type_name_with_control(&reference.schema, &reference.name, control)
+            }
             ColumnType::Domain { schema, name, .. } => {
                 visible_type_name_with_control(schema, name, control)
             }
@@ -113,7 +116,11 @@ impl ColumnType {
                 }
                 if matches!(
                     leaf,
-                    ColumnType::Enum(_) | ColumnType::Composite(_) | ColumnType::Domain { .. }
+                    ColumnType::Enum(_)
+                        | ColumnType::Composite(_)
+                        | ColumnType::Domain { .. }
+                        | ColumnType::DeclaredRange(_)
+                        | ColumnType::DeclaredMultirange(_)
                 ) {
                     let leaf = leaf.display_name_with_control(control)?;
                     control.format(format_args!("{}[]", leaf.as_str()))

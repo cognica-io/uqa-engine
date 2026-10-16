@@ -87,7 +87,7 @@ pub fn vector_value_to_string(value: &Value) -> Result<Option<String>> {
         .map(|text| text.map(|text| text.into_uncontrolled().expect("ordinary vector text")))
 }
 
-pub(super) fn vector_value_to_string_with_control(
+pub(crate) fn vector_value_to_string_with_control(
     value: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<String>>> {

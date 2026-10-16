@@ -13,6 +13,15 @@ impl ColumnType {
     /// Give every reference to the user-defined type `oid`, including array elements and domain bases, the type's current schema and name. Returns whether a reference changed.
     pub fn rename_user_type(&mut self, oid: u32, identity: &RelationIdentity) -> bool {
         match self {
+            ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference)
+                if reference.oid == oid =>
+            {
+                let changed =
+                    reference.schema != identity.schema || reference.name != identity.name;
+                reference.schema.clone_from(&identity.schema);
+                reference.name.clone_from(&identity.name);
+                changed
+            }
             ColumnType::Enum(reference) if reference.oid == oid => {
                 let changed =
                     reference.schema != identity.schema || reference.name != identity.name;

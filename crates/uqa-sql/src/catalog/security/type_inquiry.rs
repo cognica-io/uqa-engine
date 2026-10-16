@@ -26,6 +26,9 @@ pub fn usage_governing_type(ty: &ColumnType) -> Option<(u32, &ColumnType)> {
         ColumnType::Array(element) => usage_governing_type(element),
         ColumnType::Enum(reference) => Some((reference.oid, ty)),
         ColumnType::Composite(reference) => Some((reference.oid, ty)),
+        ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
+            Some((reference.oid, ty))
+        }
         ColumnType::Domain { oid, .. } => Some((*oid, ty)),
         _ => None,
     }

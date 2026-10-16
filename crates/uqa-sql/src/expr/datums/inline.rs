@@ -58,6 +58,21 @@ pub(in crate::expr) fn read(
         let payload = remaining
             .get(header..length)
             .ok_or_else(|| corrupt("invalid inline datum length"))?;
+        if matches!(
+            ty,
+            ColumnType::DeclaredRange(_) | ColumnType::DeclaredMultirange(_)
+        ) {
+            let mut bytes = ProductionVec::new(*control);
+            bytes.reserve(length)?;
+            for byte in &remaining[..length] {
+                bytes.push_copy(*byte)?;
+            }
+            let (datum, memory) =
+                DatumValue::with_control(pg_type_oid(ty) as u32, 0, bytes.finish()?, control)?
+                    .into_parts();
+            *offset += length;
+            return Ok(control.finish(Value::Datum(datum), memory)?);
+        }
         let value = read_payload(pg_type_oid(ty) as u32, payload, catalog, control)?;
         *offset += length;
         return Ok(value);
