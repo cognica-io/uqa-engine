@@ -234,4 +234,65 @@ mod tests {
             TIMESTAMP_POSITIVE_INFINITY
         ));
     }
+
+    #[test]
+    fn infinite_temporal_producers_preserve_quota_and_cancellation() {
+        use crate::{memory::MemoryBudget, CancellationToken, ValueRetentionError};
+
+        for sign in [TemporalInfinity::Negative, TemporalInfinity::Positive] {
+            for value in [
+                sign.date(),
+                sign.timestamp(),
+                sign.timestamp_tz(),
+                sign.interval(),
+            ] {
+                let original = CancellationToken::new();
+                let invoking = CancellationToken::new();
+                let empty = MemoryBudget::new(0);
+                let control = ProductionControl::new(&empty, &original, &invoking);
+                let allocations = allocation_counter::measure(|| {
+                    assert_eq!(
+                        value
+                            .parse_same_kind_at_with_control(sign.as_str(), 0, &control)
+                            .unwrap(),
+                        Some(value.clone())
+                    );
+                    assert!(matches!(
+                        value.to_sql_string_with_control(&control),
+                        Err(ValueRetentionError::Memory(_))
+                    ));
+                });
+                assert_eq!(allocations.count_total, 0);
+                assert_eq!(empty.used(), 0);
+
+                let memory = MemoryBudget::new(64);
+                let control = ProductionControl::new(&memory, &original, &invoking);
+                let text = value.to_sql_string_with_control(&control).unwrap();
+                assert_eq!(text.as_str(), sign.as_str());
+                assert_eq!(memory.used(), text.capacity());
+                drop(text);
+                assert_eq!(memory.used(), 0);
+
+                for cancel_original in [false, true] {
+                    let original = CancellationToken::new();
+                    let invoking = CancellationToken::new();
+                    if cancel_original {
+                        original.cancel();
+                    } else {
+                        invoking.cancel();
+                    }
+                    let control = ProductionControl::new(&memory, &original, &invoking);
+                    assert!(matches!(
+                        value.parse_same_kind_at_with_control(sign.as_str(), 0, &control),
+                        Err(ValueRetentionError::Cancelled(_))
+                    ));
+                    assert!(matches!(
+                        value.to_sql_string_with_control(&control),
+                        Err(ValueRetentionError::Cancelled(_))
+                    ));
+                    assert_eq!(memory.used(), 0);
+                }
+            }
+        }
+    }
 }

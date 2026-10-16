@@ -24,8 +24,14 @@ struct Diagnostic {
     hint: Option<String>,
 }
 
-fn check(group: &str) {
+fn check(group: &str, expected_cases: usize) {
     let cases: Vec<Case> = serde_json::from_str(include_str!("temporal_infinity.json")).unwrap();
+    assert_eq!(cases.len(), 497);
+    assert_eq!(
+        cases.iter().filter(|case| case.group == group).count(),
+        expected_cases,
+        "{group}"
+    );
     let mut failures = Vec::new();
     for case in cases.iter().filter(|case| case.group == group) {
         let observed = eval(&projection_expr(&case.sql), &EvalContext::new(None, &[]));
@@ -55,11 +61,47 @@ fn check(group: &str) {
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
-macro_rules! groups {
-    ($($group:ident),+ $(,)?) => { $(
-        #[test]
-        fn $group() { check(stringify!($group)); }
-    )+ };
+#[test]
+fn temporal_infinity_input_matches_postgresql() {
+    check("input", 73);
 }
 
-groups!(input, cast, compare, arithmetic, extract, trunc, function, zone, finite);
+#[test]
+fn temporal_infinity_casts_match_postgresql() {
+    check("cast", 38);
+}
+
+#[test]
+fn temporal_infinity_comparison_matches_postgresql() {
+    check("compare", 16);
+}
+
+#[test]
+fn temporal_infinity_arithmetic_matches_postgresql() {
+    check("arithmetic", 171);
+}
+
+#[test]
+fn temporal_infinity_extraction_matches_postgresql() {
+    check("extract", 120);
+}
+
+#[test]
+fn temporal_infinity_truncation_matches_postgresql() {
+    check("trunc", 36);
+}
+
+#[test]
+fn temporal_infinity_functions_match_postgresql() {
+    check("function", 30);
+}
+
+#[test]
+fn temporal_infinity_timezones_match_postgresql() {
+    check("zone", 5);
+}
+
+#[test]
+fn temporal_infinity_finite_controls_match_postgresql() {
+    check("finite", 8);
+}

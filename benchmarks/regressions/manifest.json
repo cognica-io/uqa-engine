@@ -9857,6 +9857,217 @@
       "capability": "Bounded empty multirange input",
       "workload": "One or 512 repeated empty members, including ranges that become empty after their scalar bounds are read.",
       "invariant": "Empty members contribute no retained range workspace; peak admitted bytes are independent of member count, output remains empty and all leases are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "temporal_infinity_input_matches_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/expr_evaluator/temporal_infinity.rs",
+      "capability": "Infinite temporal SQL semantics",
+      "workload": "73 independently captured PostgreSQL 18 observations for input within the fixed 497-case scalar corpus.",
+      "invariant": "Every expected value or SQLSTATE/message/DETAIL/HINT matches; exact group counts reject missing fixture coverage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "temporal_infinity_casts_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/expr_evaluator/temporal_infinity.rs",
+      "capability": "Infinite temporal SQL semantics",
+      "workload": "38 independently captured PostgreSQL 18 observations for casts within the fixed 497-case scalar corpus.",
+      "invariant": "Every expected value or SQLSTATE/message/DETAIL/HINT matches; exact group counts reject missing fixture coverage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "temporal_infinity_comparison_matches_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/expr_evaluator/temporal_infinity.rs",
+      "capability": "Infinite temporal SQL semantics",
+      "workload": "16 independently captured PostgreSQL 18 observations for comparison within the fixed 497-case scalar corpus.",
+      "invariant": "Every expected value or SQLSTATE/message/DETAIL/HINT matches; exact group counts reject missing fixture coverage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "temporal_infinity_arithmetic_matches_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/expr_evaluator/temporal_infinity.rs",
+      "capability": "Infinite temporal SQL semantics",
+      "workload": "171 independently captured PostgreSQL 18 observations for arithmetic within the fixed 497-case scalar corpus.",
+      "invariant": "Every expected value or SQLSTATE/message/DETAIL/HINT matches; exact group counts reject missing fixture coverage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "temporal_infinity_extraction_matches_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/expr_evaluator/temporal_infinity.rs",
+      "capability": "Infinite temporal SQL semantics",
+      "workload": "120 independently captured PostgreSQL 18 observations for extraction within the fixed 497-case scalar corpus.",
+      "invariant": "Every expected value or SQLSTATE/message/DETAIL/HINT matches; exact group counts reject missing fixture coverage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "temporal_infinity_truncation_matches_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/expr_evaluator/temporal_infinity.rs",
+      "capability": "Infinite temporal SQL semantics",
+      "workload": "36 independently captured PostgreSQL 18 observations for truncation within the fixed 497-case scalar corpus.",
+      "invariant": "Every expected value or SQLSTATE/message/DETAIL/HINT matches; exact group counts reject missing fixture coverage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "temporal_infinity_functions_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/expr_evaluator/temporal_infinity.rs",
+      "capability": "Infinite temporal SQL semantics",
+      "workload": "30 independently captured PostgreSQL 18 observations for functions within the fixed 497-case scalar corpus.",
+      "invariant": "Every expected value or SQLSTATE/message/DETAIL/HINT matches; exact group counts reject missing fixture coverage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "temporal_infinity_timezones_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/expr_evaluator/temporal_infinity.rs",
+      "capability": "Infinite temporal SQL semantics",
+      "workload": "5 independently captured PostgreSQL 18 observations for timezones within the fixed 497-case scalar corpus.",
+      "invariant": "Every expected value or SQLSTATE/message/DETAIL/HINT matches; exact group counts reject missing fixture coverage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "temporal_infinity_finite_controls_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/expr_evaluator/temporal_infinity.rs",
+      "capability": "Infinite temporal SQL semantics",
+      "workload": "8 independently captured PostgreSQL 18 observations for finite controls within the fixed 497-case scalar corpus.",
+      "invariant": "Every expected value or SQLSTATE/message/DETAIL/HINT matches; exact group counts reject missing fixture coverage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "infinite_endpoints_preserve_order_keys_and_durable_carriers",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/temporal/infinite.rs",
+      "capability": "Infinite temporal representation",
+      "workload": "Both infinite endpoints for date, timestamp, timestamptz and interval, with finite boundary controls.",
+      "invariant": "Order keys, equality keys, input/output and durable carriers preserve each endpoint; extreme finite values remain finite.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "infinite_temporal_producers_preserve_quota_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/temporal/infinite.rs",
+      "capability": "Infinite temporal resource ownership",
+      "workload": "Eight typed endpoints with zero-byte input/output allowance, a 64-byte output allowance and each cancellation scope.",
+      "invariant": "Endpoint input and denied output allocate nothing, successful output retains its capacity charge until drop, and either cancellation token stops production.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "temporal_bounds_match_postgresql_infinite_and_finite_observations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/in_range/tests/temporal.rs",
+      "capability": "Temporal window range semantics",
+      "workload": "860 independent PostgreSQL support-function observations across finite/infinite values, bases, offsets and boundary directions.",
+      "invariant": "Every boolean or SQLSTATE/message/DETAIL/HINT matches, including invalid offsets and opposing infinities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_bounds_match_postgresql_infinity_and_canonicalization_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/range/production/tests/infinity.rs",
+      "capability": "Infinite range bound production",
+      "workload": "138 independent PostgreSQL range/multirange observations, including temporal endpoints, empty bounds and canonicalization errors.",
+      "invariant": "Canonical output and full diagnostics match; each success or error releases all retained workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "interval_aggregate_values_and_overflow_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/tests/interval.rs",
+      "capability": "Infinite interval aggregation",
+      "workload": "The interval aggregate subset of a 110-case PostgreSQL corpus, including empty/NULL inputs, infinities and finite overflow.",
+      "invariant": "sum/avg values and full diagnostics match without retaining input rows or spill runs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "interval_aggregate_partial_states_preserve_infinities_and_finite_overflow_after_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/tests/interval.rs",
+      "capability": "Infinite interval partial aggregation",
+      "workload": "One partial state per input, plus identity states, actually serialized through a zero-budget spill before merging.",
+      "invariant": "Merged sum/avg values and full diagnostics match the PostgreSQL aggregate corpus; spill files are created and removed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "temporal_infinity_matches_postgresql_execution_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/temporal_infinity.rs",
+      "capability": "Infinite temporal provider preservation",
+      "workload": "112 public temporal observations, the aggregate and empty-range corpora, and 47 actual persistent-reopen observations on four storage providers.",
+      "invariant": "SQL values, errors, indexes and ordering match PostgreSQL on memory, native SQLite, SQLite K/V and redb before and after actual reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }
