@@ -1100,11 +1100,26 @@
       "cases": 2,
       "source": "crates/uqa-engine/src/capabilities/tests.rs",
       "capability": "Catalog type resolution",
-      "workload": "Memory and native SQLite catalogs with one or 32 three-column tables; parameterized information-schema filter.",
+      "workload": "Memory and native SQLite catalogs with one or 32 three-column tables and explicitly paused automatic maintenance; parameterized information-schema filter.",
       "invariant": "The same three correct column/type rows are returned without increasing full catalog captures as unrelated rows grow.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_capture_work_stays_bounded_after_intervening_statistics",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_capture.rs",
+      "capability": "Catalog snapshot refresh",
+      "workload": "Native SQLite, SQLite Key/Value and redb catalogs with one or 32 tables; explicitly interleave a statistics commit before adoption of a completed DDL commit.",
+      "invariant": "The refresh observes statistics and replaces stale table handles once; ordinary, refreshed and subsequent query captures do not grow with unrelated tables, and every query returns the same three correct columns.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
       ]
     },
     {
