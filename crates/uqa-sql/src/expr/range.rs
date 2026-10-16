@@ -10,13 +10,14 @@ use std::cmp::Ordering;
 
 use uqa_core::{
     memory::{Produced, ProductionControl},
-    TemporalValue, Value,
+    Value,
 };
 
 mod comparison;
 mod input;
 mod production;
 mod relationships;
+mod semantics;
 mod typed;
 pub(super) use production::{
     canonical_multirange_text_with_control, canonical_range_as_multirange_text_with_control,
@@ -24,6 +25,8 @@ pub(super) use production::{
     parse_multirange_with_control, parse_range_with_control,
 };
 pub use typed::RangeComparisonValue;
+
+use semantics::RangeSemantics;
 
 use crate::ast::RangeSubtype;
 use crate::error::Result;
@@ -40,6 +43,10 @@ pub struct CanonicalRange {
 }
 
 impl CanonicalRange {
+    fn semantics(&self) -> &'static RangeSemantics {
+        RangeSemantics::native(self.subtype)
+    }
+
     fn empty(subtype: RangeSubtype) -> Self {
         Self {
             subtype,
@@ -223,41 +230,6 @@ pub fn multirange_from_ranges(
         .expect("ordinary multirange normalization")
         .into_uncontrolled()
         .expect("ordinary multirange")
-}
-
-fn increment_discrete(value: &Value, subtype: RangeSubtype) -> Result<Value> {
-    match (subtype, value) {
-        (RangeSubtype::Integer, Value::Int(value)) => i32::try_from(*value)
-            .ok()
-            .and_then(|value| value.checked_add(1))
-            .map(|value| Value::Int(i64::from(value)))
-            .ok_or_else(|| range_overflow("integer")),
-        (RangeSubtype::BigInteger, Value::Int(value)) => value
-            .checked_add(1)
-            .map(Value::Int)
-            .ok_or_else(|| range_overflow("bigint")),
-        (RangeSubtype::Date, Value::Temporal(TemporalValue::Date { days })) => days
-            .checked_add(1)
-            .map(|days| Value::Temporal(TemporalValue::Date { days }))
-            .ok_or_else(|| range_overflow("date")),
-        _ => Err(SQLError::Internal(format!(
-            "range subtype {subtype:?} received incompatible bound {value:?}"
-        ))),
-    }
-}
-
-fn is_discrete(subtype: RangeSubtype) -> bool {
-    matches!(
-        subtype,
-        RangeSubtype::Integer | RangeSubtype::BigInteger | RangeSubtype::Date
-    )
-}
-
-fn range_overflow(type_name: &str) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "22003".into(),
-        message: format!("{type_name} out of range"),
-    }
 }
 
 #[cfg(test)]
