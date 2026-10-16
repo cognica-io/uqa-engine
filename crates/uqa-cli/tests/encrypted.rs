@@ -15,31 +15,46 @@ use std::process::{Command, Output, Stdio};
 
 use uqa_engine::{Engine, SQLiteCompressionOptions};
 
-fn run_usql_env(args: &[&str], input: &str, history_dir: &Path, envs: &[(&str, &str)]) -> Output {
+fn run_usql_env(
+    args: &[&str],
+    input: Option<&str>,
+    history_dir: &Path,
+    envs: &[(&str, &str)],
+) -> Output {
     let history = history_dir.join("hist");
     let mut command = Command::new(binary_path());
     command
         .args(args)
         .env("UQA_HISTORY", history)
         .env_remove("UQA_KEY")
-        .stdin(Stdio::piped())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     for (name, value) in envs {
         command.env(name, value);
     }
     let mut child = command.spawn().expect("spawn usql");
-    child
-        .stdin
-        .as_mut()
-        .expect("stdin")
-        .write_all(input.as_bytes())
-        .expect("write stdin");
+    if let Some(input) = input {
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(input.as_bytes())
+            .expect("write stdin");
+    }
     child.wait_with_output().expect("wait")
 }
 
 fn run_usql(args: &[&str], input: &str, history_dir: &Path) -> Output {
-    run_usql_env(args, input, history_dir, &[])
+    run_usql_env(args, Some(input), history_dir, &[])
+}
+
+fn run_usql_without_input(args: &[&str], history_dir: &Path) -> Output {
+    run_usql_env(args, None, history_dir, &[])
 }
 
 fn stdout(output: &Output) -> String {
@@ -136,7 +151,7 @@ fn environment_variable_supplies_key() {
 
     let output = run_usql_env(
         &["--db", db.to_str().unwrap()],
-        "SELECT note FROM secrets;\n\\q\n",
+        Some("SELECT note FROM secrets;\n\\q\n"),
         dir.path(),
         &[("UQA_KEY", "hunter2")],
     );
@@ -154,9 +169,8 @@ fn wrong_key_fails_with_actionable_error() {
     let db = dir.path().join("enc.db");
     seed_encrypted_database(&db, "hunter2");
 
-    let output = run_usql(
+    let output = run_usql_without_input(
         &["--db", db.to_str().unwrap(), "--key", "wrong"],
-        "SELECT 1;\n\\q\n",
         dir.path(),
     );
     assert!(!output.status.success());
@@ -171,11 +185,7 @@ fn missing_key_fails_without_terminal() {
     let db = dir.path().join("enc.db");
     seed_encrypted_database(&db, "hunter2");
 
-    let output = run_usql(
-        &["--db", db.to_str().unwrap()],
-        "SELECT 1;\n\\q\n",
-        dir.path(),
-    );
+    let output = run_usql_without_input(&["--db", db.to_str().unwrap()], dir.path());
     assert!(!output.status.success());
     let err = stderr(&output);
     assert!(err.contains("requires an encryption key"), "{err}");
@@ -193,9 +203,8 @@ fn key_on_plaintext_database_is_rejected() {
             .expect("create table");
     }
 
-    let output = run_usql(
+    let output = run_usql_without_input(
         &["--db", db.to_str().unwrap(), "--key", "whatever"],
-        "SELECT 1;\n\\q\n",
         dir.path(),
     );
     assert!(!output.status.success());
@@ -273,7 +282,7 @@ fn compressed_plain_container_opens_without_key() {
 #[test]
 fn key_and_key_file_are_mutually_exclusive() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let output = run_usql(&["--key", "a", "--key-file", "b"], "\\q\n", dir.path());
+    let output = run_usql_without_input(&["--key", "a", "--key-file", "b"], dir.path());
     assert!(!output.status.success());
     assert!(
         stderr(&output).contains("mutually exclusive"),
