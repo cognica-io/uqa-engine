@@ -20,6 +20,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Restore compact dynamic value slots after bit-string and physical enum metadata additions. Retain indirect payload headers under the existing memory allowance without changing packed values, enum identity, comparisons or persistent formats.
 
+- Read range bounds through their selected scalar input functions, preserving PostgreSQL integer spellings, overflow and temporal diagnostics. Validate complete range syntax before its bounds and retain member-by-member multirange error order, quoted inputs and separator checks.
+
 - Restore ordinary debug WASM initialization and array/row SQL decoding by bounding catalog construction and parser message construction frames. Preserve catalog layouts, protobuf wire behavior, partial decoding errors and recursion limits.
 
 - Preserve unmodified `bpchar` declarations without an implicit one-character limit and retain trailing `CHARACTER`/`bpchar` spaces in array and composite text output, including unique-constraint detail; scalar casts to `TEXT` still trim trailing spaces as PostgreSQL does.

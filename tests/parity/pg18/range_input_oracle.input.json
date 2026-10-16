@@ -1,0 +1,756 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "int4range_valid",
+      "sql": "SELECT '[0x10,0x20)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[0x10,0x20)"
+    },
+    {
+      "id": "int4range_empty",
+      "sql": "SELECT ' empty '::int4range::text AS value",
+      "kind": "int4range",
+      "input": " empty "
+    },
+    {
+      "id": "int4range_unbounded",
+      "sql": "SELECT '(,)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "(,)"
+    },
+    {
+      "id": "int4range_bad_bound",
+      "sql": "SELECT '[bad,)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[bad,)"
+    },
+    {
+      "id": "int4multirange_valid",
+      "sql": "SELECT '{empty,[0x10,0x20)}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{empty,[0x10,0x20)}"
+    },
+    {
+      "id": "int4multirange_bad_bound",
+      "sql": "SELECT '{[bad,)}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[bad,)}"
+    },
+    {
+      "id": "int8range_valid",
+      "sql": "SELECT '[-0x100,0x100)'::int8range::text AS value",
+      "kind": "int8range",
+      "input": "[-0x100,0x100)"
+    },
+    {
+      "id": "int8range_empty",
+      "sql": "SELECT ' empty '::int8range::text AS value",
+      "kind": "int8range",
+      "input": " empty "
+    },
+    {
+      "id": "int8range_unbounded",
+      "sql": "SELECT '(,)'::int8range::text AS value",
+      "kind": "int8range",
+      "input": "(,)"
+    },
+    {
+      "id": "int8range_bad_bound",
+      "sql": "SELECT '[bad,)'::int8range::text AS value",
+      "kind": "int8range",
+      "input": "[bad,)"
+    },
+    {
+      "id": "int8multirange_valid",
+      "sql": "SELECT '{empty,[-0x100,0x100)}'::int8multirange::text AS value",
+      "kind": "int8multirange",
+      "input": "{empty,[-0x100,0x100)}"
+    },
+    {
+      "id": "int8multirange_bad_bound",
+      "sql": "SELECT '{[bad,)}'::int8multirange::text AS value",
+      "kind": "int8multirange",
+      "input": "{[bad,)}"
+    },
+    {
+      "id": "numrange_valid",
+      "sql": "SELECT '[1.00,3.50)'::numrange::text AS value",
+      "kind": "numrange",
+      "input": "[1.00,3.50)"
+    },
+    {
+      "id": "numrange_empty",
+      "sql": "SELECT ' empty '::numrange::text AS value",
+      "kind": "numrange",
+      "input": " empty "
+    },
+    {
+      "id": "numrange_unbounded",
+      "sql": "SELECT '(,)'::numrange::text AS value",
+      "kind": "numrange",
+      "input": "(,)"
+    },
+    {
+      "id": "numrange_bad_bound",
+      "sql": "SELECT '[bad,)'::numrange::text AS value",
+      "kind": "numrange",
+      "input": "[bad,)"
+    },
+    {
+      "id": "nummultirange_valid",
+      "sql": "SELECT '{empty,[1.00,3.50)}'::nummultirange::text AS value",
+      "kind": "nummultirange",
+      "input": "{empty,[1.00,3.50)}"
+    },
+    {
+      "id": "nummultirange_bad_bound",
+      "sql": "SELECT '{[bad,)}'::nummultirange::text AS value",
+      "kind": "nummultirange",
+      "input": "{[bad,)}"
+    },
+    {
+      "id": "daterange_valid",
+      "sql": "SELECT '[2024-01-01,2024-01-03]'::daterange::text AS value",
+      "kind": "daterange",
+      "input": "[2024-01-01,2024-01-03]"
+    },
+    {
+      "id": "daterange_empty",
+      "sql": "SELECT ' empty '::daterange::text AS value",
+      "kind": "daterange",
+      "input": " empty "
+    },
+    {
+      "id": "daterange_unbounded",
+      "sql": "SELECT '(,)'::daterange::text AS value",
+      "kind": "daterange",
+      "input": "(,)"
+    },
+    {
+      "id": "daterange_bad_bound",
+      "sql": "SELECT '[bad,)'::daterange::text AS value",
+      "kind": "daterange",
+      "input": "[bad,)"
+    },
+    {
+      "id": "datemultirange_valid",
+      "sql": "SELECT '{empty,[2024-01-01,2024-01-03]}'::datemultirange::text AS value",
+      "kind": "datemultirange",
+      "input": "{empty,[2024-01-01,2024-01-03]}"
+    },
+    {
+      "id": "datemultirange_bad_bound",
+      "sql": "SELECT '{[bad,)}'::datemultirange::text AS value",
+      "kind": "datemultirange",
+      "input": "{[bad,)}"
+    },
+    {
+      "id": "tsrange_valid",
+      "sql": "SELECT '[2024-01-01 00:00:00,2024-01-02 00:00:00)'::tsrange::text AS value",
+      "kind": "tsrange",
+      "input": "[2024-01-01 00:00:00,2024-01-02 00:00:00)"
+    },
+    {
+      "id": "tsrange_empty",
+      "sql": "SELECT ' empty '::tsrange::text AS value",
+      "kind": "tsrange",
+      "input": " empty "
+    },
+    {
+      "id": "tsrange_unbounded",
+      "sql": "SELECT '(,)'::tsrange::text AS value",
+      "kind": "tsrange",
+      "input": "(,)"
+    },
+    {
+      "id": "tsrange_bad_bound",
+      "sql": "SELECT '[bad,)'::tsrange::text AS value",
+      "kind": "tsrange",
+      "input": "[bad,)"
+    },
+    {
+      "id": "tsmultirange_valid",
+      "sql": "SELECT '{empty,[2024-01-01 00:00:00,2024-01-02 00:00:00)}'::tsmultirange::text AS value",
+      "kind": "tsmultirange",
+      "input": "{empty,[2024-01-01 00:00:00,2024-01-02 00:00:00)}"
+    },
+    {
+      "id": "tsmultirange_bad_bound",
+      "sql": "SELECT '{[bad,)}'::tsmultirange::text AS value",
+      "kind": "tsmultirange",
+      "input": "{[bad,)}"
+    },
+    {
+      "id": "tstzrange_valid",
+      "sql": "SELECT '[2024-01-01 00:00:00+03,2024-01-02 00:00:00+03)'::tstzrange::text AS value",
+      "kind": "tstzrange",
+      "input": "[2024-01-01 00:00:00+03,2024-01-02 00:00:00+03)"
+    },
+    {
+      "id": "tstzrange_empty",
+      "sql": "SELECT ' empty '::tstzrange::text AS value",
+      "kind": "tstzrange",
+      "input": " empty "
+    },
+    {
+      "id": "tstzrange_unbounded",
+      "sql": "SELECT '(,)'::tstzrange::text AS value",
+      "kind": "tstzrange",
+      "input": "(,)"
+    },
+    {
+      "id": "tstzrange_bad_bound",
+      "sql": "SELECT '[bad,)'::tstzrange::text AS value",
+      "kind": "tstzrange",
+      "input": "[bad,)"
+    },
+    {
+      "id": "tstzmultirange_valid",
+      "sql": "SELECT '{empty,[2024-01-01 00:00:00+03,2024-01-02 00:00:00+03)}'::tstzmultirange::text AS value",
+      "kind": "tstzmultirange",
+      "input": "{empty,[2024-01-01 00:00:00+03,2024-01-02 00:00:00+03)}"
+    },
+    {
+      "id": "tstzmultirange_bad_bound",
+      "sql": "SELECT '{[bad,)}'::tstzmultirange::text AS value",
+      "kind": "tstzmultirange",
+      "input": "{[bad,)}"
+    },
+    {
+      "id": "int4_high",
+      "sql": "SELECT '[2147483648,)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[2147483648,)"
+    },
+    {
+      "id": "int4_low",
+      "sql": "SELECT '[-2147483649,)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[-2147483649,)"
+    },
+    {
+      "id": "int8_high",
+      "sql": "SELECT '[9223372036854775808,)'::int8range::text AS value",
+      "kind": "int8range",
+      "input": "[9223372036854775808,)"
+    },
+    {
+      "id": "int8_low",
+      "sql": "SELECT '[-9223372036854775809,)'::int8range::text AS value",
+      "kind": "int8range",
+      "input": "[-9223372036854775809,)"
+    },
+    {
+      "id": "underscore",
+      "sql": "SELECT '[1_000,1_010)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1_000,1_010)"
+    },
+    {
+      "id": "binary",
+      "sql": "SELECT '[0b10,0b101)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[0b10,0b101)"
+    },
+    {
+      "id": "octal",
+      "sql": "SELECT '[0o10,0o20)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[0o10,0o20)"
+    },
+    {
+      "id": "signed_hex",
+      "sql": "SELECT '[-0x10,+0x10)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[-0x10,+0x10)"
+    },
+    {
+      "id": "bad_underscore",
+      "sql": "SELECT '[1__0,20)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1__0,20)"
+    },
+    {
+      "id": "date_month",
+      "sql": "SELECT '[2024-13-01,)'::daterange::text AS value",
+      "kind": "daterange",
+      "input": "[2024-13-01,)"
+    },
+    {
+      "id": "date_day",
+      "sql": "SELECT '[2024-02-30,)'::daterange::text AS value",
+      "kind": "daterange",
+      "input": "[2024-02-30,)"
+    },
+    {
+      "id": "timestamp_month",
+      "sql": "SELECT '[2024-13-01,)'::tsrange::text AS value",
+      "kind": "tsrange",
+      "input": "[2024-13-01,)"
+    },
+    {
+      "id": "timezone_offset",
+      "sql": "SELECT '[2024-01-01 00:00:00+16,)'::tstzrange::text AS value",
+      "kind": "tstzrange",
+      "input": "[2024-01-01 00:00:00+16,)"
+    },
+    {
+      "id": "numeric_scale",
+      "sql": "SELECT '[1.00,1.000]'::numrange::text AS value",
+      "kind": "numrange",
+      "input": "[1.00,1.000]"
+    },
+    {
+      "id": "numeric_nan",
+      "sql": "SELECT '[NaN,NaN]'::numrange::text AS value",
+      "kind": "numrange",
+      "input": "[NaN,NaN]"
+    },
+    {
+      "id": "int4_canonical_overflow",
+      "sql": "SELECT '[2147483647,2147483647]'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[2147483647,2147483647]"
+    },
+    {
+      "id": "range_syntax_0",
+      "sql": "SELECT ''::int4range::text AS value",
+      "kind": "int4range",
+      "input": ""
+    },
+    {
+      "id": "range_syntax_1",
+      "sql": "SELECT ' '::int4range::text AS value",
+      "kind": "int4range",
+      "input": " "
+    },
+    {
+      "id": "range_syntax_2",
+      "sql": "SELECT 'empty junk'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "empty junk"
+    },
+    {
+      "id": "range_syntax_3",
+      "sql": "SELECT 'EMPTYX'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "EMPTYX"
+    },
+    {
+      "id": "range_syntax_4",
+      "sql": "SELECT '1,2'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "1,2"
+    },
+    {
+      "id": "range_syntax_5",
+      "sql": "SELECT '[1,2x'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1,2x"
+    },
+    {
+      "id": "range_syntax_6",
+      "sql": "SELECT '[1,2'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1,2"
+    },
+    {
+      "id": "range_syntax_7",
+      "sql": "SELECT '[1)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1)"
+    },
+    {
+      "id": "range_syntax_8",
+      "sql": "SELECT '[1,2,3)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1,2,3)"
+    },
+    {
+      "id": "range_syntax_9",
+      "sql": "SELECT '[1,2)junk'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1,2)junk"
+    },
+    {
+      "id": "range_syntax_10",
+      "sql": "SELECT '[bad,2x'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[bad,2x"
+    },
+    {
+      "id": "range_syntax_11",
+      "sql": "SELECT '[bad,2,3)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[bad,2,3)"
+    },
+    {
+      "id": "range_syntax_12",
+      "sql": "SELECT '[bad,2)junk'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[bad,2)junk"
+    },
+    {
+      "id": "range_syntax_13",
+      "sql": "SELECT '[,)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[,)"
+    },
+    {
+      "id": "range_syntax_14",
+      "sql": "SELECT '[,]'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[,]"
+    },
+    {
+      "id": "range_syntax_15",
+      "sql": "SELECT '(,]'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "(,]"
+    },
+    {
+      "id": "range_syntax_16",
+      "sql": "SELECT '[ ,)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[ ,)"
+    },
+    {
+      "id": "range_syntax_17",
+      "sql": "SELECT '[\"\",)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[\"\",)"
+    },
+    {
+      "id": "range_syntax_18",
+      "sql": "SELECT '[1 , 2)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1 , 2)"
+    },
+    {
+      "id": "range_syntax_19",
+      "sql": "SELECT '[1\"0\",20)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1\"0\",20)"
+    },
+    {
+      "id": "range_syntax_20",
+      "sql": "SELECT '[\"1\"0,20)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[\"1\"0,20)"
+    },
+    {
+      "id": "range_syntax_21",
+      "sql": "SELECT '[\"1\"\"2\",20)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[\"1\"\"2\",20)"
+    },
+    {
+      "id": "range_syntax_22",
+      "sql": "SELECT '[1\\0,20)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1\\0,20)"
+    },
+    {
+      "id": "range_syntax_23",
+      "sql": "SELECT '[\"10\",20)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[\"10\",20)"
+    },
+    {
+      "id": "range_syntax_24",
+      "sql": "SELECT '[\"1\\0\",20)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[\"1\\0\",20)"
+    },
+    {
+      "id": "range_syntax_25",
+      "sql": "SELECT '[\"unterminated,20)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[\"unterminated,20)"
+    },
+    {
+      "id": "range_syntax_26",
+      "sql": "SELECT '[1,2\\'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1,2\\"
+    },
+    {
+      "id": "range_syntax_27",
+      "sql": "SELECT '[2,1)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[2,1)"
+    },
+    {
+      "id": "range_syntax_28",
+      "sql": "SELECT '\u000b[1,2)\f'::int4range::text AS value",
+      "kind": "int4range",
+      "input": "\u000b[1,2)\f"
+    },
+    {
+      "id": "range_syntax_29",
+      "sql": "SELECT ' [1,2)'::int4range::text AS value",
+      "kind": "int4range",
+      "input": " [1,2)"
+    },
+    {
+      "id": "range_syntax_30",
+      "sql": "SELECT '[1,2) '::int4range::text AS value",
+      "kind": "int4range",
+      "input": "[1,2) "
+    },
+    {
+      "id": "multi_syntax_0",
+      "sql": "SELECT ''::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": ""
+    },
+    {
+      "id": "multi_syntax_1",
+      "sql": "SELECT ' '::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": " "
+    },
+    {
+      "id": "multi_syntax_2",
+      "sql": "SELECT '{}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{}"
+    },
+    {
+      "id": "multi_syntax_3",
+      "sql": "SELECT '{ }'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{ }"
+    },
+    {
+      "id": "multi_syntax_4",
+      "sql": "SELECT '{empty}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{empty}"
+    },
+    {
+      "id": "multi_syntax_5",
+      "sql": "SELECT '{EMPTY, empty}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{EMPTY, empty}"
+    },
+    {
+      "id": "multi_syntax_6",
+      "sql": "SELECT '{empty,[1,3),empty}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{empty,[1,3),empty}"
+    },
+    {
+      "id": "multi_syntax_7",
+      "sql": "SELECT '{'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{"
+    },
+    {
+      "id": "multi_syntax_8",
+      "sql": "SELECT '{[1,2)'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1,2)"
+    },
+    {
+      "id": "multi_syntax_9",
+      "sql": "SELECT '{[1,2)}junk'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1,2)}junk"
+    },
+    {
+      "id": "multi_syntax_10",
+      "sql": "SELECT '{,}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{,}"
+    },
+    {
+      "id": "multi_syntax_11",
+      "sql": "SELECT '{[1,2),}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1,2),}"
+    },
+    {
+      "id": "multi_syntax_12",
+      "sql": "SELECT '{[1,2) [3,4)}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1,2) [3,4)}"
+    },
+    {
+      "id": "multi_syntax_13",
+      "sql": "SELECT '{junk}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{junk}"
+    },
+    {
+      "id": "multi_syntax_14",
+      "sql": "SELECT '{empty junk}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{empty junk}"
+    },
+    {
+      "id": "multi_syntax_15",
+      "sql": "SELECT '{[1,2),junk}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1,2),junk}"
+    },
+    {
+      "id": "multi_syntax_16",
+      "sql": "SELECT '{[bad,2),junk}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[bad,2),junk}"
+    },
+    {
+      "id": "multi_syntax_17",
+      "sql": "SELECT '{[bad,2),}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[bad,2),}"
+    },
+    {
+      "id": "multi_syntax_18",
+      "sql": "SELECT '{[bad,2)'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[bad,2)"
+    },
+    {
+      "id": "multi_syntax_19",
+      "sql": "SELECT '{[1,2,3)}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1,2,3)}"
+    },
+    {
+      "id": "multi_syntax_20",
+      "sql": "SELECT '{[1,2)} }'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1,2)} }"
+    },
+    {
+      "id": "multi_syntax_21",
+      "sql": "SELECT '{[1,2)} '::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1,2)} "
+    },
+    {
+      "id": "multi_syntax_22",
+      "sql": "SELECT '{[1,2)[3,4)}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1,2)[3,4)}"
+    },
+    {
+      "id": "multi_syntax_23",
+      "sql": "SELECT '{[1,2),[3,4)}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1,2),[3,4)}"
+    },
+    {
+      "id": "multi_syntax_24",
+      "sql": "SELECT '{[\"1\"0,20)}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[\"1\"0,20)}"
+    },
+    {
+      "id": "multi_syntax_25",
+      "sql": "SELECT '{[\"1\"\"2\",20)}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[\"1\"\"2\",20)}"
+    },
+    {
+      "id": "multi_syntax_26",
+      "sql": "SELECT '{[1\\ 0,20)}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1\\ 0,20)}"
+    },
+    {
+      "id": "multi_syntax_27",
+      "sql": "SELECT '{[1\\ )2,20)}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1\\ )2,20)}"
+    },
+    {
+      "id": "multi_syntax_28",
+      "sql": "SELECT '{[\"unterminated,20)}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[\"unterminated,20)}"
+    },
+    {
+      "id": "multi_syntax_29",
+      "sql": "SELECT '{[1,2\\}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{[1,2\\}"
+    },
+    {
+      "id": "multi_syntax_30",
+      "sql": "SELECT '{empty,}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{empty,}"
+    },
+    {
+      "id": "multi_syntax_31",
+      "sql": "SELECT '{empty empty}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{empty empty}"
+    },
+    {
+      "id": "multi_syntax_32",
+      "sql": "SELECT '{emptyx}'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "{emptyx}"
+    },
+    {
+      "id": "multi_syntax_33",
+      "sql": "SELECT '\u000b{[1,2)}\f'::int4multirange::text AS value",
+      "kind": "int4multirange",
+      "input": "\u000b{[1,2)}\f"
+    },
+    {
+      "id": "schema",
+      "sql": "CREATE SCHEMA range_input"
+    },
+    {
+      "id": "table",
+      "sql": "CREATE TABLE range_input.held (id integer PRIMARY KEY, r int4range, m int4multirange, d daterange, n numrange)"
+    },
+    {
+      "id": "insert",
+      "sql": "INSERT INTO range_input.held VALUES (1,'[0x10,0x20)','{empty,[1_000,1_010)}','[2024-01-01,2024-01-03]','[1.00,3.50)')"
+    },
+    {
+      "id": "begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "savepoint",
+      "sql": "SAVEPOINT bounds"
+    },
+    {
+      "id": "failed_assignment",
+      "sql": "UPDATE range_input.held SET r='[2147483648,)' WHERE id=1"
+    },
+    {
+      "id": "recover",
+      "sql": "ROLLBACK TO SAVEPOINT bounds"
+    },
+    {
+      "id": "commit",
+      "sql": "COMMIT"
+    },
+    {
+      "id": "retained_values",
+      "sql": "SELECT id,r::text,m::text,d::text,n::text FROM range_input.held ORDER BY id"
+    },
+    {
+      "id": "reopen_values",
+      "sql": "SELECT id,r::text,m::text,d::text,n::text FROM range_input.held ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_operators",
+      "sql": "SELECT r @> 16 AS inside, r @> 32 AS outside, m @> 1005 AS member FROM range_input.held",
+      "reopen": true
+    }
+  ]
+}
