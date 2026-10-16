@@ -9432,6 +9432,45 @@
       "capability": "Concurrent range UNIQUE reservations",
       "workload": "Replay fourteen two-session PostgreSQL 18.4 observations on SQLite, SQLite Key/Value and redb.",
       "invariant": "Equal numeric range fields wait on the same reservation with 55P03; unrelated ranges remain writable, rollback releases the reservation and committed duplicates report 23505."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bit_string_order_and_equality_match_postgresql_without_unpacking",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/bit_string/tests.rs",
+      "capability": "Packed bit-string comparison",
+      "workload": "144 independent PostgreSQL comparisons plus packed-byte traversal boundaries with zero scratch allowance.",
+      "invariant": "Bit order agrees with PostgreSQL, equality agrees with order/hash and comparison does not allocate."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bit_string_rejects_noncanonical_lengths_and_padding_at_every_constructor",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/bit_string/tests.rs",
+      "capability": "Packed bit-string canonical form",
+      "workload": "Direct construction and serialization of valid empty/partial-byte values and invalid lengths/padding.",
+      "invariant": "Only the unique canonical representation of a logical bit sequence is admitted."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bit_string_copy_and_adoption_preserve_allowance_and_cancellation_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/bit_string/tests.rs",
+      "capability": "Bounded packed bit-string ownership",
+      "workload": "Packed copies at exact and insufficient byte allowances, malformed admitted input and either cancellation owner.",
+      "invariant": "Copies reserve packed bytes before allocation; errors release reservations and cancellation remains owned by both callers."
     }
   ]
 }

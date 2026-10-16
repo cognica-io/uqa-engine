@@ -34,6 +34,7 @@ pub enum PathSegment {
 pub type PathExpr = Vec<PathSegment>;
 
 mod array;
+mod bit_string;
 mod datum;
 mod decimal;
 mod enum_value;
@@ -53,6 +54,7 @@ pub use array::{
     ArrayAssignmentError, ArrayTraversalError, ArrayValue, BudgetedArrayElements,
     ControlledArrayElements,
 };
+pub use bit_string::BitStringValue;
 pub use datum::DatumValue;
 pub use decimal::DecimalValue;
 pub use enum_value::{
