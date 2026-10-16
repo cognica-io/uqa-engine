@@ -90,9 +90,10 @@ pub use value_catalog::{EngineValueCatalog, SQLRecordFields, SQLValueCatalog};
 use binary::eval_comparison_op;
 pub use binary::{
     compare_grouping_values_with_enum_catalog, compare_nullable_with_control,
+    compare_selected_grouping_values_with_catalog, compare_selected_values_with_catalog,
     compare_typed_values_with_control, compare_typed_values_with_enum_catalog,
-    compare_with_control, equal_typed_values_with_enum_catalog, eval_binary_values,
-    eval_binary_values_with_control, eval_binary_values_with_engine,
+    compare_with_control, equal_selected_values_with_catalog, equal_typed_values_with_enum_catalog,
+    eval_binary_values, eval_binary_values_with_control, eval_binary_values_with_engine,
     eval_binary_values_with_integer_width, eval_binary_values_with_integer_width_with_control,
     eval_comparison_truth, eval_comparison_truth_with_control,
     eval_comparison_truth_with_deferred_state, eval_comparison_truth_with_engine,

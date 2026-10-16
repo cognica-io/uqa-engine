@@ -66,6 +66,20 @@ impl RangeComparisonValue {
         }
     }
 
+    /// Observe an admitted value under an already selected type without resolving its identity again. Unrelated types and SQL NULL retain their ordinary consumer semantics.
+    pub fn from_type_with_control(
+        value: &Value,
+        ty: &ColumnType,
+        catalog: Option<&dyn SQLValueCatalog>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Self>> {
+        control.check()?;
+        if matches!(value, Value::Null) {
+            return Ok(None);
+        }
+        Self::from_type(value, ty, catalog, control)
+    }
+
     fn from_type(
         value: &Value,
         ty: &ColumnType,
