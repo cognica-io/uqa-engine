@@ -8,80 +8,21 @@
 
 use super::ComparisonSupport;
 use crate::{
-    catalog::type_metadata::pg_type_oid,
-    expr::{composites::CompositeTypeDescriptor, SQLValueCatalog},
+    expr::{SQLRecordFields, SQLValueCatalog},
     SQLError,
 };
-use std::sync::Arc;
-use uqa_core::{memory::ProductionControl, RecordFieldType, Value};
+use uqa_core::{memory::ProductionControl, Value};
 
-enum Fields<'a> {
-    Named(&'a uqa_core::RecordValue),
-    Anonymous(&'a uqa_core::RowValue),
-}
-
-struct Record<'a> {
-    fields: Fields<'a>,
-    descriptor: Option<Arc<CompositeTypeDescriptor>>,
-}
-
-impl<'a> Record<'a> {
-    fn new(value: &'a Value, catalog: Option<&dyn SQLValueCatalog>) -> Result<Self, SQLError> {
-        let (fields, oid) = match value {
-            Value::Record(record) => (Fields::Named(record), record.type_oid()),
-            Value::Row(row) => (Fields::Anonymous(row), None),
-            _ => unreachable!("record operator operands"),
-        };
-        let descriptor = oid
-            .map(|oid| {
-                catalog
-                    .ok_or_else(|| {
-                        SQLError::Internal("named record comparison has no catalog".into())
-                    })?
-                    .value_composite_type(oid)?
-                    .ok_or_else(|| SQLError::Routine {
-                        sqlstate: "42704".into(),
-                        message: format!("type with OID {oid} does not exist"),
-                    })
-            })
-            .transpose()?;
-        Ok(Self { fields, descriptor })
+fn type_name(
+    record: &SQLRecordFields<'_>,
+    index: usize,
+    oid: u32,
+    catalog: Option<&dyn SQLValueCatalog>,
+) -> Result<String, SQLError> {
+    if let Some(ty) = record.declared_field_type(index) {
+        return Ok(ty.display_name());
     }
-
-    fn value(&self, index: usize) -> Option<&Value> {
-        match self.fields {
-            Fields::Named(fields) => fields.get(index).map(|(_, value)| value),
-            Fields::Anonymous(fields) => fields.get(index),
-        }
-    }
-
-    fn field_type(&self, index: usize) -> Option<u32> {
-        if let Some(descriptor) = &self.descriptor {
-            return descriptor
-                .attributes
-                .get(index)
-                .map(|attribute| pg_type_oid(&attribute.ty) as u32);
-        }
-        match self.fields {
-            Fields::Anonymous(fields) => fields
-                .field_types()?
-                .get(index)
-                .map(|RecordFieldType { oid, .. }| *oid),
-            Fields::Named(_) => None,
-        }
-    }
-
-    fn type_name(
-        &self,
-        index: usize,
-        oid: u32,
-        catalog: Option<&dyn SQLValueCatalog>,
-    ) -> Result<String, SQLError> {
-        if let Some(descriptor) = &self.descriptor {
-            return Ok(descriptor.attributes[index].ty.display_name());
-        }
-        super::support::comparison_type_name(oid, catalog)
-    }
+    super::support::comparison_type_name(oid, catalog)
 }
 
 /// A deciding earlier field suppresses later type or arity errors, while a reached field's type is checked even if its value is NULL.
@@ -92,10 +33,10 @@ pub(super) fn compare<T>(
     control: &ProductionControl<'_>,
     support: ComparisonSupport,
     equal: T,
-    mut compare: impl FnMut(&Value, &Value) -> Result<Option<T>, SQLError>,
+    mut compare: impl FnMut(&Value, &Value, Option<u32>) -> Result<Option<T>, SQLError>,
 ) -> Result<T, SQLError> {
-    let left = Record::new(left, catalog)?;
-    let right = Record::new(right, catalog)?;
+    let left = SQLRecordFields::new(left, catalog)?;
+    let right = SQLRecordFields::new(right, catalog)?;
     let mut index = 0;
     loop {
         control.check()?;
@@ -109,24 +50,25 @@ pub(super) fn compare<T>(
                 })
             }
         };
-        if let (Some(left_oid), Some(right_oid)) = (left.field_type(index), right.field_type(index))
-        {
+        let left_oid = left.field_type_oid(index);
+        let right_oid = right.field_type_oid(index);
+        if let (Some(left_oid), Some(right_oid)) = (left_oid, right_oid) {
             if left_oid != right_oid {
                 return Err(SQLError::Routine {
                     sqlstate: "42804".into(),
                     message: format!(
                         "cannot compare dissimilar column types {} and {} at record column {}",
-                        left.type_name(index, left_oid, catalog)?,
-                        right.type_name(index, right_oid, catalog)?,
+                        type_name(&left, index, left_oid, catalog)?,
+                        type_name(&right, index, right_oid, catalog)?,
                         index + 1,
                     ),
                 });
             }
             if !support.available_for_oid(left_oid, catalog, control)? {
-                return Err(support.error("42883", left.type_name(index, left_oid, catalog)?));
+                return Err(support.error("42883", type_name(&left, index, left_oid, catalog)?));
             }
         }
-        if let Some(result) = compare(left_value, right_value)? {
+        if let Some(result) = compare(left_value, right_value, left_oid.or(right_oid))? {
             return Ok(result);
         }
         index += 1;
@@ -137,6 +79,7 @@ pub(super) fn compare<T>(
 mod tests {
     use super::*;
     use crate::expr::binary::equal_typed_values_with_enum_catalog;
+    use uqa_core::RecordFieldType;
 
     fn row(values: Vec<Value>, oids: &[u32]) -> Value {
         Value::Row(

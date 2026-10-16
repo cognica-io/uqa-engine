@@ -270,8 +270,12 @@ fn values_equal_nullable_with_catalog(
                 return Ok(Some(false));
             }
             let mut unknown = false;
-            for (x, y) in xs.iter().zip(ys) {
-                let equal = if matches!((x, y), (Value::Row(_), Value::Row(_))) {
+            for (index, (x, y)) in xs.iter().zip(ys).enumerate() {
+                let oid = row_field_oid(xs, index).or_else(|| row_field_oid(ys, index));
+                let equal = if let Some(order) = compare_declared_range(x, y, oid, control, enums)?
+                {
+                    Some(order.is_eq())
+                } else if matches!((x, y), (Value::Row(_), Value::Row(_))) {
                     Some(equal_values(x, y, control, enums, false)?)
                 } else {
                     values_equal_nullable_with_catalog(x, y, control, enums)?
@@ -390,20 +394,24 @@ fn compare_nullable_with_catalog(
 }
 
 fn compare_anonymous_row(
-    left: &[Value],
-    right: &[Value],
+    left: &uqa_core::RowValue,
+    right: &uqa_core::RowValue,
     control: &ProductionControl<'_>,
     enums: Option<&dyn EnumLabelCatalog>,
     state: Option<&EnumComparisonState>,
 ) -> Result<Option<Ordering>> {
-    for (index, (left, right)) in left.iter().zip(right).enumerate() {
+    for (index, (left_value, right_value)) in left.iter().zip(right).enumerate() {
+        let oid = row_field_oid(left, index).or_else(|| row_field_oid(right, index));
+        let (left, right) = (left_value, right_value);
         let field =
             if matches!(left, Value::Enum(_) | Value::Datum(_)) && !matches!(right, Value::Null) {
                 state.map(|state| state.field(index))
             } else {
                 None
             };
-        let order = if matches!((left, right), (Value::Row(_), Value::Row(_))) {
+        let order = if let Some(order) = compare_declared_range(left, right, oid, control, enums)? {
+            Some(order)
+        } else if matches!((left, right), (Value::Row(_), Value::Row(_))) {
             Some(compare_typed_values_with_catalog(
                 left, right, control, enums,
             )?)
@@ -416,6 +424,10 @@ fn compare_anonymous_row(
         }
     }
     Ok(Some(left.len().cmp(&right.len())))
+}
+
+fn row_field_oid(row: &uqa_core::RowValue, index: usize) -> Option<u32> {
+    row.field_types()?.get(index).map(|field| field.oid)
 }
 
 fn compare_sql_values(
@@ -553,7 +565,11 @@ fn compare_typed_values_for_purpose(
         }
         (Value::Array(left), Value::Array(right)) => {
             validate_array_element_types(left, right)?;
+            let oid = left.element_type_oid().or(right.element_type_oid());
             return left.cmp_by_with_control(right, control, |left, right, control| {
+                if let Some(order) = compare_declared_range(left, right, oid, control, enums)? {
+                    return Ok(order);
+                }
                 compare_typed_values_for_purpose(left, right, control, enums, enum_order)
             });
         }
@@ -568,9 +584,13 @@ fn compare_typed_values_for_purpose(
                     EnumKeyOrder::Identity => ComparisonSupport::Equality,
                 },
                 Ordering::Equal,
-                |left, right| {
-                    let order =
-                        compare_typed_values_for_purpose(left, right, control, enums, enum_order)?;
+                |left, right, oid| {
+                    let order = match compare_declared_range(left, right, oid, control, enums)? {
+                        Some(order) => order,
+                        None => compare_typed_values_for_purpose(
+                            left, right, control, enums, enum_order,
+                        )?,
+                    };
                     Ok((!order.is_eq()).then_some(order))
                 },
             );
@@ -708,7 +728,11 @@ fn equal_values(
         ),
         (Value::Array(left), Value::Array(right)) => {
             validate_array_element_types(left, right)?;
+            let oid = left.element_type_oid().or(right.element_type_oid());
             left.eq_by_with_control(right, control, |left, right, control| {
+                if let Some(order) = compare_declared_range(left, right, oid, control, enums)? {
+                    return Ok(order.is_eq());
+                }
                 equal_values(left, right, control, enums, typed)
             })
         }
@@ -719,7 +743,13 @@ fn equal_values(
             control,
             ComparisonSupport::Equality,
             true,
-            |left, right| Ok((!equal_values(left, right, control, enums, typed)?).then_some(false)),
+            |left, right, oid| {
+                let equal = match compare_declared_range(left, right, oid, control, enums)? {
+                    Some(order) => order.is_eq(),
+                    None => equal_values(left, right, control, enums, typed)?,
+                };
+                Ok((!equal).then_some(false))
+            },
         ),
         (Value::List(left), Value::List(right)) => {
             equal_sequence(left.iter(), right.iter(), control, enums, typed)
@@ -730,6 +760,32 @@ fn equal_values(
         _ if typed => Ok(compare_typed_values_with_control(left, right, control)?.is_eq()),
         _ => Ok(compare_sql_values(left, right, control, enums)?.is_eq()),
     }
+}
+
+fn compare_declared_range(
+    left: &Value,
+    right: &Value,
+    oid: Option<u32>,
+    control: &ProductionControl<'_>,
+    catalog: Option<&dyn EnumLabelCatalog>,
+) -> Result<Option<Ordering>> {
+    let Some(oid) = oid else {
+        return Ok(None);
+    };
+    // Ordinary text retains text order. A range identity comes from the selected record field or array element, never from the spelling of its value.
+    if !matches!((left, right), (Value::Str(_), Value::Str(_))) {
+        return Ok(None);
+    }
+    use crate::expr::range::RangeComparisonValue;
+    let Some(left) = RangeComparisonValue::from_declared_with_control(left, oid, catalog, control)?
+    else {
+        return Ok(None);
+    };
+    let right = RangeComparisonValue::from_declared_with_control(right, oid, catalog, control)?
+        .ok_or_else(|| {
+            SQLError::Internal("selected range identity changed during comparison".into())
+        })?;
+    left.cmp_with_control(&right, control).map(Some)
 }
 
 fn validate_array_element_types(

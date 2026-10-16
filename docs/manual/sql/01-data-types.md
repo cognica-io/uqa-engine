@@ -185,6 +185,8 @@ SELECT '[1,4]'::int4range AS canonical_integer_range,
 
 Discrete integer and date ranges canonicalize inclusive upper bounds and exclusive lower bounds to PostgreSQL's inclusive-lower, exclusive-upper form when the adjacent subtype value exists. Multiranges discard empty members, order members, and merge overlapping or adjacent members. The declared range or multirange identity survives storage, query planning, generated expressions, schema rewrites, foreign-table boundaries, reopen, and `pg_typeof`; `pg_type` and `pg_range` expose the corresponding PostgreSQL 18 built-in OIDs and subtype relationships.
 
+Record fields and array elements use the declared range subtype's comparison rather than the text spelling. Empty ranges precede nonempty ranges; nonempty ranges compare their lower bound and then their upper bound, including inclusivity. Multiranges compare their normalized members in order. Equal numeric bounds with different decimal scales remain equal in record/array comparisons, grouping and joins.
+
 This implemented surface is limited to PostgreSQL's six built-in range families and text-form values. User-defined range types, binary range I/O, range indexes and exclusion-index planning, and complete comparison ordering remain open compatibility bugs.
 
 ## Enum types

@@ -16,11 +16,13 @@ use uqa_core::{
 mod comparison;
 mod production;
 mod relationships;
+mod typed;
 pub(super) use production::{
     canonical_multirange_text_with_control, canonical_range_as_multirange_text_with_control,
     canonical_range_text_with_control, multirange_from_produced_ranges,
     parse_multirange_with_control, parse_range_with_control,
 };
+pub use typed::RangeComparisonValue;
 
 use crate::ast::RangeSubtype;
 use crate::error::Result;

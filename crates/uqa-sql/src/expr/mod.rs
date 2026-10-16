@@ -42,6 +42,7 @@ pub use json::{validate_json_object_key_type, value_to_json_text};
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 pub use range::{
     multirange_from_ranges, parse_multirange, parse_range, CanonicalMultirange, CanonicalRange,
+    RangeComparisonValue,
 };
 pub use time::IntervalFields;
 use time::{
@@ -78,7 +79,7 @@ mod session_sleep;
 mod temporal_input;
 mod value_catalog;
 pub mod variadic_any;
-pub use value_catalog::{EngineValueCatalog, SQLValueCatalog};
+pub use value_catalog::{EngineValueCatalog, SQLRecordFields, SQLValueCatalog};
 
 #[cfg(test)]
 use binary::eval_comparison_op;

@@ -24,10 +24,22 @@ fn bpchar_composite_output_and_consumers_match_postgresql(#[case] provider: usiz
     verify_consumers(provider, Some("bpchar_"));
 }
 
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn range_composite_consumers_match_postgresql(#[case] provider: usize) {
+    verify_reference(
+        provider,
+        serde_json::from_str(include_str!(
+            "../../../../../tests/parity/pg18/composite_range_consumers_oracle.expected.json"
+        ))
+        .unwrap(),
+    );
+}
+
 fn verify_consumers(provider: usize, family: Option<&str>) {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("composite-consumers.db");
-    let engine = super::addition::open(provider, &path);
     let mut reference: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../../tests/parity/pg18/composite_consumer_matrix_oracle.expected.json"
     ))
@@ -38,6 +50,13 @@ fn verify_consumers(provider: usize, family: Option<&str>) {
             id == "version" || id.starts_with(family)
         });
     }
+    verify_reference(provider, reference);
+}
+
+fn verify_reference(provider: usize, reference: serde_json::Value) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("composite-consumers.db");
+    let engine = super::addition::open(provider, &path);
     let mut initial = reference.clone();
     initial["cases"]
         .as_array_mut()

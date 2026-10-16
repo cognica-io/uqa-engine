@@ -9271,6 +9271,74 @@
       "capability": "Bounded admitted range comparison",
       "workload": "Compare admitted integer ranges and multiranges with a zero-byte allowance, then with cancellation requested.",
       "invariant": "Borrowed integer bounds require no allocation; cancellation is 57014 and leaves no retained memory."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_range_fields_preserve_postgresql_order_and_equality_in_nested_containers",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/comparison/tests.rs",
+      "capability": "Selected range field comparison",
+      "workload": "Replay the 1,264 independent PostgreSQL comparisons through named records, anonymous rows, arrays, nested records and ordinary ROW operators.",
+      "invariant": "Selected subtype bounds preserve equality and order while every temporary reservation is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_range_fields_keep_text_semantics_and_release_failed_parse_reservations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/comparison/tests.rs",
+      "capability": "Range comparison resource boundaries",
+      "workload": "Compare range fields with an exhausted allowance and cancellation, and compare identical spellings declared as ordinary text.",
+      "invariant": "Range normalization retains 53200/57014 and releases reservations; text semantics are unchanged."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_sql_hash_and_exact_keys_preserve_postgresql_equality_classes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/encoding/range_tests.rs",
+      "capability": "Range equality keys",
+      "workload": "Check the independent twelve-family PostgreSQL matrix through record and array SQL hash and exact-key paths.",
+      "invariant": "Exact key equality agrees with the PostgreSQL relation, and equal values have equal hashes regardless of numeric scale or canonical text spelling."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_key_normalization_respects_the_original_allowance_and_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/encoding/range_tests.rs",
+      "capability": "Bounded range key normalization",
+      "workload": "Normalize an 8,192-digit numeric range field with a 4 KiB allowance, then with cancellation requested.",
+      "invariant": "Admission and cancellation preserve SQLSTATE and release traversal, parsed bounds and output allocations."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "range_composite_consumers_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
+      "capability": "Range composite consumers",
+      "workload": "Replay 177 independent PostgreSQL observations across all twelve builtin range families on four providers, including thirteen observations after reopening.",
+      "invariant": "Records and arrays retain the selected field order and equal numeric bounds across groups, windows, joins, set operations, indexed lookup and UNIQUE diagnostics."
     }
   ]
 }

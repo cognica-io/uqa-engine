@@ -13,6 +13,7 @@ use uqa_core::{memory::BudgetedVec, DecimalValue, TemporalValue, Value};
 use uqa_storage::read_control::StorageReadControl;
 
 mod output;
+mod ranges;
 mod reservations;
 mod traversal;
 use output::{BudgetedOutput, KeyOutput};
@@ -162,6 +163,10 @@ struct CatalogKeyOutput<'a, O> {
 }
 
 impl<O: KeyOutput> KeyOutput for CatalogKeyOutput<'_, O> {
+    fn control(&self) -> Option<&StorageReadControl> {
+        self.values.control()
+    }
+
     fn invokes_sql_hash_operator(&self) -> bool {
         self.sql_hash
     }
@@ -265,69 +270,94 @@ impl<H: Hasher> KeyOutput for HasherOutput<'_, H> {
 fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
     let control = output.control().cloned();
     let mut stack = Frames::new(control.as_ref());
-    let mut current = Some(value);
+    let mut current = Some((value, None));
     loop {
         output.check()?;
-        if let Some(value) = current.take() {
-            match value {
-                Value::Array(array) => {
-                    output.push_byte(12)?;
-                    encode_len(array.lower_bounds().len(), output)?;
-                    for lower_bound in array.lower_bounds() {
-                        output.extend_bytes(&lower_bound.to_le_bytes())?;
+        if let Some((value, oid)) = current.take() {
+            if !ranges::encode_declared_range(value, oid, output)? {
+                match value {
+                    Value::Array(array) => {
+                        output.push_byte(12)?;
+                        encode_len(array.lower_bounds().len(), output)?;
+                        for lower_bound in array.lower_bounds() {
+                            output.extend_bytes(&lower_bound.to_le_bytes())?;
+                        }
+                        encode_len(array.elements().len(), output)?;
+                        if !array.elements().is_empty() {
+                            stack.push(Children::Array(
+                                array.elements().iter(),
+                                array.element_type_oid(),
+                            ))?;
+                        }
                     }
-                    encode_len(array.elements().len(), output)?;
-                    if !array.elements().is_empty() {
-                        stack.push(Children::Values(array.elements().iter()))?;
+                    Value::List(values) => {
+                        output.push_byte(if matches!(value, Value::List(_)) {
+                            5
+                        } else {
+                            10
+                        })?;
+                        encode_len(values.len(), output)?;
+                        if !values.is_empty() {
+                            stack.push(Children::Values(values.iter()))?;
+                        }
                     }
+                    Value::Row(values) => {
+                        output.push_byte(if matches!(value, Value::List(_)) {
+                            5
+                        } else {
+                            10
+                        })?;
+                        encode_len(values.len(), output)?;
+                        if !values.is_empty() {
+                            if output.invokes_sql_hash_operator() {
+                                stack.push(Children::SQLRecord(
+                                    uqa_sql::expr::SQLRecordFields::new(
+                                        value,
+                                        output.enum_catalog(),
+                                    )?,
+                                    0,
+                                ))?;
+                            } else {
+                                stack.push(Children::Values(values.iter()))?;
+                            }
+                        }
+                    }
+                    Value::Record(fields) => {
+                        output.push_byte(11)?;
+                        encode_len(fields.len(), output)?;
+                        if !fields.is_empty() {
+                            if output.invokes_sql_hash_operator() {
+                                stack.push(Children::SQLRecord(
+                                    uqa_sql::expr::SQLRecordFields::new(
+                                        value,
+                                        output.enum_catalog(),
+                                    )?,
+                                    0,
+                                ))?;
+                            } else {
+                                stack.push(Children::Record(fields.iter()))?;
+                            }
+                        }
+                    }
+                    Value::Map(fields) => {
+                        output.push_byte(6)?;
+                        encode_len(fields.len(), output)?;
+                        if !fields.is_empty() {
+                            stack.push(Children::Map(fields.iter()))?;
+                        }
+                    }
+                    leaf => encode_leaf(leaf, output)?,
                 }
-                Value::List(values) => {
-                    output.push_byte(if matches!(value, Value::List(_)) {
-                        5
-                    } else {
-                        10
-                    })?;
-                    encode_len(values.len(), output)?;
-                    if !values.is_empty() {
-                        stack.push(Children::Values(values.iter()))?;
-                    }
-                }
-                Value::Row(values) => {
-                    output.push_byte(if matches!(value, Value::List(_)) {
-                        5
-                    } else {
-                        10
-                    })?;
-                    encode_len(values.len(), output)?;
-                    if !values.is_empty() {
-                        stack.push(Children::Values(values.iter()))?;
-                    }
-                }
-                Value::Record(fields) => {
-                    output.push_byte(11)?;
-                    encode_len(fields.len(), output)?;
-                    if !fields.is_empty() {
-                        stack.push(Children::Record(fields.iter()))?;
-                    }
-                }
-                Value::Map(fields) => {
-                    output.push_byte(6)?;
-                    encode_len(fields.len(), output)?;
-                    if !fields.is_empty() {
-                        stack.push(Children::Map(fields.iter()))?;
-                    }
-                }
-                leaf => encode_leaf(leaf, output)?,
             }
         }
         while let Some(children) = stack.last_mut() {
             output.check()?;
             current = match children.next() {
-                Some((name, value)) => {
+                Some((name, value, oid)) => {
                     if let Some(name) = name {
                         encode_bytes(name.as_bytes(), output)?;
                     }
-                    Some(value)
+                    Some((value, oid))
                 }
                 None => None,
             };
@@ -500,6 +530,9 @@ fn encoding_error(message: impl Into<String>) -> ExecError {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod range_tests;
 
 #[cfg(test)]
 mod temporal_tests;

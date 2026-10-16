@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Preserve unmodified `bpchar` declarations without an implicit one-character limit and retain trailing `CHARACTER`/`bpchar` spaces in array and composite text output, including unique-constraint detail; scalar casts to `TEXT` still trim trailing spaces as PostgreSQL does.
 
+- Compare built-in range and multirange fields through their selected subtype bounds in rows, records and arrays. Preserve the same equality classes in grouping, joins and exact spill keys, including equal numeric bounds with different decimal scales, empty ranges and nested containers.
+
 ## [0.5.4] - 2026-10-15
 
 ### Changed
