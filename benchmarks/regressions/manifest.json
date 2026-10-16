@@ -10963,6 +10963,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "partition_btree_class_identities_match_postgresql_catalog",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/partitioning/tests.rs",
+      "capability": "Partition B-tree class identities",
+      "workload": "Compare 76 actual PostgreSQL RANGE/LIST partition class selections and corresponding domain wrappers.",
+      "invariant": "Partition catalog metadata selects the SQL-owned class for every admitted key type instead of emitting zero from a duplicate table.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

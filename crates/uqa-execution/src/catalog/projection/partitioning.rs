@@ -20,6 +20,9 @@ use uqa_sql::ast::{
 };
 use uqa_sql::{ResultRow, SQLError};
 
+#[cfg(test)]
+mod tests;
+
 pub fn build_pg_partitioned_table(
     context: &CatalogContext<'_>,
     catalog: &CatalogReadView,
@@ -518,172 +521,39 @@ fn base_type(ty: &ColumnType) -> &ColumnType {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves catalog column and OID order"
-)]
 fn partition_operator_class(strategy: PartitionStrategy, ty: &ColumnType) -> i64 {
-    let hash = strategy == PartitionStrategy::Hash;
+    if strategy != PartitionStrategy::Hash {
+        return uqa_sql::catalog::index::operator_classes::default_btree_operator_class(ty)
+            .map_or(0, |class| i64::from(class.oid));
+    }
     match base_type(ty) {
-        ColumnType::Boolean => {
-            if hash {
-                10_048
-            } else {
-                10_003
-            }
-        }
-        ColumnType::Bytea => {
-            if hash {
-                10_049
-            } else {
-                10_006
-            }
-        }
-        ColumnType::InternalChar => {
-            if hash {
-                10_008
-            } else {
-                10_007
-            }
-        }
-        ColumnType::Name => {
-            if hash {
-                10_029
-            } else {
-                10_028
-            }
-        }
-        ColumnType::SmallInteger => {
-            if hash {
-                10_019
-            } else {
-                1_979
-            }
-        }
-        ColumnType::Integer => {
-            if hash {
-                10_020
-            } else {
-                1_978
-            }
-        }
-        ColumnType::BigInteger => {
-            if hash {
-                10_021
-            } else {
-                3_124
-            }
-        }
+        ColumnType::Boolean => 10_048,
+        ColumnType::Bytea => 10_049,
+        ColumnType::InternalChar => 10_008,
+        ColumnType::Name => 10_029,
+        ColumnType::SmallInteger => 10_019,
+        ColumnType::Integer => 10_020,
+        ColumnType::BigInteger => 10_021,
         ColumnType::Oid
         | ColumnType::Regclass
         | ColumnType::Regcollation
         | ColumnType::Regnamespace
         | ColumnType::Regrole
-        | ColumnType::Regtype => {
-            if hash {
-                10_031
-            } else {
-                1_981
-            }
-        }
-        ColumnType::Text | ColumnType::Varchar(_) => {
-            if hash {
-                10_037
-            } else {
-                3_126
-            }
-        }
-        ColumnType::Bpchar | ColumnType::Character(_) => {
-            if hash {
-                10_005
-            } else {
-                10_004
-            }
-        }
-        ColumnType::Real => {
-            if hash {
-                10_013
-            } else {
-                10_012
-            }
-        }
-        ColumnType::DoublePrecision => {
-            if hash {
-                10_014
-            } else {
-                3_123
-            }
-        }
-        ColumnType::Numeric { .. } => {
-            if hash {
-                10_030
-            } else {
-                3_125
-            }
-        }
-        ColumnType::Date => {
-            if hash {
-                10_011
-            } else {
-                3_122
-            }
-        }
-        ColumnType::Time | ColumnType::TimePrecision(_) => {
-            if hash {
-                10_039
-            } else {
-                10_038
-            }
-        }
-        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => {
-            if hash {
-                10_042
-            } else {
-                10_041
-            }
-        }
-        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => {
-            if hash {
-                10_046
-            } else {
-                3_128
-            }
-        }
-        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => {
-            if hash {
-                10_040
-            } else {
-                3_127
-            }
-        }
-        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => {
-            if hash {
-                10_023
-            } else {
-                10_022
-            }
-        }
-        ColumnType::Uuid => {
-            if hash {
-                10_066
-            } else {
-                10_065
-            }
-        }
-        ColumnType::JsonB => {
-            if hash {
-                10_089
-            } else {
-                10_088
-            }
-        }
-        ColumnType::Enum(_) => {
-            if hash {
-                10_070
-            } else {
-                10_069
-            }
-        }
+        | ColumnType::Regtype => 10_031,
+        ColumnType::Text | ColumnType::Varchar(_) => 10_037,
+        ColumnType::Bpchar | ColumnType::Character(_) => 10_005,
+        ColumnType::Real => 10_013,
+        ColumnType::DoublePrecision => 10_014,
+        ColumnType::Numeric { .. } => 10_030,
+        ColumnType::Date => 10_011,
+        ColumnType::Time | ColumnType::TimePrecision(_) => 10_039,
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => 10_042,
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => 10_046,
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => 10_040,
+        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => 10_023,
+        ColumnType::Uuid => 10_066,
+        ColumnType::JsonB => 10_089,
+        ColumnType::Enum(_) => 10_070,
         _ => 0,
     }
 }
