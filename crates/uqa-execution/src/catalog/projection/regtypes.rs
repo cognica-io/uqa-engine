@@ -774,6 +774,13 @@ pub fn type_privilege_oid(context: &CatalogContext<'_>, oid: i64) -> Result<Opti
     Ok(Some(oid))
 }
 
+/// Catalog membership is independent of whether a SQL value carrier represents the type.
+pub fn type_oid_exists(context: &CatalogContext<'_>, oid: u32) -> Result<bool, SQLError> {
+    Ok(regtype_output_catalog(context)?
+        .types
+        .contains_key(&i64::from(oid)))
+}
+
 pub fn routine_oid_exists(context: &CatalogContext<'_>, oid: i64) -> Result<bool, SQLError> {
     Ok(regtype_output_catalog(context)?.procs.contains_key(&oid))
 }

@@ -1104,6 +1104,357 @@
       "id": "physical_identity_nummultirange_rollback"
     },
     {
+      "sql": "CREATE TYPE physical_payload_header AS (r bytea)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_header_type"
+    },
+    {
+      "sql": "CREATE VIEW physical_header_missing AS SELECT '(\"\\\\x000000000000000001\")'::physical_payload_header AS v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_header_missing_view"
+    },
+    {
+      "sql": "CREATE VIEW physical_header_maximum AS SELECT '(\"\\\\xffffffff0000000001\")'::physical_payload_header AS v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_header_maximum_view"
+    },
+    {
+      "sql": "CREATE VIEW physical_header_array AS SELECT '(\"\\\\xef0300000000000001\")'::physical_payload_header AS v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_header_array_view"
+    },
+    {
+      "sql": "CREATE VIEW physical_header_unknown AS SELECT '(\"\\\\xc10200000000000001\")'::physical_payload_header AS v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_header_unknown_view"
+    },
+    {
+      "sql": "CREATE VIEW physical_header_cstring AS SELECT '(\"\\\\xe30800000000000001\")'::physical_payload_header AS v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_header_cstring_view"
+    },
+    {
+      "sql": "CREATE VIEW physical_header_record AS SELECT '(\"\\\\xc90800000000000001\")'::physical_payload_header AS v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_header_record_view"
+    },
+    {
+      "sql": "ALTER TYPE physical_payload_header ALTER ATTRIBUTE r TYPE int4range",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_header_range"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_missing",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type with OID 0 does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_missing_error"
+    },
+    {
+      "sql": "SELECT ROW((v).r)=ROW('empty'::int4range) FROM physical_header_missing",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type with OID 0 does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_missing_comparison_error"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_maximum",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type with OID 4294967295 does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_maximum_error"
+    },
+    {
+      "sql": "SELECT ROW((v).r)=ROW('empty'::int4range) FROM physical_header_maximum",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type with OID 4294967295 does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_maximum_comparison_error"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_array",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 1007 is not a range type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_array_error"
+    },
+    {
+      "sql": "SELECT ROW((v).r)=ROW('empty'::int4range) FROM physical_header_array",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 1007 is not a range type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_array_comparison_error"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_unknown",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 705 is not a range type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_unknown_error"
+    },
+    {
+      "sql": "SELECT ROW((v).r)=ROW('empty'::int4range) FROM physical_header_unknown",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 705 is not a range type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_unknown_comparison_error"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_cstring",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 2275 is not a range type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_cstring_error"
+    },
+    {
+      "sql": "SELECT ROW((v).r)=ROW('empty'::int4range) FROM physical_header_cstring",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 2275 is not a range type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_cstring_comparison_error"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_record",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 2249 is not a range type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_record_error"
+    },
+    {
+      "sql": "SELECT ROW((v).r)=ROW('empty'::int4range) FROM physical_header_record",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 2249 is not a range type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_record_comparison_error"
+    },
+    {
+      "sql": "ALTER TYPE physical_payload_header ALTER ATTRIBUTE r TYPE int4multirange",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_header_multirange"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_missing",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type with OID 0 does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_missing_multirange_error"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_maximum",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type with OID 4294967295 does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_maximum_multirange_error"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_array",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 1007 is not a multirange type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_array_multirange_error"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_unknown",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 705 is not a multirange type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_unknown_multirange_error"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_cstring",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 2275 is not a multirange type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_cstring_multirange_error"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_record",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 2249 is not a multirange type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_record_multirange_error"
+    },
+    {
       "sql": "SELECT (v).v = '(\"[1,2]\")'::physical_numrange_new AS eq, (v).v <= '(\"[1,2]\")'::physical_numrange_new AS ordered FROM physical_numrange_hold",
       "command_tags": [
         "SELECT 1"
@@ -1251,6 +1602,32 @@
         }
       ],
       "id": "physical_identity_nummultirange_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_missing",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type with OID 0 does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_missing_reopen_error",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_header_array",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 1007 is not a multirange type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_header_array_reopen_error",
       "reopen": true
     },
     {

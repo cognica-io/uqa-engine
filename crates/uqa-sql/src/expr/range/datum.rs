@@ -116,10 +116,11 @@ fn write_bounds(range: &CanonicalRange, bytes: &mut Vec<u8>) -> Result<(), SQLEr
 pub(crate) fn read(
     bytes: &[u8],
     ty: &ColumnType,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
-    let subtype = physical_subtype(bytes, ty)?;
+    let subtype = physical_subtype(bytes, ty, catalog)?;
     let mut output = ProductionString::new(*control);
     match ty {
         ColumnType::Range(_) => {
@@ -149,10 +150,11 @@ pub(crate) fn read(
 pub(in crate::expr) fn comparison(
     bytes: &[u8],
     ty: &ColumnType,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<RangeComparisonValue, SQLError> {
     control.check()?;
-    let subtype = physical_subtype(bytes, ty)?;
+    let subtype = physical_subtype(bytes, ty, catalog)?;
     match ty {
         ColumnType::Range(_) => Ok(RangeComparisonValue::Range(read_range(
             bytes, subtype, control,
@@ -172,26 +174,48 @@ pub(in crate::expr) fn comparison(
     }
 }
 
-fn physical_subtype(bytes: &[u8], declared: &ColumnType) -> Result<RangeSubtype, SQLError> {
+fn physical_subtype(
+    bytes: &[u8],
+    declared: &ColumnType,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
+) -> Result<RangeSubtype, SQLError> {
+    use crate::catalog::type_metadata::{
+        builtin_array_element, builtin_scalar_type, routine_pseudo_type_name,
+    };
     let oid = word(bytes)?;
-    let actual = crate::catalog::type_metadata::builtin_scalar_type(oid)
-        .ok_or_else(|| corrupt("unknown native range payload type"))?;
+    let actual = builtin_scalar_type(oid);
     match (declared, actual) {
-        (ColumnType::Range(_), ColumnType::Range(subtype))
-        | (ColumnType::Multirange(_), ColumnType::Multirange(subtype)) => Ok(*subtype),
-        (ColumnType::Range(_), _) | (ColumnType::Multirange(_), _) => Err(SQLError::Routine {
-            sqlstate: "XX000".into(),
-            message: format!(
-                "type {oid} is not a {} type",
-                if matches!(declared, ColumnType::Range(_)) {
-                    "range"
-                } else {
-                    "multirange"
-                }
-            ),
-        }),
-        _ => Err(corrupt("non-range payload type")),
+        (ColumnType::Range(_), Some(ColumnType::Range(subtype)))
+        | (ColumnType::Multirange(_), Some(ColumnType::Multirange(subtype))) => {
+            return Ok(*subtype)
+        }
+        (ColumnType::Range(_) | ColumnType::Multirange(_), _) => {}
+        _ => return Err(corrupt("non-range payload type")),
     }
+    let exists = actual.is_some()
+        || builtin_array_element(oid).is_some()
+        || routine_pseudo_type_name(i64::from(oid)).is_some()
+        || catalog
+            .map(|catalog| catalog.value_type_exists(oid))
+            .transpose()?
+            .unwrap_or(false);
+    if !exists {
+        return Err(SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: format!("type with OID {oid} does not exist"),
+        });
+    }
+    Err(SQLError::Routine {
+        sqlstate: "XX000".into(),
+        message: format!(
+            "type {oid} is not a {} type",
+            if matches!(declared, ColumnType::Range(_)) {
+                "range"
+            } else {
+                "multirange"
+            }
+        ),
+    })
 }
 
 fn read_range(

@@ -167,8 +167,10 @@ fn native_range_datums_reject_truncated_payloads_flags_offsets_and_type_mismatch
         let mut wrong_type = payload.to_vec();
         wrong_type[..4].fill(0);
         assert_eq!(
-            read(&wrong_type, &ty, &control).unwrap_err().sqlstate(),
-            Some("XX001")
+            read(&wrong_type, &ty, None, &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("42704")
         );
         let mut corrupt = payload.to_vec();
         match ty {
@@ -177,14 +179,14 @@ fn native_range_datums_reject_truncated_payloads_flags_offsets_and_type_mismatch
             _ => unreachable!(),
         }
         assert_eq!(
-            read(&corrupt, &ty, &control).unwrap_err().sqlstate(),
+            read(&corrupt, &ty, None, &control).unwrap_err().sqlstate(),
             Some("XX001")
         );
         if case["id"].as_str().unwrap().ends_with("offsets") {
             let mut corrupt = payload.to_vec();
             corrupt[8] += 1;
             assert_eq!(
-                read(&corrupt, &ty, &control).unwrap_err().sqlstate(),
+                read(&corrupt, &ty, None, &control).unwrap_err().sqlstate(),
                 Some("XX001")
             );
         }

@@ -31,7 +31,7 @@ impl RangeComparisonValue {
             return Ok(None);
         }
         if let Some(ty) = crate::catalog::type_metadata::builtin_scalar_type(oid) {
-            return Self::from_type(value, ty, control);
+            return Self::from_type(value, ty, catalog, control);
         }
         let ty = catalog
             .map(|catalog| catalog.value_type_by_oid(oid))
@@ -40,7 +40,7 @@ impl RangeComparisonValue {
             .map(|ty| ty.retain_external_with_control(control))
             .transpose()?;
         match ty {
-            Some(ty) => Self::from_type(value, &ty, control),
+            Some(ty) => Self::from_type(value, &ty, catalog, control),
             None => Ok(None),
         }
     }
@@ -48,17 +48,20 @@ impl RangeComparisonValue {
     fn from_type(
         value: &Value,
         ty: &ColumnType,
+        catalog: Option<&dyn SQLValueCatalog>,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>> {
         control.check()?;
         let (subtype, multirange) = match ty {
             ColumnType::Range(subtype) => (*subtype, false),
             ColumnType::Multirange(subtype) => (*subtype, true),
-            ColumnType::Domain { base, .. } => return Self::from_type(value, base, control),
+            ColumnType::Domain { base, .. } => {
+                return Self::from_type(value, base, catalog, control)
+            }
             _ => return Ok(None),
         };
         if let Value::Datum(datum) = value {
-            return super::super::datums::range_comparison(datum, ty, control).map(Some);
+            return super::super::datums::range_comparison(datum, ty, catalog, control).map(Some);
         }
         let Value::Str(text) = value else {
             return Err(SQLError::Internal(

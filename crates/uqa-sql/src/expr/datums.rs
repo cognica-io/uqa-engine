@@ -111,10 +111,11 @@ pub fn read_with_control(
 pub(super) fn range_comparison(
     datum: &DatumValue,
     ty: &crate::ColumnType,
+    catalog: Option<&dyn super::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<super::range::RangeComparisonValue, SQLError> {
     let payload = payload(datum, control)?;
-    super::range::datum::comparison(payload.bytes(), ty, control)
+    super::range::datum::comparison(payload.bytes(), ty, catalog, control)
 }
 
 /// Preserve the caller's output allowance and cancellation boundary during catalog-dependent physical reads.
@@ -215,7 +216,7 @@ fn read_payload(
     if let Some(ty @ (crate::ColumnType::Range(_) | crate::ColumnType::Multirange(_))) =
         crate::catalog::type_metadata::builtin_scalar_type(oid)
     {
-        return super::range::datum::read(bytes, ty, control);
+        return super::range::datum::read(bytes, ty, catalog, control);
     }
     if crate::catalog::type_metadata::builtin_scalar_type(oid).is_none() {
         if let Some(ty) = catalog

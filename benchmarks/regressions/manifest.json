@@ -10137,7 +10137,7 @@
       ],
       "source": "crates/uqa-engine/tests/pg18_semantics/range_datums.rs",
       "capability": "Native range retained consumer persistence",
-      "workload": "68 independent PostgreSQL statements covering composite fields, nested arrays, DEFAULT/CHECK catalog output, constraint rejection, prepared output, retained field type changes, selected comparison and grouping, rollback and ten reopen observations.",
+      "workload": "97 independent PostgreSQL statements covering composite fields, nested arrays, DEFAULT/CHECK catalog output, constraint rejection, prepared output, retained field type changes, selected comparison and grouping, rollback and twelve reopen observations; absent payload OIDs retain 42704 while existing wrong-kind types retain XX000 through output and comparison.",
       "invariant": "Already admitted fields preserve physical range identity, selected comparison and catalog output through each state transition without changing database format."
     },
     {
