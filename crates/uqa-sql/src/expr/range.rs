@@ -14,6 +14,7 @@ use uqa_core::{
 };
 
 mod comparison;
+pub(crate) mod datum;
 mod input;
 mod production;
 mod relationships;

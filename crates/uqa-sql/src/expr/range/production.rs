@@ -319,7 +319,7 @@ pub(super) fn multirange_text(
     Ok(output.finish()?)
 }
 
-fn write_range(
+pub(super) fn write_range(
     range: &CanonicalRange,
     output: &mut ProductionString<'_>,
     control: &ProductionControl<'_>,

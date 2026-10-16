@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Encode built-in range and multirange constants in PostgreSQL catalog Datums, including arrays and retained composite fields. Preserve `pg_attrdef.adbin`, `pg_get_expr`, DEFAULT values, prepared observations and persistent reopening with bounded physical reads.
+
 - Read infinite interval endpoints without allocating a normalized input string. Preserve signs, case, whitespace, finite interval parsing and cancellation under the caller's memory allowance.
 
 - Replace the yanked ZIP build dependency through maintained DuckDB bindings, retaining native DuckDB 1.5.5 and bundled Parquet support. Rust callers sharing DuckDB types must use the matching package alias; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).

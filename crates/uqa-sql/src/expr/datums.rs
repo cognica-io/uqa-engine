@@ -203,6 +203,11 @@ fn read_payload(
     if crate::catalog::type_metadata::builtin_array_element(oid).is_some() {
         return arrays::read(bytes, catalog, control);
     }
+    if let Some(ty @ (crate::ColumnType::Range(_) | crate::ColumnType::Multirange(_))) =
+        crate::catalog::type_metadata::builtin_scalar_type(oid)
+    {
+        return super::range::datum::read(bytes, ty, control);
+    }
     if crate::catalog::type_metadata::builtin_scalar_type(oid).is_none() {
         if let Some(ty) = catalog
             .map(|catalog| catalog.value_type_by_oid(oid))

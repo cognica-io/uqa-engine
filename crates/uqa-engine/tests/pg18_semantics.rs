@@ -116,6 +116,8 @@ mod pattern_escape;
 mod pattern_operators;
 #[path = "pg18_semantics/pg18_additions.rs"]
 mod pg18_additions;
+#[path = "pg18_semantics/range_datums.rs"]
+mod range_datums;
 #[path = "pg18_semantics/range_elements.rs"]
 mod range_elements;
 #[path = "pg18_semantics/range_input.rs"]

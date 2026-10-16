@@ -134,6 +134,9 @@ fn payload(value: &Value, ty: &ColumnType, descriptors: &Descriptors) -> Option<
         (Value::Json(text), ColumnType::Json) => Some(text.as_bytes().to_vec()),
         (Value::JsonB(text), ColumnType::JsonB) => crate::expr::json::encode_jsonb_datum(text).ok(),
         (Value::Bytes(bytes), ColumnType::Bytea) => Some(bytes.clone()),
+        (Value::Str(text), ColumnType::Range(_) | ColumnType::Multirange(_)) => {
+            crate::expr::range::datum::encode(text, ty).ok()
+        }
         (Value::BitString(bits), ColumnType::Bit(_) | ColumnType::VarBit(_)) => {
             let mut bytes = Vec::with_capacity(4 + bits.as_bytes().len());
             bytes.extend_from_slice(&bits.bit_len().to_le_bytes());

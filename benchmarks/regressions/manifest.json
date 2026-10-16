@@ -10068,6 +10068,77 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_datums_match_postgresql_bytes_output_and_catalog_deparse",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/datum/tests.rs",
+      "capability": "Native range catalog Datum agreement",
+      "workload": "66 independent PostgreSQL range, multirange and array constants, including numeric packing, offsets, infinity and empty values.",
+      "invariant": "Encoded bytes, physical reads, copied constants and both catalog deparse modes preserve the independently captured PostgreSQL output."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_datum_reads_preserve_the_original_allowance_and_both_cancellations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/datum/tests.rs",
+      "capability": "Native range Datum ownership",
+      "workload": "Read all 66 physical constants with sufficient and zero-byte allowances and each cancellation scope.",
+      "invariant": "Output retains its complete reservation; partial reads, quota failures and cancellation release every allocation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_datums_reject_truncated_payloads_flags_offsets_and_type_mismatches",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/datum/tests.rs",
+      "capability": "Native range physical bounds",
+      "workload": "Truncate each standalone native constant and corrupt its type, flags, multirange count or offset.",
+      "invariant": "Owned bounds are checked before observation; invalid lengths and offsets cannot be used as allocation or traversal sizes."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "native_range_catalog_defaults_match_postgresql_after_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_datums.rs",
+      "capability": "Native range default catalog persistence",
+      "workload": "24 independent range, multirange and nullable-array defaults on all four providers and actual persistent close/reopen.",
+      "invariant": "Catalog node bytes, pg_get_expr and stored DEFAULT values match PostgreSQL before and after reopening."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "native_range_retained_consumers_match_postgresql_after_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_datums.rs",
+      "capability": "Native range retained consumer persistence",
+      "workload": "22 independent PostgreSQL statements covering composite fields, nested arrays, DEFAULT/CHECK catalog output, constraint rejection, prepared output, attribute rename, rollback and four reopen observations.",
+      "invariant": "Already admitted fields preserve range operations and catalog output through each state transition without changing database format."
     }
   ]
 }

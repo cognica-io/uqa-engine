@@ -1,0 +1,576 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "source": "Docker PostgreSQL 18.4, fresh disposable database and independent connection reopen",
+    "image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec"
+  },
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE retained_range_tuple AS (r int4range, m nummultirange, a daterange[])",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "type"
+    },
+    {
+      "sql": "CREATE VIEW retained_range_view AS SELECT '(\"[1,3)\",\"{[1.00,2.000],[3,4]}\",\"{\"\"[2000-01-01,2000-01-03)\"\",NULL}\")'::retained_range_tuple AS v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "view"
+    },
+    {
+      "sql": "SELECT (v).r::text AS r, (v).m::text AS m, (v).a::text AS a, lower((v).r) AS lo, upper((v).r) AS hi, (v).r @> 2 AS contains, (v).m @> 3.5::numeric AS member, (v).a[1] @> '2000-01-02'::date AS day FROM retained_range_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "m",
+            "a",
+            "lo",
+            "hi",
+            "contains",
+            "member",
+            "day"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            23,
+            23,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "[1,3)",
+              "{[1.00,2.000],[3,4]}",
+              "{\"[2000-01-01,2000-01-03)\",NULL}",
+              "1",
+              "3",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "initial_fields"
+    },
+    {
+      "sql": "CREATE TABLE retained_range_defaults (r int4range DEFAULT '[1,3)'::int4range, m nummultirange DEFAULT '{[1.00,2.000],[3,4]}'::nummultirange, a daterange[] DEFAULT '{\"[2000-01-01,2000-01-03)\",NULL}'::daterange[], c retained_range_tuple DEFAULT '(\"[1,3)\",\"{[1.00,2.000],[3,4]}\",\"{\"\"[2000-01-01,2000-01-03)\"\",NULL}\")'::retained_range_tuple)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "table"
+    },
+    {
+      "sql": "ALTER TABLE retained_range_defaults ADD CONSTRAINT range_matches CHECK (r = '[1,3)'::int4range AND m = '{[1.00,2.000],[3,4]}'::nummultirange)",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "constraint"
+    },
+    {
+      "sql": "SELECT pg_get_constraintdef(oid), pg_get_expr(conbin,conrelid) FROM pg_constraint WHERE conrelid='retained_range_defaults'::regclass AND conname='range_matches'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_constraintdef",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "CHECK (((r = '[1,3)'::int4range) AND (m = '{[1.00,2.000],[3,4]}'::nummultirange)))",
+              "((r = '[1,3)'::int4range) AND (m = '{[1.00,2.000],[3,4]}'::nummultirange))"
+            ]
+          ]
+        }
+      ],
+      "id": "constraint_catalog"
+    },
+    {
+      "sql": "SELECT a.attname::text, pg_get_expr(d.adbin,d.adrelid) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum WHERE d.adrelid='retained_range_defaults'::regclass AND a.attname<>'c' ORDER BY a.attnum",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "r",
+              "'[1,3)'::int4range"
+            ],
+            [
+              "m",
+              "'{[1.00,2.000],[3,4]}'::nummultirange"
+            ],
+            [
+              "a",
+              "'{\"[2000-01-01,2000-01-03)\",NULL}'::daterange[]"
+            ]
+          ]
+        }
+      ],
+      "id": "catalog"
+    },
+    {
+      "sql": "INSERT INTO retained_range_defaults DEFAULT VALUES",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "insert"
+    },
+    {
+      "sql": "SELECT r::text,m::text,a::text,c::text,(c).r::text AS nested FROM retained_range_defaults",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "m",
+            "a",
+            "c",
+            "nested"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "[1,3)",
+              "{[1.00,2.000],[3,4]}",
+              "{\"[2000-01-01,2000-01-03)\",NULL}",
+              "(\"[1,3)\",\"{[1.00,2.000],[3,4]}\",\"{\"\"[2000-01-01,2000-01-03)\"\",NULL}\")",
+              "[1,3)"
+            ]
+          ]
+        }
+      ],
+      "id": "stored"
+    },
+    {
+      "sql": "INSERT INTO retained_range_defaults(r) VALUES ('[2,3)'::int4range)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"retained_range_defaults\" violates check constraint \"range_matches\"",
+        "detail": "Failing row contains ([2,3), {[1.00,2.000],[3,4]}, {\"[2000-01-01,2000-01-03)\",NULL}, (\"[1,3)\",\"{[1.00,2.000],[3,4]}\",\"{\"\"[2000-01-01,2000-01-03)\"\",NU...).",
+        "hint": null
+      },
+      "results": [],
+      "id": "constraint_rejects"
+    },
+    {
+      "sql": "PREPARE retained_range_fields AS SELECT (v).r::text AS r, (v).m::text AS m, (v).a::text AS a, lower((v).r) AS lo, upper((v).r) AS hi, (v).r @> 2 AS contains, (v).m @> 3.5::numeric AS member, (v).a[1] @> '2000-01-02'::date AS day FROM retained_range_view",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "prepare"
+    },
+    {
+      "sql": "EXECUTE retained_range_fields",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "m",
+            "a",
+            "lo",
+            "hi",
+            "contains",
+            "member",
+            "day"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            23,
+            23,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "[1,3)",
+              "{[1.00,2.000],[3,4]}",
+              "{\"[2000-01-01,2000-01-03)\",NULL}",
+              "1",
+              "3",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "prepared"
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "begin"
+    },
+    {
+      "sql": "ALTER TYPE retained_range_tuple RENAME ATTRIBUTE r TO renamed",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "rename"
+    },
+    {
+      "sql": "SELECT (v).renamed::text, (v).m::text FROM retained_range_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "renamed",
+            "m"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "[1,3)",
+              "{[1.00,2.000],[3,4]}"
+            ]
+          ]
+        }
+      ],
+      "id": "renamed"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "rollback"
+    },
+    {
+      "sql": "EXECUTE retained_range_fields",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "m",
+            "a",
+            "lo",
+            "hi",
+            "contains",
+            "member",
+            "day"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            23,
+            23,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "[1,3)",
+              "{[1.00,2.000],[3,4]}",
+              "{\"[2000-01-01,2000-01-03)\",NULL}",
+              "1",
+              "3",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "after_rollback"
+    },
+    {
+      "sql": "SELECT a.attname::text, pg_get_expr(d.adbin,d.adrelid) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum WHERE d.adrelid='retained_range_defaults'::regclass AND a.attname<>'c' ORDER BY a.attnum",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "r",
+              "'[1,3)'::int4range"
+            ],
+            [
+              "m",
+              "'{[1.00,2.000],[3,4]}'::nummultirange"
+            ],
+            [
+              "a",
+              "'{\"[2000-01-01,2000-01-03)\",NULL}'::daterange[]"
+            ]
+          ]
+        }
+      ],
+      "id": "reopen_catalog",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT pg_get_constraintdef(oid), pg_get_expr(conbin,conrelid) FROM pg_constraint WHERE conrelid='retained_range_defaults'::regclass AND conname='range_matches'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_constraintdef",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "CHECK (((r = '[1,3)'::int4range) AND (m = '{[1.00,2.000],[3,4]}'::nummultirange)))",
+              "((r = '[1,3)'::int4range) AND (m = '{[1.00,2.000],[3,4]}'::nummultirange))"
+            ]
+          ]
+        }
+      ],
+      "id": "reopen_constraint",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT (v).r::text AS r, (v).m::text AS m, (v).a::text AS a, lower((v).r) AS lo, upper((v).r) AS hi, (v).r @> 2 AS contains, (v).m @> 3.5::numeric AS member, (v).a[1] @> '2000-01-02'::date AS day FROM retained_range_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "m",
+            "a",
+            "lo",
+            "hi",
+            "contains",
+            "member",
+            "day"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            23,
+            23,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "[1,3)",
+              "{[1.00,2.000],[3,4]}",
+              "{\"[2000-01-01,2000-01-03)\",NULL}",
+              "1",
+              "3",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "reopen_view",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT r::text,m::text,a::text,c::text,(c).r::text AS nested FROM retained_range_defaults",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "m",
+            "a",
+            "c",
+            "nested"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "[1,3)",
+              "{[1.00,2.000],[3,4]}",
+              "{\"[2000-01-01,2000-01-03)\",NULL}",
+              "(\"[1,3)\",\"{[1.00,2.000],[3,4]}\",\"{\"\"[2000-01-01,2000-01-03)\"\",NULL}\")",
+              "[1,3)"
+            ]
+          ]
+        }
+      ],
+      "id": "reopen_stored",
+      "reopen": true
+    }
+  ]
+}
