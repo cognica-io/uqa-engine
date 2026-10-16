@@ -10430,6 +10430,19 @@
       "capability": "Private type catalog refresh",
       "workload": "Replay 28 PostgreSQL writer/peer steps, including independent changes, completion, savepoints, rollback, commit and final persistent reopen.",
       "invariant": "Private names and descriptions survive committed peer refresh while other sessions observe only committed catalog generations."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "anonymous_row_production_preserves_ownership_and_releases_cancelled_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/row/tests.rs",
+      "capability": "Anonymous row production ownership",
+      "workload": "Produce empty and populated rows without field descriptors, then cancel each original owner after admitting their values.",
+      "invariant": "Missing metadata retains the budget owner, transfers admitted buffers without copying and releases all storage on drop or cancellation."
     }
   ]
 }
