@@ -1,6 +1,6 @@
 # Selected B-tree inputs
 
-This is the next support-invocation boundary of original #638 record 65, prepared separately from [PR #955](https://github.com/cognica-io/uqa-engine/pull/955). That PR owns selected record-image comparison and #954's retained-vector correction. This work retains a declaration's selected class independently of the subtype's default. Original range declarations, selected collation execution, constructors, lifecycle and provider/binding acceptance remain open.
+This is the next support-invocation boundary of original #638 record 65, prepared separately after merged [PR #955](https://github.com/cognica-io/uqa-engine/pull/955). That PR completed selected record-image comparison and #954's retained-vector correction. This work retains a declaration's selected class independently of the subtype's default. Original range declarations, selected collation execution, constructors, lifecycle and provider/binding acceptance remain open.
 
 ## Ownership and input contract
 
@@ -38,4 +38,4 @@ Declaration integration review additionally captures five PostgreSQL diagnostics
 
 The final selected-input run passes 27 SQL binary/comparison tests and 28 Execution encoding tests. The seven independent support comparisons are tested through all logical/physical pairs, using fourteen actual PostgreSQL catalog Datums rather than UQA-generated expected bytes; physical and logical keys also match through memory and one-byte spill. Consumer cancellation is checked before returning borrowed or allocated observations, including NULL. The #956 correction additionally passes three Core comparison-owner tests. The final inventory selects 857 checks / 1,256 cases. Automatic platform qualification is still pending and the original record remains open.
 
-Final strict SQL/Execution library/test Clippy, formatting and ownership/dependency/harness/header/file-size policies pass. Core strict lint also passed with the separately committed #956 correction. The complete selected-input unit is ready for its own PR after #955 is qualified and merged; no release build or uncontrolled timing measurement was run.
+Final strict SQL/Execution library/test Clippy, formatting and ownership/dependency/harness/header/file-size policies pass. Core strict lint also passed with the separately committed #956 correction. The complete selected-input unit is ready for its own PR following verified and merged #955; no release build or uncontrolled timing measurement was run.
