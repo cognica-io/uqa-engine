@@ -39,3 +39,11 @@ For each selected range identity $r$, define its endpoint domain $T_r$, selected
 Derive range order and multirange normalization from the selected endpoint order and the empty/unbounded rules. Show that observing consumers use the same equality classes and that any exact/hash/index representation preserves them. For serialization $E_r$ and admitted decoding $D_r$, prove that $D_r(E_r(v))$ preserves type and endpoint identities and every supported observation; equality of output text alone is insufficient. Preserve transaction effects, lazy read boundaries, memory ownership and cancellation when applying the existing relational compositions.
 
 Finite PostgreSQL fixtures and resource tests exercise these obligations but do not replace their argument. Keep original records 66–75 and all earlier unfinished requirements in the parent ledger; this plan neither implements package installation nor closes the larger extension project.
+
+## Active selected-semantics work
+
+The next focused source unit starts from main `594036fdf` on `feature/declared-range-semantics`. SQL's native range production, comparison, containment, normalization and text output will select their endpoint operations and optional canonicalization through one owning interface. Preserve public native adapters, the existing admitted carrier layout, stored text representation and exact-key consumers. This unit does not expose custom DDL or complete record 65; typed custom endpoint retention and catalog publication remain the following boundaries.
+
+- [x] Inspect Core, SQL and Execution manifests/features, dependency policy, manual ownership, existing range consumers and the retained independent PostgreSQL references.
+- [ ] Implement selected semantics in the actual native input, comparison, canonicalization and output paths; retain error order, memory leases and cancellation.
+- [ ] Complete the preservation argument and focused owner/consumer verification, inspect relevant automatic regression evidence, update the successor PR and merge this unit before publishing dependent work.
