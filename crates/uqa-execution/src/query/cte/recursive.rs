@@ -25,6 +25,8 @@ use uqa_sql::{
     SQLError, SQLParam, ScalarExpr,
 };
 
+mod keys;
+
 const MAX_ITERATIONS: usize = 1024;
 
 /// Iterate the recursive `CtePlan`: take the anchor (LHS of UNION ALL) as
@@ -637,22 +639,10 @@ fn annotate_recursive_row(
         .map(|(_, value)| value.clone())
         .collect::<Vec<_>>();
     if let (Some(search), Some(positions)) = (&cte.search, search_positions) {
-        let key = positions
-            .iter()
-            .map(|position| {
-                base.view()
-                    .value_at(*position)
-                    .cloned()
-                    .unwrap_or(Value::Null)
-            })
-            .collect::<Vec<_>>();
         let sequence = if search.breadth_first {
-            let mut fields = Vec::with_capacity(key.len() + 1);
-            fields.push(Value::Int(i64::try_from(depth).map_err(|_| {
-                SQLError::Unsupported("recursive CTE depth exceeds bigint".into())
-            })?));
-            fields.extend(key);
-            Value::Row(fields.into())
+            let depth = i64::try_from(depth)
+                .map_err(|_| SQLError::Unsupported("recursive CTE depth exceeds bigint".into()))?;
+            keys::record(base, positions, Some(depth))?
         } else {
             let mut path = parent
                 .and_then(|parent| parent.search_sequence.as_ref())
@@ -661,7 +651,7 @@ fn annotate_recursive_row(
                     _ => None,
                 })
                 .unwrap_or_default();
-            path.push(Value::Row(key.into()));
+            path.push(keys::record(base, positions, None)?);
             Value::Array(ArrayValue::try_new(path).ok_or_else(|| {
                 SQLError::Internal("SEARCH path is not a rectangular SQL array".into())
             })?)
@@ -672,17 +662,7 @@ fn annotate_recursive_row(
     if let (Some(_cycle), Some(positions), Some((mark, default))) =
         (&cte.cycle, cycle_positions, cycle_marks)
     {
-        let key = Value::Row(
-            positions
-                .iter()
-                .map(|position| {
-                    base.view()
-                        .value_at(*position)
-                        .cloned()
-                        .unwrap_or(Value::Null)
-                })
-                .collect(),
-        );
+        let key = keys::record(base, positions, None)?;
         let mut path = parent
             .and_then(|parent| parent.cycle_path.as_ref())
             .and_then(|value| match value {

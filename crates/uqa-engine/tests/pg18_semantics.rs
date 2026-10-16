@@ -124,6 +124,8 @@ mod range_elements;
 mod range_input;
 #[path = "pg18_semantics/range_peers.rs"]
 mod range_peers;
+#[path = "pg18_semantics/range_rowsets.rs"]
+mod range_rowsets;
 #[path = "pg18_semantics/reverse_overloads.rs"]
 mod reverse_overloads;
 #[path = "pg18_semantics/review_regressions.rs"]

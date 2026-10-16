@@ -136,16 +136,20 @@ impl CachedScalarSubquery {
                 saw_null: false,
             });
         };
-        let mut values = crate::ExactRowSet::new(work_mem_bytes);
+        let schema = self.rows.row_schema();
+        let position = schema.position(first_column).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "cached subquery output column `{first_column}` is missing"
+            ))
+        })?;
+        let mut values = crate::ExactRowSet::with_sql_types(
+            work_mem_bytes,
+            vec![schema.column_type(position).cloned()],
+        );
         let mut saw_row = false;
         let mut saw_null = false;
         for batch in self.rows.reader().map_err(physical_exec_error)? {
             let batch = batch.map_err(physical_exec_error)?;
-            let position = batch.schema.position(first_column).ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "cached subquery output column `{first_column}` is missing"
-                ))
-            })?;
             for row in &batch.rows {
                 saw_row = true;
                 match batch.schema.view(row).value_at(position) {

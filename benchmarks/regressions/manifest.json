@@ -11199,6 +11199,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_range_rowsets_preserve_postgresql_classes_in_memory_and_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/tests/typed_rowsets.rs",
+      "capability": "Typed reusable SQL sets",
+      "workload": "All twelve native range/multirange families and domains through borrowed/value hash insertion, physical/value exact insertion, probes and one-byte spill.",
+      "invariant": "Every independent PostgreSQL equivalence class is retained once; input representations, exact state bounds and hash-collision verification remain correct.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "typed_sql_rowsets_keep_raw_and_text_key_domains_separate",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/tests/typed_rowsets.rs",
+      "capability": "Raw and selected SQL key domains",
+      "workload": "Equal-looking range strings through unselected/TEXT SQL sets and raw methods of a range-typed exact set.",
+      "invariant": "Type transport does not infer ranges from spelling or change the established raw encoding domain.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sql_rowset_physical_and_value_access_keep_one_selected_type_domain",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/tests/typed_rowsets.rs",
+      "capability": "Stable reusable SQL key types",
+      "workload": "Physical/value insertion and probes for equal numrange/nummultirange spellings, explicit and inferred types, probes before insertion, both initial insertion forms and memory/one-byte spill.",
+      "invariant": "Every SQL operation uses one retained selected type domain; physical insertion can always be probed by its original value or a PostgreSQL-equal value, and an untyped first insertion remains untyped.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_range_membership_keeps_null_empty_and_streamed_semantics",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/subqueries/tests/typed_ranges.rs",
+      "capability": "Typed cached and streamed membership",
+      "workload": "Numeric range/multirange membership in empty, NULL-only, non-NULL and mixed sets under memory and forced-spill budgets.",
+      "invariant": "Cached and streamed results agree for SQL-equal, different and NULL needles, including three-valued and empty-set rules.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "recursive_key_records_keep_range_identity_and_depth",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/cte/recursive/keys.rs",
+      "capability": "Recursive generated key identities",
+      "workload": "Equivalent numeric ranges and multiranges in generated key records, with absent or bigint breadth-first depth prefixes.",
+      "invariant": "Record equality observes selected field types and breadth-first depth remains the first ordering key.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "scalar_range_recursive_and_subquery_sets_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_rowsets.rs",
+      "capability": "Public recursive and subquery range semantics",
+      "workload": "Fourteen independently captured PostgreSQL queries for recursive UNION, scalar IN, WHERE IN, EXISTS, CYCLE and depth/breadth-first SEARCH.",
+      "invariant": "Actual Engine SQL preserves equality classes, finite cycle boundaries and generated-key order for numeric ranges and multiranges.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
