@@ -533,6 +533,10 @@ impl CatalogReadView {
         self.snapshot.definitions.enums.values()
     }
 
+    pub fn shells(&self) -> impl Iterator<Item = &uqa_sql::catalog::shell_type::StoredShellType> {
+        self.snapshot.definitions.shells.values()
+    }
+
     pub fn composites(
         &self,
     ) -> impl Iterator<Item = &uqa_sql::catalog::composite_type::StoredComposite> {

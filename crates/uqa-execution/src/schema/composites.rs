@@ -32,6 +32,7 @@ mod type_changes;
 pub mod values;
 
 pub struct CompositeTypeContext<'a> {
+    pub shells: super::shell_types::ShellCompletionContext<'a>,
     pub creation: RelationCreationContext<'a>,
     pub identities: CatalogIdentityReservationContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,
@@ -54,6 +55,7 @@ pub fn create_composite_type(
     context.writer.prepare_writer()?;
     let name = context.creation.persistent_name(&definition.name)?;
     let requested = RelationIdentity::from_legacy_name(&name).map_err(SQLError::Internal)?;
+    let shell = context.shells.retain(&name, owner.identity())?;
     super::types::arrays::displace_array_type(
         &context.creation,
         super::types::arrays::UserTypeRegistries {
@@ -63,7 +65,11 @@ pub fn create_composite_type(
         },
         &requested,
     )?;
-    let identity = context.creation.reserve_type_name(&name)?;
+    let identity = if let Some(shell) = &shell {
+        shell.identity.clone()
+    } else {
+        context.creation.reserve_type_name(&name)?
+    };
     let attributes = uqa_sql::schema::composites::prepare_composite_attributes(
         context.types,
         &definition.attributes,
@@ -80,11 +86,18 @@ pub fn create_composite_type(
         &identity.schema,
         &identity.name,
     )?;
-    let object_id = (context.allocate_identity)()?;
+    let object_id = shell.as_ref().map_or_else(
+        || (context.allocate_identity)(),
+        |shell| Ok(shell.object_id),
+    )?;
     let oids = context
         .identities
         .allocator(allocate_catalog_object_id)
-        .allocate_relation_oids(RelationOidKind::CompositeType, &identity)?;
+        .allocate_relation_oids_with_row_type(
+            RelationOidKind::CompositeType,
+            &identity,
+            shell.as_ref().map(|shell| shell.oid),
+        )?;
     let (Some(array_oid), Some(oid)) = (oids.array_type, oids.row_type) else {
         return Err(SQLError::Internal(
             "composite type relation OIDs omitted its types".into(),
@@ -108,6 +121,7 @@ pub fn create_composite_type(
         },
     );
     composite_type::publish(context.publication, &before, registry)?;
+    context.shells.complete(shell.as_ref())?;
     context.changes.catalog_registry_changed();
     Ok(())
 }

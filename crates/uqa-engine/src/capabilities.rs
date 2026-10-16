@@ -283,6 +283,8 @@ impl Engine {
 
             domains: durable.domains.clone(),
             enums: durable.enums.clone(),
+            shells: durable.shells.clone(),
+            comments: durable.comments.clone(),
             composites: durable.composites.clone(),
             graphs: durable.graphs.clone(),
             views: durable.views.clone(),
@@ -512,10 +514,12 @@ mod view_alteration;
 mod view_creation;
 mod view_restoration;
 
+mod comments;
 mod composites;
 mod domains;
 mod enums;
 mod namespaces;
+mod shell_types;
 
 mod object_removal;
 mod type_lifecycle;

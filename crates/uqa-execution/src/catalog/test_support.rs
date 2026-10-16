@@ -56,6 +56,8 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
             role_memberships: Arc::default(),
             domains: Arc::default(),
             enums: Arc::default(),
+            shells: Arc::default(),
+            comments: Arc::default(),
             composites: Arc::default(),
             graphs: Arc::default(),
             views: Arc::default(),

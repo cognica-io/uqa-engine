@@ -113,6 +113,7 @@ fn legacy_vector_array_type_lookup_uses_the_array_identity() {
         catalog.types.insert(
             oid,
             RegtypeCatalogEntry {
+                is_defined: true,
                 name: name.into(),
                 namespace_oid: 11,
                 overloaded: false,
@@ -155,6 +156,7 @@ fn type_output_qualifies_shadowed_rows_and_arrays_by_first_visible_type() {
         catalog.types.insert(
             oid,
             RegtypeCatalogEntry {
+                is_defined: true,
                 name: name.into(),
                 namespace_oid: namespace,
                 overloaded: false,
@@ -209,6 +211,7 @@ fn builtin_output_distinguishes_keyword_aliases_from_catalog_identifiers() {
         catalog.types.insert(
             oid,
             RegtypeCatalogEntry {
+                is_defined: true,
                 name: name.into(),
                 namespace_oid: namespace,
                 overloaded: false,
@@ -257,7 +260,14 @@ fn missing_retained_type_identity_uses_the_missing_type_diagnostic() {
         cache::RegtypeOutputCache,
         test_support::{empty_catalog, CatalogServices},
     };
-    let catalog = empty_catalog();
+    let mut snapshot = empty_catalog().snapshot().clone();
+    snapshot.definitions.schemas =
+        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
+    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
+        "uqa".into(),
+        uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+    )]));
+    let catalog = CatalogReadView::new(snapshot);
     let services = CatalogServices::default();
     let cache = RegtypeOutputCache::default();
     let context = services.context(&catalog, &cache);

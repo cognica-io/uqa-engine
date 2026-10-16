@@ -15,7 +15,19 @@ use crate::{
     SQLError,
 };
 
+mod shells;
+pub use shells::RoutineShellTypes;
+
 pub trait RoutineTypeCatalog {
+    /// Resolve an undefined type without inventing a value layout.
+    fn shell_type_oid(&self, _name: &str) -> Result<Option<u32>, SQLError> {
+        Ok(None)
+    }
+    fn require_type_oid_usage(&self, _oid: u32) -> Result<(), SQLError> {
+        Err(SQLError::Internal(
+            "routine catalog cannot check an undefined type's USAGE".into(),
+        ))
+    }
     fn try_describe_table(&self, reference: &str) -> Result<Option<Vec<ColumnDef>>, String>;
     fn resolve_catalog_column_type(&self, name: &str) -> Option<ColumnType>;
     fn resolve_catalog_column_type_name(&self, name: &str) -> Result<ColumnType, SQLError>;
@@ -58,21 +70,24 @@ pub fn result_type_name(def: &CreateFunction) -> &str {
 pub fn resolve_routine_type_references(
     context: &super::compilation::RoutineCompilationContext<'_>,
     def: &mut CreateFunction,
-) -> Result<(), SQLError> {
+) -> Result<RoutineShellTypes, SQLError> {
     let catalog = context.types;
+    let mut shells = RoutineShellTypes::default();
     let mut have_defaults = false;
     let mut after_variadic = false;
     for index in 0..def.params.len() {
         let (previous, rest) = def.params.split_at_mut(index);
         let parameter = &mut rest[0];
         let written = parameter.written_type.take();
-        parameter.type_name = resolve_used_routine_type(
-            catalog,
-            &parameter.type_name,
-            ROUTINE_PARAMETER_PSEUDO_TYPES,
-            parameter.type_reference.as_ref(),
-            MissingRoutineType::Parameter(written.as_deref()),
-        )?;
+        if !shells.argument(context, &def.language, &parameter.type_name, parameter.mode)? {
+            parameter.type_name = resolve_used_routine_type(
+                catalog,
+                &parameter.type_name,
+                ROUTINE_PARAMETER_PSEUDO_TYPES,
+                parameter.type_reference.as_ref(),
+                MissingRoutineType::Parameter(written.as_deref()),
+            )?;
+        }
         parameter.type_reference = None;
         let input = !matches!(
             parameter.mode,
@@ -133,18 +148,20 @@ pub fn resolve_routine_type_references(
     let written = def.return_written_type.take();
     match &mut def.returns {
         FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            *type_name = resolve_used_routine_type(
-                catalog,
-                type_name,
-                ROUTINE_RESULT_PSEUDO_TYPES,
-                def.return_type_reference.as_ref(),
-                MissingRoutineType::Result(written.as_deref()),
-            )?;
+            if !shells.result(context, &def.language, type_name)? {
+                *type_name = resolve_used_routine_type(
+                    catalog,
+                    type_name,
+                    ROUTINE_RESULT_PSEUDO_TYPES,
+                    def.return_type_reference.as_ref(),
+                    MissingRoutineType::Result(written.as_deref()),
+                )?;
+            }
         }
         FunctionReturns::None | FunctionReturns::Table => {}
     }
     def.return_type_reference = None;
-    Ok(())
+    Ok(shells)
 }
 
 /// Whether two parameters of these modes may not share a name: a pure input never conflicts with a pure output.

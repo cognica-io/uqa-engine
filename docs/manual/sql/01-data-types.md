@@ -211,6 +211,22 @@ Built-in range and multirange DEFAULT values, including array and composite fiel
 
 This implemented surface is limited to PostgreSQL's six built-in range families. User-defined range types, wire-protocol binary range I/O, range indexes and exclusion-index planning, and complete comparison ordering remain open compatibility bugs.
 
+## Shell types and descriptions
+
+`CREATE TYPE schema.name;` reserves an undefined type name and one type OID. The name is an SQL identifier. The statement returns a `CREATE TYPE` completion with no result columns; its `pg_type` row has `typisdefined = false` and no array type. A later enum, domain or composite declaration with that name completes the same OID in the same catalog transaction model. Completion requires the completing role itself to own the shell and resets the type ACL to PostgreSQL's default. Creation, completion, ownership, privileges, descriptions and removal obey transactions, savepoints, peer-session visibility and persistent reopening.
+
+Creating a shell requires superuser authority. A shell cannot yet hold values or declare columns; named `regtype` input, explicit type rename and explicit schema movement report `42704`. SQL functions reject shell parameters and results with `42P13`. PL/pgSQL first reports the shell notices, then rejects those types with `0A000`, including when `check_function_bodies` is off. Renaming its containing schema preserves the shell identity.
+
+`COMMENT ON TYPE schema.name IS 'description';` and `COMMENT ON DOMAIN schema.name IS 'description';` store a text value for the addressed type and return `COMMENT` with no result columns. `IS NULL` or an empty description removes it. `obj_description(type_oid, 'pg_type')` returns the stored description as `TEXT`, or NULL when no description exists; its one-argument form also looks up an object by OID. `pg_description` exposes the object OID, catalog class OID, subobject number and description. Type ownership is required to change a description. Descriptions follow type identity through completion, rename, schema movement and owner changes; dropping a type or a table owning a row type removes its descriptions and those of its generated array.
+
+```sql execute
+CREATE TYPE pending_state;
+COMMENT ON TYPE pending_state IS 'Processing state';
+CREATE TYPE pending_state AS ENUM ('new', 'done');
+SELECT obj_description('pending_state'::regtype, 'pg_type');
+DROP TYPE pending_state;
+```
+
 ## Enum types
 
 An enum type is a catalog-defined list of labels. A value's text is exactly one of its type's labels: input is case-sensitive, keeps surrounding spaces, and reports `22P02` for any other text. Ordered comparisons, `ORDER BY`, `min` and `max` use the labels' declaration order, not their spelling. Equality, `DISTINCT`, grouping, joins and set operations compare label identities. Distinct enum types never compare with each other or with text; such comparisons report `42883` like PostgreSQL. A string literal or untyped parameter compared with an enum value, listed in `IN`, used as a `BETWEEN` bound or passed where a function expects the enum type is converted to that type once, as PostgreSQL's parse analysis converts it, so an unknown label is rejected even when no row is read.

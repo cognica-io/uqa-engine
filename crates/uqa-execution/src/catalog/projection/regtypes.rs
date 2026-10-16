@@ -352,6 +352,22 @@ pub fn resolve_regnamespace_oid(
         })
 }
 
+/// Inspect an undefined catalog identity without claiming a SQL value layout.
+pub fn shell_type_oid(context: &CatalogContext<'_>, name: &str) -> Result<Option<u32>, SQLError> {
+    let Some(parsed) = uqa_sql::parse_regtype_name(name)? else {
+        return Ok(None);
+    };
+    let catalog = regtype_output_catalog(context)?;
+    Ok(parsed_regtype_oid(context, &catalog, &parsed)?
+        .filter(|oid| {
+            catalog
+                .types
+                .get(oid)
+                .is_some_and(|entry| !entry.is_defined)
+        })
+        .and_then(|oid| u32::try_from(oid).ok()))
+}
+
 pub fn resolve_regtype_oid(
     context: &CatalogContext<'_>,
     name: &str,
@@ -363,7 +379,8 @@ pub fn resolve_regtype_oid(
         return Ok(None);
     };
     let catalog = regtype_output_catalog(context)?;
-    parsed_regtype_oid(context, &catalog, &parsed)
+    let oid = parsed_regtype_oid(context, &catalog, &parsed)?;
+    type_names::require_defined(&catalog, oid, &parsed)
 }
 
 enum ParsedRegroleInput {
@@ -429,7 +446,7 @@ pub fn resolve_regobject_oid(
         ColumnType::Regrole => lookup_regrole_oid(context, name),
         ColumnType::Regtype => match resolve_regtype_oid(context, name) {
             Err(SQLError::Routine { sqlstate, .. })
-                if matches!(sqlstate.as_str(), "3F000" | "22P02" | "22003") =>
+                if matches!(sqlstate.as_str(), "3F000" | "22P02" | "22003" | "42704") =>
             {
                 Ok(None)
             }
@@ -478,6 +495,7 @@ struct RegtypeCatalogEntry {
     argument_types: Vec<i64>,
     array_oid: i64,
     element_oid: i64,
+    is_defined: bool,
 }
 
 #[cfg(test)]
@@ -521,6 +539,7 @@ impl RegtypeOutputCatalog {
                         argument_types: Vec::new(),
                         array_oid: 0,
                         element_oid: 0,
+                        is_defined: true,
                     },
                 )
             })
@@ -593,6 +612,7 @@ impl RegtypeOutputCatalog {
                     })?,
                     array_oid: 0,
                     element_oid: 0,
+                    is_defined: true,
                 },
             );
         }
@@ -614,6 +634,7 @@ impl RegtypeOutputCatalog {
                         argument_types: Vec::new(),
                         array_oid: catalog_int(&row, "typarray").unwrap_or(0),
                         element_oid: catalog_int(&row, "typelem").unwrap_or(0),
+                        is_defined: row.get("typisdefined") == Some(&Value::Bool(true)),
                     },
                 ))
             })

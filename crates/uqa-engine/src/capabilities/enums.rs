@@ -18,6 +18,7 @@ use uqa_sql::SQLError;
 impl Engine {
     pub(crate) fn enum_type_context(&self) -> EnumTypeContext<'_> {
         EnumTypeContext {
+            shells: self.shell_completion_context(),
             creation: self.relation_creation_context(),
             identities: self.catalog_identity_reservation_context(),
             writer: self,

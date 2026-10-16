@@ -62,6 +62,7 @@ pub trait EnumLabelVisibility {
 }
 
 pub struct EnumTypeContext<'a> {
+    pub shells: super::shell_types::ShellCompletionContext<'a>,
     pub creation: RelationCreationContext<'a>,
     pub identities: CatalogIdentityReservationContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,
@@ -104,6 +105,7 @@ pub fn create_enum(context: &EnumTypeContext<'_>, definition: CreateEnum) -> Res
     context.writer.prepare_writer()?;
     let name = context.creation.persistent_name(&definition.name)?;
     let requested = RelationIdentity::from_legacy_name(&name).map_err(SQLError::Internal)?;
+    let shell = context.shells.retain(&name, owner.identity())?;
     super::types::arrays::displace_array_type(
         &context.creation,
         super::types::arrays::UserTypeRegistries {
@@ -113,17 +115,27 @@ pub fn create_enum(context: &EnumTypeContext<'_>, definition: CreateEnum) -> Res
         },
         &requested,
     )?;
-    let identity = context.creation.reserve_type_name(&name)?;
+    let identity = if let Some(shell) = &shell {
+        shell.identity.clone()
+    } else {
+        context.creation.reserve_type_name(&name)?
+    };
     let array_name = super::types::arrays::reserve_array_name(
         &context.creation,
         &identity.schema,
         &identity.name,
     )?;
-    let object_id = (context.allocate_identity)()?;
+    let object_id = shell.as_ref().map_or_else(
+        || (context.allocate_identity)(),
+        |shell| Ok(shell.object_id),
+    )?;
     // `DefineEnum` assigns the array type's OID before the enum's, and `EnumValuesCreate` then gives the labels even OIDs in ascending order.
     let mut allocator = context.identities.allocator(allocate_catalog_object_id);
     let array_oid = allocate_oid(&mut allocator, CatalogOidClass::Type, &object_id)?;
-    let oid = allocate_oid(&mut allocator, CatalogOidClass::Type, &object_id)?;
+    let oid = shell.as_ref().map_or_else(
+        || allocate_oid(&mut allocator, CatalogOidClass::Type, &object_id),
+        |shell| Ok(shell.oid),
+    )?;
     let mut label_oids = definition
         .labels
         .iter()
@@ -152,6 +164,7 @@ pub fn create_enum(context: &EnumTypeContext<'_>, definition: CreateEnum) -> Res
         },
     );
     enum_type::publish(context.publication, &before, registry)?;
+    context.shells.complete(shell.as_ref())?;
     context.visibility.enum_type_created(oid);
     context.changes.catalog_registry_changed();
     Ok(())

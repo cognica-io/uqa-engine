@@ -14,9 +14,10 @@ use crate::schema::domains::removal::{RowTypeRelation, TypeObjectBinding};
 use crate::SQLError;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
-/// A user-defined type whose catalog definition a lifecycle command changes. Its generated array type follows it.
+/// A user-defined type whose catalog definition a lifecycle command changes. A completed type's generated array follows it.
 #[derive(Debug, Clone)]
 pub enum TypeObject {
+    Shell(crate::catalog::shell_type::StoredShellType),
     Enum(StoredEnum),
     Domain(Box<StoredDomain>),
     /// A standalone composite type, whose relation follows it.
@@ -27,6 +28,7 @@ impl TypeObject {
     #[must_use]
     pub fn oid(&self) -> u32 {
         match self {
+            Self::Shell(definition) => definition.oid,
             Self::Enum(definition) => definition.oid,
             Self::Domain(domain) => domain.oid,
             Self::Composite(definition) => definition.oid,
@@ -36,6 +38,7 @@ impl TypeObject {
     #[must_use]
     pub fn identity(&self) -> &RelationIdentity {
         match self {
+            Self::Shell(definition) => &definition.identity,
             Self::Enum(definition) => &definition.identity,
             Self::Domain(domain) => &domain.identity,
             Self::Composite(definition) => &definition.identity,
@@ -45,6 +48,7 @@ impl TypeObject {
     #[must_use]
     pub fn owner(&self) -> RoleIdentity {
         match self {
+            Self::Shell(definition) => definition.owner,
             Self::Enum(definition) => definition.owner,
             Self::Domain(domain) => domain.owner,
             Self::Composite(definition) => definition.owner,
@@ -52,17 +56,19 @@ impl TypeObject {
     }
 
     #[must_use]
-    pub fn array_name(&self) -> String {
+    pub fn array_name(&self) -> Option<String> {
         match self {
-            Self::Enum(definition) => definition.array_name.clone(),
-            Self::Domain(domain) => domain.array_type_name(),
-            Self::Composite(definition) => definition.array_name.clone(),
+            Self::Shell(_) => None,
+            Self::Enum(definition) => Some(definition.array_name.clone()),
+            Self::Domain(domain) => Some(domain.array_type_name()),
+            Self::Composite(definition) => Some(definition.array_name.clone()),
         }
     }
 
     #[must_use]
     pub fn usage_acl(&self) -> Option<&[ObjectAclEntry]> {
         match self {
+            Self::Shell(definition) => definition.usage_acl.as_deref(),
             Self::Enum(definition) => definition.usage_acl.as_deref(),
             Self::Domain(domain) => domain.usage_acl.as_deref(),
             Self::Composite(definition) => definition.usage_acl.as_deref(),
@@ -149,6 +155,9 @@ pub fn resolve_type_object(
 }
 
 fn classify(context: &TypeObjectBinding<'_>, oid: u32) -> ResolvedKind {
+    if let Some(definition) = context.catalog.shell_by_type_oid(oid) {
+        return ResolvedKind::User(TypeObject::Shell(definition));
+    }
     if let Some(domain) = context.catalog.domain_by_oid(oid) {
         return ResolvedKind::User(TypeObject::Domain(Box::new(domain)));
     }
@@ -178,6 +187,19 @@ fn classify(context: &TypeObjectBinding<'_>, oid: u32) -> ResolvedKind {
 }
 
 impl ResolvedTypeObject {
+    /// ALTER TYPE name and namespace operations require a completed type, while owner and ACL operations can name a shell.
+    pub fn require_defined(&self, name: &str) -> Result<(), SQLError> {
+        if matches!(self.kind, ResolvedKind::User(TypeObject::Shell(_))) {
+            let label = crate::parse_regtype_name(name)?
+                .map_or_else(|| name.to_owned(), |parsed| parsed.names.join("."));
+            return Err(SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("type \"{label}\" is only a shell"),
+            });
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn oid(&self) -> u32 {
         self.oid
@@ -220,6 +242,26 @@ impl ResolvedTypeObject {
             return Err(SQLError::Routine {
                 sqlstate: "42809".into(),
                 message: format!("{} is not a domain", format_type(context, self.oid)?),
+            });
+        }
+        Ok(())
+    }
+
+    /// `COMMENT ON DOMAIN` quotes the parsed type name, unlike ALTER's formatted type diagnostic.
+    pub fn require_comment_kind(&self, kind: TypeObjectKind, name: &str) -> Result<(), SQLError> {
+        if kind == TypeObjectKind::Domain
+            && !matches!(self.kind, ResolvedKind::User(TypeObject::Domain(_)))
+        {
+            let parsed = crate::parse_regtype_name(name)?
+                .ok_or_else(|| SQLError::Internal("COMMENT has no type name".into()))?;
+            let label = format!(
+                "{}{}",
+                parsed.names.join("."),
+                "[]".repeat(parsed.array_dimensions)
+            );
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("\"{label}\" is not a domain"),
             });
         }
         Ok(())

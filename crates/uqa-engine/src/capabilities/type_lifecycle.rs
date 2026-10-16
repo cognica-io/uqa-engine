@@ -32,6 +32,7 @@ impl Engine {
     }
     pub(crate) fn type_lifecycle_context(&self) -> TypeLifecycleContext<'_> {
         TypeLifecycleContext {
+            comments: self,
             composite_attributes:
                 uqa_execution::schema::composites::alteration::CompositeAlterationContext {
                     binding: self.table_alter_binding_context(),
@@ -55,6 +56,7 @@ impl Engine {
                 domains: self,
                 composites: self,
             },
+            shells: self,
             owner_schemas: self,
             changes: self,
             notices: self,

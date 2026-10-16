@@ -121,6 +121,7 @@ fn rename(
     new_name: &str,
 ) -> Result<(), SQLError> {
     let resolved = lock_and_resolve(context, name)?;
+    resolved.require_defined(name)?;
     resolved.require_owner(&context.binding)?;
     resolved.require_domain_keyword(&context.binding, kind)?;
     resolved.reject_row_type(&context.binding)?;
@@ -183,6 +184,9 @@ fn move_to_schema(
     check_owner: bool,
 ) -> Result<(), SQLError> {
     let resolved = lock_and_resolve(context, name)?;
+    if check_owner {
+        resolved.require_defined(name)?;
+    }
     resolved.require_domain_keyword(&context.binding, kind)?;
     let temporary = context.creation.state.temporary_schema_name();
     // LookupCreationNamespace: the destination must exist and allow CREATE before ownership is checked.
@@ -218,7 +222,9 @@ fn move_to_schema(
         });
     }
     let target = RelationIdentity::new(&destination, &identity.name);
-    let array_target = RelationIdentity::new(&destination, object.array_name());
+    let array_target = object
+        .array_name()
+        .map(|name| RelationIdentity::new(&destination, name));
     // AlterTypeNamespaceInternal checks the type's name, then moves a composite type's relation, whose name no relation in the destination may hold, and then the array type.
     if context.creation.type_name_in_use(&target) {
         return Err(duplicate_in_schema(&target.name, &destination));
@@ -238,12 +244,14 @@ fn move_to_schema(
         }
         context.creation.reserve_name(&target.qualified_name())?;
     }
-    if context.creation.type_name_in_use(&array_target) {
-        return Err(duplicate_in_schema(&array_target.name, &destination));
+    if let Some(array_target) = array_target {
+        if context.creation.type_name_in_use(&array_target) {
+            return Err(duplicate_in_schema(&array_target.name, &destination));
+        }
+        context
+            .creation
+            .reserve_type_name(&array_target.qualified_name())?;
     }
-    context
-        .creation
-        .reserve_type_name(&array_target.qualified_name())?;
     publish_identity(context, object, target, None)
 }
 
@@ -314,6 +322,14 @@ fn set_owner(
     };
     let new_owner = owner.identity();
     match object {
+        TypeObject::Shell(mut definition) => {
+            definition.owner = new_owner;
+            object_acl::rewrite_owner(&mut definition.usage_acl, previous, new_owner);
+            let before = context.shells.shell_registry().clone();
+            let mut registry = before.clone();
+            registry.insert(definition.identity.qualified_name(), definition);
+            crate::catalog::shell_type::publish(context.shells, &before, registry)?;
+        }
         TypeObject::Enum(mut definition) => {
             definition.owner = new_owner;
             object_acl::rewrite_owner(&mut definition.usage_acl, previous, new_owner);
@@ -356,6 +372,14 @@ pub(super) fn current_definition(
     oid: u32,
 ) -> Result<TypeObject, SQLError> {
     if let Some(definition) = context
+        .shells
+        .shell_registry()
+        .values()
+        .find(|definition| definition.oid == oid)
+    {
+        return Ok(TypeObject::Shell(definition.clone()));
+    }
+    if let Some(definition) = context
         .registries
         .enums
         .enum_registry()
@@ -395,6 +419,14 @@ fn publish_identity(
 ) -> Result<(), SQLError> {
     let oid = object.oid();
     match object {
+        TypeObject::Shell(mut definition) => {
+            let before = context.shells.shell_registry().clone();
+            let mut registry = before.clone();
+            registry.remove(&definition.identity.qualified_name());
+            definition.identity = identity.clone();
+            registry.insert(identity.qualified_name(), definition);
+            crate::catalog::shell_type::publish(context.shells, &before, registry)?;
+        }
         TypeObject::Enum(mut definition) => {
             let before = context.registries.enums.enum_registry().clone();
             let mut registry = before.clone();

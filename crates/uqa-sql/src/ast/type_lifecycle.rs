@@ -17,6 +17,14 @@ pub enum TypeObjectKind {
     Domain,
 }
 
+/// A description on a type identity; an empty or NULL description removes it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommentType {
+    pub kind: TypeObjectKind,
+    pub name: String,
+    pub description: Option<String>,
+}
+
 /// One `ALTER TYPE` or `ALTER DOMAIN` lifecycle change of a user-defined type and its generated array type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlterTypeObject {

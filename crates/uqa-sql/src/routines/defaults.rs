@@ -39,6 +39,19 @@ pub(super) fn analyze_parameter_default(
         &mut bound,
         &binding.context(),
     )?;
+    if let Some(oid) = context.types.shell_type_oid(type_name)? {
+        return Err(match source.as_ref() {
+            None => error("0A000", "cannot accept a value of a shell type"),
+            Some(source) => error(
+                "42804",
+                format!(
+                    "argument of DEFAULT must be type {}, not type {}",
+                    context.types.format_type_oid(oid)?,
+                    context.types.format_type(source)?
+                ),
+            ),
+        });
+    }
     let polymorphic = routine_polymorphic_type(type_name);
     let target = if let Some(polymorphic) = polymorphic {
         check_polymorphic_default(

@@ -27,6 +27,7 @@ use uqa_sql::{SQLError, SQLNotice};
 
 /// The catalog services that remove each kind of object.
 pub struct CatalogRemovalContext<'a> {
+    pub comments: &'a dyn crate::catalog::comments::CommentPublication,
     pub catalog: CatalogContext<'a>,
     pub locks: &'a dyn RelationDefinitionSession,
     pub shared_locks: &'a dyn crate::row_locks::shared_objects::SharedObjectLockSession,
@@ -99,6 +100,22 @@ fn delete_objects(
         }
         let notice = targets.report(cascade, original, &describe)?;
         plan.execute(context)?;
+        // Implicit arrays and relation row types are deletion targets even when their owners remove the physical definitions.
+        let described_types = targets
+            .targets()
+            .iter()
+            .filter_map(|target| {
+                (target.object.class_id == uqa_sql::catalog::dependencies::TYPE_CLASS)
+                    .then_some(target.object.object_id)
+            })
+            .collect();
+        if crate::catalog::comments::remove(
+            context.comments,
+            uqa_sql::catalog::dependencies::TYPE_CLASS,
+            &described_types,
+        )? {
+            context.domains.changes.catalog_registry_changed();
+        }
         if let Some(notice) = notice.filter(|_| !quiet) {
             let report = SQLNotice::notice(notice.message);
             context.notices.push(match notice.detail {

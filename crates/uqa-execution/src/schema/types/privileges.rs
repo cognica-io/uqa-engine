@@ -240,6 +240,10 @@ fn apply_privileges(
 
 fn with_acl(object: TypeObject, acl: Option<Vec<ObjectAclEntry>>) -> TypeObject {
     match object {
+        TypeObject::Shell(mut definition) => {
+            definition.usage_acl = acl;
+            TypeObject::Shell(definition)
+        }
         TypeObject::Enum(mut definition) => {
             definition.usage_acl = acl;
             TypeObject::Enum(definition)
@@ -257,6 +261,12 @@ fn with_acl(object: TypeObject, acl: Option<Vec<ObjectAclEntry>>) -> TypeObject 
 
 fn publish(context: &TypeLifecycleContext<'_>, object: TypeObject) -> Result<(), SQLError> {
     match object {
+        TypeObject::Shell(definition) => {
+            let before = context.shells.shell_registry().clone();
+            let mut registry = before.clone();
+            registry.insert(definition.identity.qualified_name(), definition);
+            crate::catalog::shell_type::publish(context.shells, &before, registry)
+        }
         TypeObject::Enum(definition) => {
             let before = context.registries.enums.enum_registry().clone();
             let mut registry = before.clone();

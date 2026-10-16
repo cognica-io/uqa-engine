@@ -37,8 +37,8 @@ use uqa_storage::read_control::StorageReadControl;
 use crate::error::redb_error;
 use codec::{read_u64, receipt_bytes, status};
 
-/// Every owner preserves packed bit values and their SQL type descriptors.
-const RECORD_FORMAT: u64 = 59;
+/// Every owner preserves undefined type identities before their completed catalog definitions.
+const RECORD_FORMAT: u64 = 60;
 
 const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("uqa_mvcc_metadata");
 const HEADS: TableDefinition<&[u8], u64> = TableDefinition::new("uqa_mvcc_heads");

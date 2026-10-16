@@ -18,6 +18,7 @@ use uqa_sql::{SQLError, SQLParam, SQLResult};
 use super::context::StatementExecutionContext;
 
 mod completion;
+mod types;
 use crate::schema::view_creation::{self, MaterializedViewRegistration, ViewRegistration};
 
 use crate::query::output::QueryOutput;
@@ -829,71 +830,15 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                     statement,
                 )
             }
-            CommandPlan::CreateDomain(statement) => {
-                crate::schema::domains::create_domain(
-                    &self.context.schemas.inputs.domain_creation_context(),
-                    statement.clone(),
-                )?;
-                Ok(SQLResult::empty())
-            }
-            CommandPlan::AlterDomain(statement) => {
-                crate::schema::domains::alteration::alter_domain(
-                    &self.context.schemas.inputs.domain_alter_context(),
-                    statement.clone(),
-                )?;
-                Ok(SQLResult::empty())
-            }
-            CommandPlan::CreateEnum(statement) => {
-                crate::schema::enums::create_enum(
-                    &self.context.schemas.inputs.enum_type_context(),
-                    statement.clone(),
-                )?;
-                Ok(SQLResult::empty())
-            }
-            CommandPlan::CreateCompositeType(statement) => {
-                crate::schema::composites::create_composite_type(
-                    &self.context.schemas.inputs.composite_type_context(),
-                    statement.clone(),
-                )?;
-                Ok(SQLResult::empty())
-            }
-            CommandPlan::AlterEnum(statement) => {
-                crate::schema::enums::alter_enum(
-                    &self.context.schemas.inputs.enum_type_context(),
-                    statement.clone(),
-                )?;
-                Ok(SQLResult::empty())
-            }
-            CommandPlan::AlterTypeObject(statement) => {
-                if let uqa_sql::ast::AlterTypeObjectAction::RenameAttribute { from, to } =
-                    &statement.action
-                {
-                    return crate::schema::composites::renaming::rename_attribute(
-                        &self
-                            .context
-                            .schemas
-                            .inputs
-                            .type_lifecycle_context()
-                            .composite_attributes,
-                        &self.context.schemas.inputs.table_alter_entry_context(),
-                        &statement.name,
-                        from,
-                        to,
-                    );
-                }
-                crate::schema::types::alter_type_object(
-                    &self.context.schemas.inputs.type_lifecycle_context(),
-                    statement.clone(),
-                )?;
-                Ok(SQLResult::empty())
-            }
-            CommandPlan::GrantType(statement) => {
-                crate::schema::types::grant_type(
-                    &self.context.schemas.inputs.type_lifecycle_context(),
-                    statement,
-                )?;
-                Ok(SQLResult::empty())
-            }
+            CommandPlan::CreateDomain(_)
+            | CommandPlan::AlterDomain(_)
+            | CommandPlan::CreateEnum(_)
+            | CommandPlan::CommentType(_)
+            | CommandPlan::CreateShellType(_)
+            | CommandPlan::CreateCompositeType(_)
+            | CommandPlan::AlterEnum(_)
+            | CommandPlan::AlterTypeObject(_)
+            | CommandPlan::GrantType(_) => self.execute_type_command(command),
             CommandPlan::AlterSequence(statement) => {
                 crate::schema::sequences::entry::run_alter_sequence(
                     self.context.schemas.sequence_alteration,

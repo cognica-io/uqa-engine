@@ -435,6 +435,8 @@ pub struct VacuumStmt {
 pub enum Statement {
     CreateDomain(CreateDomain),
     AlterDomain(AlterDomain),
+    CreateShellType(String),
+    CommentType(CommentType),
     CreateEnum(CreateEnum),
     CreateCompositeType(CreateCompositeType),
     AlterEnum(AlterEnum),

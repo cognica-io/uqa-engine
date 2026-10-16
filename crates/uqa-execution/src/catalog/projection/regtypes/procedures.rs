@@ -59,7 +59,12 @@ pub fn resolve_regprocedure_input_oid(
     let argument_oids = arguments
         .iter()
         .map(|argument| {
-            parsed_regtype_oid(context, &catalog, argument)?.ok_or_else(|| {
+            super::type_names::require_defined(
+                &catalog,
+                parsed_regtype_oid(context, &catalog, argument)?,
+                argument,
+            )?
+            .ok_or_else(|| {
                 input_error(
                     "42704",
                     format!("type \"{}\" does not exist", argument.names.join(".")),
@@ -214,6 +219,7 @@ mod tests {
         overloaded: bool,
     ) -> RegtypeCatalogEntry {
         RegtypeCatalogEntry {
+            is_defined: true,
             name: name.into(),
             namespace_oid: namespace,
             overloaded,

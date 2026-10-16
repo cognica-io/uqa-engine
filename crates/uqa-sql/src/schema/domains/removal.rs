@@ -13,6 +13,9 @@ use crate::{
 };
 
 pub trait TypeObjectCatalog: DomainCatalog {
+    fn shell_by_type_oid(&self, _oid: u32) -> Option<crate::catalog::shell_type::StoredShellType> {
+        None
+    }
     fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity>;
     fn resolve_drop_type_oid(&self, name: &str) -> Result<Option<i64>, SQLError>;
     fn format_drop_type(&self, oid: i64) -> Result<Option<String>, String>;
@@ -199,6 +202,13 @@ fn drop_target(
         return Err(SQLError::Routine {
             sqlstate: "42809".into(),
             message: format!("\"{label}\" is not a domain"),
+        });
+    }
+    if let Some(definition) = context.catalog.shell_by_type_oid(oid) {
+        return Ok(DropTarget {
+            schema: Some(definition.identity.schema),
+            owner: definition.owner,
+            required_by: None,
         });
     }
     if let Some(definition) = context.catalog.enum_by_type_oid(oid) {

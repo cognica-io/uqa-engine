@@ -27,19 +27,26 @@ pub fn named_type_exists<'a>(
     mut domains: impl Iterator<Item = &'a uqa_sql::catalog::domain::StoredDomain>,
     mut enums: impl Iterator<Item = &'a uqa_sql::catalog::enum_type::StoredEnum>,
     mut composites: impl Iterator<Item = &'a uqa_sql::catalog::composite_type::StoredComposite>,
+    mut shells: impl Iterator<Item = &'a uqa_sql::catalog::shell_type::StoredShellType>,
     identity: &uqa_core::RelationIdentity,
 ) -> bool {
-    domains.any(|domain| {
-        domain.identity == *identity
-            || (domain.identity.schema == identity.schema
-                && domain.array_type_name() == identity.name)
-    }) || enums.any(|definition| {
-        definition.identity.schema == identity.schema
-            && (definition.identity.name == identity.name || definition.array_name == identity.name)
-    }) || composites.any(|definition| {
-        definition.identity.schema == identity.schema
-            && (definition.identity.name == identity.name || definition.array_name == identity.name)
-    }) || ColumnType::from_sql_name(&identity.qualified_name()).is_ok()
+    shells.any(|definition| definition.identity == *identity)
+        || domains.any(|domain| {
+            domain.identity == *identity
+                || (domain.identity.schema == identity.schema
+                    && domain.array_type_name() == identity.name)
+        })
+        || enums.any(|definition| {
+            definition.identity.schema == identity.schema
+                && (definition.identity.name == identity.name
+                    || definition.array_name == identity.name)
+        })
+        || composites.any(|definition| {
+            definition.identity.schema == identity.schema
+                && (definition.identity.name == identity.name
+                    || definition.array_name == identity.name)
+        })
+        || ColumnType::from_sql_name(&identity.qualified_name()).is_ok()
         || CATALOG_NAMED_TYPES.iter().any(|ty| {
             matches!(ty, ColumnType::Domain { schema, name, .. }
                 if schema == &identity.schema && name == &identity.name)
@@ -166,6 +173,12 @@ pub fn resolve_catalog_column_type(
                 return ColumnType::from_sql_name(type_name).ok();
             }
         }
+        if catalog
+            .shells()
+            .any(|shell| shell.identity.schema == schema && shell.identity.name == *local)
+        {
+            return None;
+        }
         let name = format!(
             "\"{}\".\"{}\"",
             schema.replace('"', "\"\""),
@@ -286,4 +299,22 @@ impl uqa_sql::expr::enums::EnumLabelCatalog for CatalogEnumLabels<'_> {
     fn has_enum_types(&self) -> bool {
         self.catalog.enums().next().is_some()
     }
+}
+
+/// Named type input rejects undefined shells; object-lifecycle lookup can retain the same OID without requiring a value layout.
+pub(super) fn require_defined(
+    catalog: &super::RegtypeOutputCatalog,
+    oid: Option<i64>,
+    parsed: &uqa_sql::ParsedRegtypeName,
+) -> Result<Option<i64>, uqa_sql::SQLError> {
+    if oid
+        .and_then(|oid| catalog.types.get(&oid))
+        .is_some_and(|entry| !entry.is_defined)
+    {
+        return Err(uqa_sql::SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: format!("type \"{}\" is only a shell", parsed.names.join(".")),
+        });
+    }
+    Ok(oid)
 }

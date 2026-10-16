@@ -42,6 +42,9 @@ impl SchemaStatementInputs<StatementReadSnapshot> for Engine {
     fn enum_type_context(&self) -> uqa_execution::schema::enums::EnumTypeContext<'_> {
         Engine::enum_type_context(self)
     }
+    fn shell_type_context(&self) -> uqa_execution::schema::shell_types::ShellTypeContext<'_> {
+        Engine::shell_type_context(self)
+    }
     fn type_lifecycle_context(&self) -> uqa_execution::schema::types::TypeLifecycleContext<'_> {
         Engine::type_lifecycle_context(self)
     }

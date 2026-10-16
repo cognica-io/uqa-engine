@@ -35,6 +35,15 @@ impl Engine {
     }
 }
 impl RoutineTypeCatalog for Engine {
+    fn shell_type_oid(&self, name: &str) -> Result<Option<u32>, SQLError> {
+        uqa_execution::catalog::projection::shell_type_oid(&self.catalog_execution(), name)
+    }
+    fn require_type_oid_usage(&self, oid: u32) -> Result<(), SQLError> {
+        uqa_execution::catalog::security::type_inquiry::require_type_oid_usage(
+            &self.catalog_execution(),
+            oid,
+        )
+    }
     fn try_describe_table(&self, name: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Engine::describe_table_in_execution(self, name).map_err(|error| error.to_string())
     }

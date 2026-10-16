@@ -8,11 +8,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Support transactional shell type declarations and completion as enums, domains or composite types while preserving OIDs, ownership, PostgreSQL diagnostics, savepoints and provider reopening.
+
+- Store type and domain descriptions through `COMMENT`, `obj_description` and `pg_description`, preserving identity through type completion and lifecycle changes and removing descriptions of dropped types and their generated arrays.
+
 - Support PostgreSQL `BIT` and `BIT VARYING` declarations, binary and hexadecimal literals, length-constrained assignment and casts, and exact comparison through arrays, composite fields, indexes and persistent storage. Packed values preserve leading zeroes, empty values and logical bit lengths across Rust, Python, Node.js and WASM consumers; see [bit strings](docs/manual/sql/01-data-types.md#bit-strings).
 
 ### Changed
 
-- Upgrade persistent databases to SQLite record format 63 and redb record format 59 for packed bit values and their type descriptors. Close all owners, retain a pre-upgrade backup and update every owner together; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).
+- Upgrade persistent databases to SQLite record format 64 and redb record format 60 for shell type identities and transactional descriptions, including packed bit values and their type descriptors. Close all owners, retain a pre-upgrade backup and update every owner together; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).
 
 ### Fixed
 
