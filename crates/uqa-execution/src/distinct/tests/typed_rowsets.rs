@@ -96,3 +96,55 @@ fn typed_sql_rowsets_keep_raw_and_text_key_domains_separate() {
         assert!(raw.contains_values(std::slice::from_ref(value)).unwrap());
     }
 }
+
+#[test]
+fn sql_rowset_physical_and_value_access_keep_one_selected_type_domain() {
+    for kind in ["numrange", "nummultirange"] {
+        let values = ["[1.0,3.00)", "[1.00,3.0)"].map(|input| {
+            let input = if kind == "nummultirange" {
+                format!("{{{input}}}")
+            } else {
+                input.into()
+            };
+            uqa_sql::expr::cast_value(&Value::Str(input), kind).unwrap()
+        });
+        let ty = ColumnType::from_sql_name(kind).unwrap();
+        let selected = RowSchema::with_types(vec!["r".into()], vec![Some(ty.clone())]);
+        let untyped = RowSchema::with_types(vec!["r".into()], vec![None]);
+        let physical = PhysicalRow::from_values(vec![values[0].clone()]);
+        for budget in [1, 64 * 1024] {
+            for explicit_types in [false, true] {
+                let mut rows = if explicit_types {
+                    ExactRowSet::with_sql_types(budget, vec![Some(ty.clone())])
+                } else {
+                    ExactRowSet::new(budget)
+                };
+                assert!(!rows.contains_sql_values(&values[..1], None).unwrap());
+                let schema = if explicit_types { &untyped } else { &selected };
+                assert!(rows.insert_sql_physical(&physical, schema, None).unwrap());
+                for value in &values {
+                    assert!(rows
+                        .contains_sql_values(std::slice::from_ref(value), None)
+                        .unwrap());
+                    assert!(!rows
+                        .insert_sql_values(std::slice::from_ref(value), None)
+                        .unwrap());
+                }
+                assert_eq!(rows.has_spilled(), budget == 1);
+                assert!(rows.in_memory_key_bytes() <= budget);
+            }
+
+            let mut rows = ExactRowSet::new(budget);
+            assert!(rows.insert_sql_values(&values[..1], None).unwrap());
+            assert!(!rows
+                .insert_sql_physical(&physical, &selected, None)
+                .unwrap());
+            assert!(rows.insert_sql_values(&values[1..], None).unwrap());
+            for value in &values {
+                assert!(rows
+                    .contains_sql_values(std::slice::from_ref(value), None)
+                    .unwrap());
+            }
+        }
+    }
+}

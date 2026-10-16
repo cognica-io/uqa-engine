@@ -192,26 +192,30 @@ impl Default for CanonicalRowHashSet {
 /// the on-disk format.
 pub struct ExactRowSet {
     seen: SeenKeySet,
-    types: Vec<Option<ColumnType>>,
+    types: Option<Vec<Option<ColumnType>>>,
 }
 
 impl ExactRowSet {
+    /// The first SQL insertion selects the key types; probes do not bind an empty set. Explicit selected types can instead be supplied by `with_sql_types`.
     pub fn new(work_mem_bytes: usize) -> Self {
-        Self::with_sql_types(work_mem_bytes, Vec::new())
+        Self {
+            seen: SeenKeySet::new(work_mem_bytes, None),
+            types: None,
+        }
     }
 
     /// Keep the selected SQL value-key types across memory-to-disk migration and later probes. Raw-key methods retain their existing representation domain.
     pub fn with_sql_types(work_mem_bytes: usize, types: Vec<Option<ColumnType>>) -> Self {
         Self {
             seen: SeenKeySet::new(work_mem_bytes, None),
-            types,
+            types: Some(types),
         }
     }
 
     pub fn with_spill_directory(work_mem_bytes: usize, directory: impl Into<PathBuf>) -> Self {
         Self {
             seen: SeenKeySet::new(work_mem_bytes, Some(directory.into())),
-            types: Vec::new(),
+            types: None,
         }
     }
 
@@ -244,6 +248,7 @@ impl ExactRowSet {
         values: &[Value],
         catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
     ) -> ExecResult<bool> {
+        self.types.get_or_insert_with(Vec::new);
         self.seen.insert(self.sql_key(values, catalog)?)
     }
 
@@ -261,25 +266,36 @@ impl ExactRowSet {
         values: &[Value],
         catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
     ) -> ExecResult<Vec<u8>> {
+        let types = self.types.as_deref().unwrap_or_default();
         encode_sql_key_with_types_and_catalog(
-            values.iter().enumerate().map(|(index, value)| {
-                (Some(value), self.types.get(index).and_then(Option::as_ref))
-            }),
+            values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (Some(value), types.get(index).and_then(Option::as_ref))),
             catalog,
         )
     }
 
-    /// Insert selected SQL fields in logical schema order without cloning their payloads.
+    /// Insert SQL fields in logical schema order without cloning their payloads. An unbound set captures this schema's selected types once; every later insertion and probe uses the captured or explicitly selected types.
     pub fn insert_sql_physical(
         &mut self,
         row: &PhysicalRow,
         schema: &RowSchema,
         catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
     ) -> ExecResult<bool> {
+        let types = self.types.get_or_insert_with(|| {
+            (0..schema.len())
+                .map(|position| schema.column_type(position).cloned())
+                .collect()
+        });
         let view = schema.view(row);
         self.seen.insert(encode_sql_key_with_types_and_catalog(
-            (0..schema.len())
-                .map(|position| (view.value_at(position), schema.column_type(position))),
+            (0..schema.len()).map(|position| {
+                (
+                    view.value_at(position),
+                    types.get(position).and_then(Option::as_ref),
+                )
+            }),
             catalog,
         )?)
     }
