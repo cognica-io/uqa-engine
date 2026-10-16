@@ -11436,6 +11436,32 @@
       "capability": "Retained SQL vector fields",
       "workload": "Observe stored and prepared composite vectors before and after domain rebinding on four providers, then reopen each persistent provider.",
       "invariant": "Match eight independently captured PostgreSQL observations and retain the same stored vector fields after persistent reopening."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_btree_inputs_match_postgresql_range_declarations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/operator_classes/btree/binding/tests.rs",
+      "capability": "Selected B-tree input binding",
+      "workload": "31 independently captured PostgreSQL selected range subtype/class declarations, including domains, aliases, arrays, records, enums and binary-compatible non-default inputs.",
+      "invariant": "All 23 accepted bindings and eight exact errors match PostgreSQL; binding retains the original class/type references and releases every cast lookup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_btree_binding_preserves_modifiers_and_owns_only_cast_lookup_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/operator_classes/btree/binding/tests.rs",
+      "capability": "Selected B-tree input binding",
+      "workload": "Modified text/bit types, domain binary inputs, zero-byte direct/generic binding, exhausted cast lookup and both cancellation owners.",
+      "invariant": "No declared type or class is rewritten, direct/generic binding allocates nothing, failures release scratch and either owner cancels binding.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

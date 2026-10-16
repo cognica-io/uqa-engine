@@ -8,6 +8,9 @@
 
 use crate::ColumnType;
 
+mod binding;
+pub use binding::BoundBTreeOperatorClass;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltinBTreeOperatorClass {
     pub oid: u32,

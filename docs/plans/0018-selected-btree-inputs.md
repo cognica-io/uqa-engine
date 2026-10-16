@@ -1,0 +1,23 @@
+# Selected B-tree inputs
+
+This is the next support-invocation boundary of original #638 record 65, prepared separately from [PR #955](https://github.com/cognica-io/uqa-engine/pull/955). That PR owns selected record-image comparison and #954's retained-vector correction. This work retains a declaration's selected class independently of the subtype's default. Original range declarations, selected collation execution, constructors, lifecycle and provider/binding acceptance remain open.
+
+## Ownership and input contract
+
+SQL's existing B-tree metadata owns class, input and support-function identities. The new borrowed binding validates the selected class's input using SQL's existing cast catalog. It removes domain wrappers for compatibility only, accepts the existing generic array/record/enum/range families and otherwise requires an implicit binary cast. A function cast, even an implicit one, is insufficient. The bound result retains references to the original declaration and actual selected class, including modifiers and domain identity. It performs no value conversion, input function, domain constraint or canonical call. Execution will consume this binding when invoking the stored range support; Engine remains the catalog/session adapter.
+
+Independent PostgreSQL declarations establish that integer can select `oid_ops`, varchar can select `bpchar_ops`, and oidvector can select `array_ops`. These accepted alternatives have different observable order or equality from their default class. Invocation must consequently use the selected class's binary input interpretation, and exact-key generation must preserve that same selected equality. Merely accepting the declaration and then using its default comparator would be incorrect.
+
+## Preservation argument
+
+Let $T$ be the declared subtype, $b(T)$ its type after removing domain wrappers, and $I_C$ the input identity of selected class $C$. Binding succeeds precisely when $b(T)$ has identity $I_C$, belongs to the existing generic family represented by $I_C$, or the shared catalog records an implicit binary cast $b(T)\rightarrow I_C$. These are alternative identity-preserving admission rules; they neither execute a coercion function nor infer another class. The binding returns the original pair $(T,C)$, so projecting either component recovers the exact supplied reference. In particular, modifier removal for an identity check does not mutate the retained declaration, and domain unwrapping does not remove its later input obligations.
+
+This boundary introduces no value operator, order, equality, stored representation or algebraic rewrite. Existing comparisons, grouping partitions, hashes and range construction therefore remain unchanged. The next invocation boundary must prove that its selected interpretation $J_C$ and exact key $K_C$ satisfy $K_C(x)=K_C(y)\iff\operatorname{cmp}_C(J_C(x),J_C(y))=0$ on the admitted comparable domain; this input binding does not assert that property for a class merely because metadata exists.
+
+The result contains two borrowed references and allocates no retained state. Direct and generic identity checks allocate nothing. A cast lookup uses the existing controlled SQL name producer and releases both temporary names before returning. Each domain-unwrapping step checks both cancellation owners. Success, incompatibility, cancellation and allocation failure retain no scratch after returning. The operation invokes no callback and observes no values, so it introduces no state effects or repeated input behavior.
+
+## Verification and remaining work
+
+Six focused SQL owner tests pass. The compact PostgreSQL 18.4 Docker fixture contains 31 actual range declarations: 23 accepted bindings and eight rejected bindings with exact SQLSTATE, message, detail and hint. Existing default-class metadata and declaration tests still pass. The new resource test covers original reference/modifier retention, domain-to-binary selection, zero-allocation direct/generic binding, exhausted cast lookup and both cancellation owners. The automatic manifest adds these two tests, selecting 851 checks / 1,250 cases. This is local binding evidence, not completed comparator, collation, range declaration or automatic platform acceptance.
+
+Strict SQL library/test Clippy and formatting pass after making the reference-identity assertions use explicit raw-pointer notation. Dependency ownership, Engine capability, single-test-harness, source-header, file-size and manifest policies pass. No product source changed after the focused passing test run; the pointer notation is an equivalent assertion. The selected-input implementation and its independent fixture are committed as one unit before further invocation work.
