@@ -31,6 +31,10 @@ fn identity(expression: &ScalarExpr) -> usize {
 }
 
 impl ScalarTypeSchema for CallInputTypes<'_> {
+    fn input_collation(&self, expression: &ScalarExpr) -> Option<u32> {
+        self.schema.input_collation(expression)
+    }
+
     fn observed_expression_type(&self, expression: &ScalarExpr) -> Option<Option<&ColumnType>> {
         let argument = crate::scalar_call_argument(expression).ok()?.value;
         self.observations

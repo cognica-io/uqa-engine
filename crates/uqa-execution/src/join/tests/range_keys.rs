@@ -18,6 +18,7 @@ fn range_field(text: &str, oid: u32, array: bool) -> Value {
             uqa_core::RowValue::typed(
                 vec![Value::Str(text.into())],
                 vec![uqa_core::RecordFieldType {
+                    collation_oid: None,
                     oid,
                     type_modifier: -1,
                 }],

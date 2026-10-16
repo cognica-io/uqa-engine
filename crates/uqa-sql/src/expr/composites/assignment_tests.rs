@@ -62,6 +62,7 @@ fn row(value: Value, oid: u32) -> Value {
         RowValue::typed(
             vec![value],
             vec![RecordFieldType {
+                collation_oid: None,
                 oid,
                 type_modifier: -1,
             }],

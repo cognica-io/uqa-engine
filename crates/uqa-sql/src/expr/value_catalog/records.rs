@@ -66,6 +66,20 @@ impl<'a> SQLRecordFields<'a> {
             .map(|attribute| &attribute.ty)
     }
 
+    /// Observe a retained field selection without evaluating the field. Named fields use the pinned descriptor; anonymous fields distinguish explicit zero from absent legacy metadata.
+    pub fn field_collation_oid(&self, index: usize) -> Option<u32> {
+        if let Some(descriptor) = &self.descriptor {
+            return descriptor
+                .attributes
+                .get(index)
+                .map(|attribute| attribute.collation_oid());
+        }
+        match self.fields {
+            Fields::Anonymous(fields) => fields.field_types()?.get(index)?.collation_oid,
+            Fields::Named(_) => None,
+        }
+    }
+
     pub fn field_type_oid(&self, index: usize) -> Option<u32> {
         if let Some(ty) = self.declared_field_type(index) {
             return Some(pg_type_oid(ty) as u32);
@@ -77,5 +91,89 @@ impl<'a> SQLRecordFields<'a> {
                 .map(|RecordFieldType { oid, .. }| *oid),
             Fields::Named(_) => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::expr::{composites::CompositeAttribute, enums::EnumTypeLabels};
+    use std::cell::RefCell;
+
+    struct Catalog(RefCell<Arc<CompositeTypeDescriptor>>);
+
+    impl SQLValueCatalog for Catalog {
+        fn value_composite_type(
+            &self,
+            _: u32,
+        ) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
+            Ok(Some(self.0.borrow().clone()))
+        }
+        fn enum_type_labels(&self, _: u32) -> Result<Option<Arc<EnumTypeLabels>>, SQLError> {
+            Ok(None)
+        }
+        fn enum_label_uncommitted(&self, _: u32) -> bool {
+            false
+        }
+        fn enum_type_name(&self, _: u32) -> Result<Option<String>, SQLError> {
+            Ok(None)
+        }
+        fn has_enum_types(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn field_collations_keep_named_generations_and_anonymous_zero() {
+        let descriptor = |collation_oid| {
+            Arc::new(CompositeTypeDescriptor {
+                dropped: Vec::new(),
+                type_oid: 20_001,
+                relation_oid: 20_002,
+                attributes: vec![CompositeAttribute {
+                    name: "v".into(),
+                    ty: ColumnType::Text,
+                    collation_oid,
+                    number: 1,
+                }],
+            })
+        };
+        let catalog = Catalog(RefCell::new(descriptor(Some(950))));
+        let value = Value::Record(uqa_core::RecordValue::from_parts(
+            vec![("v".into(), Value::Null)],
+            Some(20_001),
+        ));
+        let original = SQLRecordFields::new(&value, Some(&catalog)).unwrap();
+        *catalog.0.borrow_mut() = descriptor(Some(963));
+        let changed = SQLRecordFields::new(&value, Some(&catalog)).unwrap();
+        assert_eq!(original.field_collation_oid(0), Some(950));
+        assert_eq!(changed.field_collation_oid(0), Some(963));
+        assert_eq!(original.field_collation_oid(1), None);
+        *catalog.0.borrow_mut() = descriptor(None);
+        assert_eq!(
+            SQLRecordFields::new(&value, Some(&catalog))
+                .unwrap()
+                .field_collation_oid(0),
+            Some(100)
+        );
+
+        let anonymous = Value::Row(
+            uqa_core::RowValue::typed(
+                vec![Value::Null; 3],
+                [None, Some(0), Some(950)]
+                    .into_iter()
+                    .map(|collation_oid| RecordFieldType {
+                        oid: 25,
+                        type_modifier: -1,
+                        collation_oid,
+                    })
+                    .collect(),
+            )
+            .unwrap(),
+        );
+        let fields = SQLRecordFields::new(&anonymous, None).unwrap();
+        assert_eq!(fields.field_collation_oid(0), None);
+        assert_eq!(fields.field_collation_oid(1), Some(0));
+        assert_eq!(fields.field_collation_oid(2), Some(950));
     }
 }

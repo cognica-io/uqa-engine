@@ -7,6 +7,23 @@
 use super::*;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+#[test]
+fn row_constructor_preserves_each_selected_field_collation() {
+    let crate::Statement::Select(query) =
+        crate::compile("SELECT ROW('B'::text COLLATE \"C\", 'a'::text COLLATE \"unicode\")")
+            .unwrap()
+            .remove(0)
+    else {
+        panic!("SELECT");
+    };
+    let value = eval(&query.projections[0].expr, &EvalContext::new(None, &[])).unwrap();
+    let encoded = serde_json::to_value(&value).unwrap();
+    assert_eq!(encoded["field_types"][0]["oid"], 25);
+    assert_eq!(encoded["field_types"][1]["oid"], 25);
+    assert_eq!(encoded["field_types"][0]["collation_oid"], 950);
+    assert_eq!(encoded["field_types"][1]["collation_oid"], 963);
+}
+
 #[derive(Default)]
 struct Sequence(AtomicI64);
 

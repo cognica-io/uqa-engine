@@ -110,6 +110,7 @@ fn selected_btree_input_keys_share_array_and_record_image_owners() {
             RowValue::typed(
                 vec![uqa_sql::expr::cast_value(&Value::Str(text.into()), "numeric").unwrap()],
                 vec![RecordFieldType {
+                    collation_oid: None,
                     oid: 1700,
                     type_modifier: -1,
                 }],

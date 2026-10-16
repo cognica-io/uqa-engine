@@ -33,6 +33,7 @@ impl SQLValueCatalog for Catalog {
 fn row(values: Vec<Value>, ty: &ColumnType) -> Value {
     let types = vec![
         RecordFieldType {
+            collation_oid: None,
             oid: type_metadata::pg_type_oid(ty) as u32,
             type_modifier: type_metadata::pg_type_modifier(ty) as i32,
         };

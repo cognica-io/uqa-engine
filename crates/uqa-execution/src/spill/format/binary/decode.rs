@@ -404,9 +404,12 @@ impl<'a> BinaryReader<'a> {
                 .map(Value::FixedChar),
             11 => self.read_string("JSON value").map(Value::Json),
             12 => self.read_string("JSONB value").map(Value::JsonB),
-            tag @ (13 | 19) => {
-                let fields = if tag == 19 {
-                    let count = self.read_count("row descriptor length", 8)?;
+            tag @ (13 | 19 | 25) => {
+                let fields = if tag == 13 {
+                    None
+                } else {
+                    let count =
+                        self.read_count("row descriptor length", if tag == 25 { 9 } else { 8 })?;
                     let mut fields = Vec::new();
                     fields.try_reserve_exact(count).map_err(|error| {
                         spill_error(format!("cannot allocate row descriptor: {error}"))
@@ -417,11 +420,24 @@ impl<'a> BinaryReader<'a> {
                                 self.read_i32("row field type OID")?.to_le_bytes(),
                             ),
                             type_modifier: self.read_i32("row field type modifier")?,
+                            collation_oid: if tag == 25 {
+                                match self.read_u8("row field collation presence")? {
+                                    0 => None,
+                                    1 => Some(u32::from_le_bytes(
+                                        self.read_i32("row field collation OID")?.to_le_bytes(),
+                                    )),
+                                    _ => {
+                                        return Err(spill_error(
+                                            "invalid row field collation presence",
+                                        ))
+                                    }
+                                }
+                            } else {
+                                None
+                            },
                         });
                     }
                     Some(fields)
-                } else {
-                    None
                 };
                 let count = self.read_count("row length", 1)?;
                 let mut values = Vec::new();

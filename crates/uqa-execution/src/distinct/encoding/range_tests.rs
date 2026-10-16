@@ -46,6 +46,7 @@ fn containers(text: &str, oid: u32) -> Vec<Value> {
         uqa_core::RowValue::typed(
             vec![Value::Str(text.into())],
             vec![uqa_core::RecordFieldType {
+                collation_oid: None,
                 oid,
                 type_modifier: -1,
             }],
@@ -190,10 +191,12 @@ fn range_reservations_preserve_deferred_fields_and_existing_nonrange_addresses()
                 vec![Value::Str("[1.0,3.00)".into()), opaque],
                 vec![
                     uqa_core::RecordFieldType {
+                        collation_oid: None,
                         oid: 3906,
                         type_modifier: -1,
                     },
                     uqa_core::RecordFieldType {
+                        collation_oid: None,
                         oid: 23,
                         type_modifier: -1,
                     },
@@ -271,6 +274,7 @@ fn physical_range_fields_share_sql_hash_exact_and_spill_keys_with_admitted_value
                 uqa_core::RowValue::typed(
                     vec![value],
                     vec![uqa_core::RecordFieldType {
+                        collation_oid: None,
                         oid,
                         type_modifier: -1,
                     }],

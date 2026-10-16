@@ -31,6 +31,28 @@ pub trait ScalarTypeSchema {
     fn qualified_type(&self, qualifier: &str, name: &str) -> Option<&ColumnType>;
     fn columns_are_open(&self, qualifier: Option<&str>) -> bool;
 
+    /// Observe the analyzed result selection or a direct input reference without repeating type input, evaluation or collation derivation.
+    fn input_collation(&self, expression: &crate::ScalarExpr) -> Option<u32> {
+        match expression {
+            crate::ScalarExpr::TypedLiteral { collation_oid, .. } => *collation_oid,
+            crate::ScalarExpr::Collated { collation, .. } => Some(collation.oid()),
+            crate::ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } => match binding.dispatch {
+                Some(crate::ast::FunctionDispatch::Collate { oid }) => oid,
+                _ => None,
+            },
+            crate::ScalarExpr::Column(name) => self.collation_of(name),
+            crate::ScalarExpr::QualifiedColumn { qualifier, column } => {
+                self.qualified_collation(qualifier, column)
+            }
+            crate::ScalarExpr::Position(position) => self.column_collation(*position),
+            crate::ScalarExpr::InternalColumn(column) => self.internal_collation(*column),
+            _ => None,
+        }
+    }
+
     fn column_collation(&self, position: usize) -> Option<u32> {
         self.column_type(position).map(default_collation)
     }

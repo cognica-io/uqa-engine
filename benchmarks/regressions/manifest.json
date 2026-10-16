@@ -11540,6 +11540,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "row_collations_survive_json_copy_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/row/tests.rs",
+      "capability": "Anonymous row collation retention",
+      "workload": "Rows with absent, zero, built-in and maximum opaque collation identities pass tagged JSON, admitted copy and both cancelled construction owners.",
+      "invariant": "Exact descriptor representation survives round trips; actual retained bytes stay charged and failures release them.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "row_constructor_preserves_each_selected_field_collation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/tests/collations.rs",
+      "capability": "Anonymous row collation production",
+      "workload": "A ROW contains independently selected C and unicode text fields.",
+      "invariant": "Field type and collation identities survive ordinary SQL construction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "row_field_collations_use_analyzed_inputs_and_observe_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/scalar_input/tests.rs",
+      "capability": "Anonymous row collation production",
+      "workload": "Selected schema columns, an indeterminate column, an unknown null and a retained computed result are observed under both cancellation scopes.",
+      "invariant": "Existing analyzed selections are retained without value evaluation; cancellation releases all inference storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "field_collations_keep_named_generations_and_anonymous_zero",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/value_catalog/records.rs",
+      "capability": "Borrowed record collation observation",
+      "workload": "Named descriptors change from C to unicode while an older view is retained; anonymous fields carry absent, zero and explicit identities.",
+      "invariant": "Named observations pin their catalog generation and anonymous zero remains distinct from absent legacy metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "record_field_collations_survive_spill_and_legacy_row_bytes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/tests/collations.rs",
+      "capability": "Spilled record collation retention",
+      "workload": "A mixed descriptor spills at a zero-byte threshold; every encoded prefix and independently constructed historical row tags are decoded.",
+      "invariant": "Exact sizing matches written bytes, complete metadata survives spill, truncation fails and old typed/untyped rows remain readable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "record_field_spill_rejects_invalid_collation_presence",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/tests/collations.rs",
+      "capability": "Spilled record descriptor validation",
+      "workload": "An independently constructed row uses a collation presence flag outside zero and one.",
+      "invariant": "Malformed descriptor metadata is rejected before it can become a retained value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "row_field_collations_agree_in_ordinary_and_admitted_contexts",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/evaluator/collation_tests.rs",
+      "capability": "Admitted record collation production",
+      "workload": "A ROW combines a selected input column, explicit unicode text and a typed null under ordinary, admitted, exhausted and cancelled evaluation.",
+      "invariant": "Both producers retain identical descriptors; output owns its exact lease and failed evaluation releases scratch.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

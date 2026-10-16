@@ -147,6 +147,7 @@ fn typed_containers(text: &str, oid: u32) -> Vec<Value> {
         uqa_core::RowValue::typed(
             vec![Value::Str(text.into())],
             vec![uqa_core::RecordFieldType {
+                collation_oid: None,
                 oid,
                 type_modifier: -1,
             }],
@@ -168,6 +169,7 @@ fn typed_containers(text: &str, oid: u32) -> Vec<Value> {
             uqa_core::RowValue::typed(
                 vec![row],
                 vec![uqa_core::RecordFieldType {
+                    collation_oid: None,
                     oid: 2249,
                     type_modifier: -1,
                 }],

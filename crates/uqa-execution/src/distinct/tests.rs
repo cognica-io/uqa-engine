@@ -27,6 +27,7 @@ fn collision_verification_requires_equality_without_ordering() {
             uqa_core::RowValue::typed(
                 vec![Value::Int(value)],
                 vec![uqa_core::RecordFieldType {
+                    collation_oid: None,
                     oid: 28,
                     type_modifier: -1,
                 }],
@@ -95,6 +96,7 @@ fn range_distinct_preserves_equivalence_and_first_values_after_forced_spill() {
                         uqa_core::RowValue::typed(
                             vec![Value::Str(text.into())],
                             vec![uqa_core::RecordFieldType {
+                                collation_oid: None,
                                 oid,
                                 type_modifier: -1,
                             }],

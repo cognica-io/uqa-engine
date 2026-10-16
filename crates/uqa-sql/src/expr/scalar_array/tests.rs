@@ -170,6 +170,7 @@ fn typed_row(values: Vec<Value>, oids: &[u32]) -> Value {
             values,
             oids.iter()
                 .map(|oid| uqa_core::RecordFieldType {
+                    collation_oid: None,
                     oid: *oid,
                     type_modifier: -1,
                 })

@@ -79,10 +79,12 @@ fn current_records_preserve_user_fields_metadata_and_sequence_envelopes() {
                     vec![Value::Int(1), Value::Null],
                     vec![
                         uqa_core::RecordFieldType {
+                            collation_oid: None,
                             oid: 20,
                             type_modifier: -1,
                         },
                         uqa_core::RecordFieldType {
+                            collation_oid: None,
                             oid: 23,
                             type_modifier: -1,
                         },
