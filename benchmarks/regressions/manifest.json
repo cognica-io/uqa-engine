@@ -11103,7 +11103,7 @@
       "cases": 1,
       "source": "crates/uqa-engine/tests/pg18_semantics/range_datums.rs",
       "capability": "Public scalar range equality consumers",
-      "workload": "122 independently captured PostgreSQL queries across twelve range/multirange types, including hash and mixed-record ordered DISTINCT/DISTINCT ON, grouping, aggregate DISTINCT, MODE, joins and sets.",
+      "workload": "128 independently captured PostgreSQL queries across twelve range/multirange types, including hash and mixed-record ordered DISTINCT/DISTINCT ON, grouping, aggregate DISTINCT, MODE, multi-argument JSON DISTINCT, joins and sets.",
       "invariant": "Actual Engine SQL counts match PostgreSQL for DISTINCT, DISTINCT ON, groups, aggregate DISTINCT, MODE, joins and set operations.",
       "case_names": [
         ""
@@ -11131,6 +11131,19 @@
       "capability": "Selected scalar range MODE classes",
       "workload": "Numeric range and multirange spellings, domains and TEXT controls with ascending/descending order, reversed input, NULL and one-byte forced spill.",
       "invariant": "MODE counts the same equivalence classes as sorting, matches the independent PostgreSQL winner, and preserves TEXT separation and spill bounds.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "aggregate_argument_ranges_preserve_types_across_spill_and_restore",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/tests/argument_types.rs",
+      "capability": "Selected aggregate argument tuples",
+      "workload": "Numeric ranges/multiranges, domains and TEXT in either argument position with secondary integers/NULLs, explicit order, one-byte spill, merge runs and template restoration.",
+      "invariant": "Distinct tuple ordering and equality retain every argument type and original representation; registered transitions observe each PostgreSQL equivalence class once.",
       "case_names": [
         ""
       ]

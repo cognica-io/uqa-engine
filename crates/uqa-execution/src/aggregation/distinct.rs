@@ -14,6 +14,7 @@ use uqa_sql::expr::enums::EnumLabelCatalog;
 /// Reusing sorted runs keeps both comparisons and spill behavior fallible.
 pub struct DistinctTracker {
     pub(super) values: AggregateValueBuffer,
+    pub(super) argument_count: Option<usize>,
 }
 
 impl Default for DistinctTracker {
@@ -26,6 +27,7 @@ impl DistinctTracker {
     pub(super) fn new(budget_bytes: usize) -> Self {
         Self {
             values: AggregateValueBuffer::new(budget_bytes),
+            argument_count: None,
         }
     }
 
@@ -39,8 +41,14 @@ impl DistinctTracker {
         mut sort_keys: Vec<super::ordering::AggregateSortKey>,
         enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
-        // Explicit ORDER BY keys come first; the complete argument tuple resolves their ties.
-        sort_keys.push(super::ordering::AggregateSortKey::ascending(value.clone()));
+        // Explicit ORDER BY keys come first; each selected argument resolves their ties.
+        if let Some(count) = self.argument_count {
+            for value in arguments(value, count)? {
+                sort_keys.push(super::ordering::AggregateSortKey::ascending(value.clone()));
+            }
+        } else {
+            sort_keys.push(super::ordering::AggregateSortKey::ascending(value.clone()));
+        }
         self.values.push(value.clone(), sort_keys, enums)
     }
 
@@ -52,17 +60,7 @@ impl DistinctTracker {
         let mut previous: Option<Value> = None;
         self.values.for_each_ordered(enums, |record| {
             if let Some(previous) = &previous {
-                if uqa_sql::expr::equal_selected_values_with_catalog(
-                    previous,
-                    &record.value,
-                    self.values
-                        .key_types
-                        .as_deref()
-                        .and_then(|types| types.last())
-                        .and_then(Option::as_ref),
-                    &ProductionControl::uncontrolled(),
-                    enums,
-                )? {
+                if self.equal_inputs(previous, &record.value, enums)? {
                     return Ok(());
                 }
             }
@@ -71,6 +69,56 @@ impl DistinctTracker {
             Ok(())
         })
     }
+
+    fn equal_inputs(
+        &self,
+        left: &Value,
+        right: &Value,
+        enums: Option<&dyn EnumLabelCatalog>,
+    ) -> Result<bool, SQLError> {
+        let types = self.values.key_types.as_deref().unwrap_or_default();
+        let control = ProductionControl::uncontrolled();
+        let Some(count) = self.argument_count else {
+            return uqa_sql::expr::equal_selected_values_with_catalog(
+                left,
+                right,
+                types.last().and_then(Option::as_ref),
+                &control,
+                enums,
+            );
+        };
+        let types = types
+            .get(types.len().saturating_sub(count)..)
+            .filter(|types| types.len() == count)
+            .ok_or_else(|| SQLError::Internal("DISTINCT argument types are missing".into()))?;
+        for ((left, right), ty) in arguments(left, count)?
+            .iter()
+            .zip(arguments(right, count)?)
+            .zip(types)
+        {
+            if !uqa_sql::expr::equal_selected_values_with_catalog(
+                left,
+                right,
+                ty.as_ref(),
+                &control,
+                enums,
+            )? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
+fn arguments(value: &Value, count: usize) -> Result<&[Value], SQLError> {
+    if let Value::List(values) = value {
+        if values.len() == count {
+            return Ok(values);
+        }
+    }
+    Err(SQLError::Internal(
+        "DISTINCT input does not match its argument tuple".into(),
+    ))
 }
 
 pub fn value_as_f64(v: &Value) -> Result<f64, SQLError> {
