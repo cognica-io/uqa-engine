@@ -90,6 +90,28 @@ fn admitted_xid_fields_are_not_reinterpreted_as_integer_inputs() {
 }
 
 #[test]
+fn admitted_bpchar_fields_keep_padding_in_composite_assignment() {
+    let catalog = Catalog(ColumnType::Bpchar);
+    let field = Value::FixedChar("a   ".into());
+    let assigned = cast_to_composite(
+        &catalog,
+        &row(field.clone(), 1042),
+        Some(&ColumnType::Record),
+        &target(),
+    )
+    .unwrap()
+    .unwrap();
+    let Value::Record(fields) = &assigned else {
+        panic!("assigned composite")
+    };
+    assert_eq!(fields[0].1, field);
+    assert_eq!(
+        crate::result::format_postgres_text(&assigned, &target(), Some(&catalog)).unwrap(),
+        r#"("a   ")"#
+    );
+}
+
+#[test]
 fn unknown_field_input_is_converted_while_a_declared_integer_remains_incompatible() {
     let assigned = cast_to_composite(
         &Catalog(ColumnType::Xid),

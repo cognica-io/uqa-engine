@@ -353,9 +353,13 @@ pub(super) fn compile_pg_type_name(
                     .typmods
                     .first()
                     .map(|node| expect_positive_character_length(node, "bpchar"))
-                    .transpose()?
-                    .unwrap_or(1);
-                Ok(ColumnType::Character(length))
+                    .transpose()?;
+                // The parser supplies length one for CHAR/CHARACTER; the catalog name without a modifier is unconstrained.
+                Ok(match length {
+                    Some(length) => ColumnType::Character(length),
+                    None if raw == "bpchar" => ColumnType::Bpchar,
+                    None => ColumnType::Character(1),
+                })
             }
             "bool" | "boolean" => Ok(ColumnType::Boolean),
             "real" | "float4" => Ok(ColumnType::Real),

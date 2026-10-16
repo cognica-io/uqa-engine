@@ -114,7 +114,7 @@ Use exact decimal for financial values. Do not substitute floating point where e
 
 `TEXT`, `VARCHAR(n)`, `NAME`, and `UUID` retain distinct declared identities while using text-compatible carriers. `VARCHAR(n)` rejects overlength assignment except for discarded trailing spaces, explicit casts follow PostgreSQL truncation behavior, `NAME` preserves its catalog identity, and UUID input is validated and emitted canonically.
 
-`CHARACTER(n)` pads shorter values with ASCII spaces to its fixed width. Comparisons follow the implemented character coercion behavior; normalize at application boundaries when exchanging data with another database.
+`CHARACTER(n)` pads shorter values with ASCII spaces to its fixed width; `CHAR` and `CHARACTER` without a modifier use length one. The catalog type name `bpchar` without a modifier preserves the input length, including in table and composite declarations. A cast to `TEXT` removes trailing ASCII spaces; array and composite text output preserve them and quote fields as required.
 
 ## Temporal types
 

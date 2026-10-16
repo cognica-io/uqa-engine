@@ -9214,8 +9214,37 @@
       ],
       "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
       "capability": "Composite field equality across consumers",
-      "workload": "169 independent PostgreSQL 18.4 observations across twelve field families on memory, native SQLite, SQLite Key/Value and redb, including twelve fresh-connection observations.",
+      "workload": "172 independent PostgreSQL 18.4 observations across twelve field families on memory, native SQLite, SQLite Key/Value and redb, including thirteen fresh-connection observations.",
       "invariant": "Comparison laws, DISTINCT/groups/window peers/joins/set operations, indexed probes and uniqueness retain the same field equality and ordering before and after persistent reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "padded_container_output_keeps_memory_and_cancellation_limits",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/conversion/tests.rs",
+      "capability": "Bounded padded character output",
+      "workload": "Render a padded character field whose container output exceeds the existing memory allowance, then repeat with cancellation already requested.",
+      "invariant": "Padding is retained without bypassing the caller's memory or cancellation boundary; errors release all temporary reservations."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "bpchar_composite_output_and_consumers_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
+      "capability": "Padded character composite output and consumers",
+      "workload": "Replay the bpchar family of the independent PostgreSQL 18.4 consumer reference on all four providers, including scalar and nested container output and actual persistent reopening.",
+      "invariant": "Container output and unique-key detail retain trailing spaces while scalar text casts trim them; equality, hashing and indexed lookup keep their existing padding-insensitive classes."
     }
   ]
 }

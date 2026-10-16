@@ -26,6 +26,68 @@
       "id": "version"
     },
     {
+      "sql": "CREATE TEMP TABLE cm_decl (catalog_name bpchar, quoted_name \"bpchar\", qualified pg_catalog.bpchar, keyword character, keyword_n char(4)); SELECT attname,atttypid::integer,atttypmod FROM pg_attribute WHERE attrelid='cm_decl'::regclass AND attnum>0 ORDER BY attnum; DROP TABLE cm_decl",
+      "command_tags": [
+        "CREATE TABLE",
+        "SELECT 5",
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "attname",
+            "atttypid",
+            "atttypmod"
+          ],
+          "type_oids": [
+            19,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "catalog_name",
+              "1042",
+              "-1"
+            ],
+            [
+              "quoted_name",
+              "1042",
+              "-1"
+            ],
+            [
+              "qualified",
+              "1042",
+              "-1"
+            ],
+            [
+              "keyword",
+              "1042",
+              "5"
+            ],
+            [
+              "keyword_n",
+              "1042",
+              "8"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_declarations"
+    },
+    {
       "sql": "CREATE TYPE cm_float8_row AS (value double precision); CREATE TABLE cm_float8 (id integer PRIMARY KEY, v cm_float8_row); INSERT INTO cm_float8 VALUES (1,ROW('-0'::float8)),(2,ROW('0'::float8)),(3,ROW('NaN'::float8)),(4,ROW('NaN'::float8)),(5,ROW('infinity'::float8)),(6,ROW(1::float8)),(7,ROW(NULL)),(8,NULL)",
       "command_tags": [
         "CREATE TYPE",
@@ -4621,6 +4683,42 @@
       "id": "oidvector_unique_duplicate"
     },
     {
+      "sql": "SELECT ('a   '::bpchar)::text AS scalar_text,ROW('a   '::bpchar)::text AS anonymous,ROW('a   '::bpchar)::cm_bpchar_row::text AS named,ARRAY['a   '::bpchar]::text AS array,ROW(ARRAY['a   '::bpchar])::text AS nested",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "scalar_text",
+            "anonymous",
+            "named",
+            "array",
+            "nested"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "a",
+              "(\"a   \")",
+              "(\"a   \")",
+              "{\"a   \"}",
+              "(\"{\"\"a   \"\"}\")"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_output"
+    },
+    {
       "sql": "SELECT id FROM cm_float8 WHERE v=ROW('-0'::float8)::cm_float8_row ORDER BY id",
       "command_tags": [
         "SELECT 2"
@@ -4955,12 +5053,64 @@
       "notices": [],
       "id": "oidvector_reopen",
       "reopen": true
+    },
+    {
+      "sql": "SELECT id,v::text AS value FROM cm_bpchar ORDER BY id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "value"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "(a)"
+            ],
+            [
+              "2",
+              "(\"a   \")"
+            ],
+            [
+              "3",
+              "(b)"
+            ],
+            [
+              "4",
+              "(\"\")"
+            ],
+            [
+              "5",
+              "(\"   \")"
+            ],
+            [
+              "6",
+              "()"
+            ],
+            [
+              "7",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_output_reopen",
+      "reopen": true
     }
   ],
   "provenance": {
     "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
     "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "a7388a5afac0679d482071dbf481b4da0e393596984a8dfd062fc2f4727108a5",
+    "input_sha256": "3b155d3b2e9b3c8be82de6d6f67aaa698b2b9a179cd0b5b54592457dcaaa9b00",
     "options": [
       "--rows",
       "--details",
@@ -4968,6 +5118,9 @@
     ],
     "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
     "fresh_connection_cases": 12,
-    "fresh_connection_output_sha256": "3862d0893e26c8a626f748eb0390630dd09976ec7136df388dabc24cca7e08db"
+    "fresh_connection_output_sha256": "3862d0893e26c8a626f748eb0390630dd09976ec7136df388dabc24cca7e08db",
+    "supplemental_output_sha256": "1ead3760f04cc8ce5ccf39512fb54e3b4f0403750f678d3eb2bb35e25d0ed555",
+    "supplemental_fresh_connection_cases": 1,
+    "character_declaration_output_sha256": "6a8a716c5c57316814c7d5fc93ad186cabb3c3493eeee12e3acfe431d6770eb9"
   }
 }

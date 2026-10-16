@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve unmodified `bpchar` declarations without an implicit one-character limit and retain trailing `CHARACTER`/`bpchar` spaces in array and composite text output, including unique-constraint detail; scalar casts to `TEXT` still trim trailing spaces as PostgreSQL does.
+
 ## [0.5.4] - 2026-10-15
 
 ### Changed
