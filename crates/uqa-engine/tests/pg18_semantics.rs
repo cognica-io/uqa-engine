@@ -132,6 +132,8 @@ mod range_rowsets;
 mod range_subtype_distance;
 #[path = "pg18_semantics/regexp_matches.rs"]
 mod regexp_matches;
+#[path = "pg18_semantics/regexp_search_loop.rs"]
+mod regexp_search_loop;
 #[path = "pg18_semantics/regexp_split.rs"]
 mod regexp_split;
 #[path = "pg18_semantics/regular_expression_engine.rs"]
