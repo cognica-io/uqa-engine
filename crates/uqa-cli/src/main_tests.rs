@@ -22,6 +22,7 @@ fn legacy_vector_expanded_output_reports_invalid_layout() {
         expanded: true,
         copy_text: false,
         output_path: None,
+        shell: crate::shell::ShellState::default(),
     };
     for ty in ["int2vector", "oidvector"] {
         let error = session
@@ -178,6 +179,7 @@ fn psql_escaped_semicolons_keep_one_simple_query_transaction() {
         expanded: false,
         copy_text: false,
         output_path: None,
+        shell: crate::shell::ShellState::default(),
     };
     let mut out = Vec::new();
     let error = session
@@ -260,6 +262,7 @@ fn command_text_uses_one_implicit_transaction_for_multiple_statements() {
         expanded: false,
         copy_text: false,
         output_path: None,
+        shell: crate::shell::ShellState::default(),
     };
     let mut out = Vec::new();
     session
@@ -350,6 +353,7 @@ fn command_text_applies_each_discard_targets_transaction_contract() {
         expanded: false,
         copy_text: false,
         output_path: None,
+        shell: crate::shell::ShellState::default(),
     };
     let mut out = Vec::new();
     session
@@ -417,6 +421,7 @@ fn meta_ds_lists_sequences_using_search_path() {
         expanded: false,
         copy_text: false,
         output_path: None,
+        shell: crate::shell::ShellState::default(),
     };
 
     let mut out = Vec::new();
@@ -433,7 +438,7 @@ fn meta_ds_lists_sequences_using_search_path() {
 fn highlighter_marks_keywords_registry_functions_and_literals() {
     let highlighted = highlight_sql_line("select text_match(body, 'rust') -- comment");
     assert!(highlighted.contains("\x1b[1;34mselect\x1b[0m"));
-    assert!(highlighted.contains("\x1b[1;34mtext_match\x1b[0m"));
+    assert!(highlighted.contains("\x1b[35mtext_match\x1b[0m"));
     assert!(highlighted.contains("\x1b[32m'rust'\x1b[0m"));
     assert!(highlighted.contains("\x1b[90m-- comment\x1b[0m"));
 }
@@ -441,17 +446,21 @@ fn highlighter_marks_keywords_registry_functions_and_literals() {
 #[test]
 fn highlighter_forces_refresh_while_typing_sql_tokens() {
     let helper = UsqlHelper::new(Vec::new(), Vec::new(), Vec::new());
-    assert!(helper.highlight_char("sele", 4, CmdKind::Other));
-    assert!(helper
-        .highlight("select", 6)
-        .contains("\x1b[1;34mselect\x1b[0m"));
+    let enabled = std::env::var_os("NO_COLOR").is_none();
+    assert_eq!(helper.highlight_char("sele", 4, CmdKind::Other), enabled);
+    assert_eq!(
+        helper
+            .highlight("select", 6)
+            .contains("\x1b[1;34mselect\x1b[0m"),
+        enabled
+    );
 }
 
 #[test]
 fn highlighter_keeps_uppercase_keywords_case_insensitive() {
     let highlighted = highlight_sql_line("SELECT text_match(body, 'rust') -- comment");
     assert!(highlighted.contains("\x1b[1;34mSELECT\x1b[0m"));
-    assert!(highlighted.contains("\x1b[1;34mtext_match\x1b[0m"));
+    assert!(highlighted.contains("\x1b[35mtext_match\x1b[0m"));
     assert!(highlighted.contains("\x1b[32m'rust'\x1b[0m"));
     assert!(highlighted.contains("\x1b[90m-- comment\x1b[0m"));
 }

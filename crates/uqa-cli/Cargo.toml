@@ -36,10 +36,10 @@ uqa-pg-query = { workspace = true }
 uqa-sql = { workspace = true }
 rustyline = "18.0.0"
 rpassword = "7.4"
-serde_json = { workspace = true }
-
-[dev-dependencies]
+unicode-width = "0.2"
+ctrlc = "3.5"
 tempfile = "3.13"
+serde_json = { workspace = true }
 
 [[test]]
 name = "integration"

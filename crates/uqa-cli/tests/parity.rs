@@ -285,15 +285,12 @@ fn piped_sql_returns_failure_when_execution_fails() {
 }
 
 #[test]
-fn piped_unterminated_sql_is_not_silently_discarded() {
+fn piped_final_statement_executes_at_eof_like_psql() {
     let dir = tempfile::tempdir().expect("tempdir");
     let output = run_usql(&[], "SELECT 1\n", dir.path());
-    assert!(!output.status.success(), "stdout: {}", stdout(&output));
-    assert!(
-        stdout(&output).contains("unterminated SQL statement"),
-        "{}",
-        stdout(&output)
-    );
+    assert!(output.status.success(), "stdout: {}", stdout(&output));
+    assert!(stdout(&output).contains('1'));
+    assert!(!stdout(&output).contains("ERROR"));
 }
 
 #[test]
@@ -393,19 +390,16 @@ fn python_backslash_surface_is_available() {
     let out = stdout(&output);
     assert!(out.contains("Backslash commands:"), "{out}");
     assert!(out.contains("\\di"), "{out}");
-    assert!(out.contains("\\ds [sequence]"), "{out}");
+    assert!(out.contains("List sequences [sequence]"), "{out}");
     assert!(out.contains("\\dF"), "{out}");
     assert!(out.contains("\\dS"), "{out}");
-    assert!(out.contains("\\stats <table>"), "{out}");
-    assert!(
-        out.contains("\\open <path>    Switch to persistent storage"),
-        "{out}"
-    );
+    assert!(out.contains("Show statistics <table>"), "{out}");
+    assert!(out.contains("Open database <path>"), "{out}");
     assert!(!out.contains("persistent SQLite storage"), "{out}");
     assert!(out.contains("table_name"), "{out}");
     assert!(out.contains("users"), "{out}");
-    assert!(out.contains("Table \"users\""), "{out}");
-    assert!(out.contains("indexed_fields"), "{out}");
+    assert!(out.contains("public\".\"users"), "{out}");
+    assert!(out.contains("indexname"), "{out}");
     assert!(out.contains("Statistics for \"users\""), "{out}");
     assert!(out.contains("sequence_name"), "{out}");
     assert!(out.contains("user_seq"), "{out}");
@@ -413,7 +407,7 @@ fn python_backslash_surface_is_available() {
     assert!(out.contains("Output redirected to:"), "{out}");
     assert!(out.contains("Output restored to stdout"), "{out}");
     assert!(out.contains("Engine reset."), "{out}");
-    assert!(out.contains("No tables."), "{out}");
+    assert!(out.contains("(0 rows)"), "{out}");
 
     let redirected = std::fs::read_to_string(&output_file).expect("redirected output");
     assert!(redirected.contains("Alice"), "{redirected}");
@@ -444,4 +438,70 @@ fn foreign_catalog_commands_do_not_require_source_handlers() {
     assert!(!out.contains("ERROR"), "{out}");
     assert!(!out.contains("not available"), "{out}");
     assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_editor_signals_and_idle_notifications_use_the_real_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = std::process::Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/terminal.py"
+        ))
+        .arg(binary_path())
+        .arg(dir.path())
+        .output()
+        .expect("execute the Unix terminal fixture with Python 3");
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        stdout(&output),
+        stderr(&output)
+    );
+}
+
+#[test]
+fn catalog_commands_query_native_catalogs_instead_of_missing_views() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = run_usql(
+        &[],
+        r"CREATE TABLE shell_catalog_item(id int PRIMARY KEY);
+CREATE VIEW shell_catalog_view AS SELECT id FROM shell_catalog_item;
+\d shell_catalog_item
+\d shell_catalog_view
+\dt shell_catalog_*
+\di shell_catalog_*
+\dv shell_catalog_*
+\dn public
+\df
+\da
+\du
+\dg
+\l
+\dS
+\dx
+\dp shell_catalog_*
+\z shell_catalog_*
+\dft
+\dfs
+\analyzers
+\graphs
+\q
+",
+        dir.path(),
+    );
+    let out = stdout(&output);
+    assert!(output.status.success(), "{out}\n{}", stderr(&output));
+    assert!(!out.contains("ERROR"), "{out}");
+    for expected in [
+        "shell_catalog_item",
+        "shell_catalog_view",
+        "shell_catalog_item_pkey",
+        "plpgsql",
+        "extversion",
+        "access_privileges",
+    ] {
+        assert!(out.contains(expected), "missing {expected}: {out}");
+    }
 }

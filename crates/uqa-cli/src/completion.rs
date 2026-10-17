@@ -8,10 +8,10 @@
 
 use super::{
     BTreeSet, CmdKind, Completer, Context, Cow, Editor, Helper, Highlighter, Hinter, HistoryHinter,
-    MatchingBracketHighlighter, MatchingBracketValidator, Pair, RustylineResult, Validator,
+    Pair, RustylineResult, Validator,
 };
 
-const SQL_KEYWORDS: &[&str] = &[
+pub(crate) const SQL_KEYWORDS: &[&str] = &[
     "CREATE",
     "TABLE",
     "DROP",
@@ -144,27 +144,68 @@ const SQL_KEYWORDS: &[&str] = &[
     "ANALYZE",
     "GENERATE_SERIES",
 ];
-const BACKSLASH_COMMANDS: &[(&str, &str)] = &[
-    ("\\dt", "List tables"),
-    ("\\d", "Describe table"),
-    ("\\di", "List indexes"),
-    ("\\dF", "List foreign tables"),
-    ("\\dS", "List foreign servers"),
-    ("\\dg", "List graphs"),
-    ("\\ds", "List sequences"),
-    ("\\stats", "Show column statistics"),
-    ("\\x", "Expanded display"),
-    ("\\o", "Output to file"),
-    ("\\timing", "Toggle timing"),
-    ("\\reset", "Reset engine"),
-    ("\\q", "Quit"),
-    ("\\?", "Help"),
-    ("\\help", "Help"),
-    ("\\history", "History"),
-    ("\\open", "Open database"),
+pub(super) const BACKSLASH_COMMANDS: &[(&str, &str)] = &[
+    ("\\dt", "List tables [pattern]"),
+    ("\\d", "Describe relations [pattern]"),
+    ("\\di", "List indexes [pattern]"),
+    ("\\dv", "List views [pattern]"),
+    ("\\dn", "List schemas [pattern]"),
+    ("\\df", "List routines [pattern]"),
+    ("\\du", "List roles [pattern]"),
+    ("\\dg", "List roles [pattern]"),
+    ("\\da", "List aggregates [pattern]"),
+    ("\\dx", "List extensions [pattern]"),
+    ("\\dp", "List table privileges [pattern]"),
+    ("\\l", "List databases [pattern]"),
+    ("\\dft", "List foreign tables"),
+    ("\\dfs", "List foreign servers"),
+    ("\\dF", "List foreign tables (UQA alias)"),
+    ("\\dS", "List system and user relations"),
+    ("\\ds", "List sequences [sequence]"),
+    ("\\graphs", "List named graphs"),
+    ("\\analyzers", "List named analyzers"),
+    ("\\stats", "Show statistics <table>"),
+    ("\\x", "Expanded display [on|off|auto]"),
+    ("\\timing", "Timing [on|off]"),
+    ("\\pset", "Set printing options"),
+    ("\\a", "Toggle aligned output"),
+    ("\\H", "Toggle HTML output"),
+    ("\\t", "Tuples only [on|off]"),
+    ("\\f", "Set field separator"),
+    ("\\C", "Set table title"),
+    ("\\o", "Redirect output [file]"),
+    ("\\g", "Submit query [file]"),
+    ("\\gx", "Submit with expanded output [file]"),
+    ("\\gset", "Store result in variables [prefix]"),
+    ("\\p", "Print query buffer"),
+    ("\\r", "Clear query buffer"),
+    ("\\set", "Set a variable"),
+    ("\\unset", "Unset a variable"),
+    ("\\if", "Begin conditional"),
+    ("\\elif", "Conditional alternative"),
+    ("\\else", "Conditional alternative"),
+    ("\\endif", "End conditional"),
+    ("\\echo", "Print arguments"),
+    ("\\qecho", "Print to query output"),
+    ("\\i", "Include file"),
+    ("\\ir", "Include file relative to current script"),
+    ("\\run", "Include file"),
+    ("\\e", "Edit query [file [line]]"),
+    ("\\w", "Write query buffer to file"),
+    ("\\s", "Show or save history [file]"),
+    ("\\watch", "Repeat query [seconds] [c=count]"),
+    ("\\copy", "Copy table/query to or from a local file"),
+    ("\\connect", "Connect to database [path]"),
+    ("\\conninfo", "Show database connection"),
+    ("\\open", "Open database <path>"),
     ("\\new", "New in-memory database"),
+    ("\\reset", "Reopen current database"),
     ("\\where", "Show current database"),
-    ("\\run", "Run SQL file"),
+    ("\\history", "Show history [clear]"),
+    ("\\h", "SQL syntax help [command]"),
+    ("\\?", "Backslash help"),
+    ("\\help", "Backslash help"),
+    ("\\q", "Quit"),
     ("\\migrate-python-db", "Migrate Python DB"),
 ];
 pub(super) type UsqlEditor = Editor<UsqlHelper, rustyline::history::DefaultHistory>;
@@ -179,12 +220,24 @@ pub(super) struct UsqlHelper {
     table_names: BTreeSet<String>,
     foreign_table_names: BTreeSet<String>,
     column_names: BTreeSet<String>,
-    highlighter: MatchingBracketHighlighter,
+    highlighter: crate::highlight::SQLHighlighter,
     hinter: HistoryHinter,
-    validator: MatchingBracketValidator,
+    variables: BTreeSet<String>,
+    filename: rustyline::completion::FilenameCompleter,
 }
 
 impl UsqlHelper {
+    pub(super) fn configure(
+        &mut self,
+        buffer: &str,
+        enabled: bool,
+        variables: &crate::variables::Variables,
+    ) {
+        self.highlighter.set_query_buffer(buffer);
+        self.highlighter
+            .set_enabled(enabled && std::env::var_os("NO_COLOR").is_none());
+        self.variables = variables.entries().map(|(name, _)| name.clone()).collect();
+    }
     pub(super) fn new(
         table_names: Vec<String>,
         foreign_table_names: Vec<String>,
@@ -216,9 +269,10 @@ impl UsqlHelper {
             table_names: table_names.into_iter().collect(),
             foreign_table_names: foreign_table_names.into_iter().collect(),
             column_names: column_names.into_iter().collect(),
-            highlighter: MatchingBracketHighlighter::new(),
+            highlighter: crate::highlight::SQLHighlighter::new(),
             hinter: HistoryHinter::new(),
-            validator: MatchingBracketValidator::new(),
+            variables: BTreeSet::new(),
+            filename: rustyline::completion::FilenameCompleter::new(),
         }
     }
 
@@ -307,9 +361,55 @@ impl Completer for UsqlHelper {
         &self,
         line: &str,
         pos: usize,
-        _ctx: &Context<'_>,
+        ctx: &Context<'_>,
     ) -> RustylineResult<(usize, Vec<Self::Candidate>)> {
-        let prefix_line = &line[..pos.min(line.len())];
+        let pos = pos.min(line.len());
+        if !line.is_char_boundary(pos) {
+            return Ok((pos, Vec::new()));
+        }
+        let prefix_line = &line[..pos];
+        let source = format!("{}{prefix_line}", self.highlighter.prefix());
+        let tokens = crate::lexer::tokenize_sql(&source);
+        let in_literal = tokens.last().is_some_and(|token| {
+            use crate::lexer::TokenKind as K;
+            matches!(token.kind, K::String | K::Comment)
+                && (!token.closed || token.kind == K::Comment)
+        });
+        let meta = tokens.iter().any(|token| {
+            token.kind == crate::lexer::TokenKind::Meta
+                && token.span.start
+                    == self.highlighter.prefix().len() + prefix_line.len()
+                        - prefix_line.trim_start().len()
+        });
+        if meta
+            && prefix_line
+                .split_whitespace()
+                .next()
+                .is_some_and(|command| {
+                    matches!(
+                        command,
+                        "\\i" | "\\ir" | "\\run" | "\\o" | "\\w" | "\\s" | "\\e" | "\\open"
+                    )
+                })
+        {
+            return self.filename.complete(line, pos, ctx);
+        }
+        if in_literal {
+            return Ok((pos, Vec::new()));
+        }
+        if let Some(token) = tokens
+            .last()
+            .filter(|token| token.kind == crate::lexer::TokenKind::Identifier && !token.closed)
+        {
+            if token.span.start < self.highlighter.prefix().len() {
+                return Ok((pos, Vec::new()));
+            }
+            let prefix = token.text(&source);
+            return Ok((
+                token.span.start - self.highlighter.prefix().len(),
+                self.completion_candidates(prefix, false),
+            ));
+        }
         if let Some((start, prefix)) = backslash_completion_prefix(prefix_line) {
             let candidates = BACKSLASH_COMMANDS
                 .iter()
@@ -325,6 +425,19 @@ impl Completer for UsqlHelper {
             return Ok((start, candidates));
         }
         let (start, prefix) = word_completion_prefix(prefix_line);
+        if prefix_line[..start].ends_with(':') && !prefix_line[..start].ends_with("::") {
+            return Ok((
+                start,
+                self.variables
+                    .iter()
+                    .filter(|name| name.starts_with(prefix))
+                    .map(|name| Pair {
+                        display: name.clone(),
+                        replacement: name.clone(),
+                    })
+                    .collect(),
+            ));
+        }
         let after_table_keyword = follows_table_keyword(&prefix_line[..start]);
         if prefix.is_empty() && !after_table_keyword {
             return Ok((start, Vec::new()));
@@ -348,8 +461,54 @@ impl UsqlHelper {
         let (word_offset, prefix) = word_completion_prefix(args);
         let start = args_start + word_offset;
         match command {
-            "d" | "describe" => Some((start, self.table_completion_candidates(prefix, true))),
+            "d" | "describe" | "dt" | "di" | "dv" | "dp" => {
+                Some((start, self.table_completion_candidates(prefix, true)))
+            }
             "stats" => Some((start, self.table_completion_candidates(prefix, false))),
+            "timing" | "t" => Some((start, literal_candidates(prefix, &["on", "off"]))),
+            "x" => Some((start, literal_candidates(prefix, &["on", "off", "auto"]))),
+            "set" | "unset" => Some((
+                start,
+                literal_candidates(
+                    prefix,
+                    &[
+                        "AUTOCOMMIT",
+                        "ON_ERROR_STOP",
+                        "HIGHLIGHT",
+                        "HISTCONTROL",
+                        "HISTSIZE",
+                    ],
+                ),
+            )),
+            "history" => Some((start, literal_candidates(prefix, &["clear"]))),
+            "pset" => {
+                let words = args.split_whitespace().collect::<Vec<_>>();
+                let choices: &[&str] = if words.len() <= 1 && !args.ends_with(char::is_whitespace) {
+                    &[
+                        "format",
+                        "expanded",
+                        "tuples_only",
+                        "footer",
+                        "pager",
+                        "fieldsep",
+                        "recordsep",
+                        "null",
+                        "title",
+                        "border",
+                        "columns",
+                        "csv_fieldsep",
+                    ]
+                } else {
+                    match words.first().copied() {
+                        Some("format") => &["aligned", "unaligned", "csv", "html", "json"],
+                        Some("expanded") => &["on", "off", "auto"],
+                        Some("pager") => &["on", "off", "always"],
+                        Some("footer" | "tuples_only") => &["on", "off"],
+                        _ => &[],
+                    }
+                };
+                Some((start, literal_candidates(prefix, choices)))
+            }
             _ => Some((start, Vec::new())),
         }
     }
@@ -363,23 +522,11 @@ impl Hinter for UsqlHelper {
     }
 }
 
-impl Validator for UsqlHelper {
-    fn validate(
-        &self,
-        ctx: &mut rustyline::validate::ValidationContext<'_>,
-    ) -> RustylineResult<rustyline::validate::ValidationResult> {
-        self.validator.validate(ctx)
-    }
-}
+impl Validator for UsqlHelper {}
 
 impl Highlighter for UsqlHelper {
     fn highlight<'l>(&self, line: &'l str, pos: usize) -> Cow<'l, str> {
-        let highlighted = highlight_sql_line(line);
-        if highlighted == line {
-            self.highlighter.highlight(line, pos)
-        } else {
-            Cow::Owned(highlighted)
-        }
+        self.highlighter.highlight(line, pos)
     }
 
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
@@ -387,16 +534,23 @@ impl Highlighter for UsqlHelper {
         prompt: &'p str,
         _default: bool,
     ) -> Cow<'b, str> {
-        Cow::Owned(format!("\x1b[1;36m{prompt}\x1b[0m"))
+        if self.highlighter.enabled() {
+            Cow::Owned(format!("\x1b[1;36m{prompt}\x1b[0m"))
+        } else {
+            Cow::Borrowed(prompt)
+        }
     }
 
     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
-        Cow::Owned(format!("\x1b[90m{hint}\x1b[0m"))
+        if self.highlighter.enabled() {
+            Cow::Owned(format!("\x1b[90m{hint}\x1b[0m"))
+        } else {
+            Cow::Borrowed(hint)
+        }
     }
 
-    fn highlight_char(&self, line: &str, pos: usize, kind: CmdKind) -> bool {
-        self.highlighter.highlight_char(line, pos, kind)
-            || matches!(kind, CmdKind::Other | CmdKind::ForcedRefresh)
+    fn highlight_char(&self, _line: &str, _pos: usize, _kind: CmdKind) -> bool {
+        self.highlighter.enabled()
     }
 }
 
@@ -420,7 +574,7 @@ pub(super) fn word_completion_prefix(line: &str) -> (usize, &str) {
 }
 
 pub(super) fn is_completion_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '_'
+    ch.is_alphanumeric() || matches!(ch, '_' | '.' | '$')
 }
 
 pub(super) fn follows_table_keyword(text_before_word: &str) -> bool {
@@ -432,103 +586,24 @@ pub(super) fn follows_table_keyword(text_before_word: &str) -> bool {
         .to_ascii_uppercase();
     matches!(
         previous.as_str(),
-        "FROM" | "INTO" | "TABLE" | "ANALYZE" | "JOIN"
+        "FROM" | "INTO" | "TABLE" | "ANALYZE" | "JOIN" | "UPDATE" | "REFERENCES"
     )
 }
 
+#[cfg(test)]
 pub(super) fn highlight_sql_line(line: &str) -> String {
-    if line.trim_start().starts_with('\\') {
-        return format!("\x1b[1;36m{line}\x1b[0m");
-    }
-    let mut out = String::with_capacity(line.len());
-    let mut chars = line.char_indices().peekable();
-    while let Some((idx, ch)) = chars.next() {
-        if ch == '-' && chars.peek().is_some_and(|(_, next)| *next == '-') {
-            out.push_str("\x1b[90m");
-            out.push_str(&line[idx..]);
-            out.push_str("\x1b[0m");
-            break;
-        }
-        if ch == '\'' {
-            let end = consume_string_literal(line, &mut chars);
-            out.push_str("\x1b[32m");
-            out.push_str(&line[idx..end]);
-            out.push_str("\x1b[0m");
-            continue;
-        }
-        if ch.is_ascii_digit() {
-            let end = consume_number(idx, &mut chars);
-            out.push_str("\x1b[35m");
-            out.push_str(&line[idx..end]);
-            out.push_str("\x1b[0m");
-            continue;
-        }
-        if is_completion_char(ch) {
-            let end = consume_word(idx, &mut chars);
-            let word = &line[idx..end];
-            if is_sql_keyword_or_function(word) {
-                out.push_str("\x1b[1;34m");
-                out.push_str(word);
-                out.push_str("\x1b[0m");
-            } else {
-                out.push_str(word);
-            }
-            continue;
-        }
-        out.push(ch);
-    }
-    out
+    let mut highlighter = crate::highlight::SQLHighlighter::new();
+    highlighter.set_enabled(true);
+    highlighter.highlight(line, line.len()).into_owned()
 }
 
-pub(super) fn consume_string_literal(
-    line: &str,
-    chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
-) -> usize {
-    let mut end = line.len();
-    for (idx, ch) in chars.by_ref() {
-        if ch == '\'' {
-            end = idx + ch.len_utf8();
-            break;
-        }
-    }
-    end
-}
-
-pub(super) fn consume_number(
-    start: usize,
-    chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
-) -> usize {
-    let mut end = start;
-    while let Some((idx, ch)) = chars.peek().copied() {
-        if ch.is_ascii_digit() || ch == '.' {
-            end = idx + ch.len_utf8();
-            let _ = chars.next();
-        } else {
-            break;
-        }
-    }
-    end.max(start + 1)
-}
-
-pub(super) fn consume_word(
-    start: usize,
-    chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
-) -> usize {
-    let mut end = start;
-    while let Some((idx, ch)) = chars.peek().copied() {
-        if is_completion_char(ch) {
-            end = idx + ch.len_utf8();
-            let _ = chars.next();
-        } else {
-            break;
-        }
-    }
-    end.max(start + 1)
-}
-
-pub(super) fn is_sql_keyword_or_function(word: &str) -> bool {
-    SQL_KEYWORDS
+fn literal_candidates(prefix: &str, values: &[&str]) -> Vec<Pair> {
+    values
         .iter()
-        .any(|keyword| keyword.eq_ignore_ascii_case(word))
-        || uqa_sql::registry::is_registered(word)
+        .filter(|value| value.starts_with(prefix))
+        .map(|value| Pair {
+            display: (*value).into(),
+            replacement: (*value).into(),
+        })
+        .collect()
 }

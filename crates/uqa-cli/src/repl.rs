@@ -69,26 +69,41 @@ impl Session {
         }
         let mut buffer = String::new();
         loop {
-            let helper = match self.repl_helper() {
+            let mut helper = match self.repl_helper() {
                 Ok(helper) => helper,
                 Err(err) => {
                     let _ = writeln!(out, "completion catalog error: {err}");
                     return ExitCode::FAILURE;
                 }
             };
+            helper.configure(
+                &buffer,
+                self.shell.variables.flag("HIGHLIGHT", true),
+                &self.shell.variables,
+            );
             editor.set_helper(Some(helper));
+            if let Err(error) = self.configure_history(&mut editor) {
+                let _ = writeln!(out, "ERROR: {error}");
+                return ExitCode::FAILURE;
+            }
             let prompt = if buffer.is_empty() {
                 PROMPT_PRIMARY
             } else {
                 PROMPT_CONTINUATION
             };
-            match editor.readline(prompt) {
+            match self.readline(&mut editor, prompt) {
                 Ok(line) => {
                     self.remember_prompt_line(&line);
-                    if matches!(
-                        self.handle_prompt_line_with_history(&line, &mut buffer, out, false),
-                        PromptLineOutcome::Quit
-                    ) {
+                    let outcome =
+                        self.handle_prompt_line_with_history(&line, &mut buffer, out, false);
+                    if self.shell.clear_history {
+                        if let Err(error) = editor.clear_history() {
+                            let _ = writeln!(out, "ERROR: {error}");
+                            return ExitCode::FAILURE;
+                        }
+                        self.shell.clear_history = false;
+                    }
+                    if outcome == PromptLineOutcome::Quit {
                         return match self.append_readline_history(&mut editor) {
                             Ok(()) => ExitCode::SUCCESS,
                             Err(error) => {
@@ -140,8 +155,8 @@ impl Session {
             let read = stdin.lock().read_line(&mut input);
             match read {
                 Ok(0) => {
-                    if !buffer.trim().is_empty() && !statement_is_pure_comment(&buffer) {
-                        let _ = writeln!(out, "ERROR: unterminated SQL statement at end of input");
+                    if let Err(error) = self.finish_input(&mut buffer, out) {
+                        let _ = writeln!(out, "ERROR: {error}");
                         return ExitCode::FAILURE;
                     }
                     let _ = writeln!(out);
@@ -160,7 +175,12 @@ impl Session {
             let line = input.trim_end_matches(['\n', '\r']);
             match self.handle_prompt_line(line, &mut buffer, out) {
                 PromptLineOutcome::Continue => {}
-                PromptLineOutcome::Failed => had_error = true,
+                PromptLineOutcome::Failed => {
+                    had_error = true;
+                    if self.shell.variables.flag("ON_ERROR_STOP", false) {
+                        return ExitCode::FAILURE;
+                    }
+                }
                 PromptLineOutcome::Quit => {
                     return if had_error {
                         ExitCode::FAILURE
@@ -188,28 +208,7 @@ impl Session {
         out: &mut impl Write,
         record_sql_history: bool,
     ) -> PromptLineOutcome {
-        if buffer.is_empty() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                return PromptLineOutcome::Continue;
-            }
-            if let Some(rest) = trimmed.strip_prefix('\\') {
-                return self.handle_meta(rest, out);
-            }
-        }
-        if !buffer.is_empty() {
-            buffer.push('\n');
-        }
-        buffer.push_str(line);
-        if contains_input_terminator(buffer) {
-            if let Err(err) = self.execute_text_with_history(buffer, out, record_sql_history) {
-                let _ = writeln!(out, "ERROR: {err}");
-                buffer.clear();
-                return PromptLineOutcome::Failed;
-            }
-            buffer.clear();
-        }
-        PromptLineOutcome::Continue
+        self.process_line(line, buffer, out, record_sql_history)
     }
 }
 
@@ -233,6 +232,7 @@ pub(super) struct Session {
     pub(super) expanded: bool,
     pub(super) copy_text: bool,
     pub(super) output_path: Option<PathBuf>,
+    pub(super) shell: crate::shell::ShellState,
 }
 
 impl Session {
@@ -252,24 +252,9 @@ impl Session {
         key: Option<&str>,
         history_path: Option<PathBuf>,
     ) -> Result<Self, String> {
-        let history = match history_path.as_ref() {
-            Some(path) => match std::fs::read_to_string(path) {
-                Ok(text) => text
-                    .lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .map(std::string::ToString::to_string)
-                    .collect(),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
-                Err(error) => {
-                    return Err(format!(
-                        "failed to read history file {}: {error}",
-                        path.display()
-                    ));
-                }
-            },
-            None => Vec::new(),
-        };
+        let history = crate::shell_history::load(history_path.as_deref())?;
         let (engine, location, db_key) = open_engine(db_path.as_deref(), key)?;
+        crate::shell_notifications::configure(&engine)?;
         Ok(Self {
             engine,
             db_path,
@@ -281,28 +266,40 @@ impl Session {
             expanded: false,
             copy_text: false,
             output_path: None,
+            shell: crate::shell::ShellState::default(),
         })
     }
 
     pub(super) fn repl_helper(&self) -> Result<UsqlHelper, String> {
+        // Completion must leave an aborted transaction available for ROLLBACK.
+        if self.engine.transaction_failed() {
+            return Ok(UsqlHelper::new(Vec::new(), Vec::new(), Vec::new()));
+        }
+        let result = self
+            .engine
+            .sql(
+                "SELECT table_schema, table_name, column_name FROM information_schema.columns",
+                &[],
+            )
+            .map_err(|error| error.to_string())?;
+        let mut tables = BTreeSet::new();
         let mut columns = BTreeSet::new();
-        let table_names = self.engine.table_names().map_err(|err| err.to_string())?;
-        for table in &table_names {
-            if let Some(defs) = self
-                .engine
-                .describe_table(table)
-                .map_err(|err| err.to_string())?
-            {
-                columns.extend(defs.into_iter().map(|def| def.name));
+        for row in 0..result.rows.len() {
+            if let (Some(Value::Str(schema)), Some(Value::Str(table)), Some(Value::Str(column))) = (
+                result.value_at(row, 0),
+                result.value_at(row, 1),
+                result.value_at(row, 2),
+            ) {
+                let schema = crate::shell_catalog::completion_identifier(schema);
+                let table = crate::shell_catalog::completion_identifier(table);
+                tables.insert(table.clone());
+                tables.insert(format!("{schema}.{table}"));
+                columns.insert(crate::shell_catalog::completion_identifier(column));
             }
         }
-        let foreign_tables = self.engine.list_foreign_tables()?;
-        for table in &foreign_tables {
-            columns.extend(self.engine.foreign_table_columns(table)?);
-        }
         Ok(UsqlHelper::new(
-            table_names,
-            foreign_tables,
+            tables.into_iter().collect(),
+            Vec::new(),
             columns.into_iter().collect(),
         ))
     }
@@ -328,45 +325,8 @@ impl Session {
             })?;
         }
         editor
-            .append_history(path)
+            .save_history(path)
             .map_err(|error| format!("append {}: {error}", path.display()))
-    }
-
-    pub(super) fn remember_prompt_line(&mut self, line: &str) {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        if self.history.last().is_some_and(|entry| entry == trimmed) {
-            return;
-        }
-        self.history.push(trimmed.to_string());
-    }
-
-    pub(super) fn record_statement(&mut self, sql: &str) -> Result<(), String> {
-        let trimmed = sql.trim();
-        if trimmed.is_empty() {
-            return Ok(());
-        }
-        if self.history.last().is_some_and(|l| l == trimmed) {
-            return Ok(());
-        }
-        if let Some(path) = &self.history_path {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| {
-                    format!("create history directory {}: {error}", parent.display())
-                })?;
-            }
-            let mut file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|error| format!("open history file {}: {error}", path.display()))?;
-            writeln!(file, "{trimmed}")
-                .map_err(|error| format!("write history file {}: {error}", path.display()))?;
-        }
-        self.history.push(trimmed.to_string());
-        Ok(())
     }
 
     pub(super) fn print_banner(&self, out: &mut impl Write) -> io::Result<()> {
@@ -375,16 +335,18 @@ impl Session {
             "usql {} -- UQA interactive SQL shell",
             env!("CARGO_PKG_VERSION")
         )?;
-        writeln!(out, "Database: {}", self.location)?;
+        writeln!(
+            out,
+            "Database: {}",
+            crate::printing::terminal_text(&self.location)
+        )?;
         writeln!(out, "Type SQL statements terminated by ';'")?;
         writeln!(out, "Use \\? for help, \\q to quit.")?;
         writeln!(out)
     }
 
     pub(super) fn run_file(&mut self, path: &Path, out: &mut impl Write) -> Result<(), String> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|err| format!("File not found or unreadable: {}: {err}", path.display()))?;
-        self.execute_text(&text, out)
+        self.include_script(path, out)
     }
 
     pub(super) fn execute_text(&mut self, text: &str, out: &mut impl Write) -> Result<(), String> {
@@ -438,6 +400,9 @@ impl Session {
                 uqa_sql::ast::Statement::Transaction(transaction) => Some(transaction),
                 _ => None,
             };
+            if transaction.is_none() && !self.shell.variables.flag("AUTOCOMMIT", true) {
+                self.prepare_statement_transaction(&statement)?;
+            }
             if implicit_segment_open || self.engine.transaction_depth() == 0 {
                 if let Some(command) = transaction.as_ref().and_then(explicit_block_command) {
                     if record_history {
@@ -535,7 +500,7 @@ impl Session {
             self.record_statement(sql)?;
         }
         let start = std::time::Instant::now();
-        let outcome = self.engine.sql(sql, &[]);
+        let outcome = self.query(sql);
         let elapsed = start.elapsed();
         let notices = self.engine.take_sql_notices();
         let notice_result = {
@@ -552,21 +517,19 @@ impl Session {
         };
         let result = notice_result.and_then(|()| match outcome {
             Ok(result) => {
-                let mut formatted = Ok(());
-                self.write_query_output(out, |writer| {
-                    formatted = if self.copy_text {
-                        print_result_copy_text_with_engine(&result, &self.engine, writer)
-                    } else if self.expanded {
-                        print_result_expanded_with_engine(&result, &self.engine, writer)
-                    } else {
-                        print_result_with_engine(&result, &self.engine, writer)
-                    };
-                })?;
-                formatted.map_err(|error| super::diagnostics::sql_error_text(&error))
+                if let crate::shell::ResultTarget::Capture(captured) = &mut self.shell.result_target
+                {
+                    *captured = Some(Box::new(result));
+                    Ok(())
+                } else {
+                    self.render_result(&result, out)
+                }
             }
-            Err(err) => Err(super::diagnostics::sql_error_text(&err)),
+            Err(err) => Err(err),
         });
-        let timing_result = if self.show_timing {
+        let timing_result = if self.show_timing
+            && matches!(self.shell.result_target, crate::shell::ResultTarget::Print)
+        {
             let ms = elapsed.as_secs_f64() * 1000.0;
             self.write_query_output(out, |writer| {
                 let _ = writeln!(writer, "Time: {ms:.3} ms");
@@ -574,7 +537,9 @@ impl Session {
         } else {
             Ok(())
         };
-        result.and(timing_result)
+        result
+            .and(timing_result)
+            .and_then(|()| self.drain_notifications(out))
     }
 
     pub(super) fn write_query_output(

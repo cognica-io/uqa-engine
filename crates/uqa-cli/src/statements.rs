@@ -287,7 +287,21 @@ pub(super) fn contains_statement_terminator(text: &str) -> bool {
 }
 
 pub(super) fn statement_is_pure_comment(statement: &str) -> bool {
-    statement
-        .lines()
-        .all(|line| line.trim().is_empty() || line.trim().starts_with("--"))
+    crate::lexer::tokenize_sql(statement).iter().all(|token| {
+        token.closed
+            && matches!(
+                token.kind,
+                crate::lexer::TokenKind::Space | crate::lexer::TokenKind::Comment
+            )
+    })
+}
+
+pub(super) fn input_terminator_offsets(text: &str) -> Vec<usize> {
+    let escaped = psql_escaped_semicolon_offsets(text);
+    let masked = replace_psql_escaped_semicolons(text, &escaped, "  ");
+    let end = crate::lexer::tokenize_sql(&masked)
+        .last()
+        .filter(|token| !token.closed)
+        .map_or(masked.len(), |token| token.span.start);
+    statement_terminator_offsets(&masked[..end])
 }
