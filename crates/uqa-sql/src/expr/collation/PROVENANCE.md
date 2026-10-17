@@ -1,0 +1,16 @@
+# Controlled root collation provenance
+
+The compact collation-element representation, data observation and decomposition/contraction mapping derive from ICU4X `icu_collator` 2.0.0 `elements.rs` and `provider.rs`, distributed under the included [Unicode-3.0 license](LICENSE-ICU). The files retain the upstream attribution and use the dependency's public data structures. The dependency's complete-string comparator is not called in production: its internal buffers do not expose admission/cancellation, and its normalization behavior differs from PostgreSQL's built-in `unicode` on non-FCD input.
+
+The adapted implementation is split into element representation, immutable data observation, input/decomposition, mapping and combining-character handling. It replaces private growing buffers with Core's `ProductionSmallVec`, returns original typed resource failures, polls input and buffered loops, and replaces unchecked enum/character construction with safe decoding. PostgreSQL's root configuration disables cross-scalar normalization checking, so the input order of combining marks is preserved; per-scalar decomposition and contraction lookup remain selected by the pinned data. Numeric collation, alternate strength levels, locale tailoring and identical-strength fallback are not exposed by this root-only entry point.
+
+Pinned data dependencies are `icu_collator`/`icu_collator_data` 2.0.0, `icu_normalizer` 2.0.1, `icu_collections` 2.0.0 and `icu_properties` 2.0.2. The baked collation data uses CLDR 47 and ICU's `icu4x/2025-05-01/77.x` export. Standard implicit-Han root data in ICU 76.1, 77.1 and that export is byte-identical: 196,520 bytes, SHA-256 `4e7623552f57d1aef85cb42ad9507ef371632301e1b9a4e228ca7d8151afd139`. The ICU4X-specific export adds 28 bytes by replacing U+0CC2/U+0DCF simple entries with equivalent default/contraction entries; the independent fixture includes both characters and combining followers. A shared source hash alone is not claimed as complete algorithm compatibility.
+
+The compact [PostgreSQL fixture](postgresql.json) records 7,921 pairwise results from PostgreSQL 18.4 with ICU 76.1, deterministic `und`, stored/actual collation version `153.128`, plus three explicit normalization-option probes. The original capture SHA-256 is `225ba8ef9a0e0f0dd911c7125b6212d0a82f2b652662398e9e52b82b797ae771`; the checked-in fixture reformats that matrix and adds the independently captured option probes. Expected values are obtained from PostgreSQL, not generated from this implementation.
+
+Primary sources: [ICU4X 2.0.0 source archive](https://static.crates.io/crates/icu_collator/icu_collator-2.0.0.crate), [PostgreSQL 18 ICU locale construction](https://github.com/postgres/postgres/blob/REL_18_STABLE/src/backend/utils/adt/pg_locale_icu.c), [ICU 76.1 iterator selection](https://github.com/unicode-org/icu/blob/release-76-1/icu4c/source/i18n/rulebasedcollator.cpp), and [ICU 76.1 contraction mapping](https://github.com/unicode-org/icu/blob/release-76-1/icu4c/source/i18n/collationiterator.cpp).
+
+## Source identities
+
+- ICU4X 2.0.0 `elements.rs`: SHA-256 `af22a6a234b0424758a584b8b6eaf9bc4bf584726efc8b05bb3dcc1ad6b62331`.
+- ICU4X 2.0.0 `provider.rs`: SHA-256 `813fae36f817f4f3c7d246302f0a19144df72c83e0d2caba72c632dd2e79533a`.

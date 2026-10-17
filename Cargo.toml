@@ -117,6 +117,11 @@ lz4_flex = "0.13"
 miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
 getrandom = "0.3"
 icu_casemap = "=2.0.0"
+icu_collator = "=2.0.0"
+icu_collections = "=2.0.0"
+icu_normalizer = "=2.0.1"
+icu_provider = "=2.2.0"
+zerovec = "=0.11.6"
 writeable = { version = "=0.6.3", default-features = false }
 icu_properties = "=2.0.2"
 libm = "0.2"

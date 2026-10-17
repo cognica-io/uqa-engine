@@ -59,6 +59,8 @@ use uuid::generate_random_uuid;
 pub use uuid::parse_uuid_bytes;
 mod binary;
 mod casting;
+mod collation;
+pub use collation::compare_unicode_with_control;
 mod collation_for;
 pub mod composites;
 mod concatenation;
