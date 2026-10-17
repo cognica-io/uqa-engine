@@ -180,40 +180,38 @@ fn next_search_start(input: &str, matched: regex::Match<'_>) -> Option<usize> {
     }
 }
 
-fn tail<'a>(
-    string: &'a str,
+/// The matches of `PostgreSQL`'s search loop over the whole `input` from byte offset `start`: each search begins where the previous match ended, or one character later after an empty match, so an empty match right after a non-empty one is found and anchors see the text before `start`.
+fn search_loop<'r, 'h: 'r>(
+    regex: &'r regex::Regex,
+    input: &'h str,
     start: usize,
-    control: &ProductionControl<'_>,
-) -> Result<Option<(&'a str, usize)>> {
-    let Some(base_chars) = start.checked_sub(1) else {
-        return Ok(None);
-    };
-    if base_chars == 0 {
-        return Ok(Some((string, 0)));
-    }
-    for (offset, (byte, _)) in string.char_indices().enumerate() {
-        control.check()?;
-        if offset == base_chars {
-            return Ok(Some((&string[byte..], base_chars)));
-        }
-    }
-    Ok(None)
+) -> impl Iterator<Item = regex::Captures<'h>> + 'r {
+    let mut next = Some(start);
+    std::iter::from_fn(move || {
+        let Some(captures) = regex.captures_at(input, next?) else {
+            next = None;
+            return None;
+        };
+        next = next_search_start(input, captures.get_match());
+        Some(captures)
+    })
 }
 
-fn nth_capture<'h>(
-    regex: &regex::Regex,
-    haystack: &'h str,
-    occurrence: usize,
+/// The byte offset of the character at zero-based position `chars`, the end of `input` when `chars` equals its length, or `None` beyond it, as `PostgreSQL` counts a `start` parameter in characters.
+fn char_byte_offset(
+    input: &str,
+    chars: usize,
     control: &ProductionControl<'_>,
-) -> Result<Option<regex::Captures<'h>>> {
-    for (index, capture) in regex.captures_iter(haystack).enumerate() {
-        control.check()?;
-        if index == occurrence - 1 {
-            return Ok(Some(capture));
+) -> Result<Option<usize>> {
+    let mut count = 0_usize;
+    for (byte, _) in input.char_indices() {
+        if count == chars {
+            return Ok(Some(byte));
         }
+        control.check()?;
+        count += 1;
     }
-    control.check()?;
-    Ok(None)
+    Ok((count == chars).then_some(input.len()))
 }
 
 #[cfg(test)]

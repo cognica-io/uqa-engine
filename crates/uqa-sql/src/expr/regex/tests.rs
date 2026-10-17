@@ -8,6 +8,7 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken};
 
 mod match_rows;
+mod search_loop;
 mod split_pieces;
 mod substring_patterns;
 
@@ -106,7 +107,7 @@ fn regex_outputs_keep_capture_nulls_unicode_offsets_and_replacement_selection() 
 }
 
 #[test]
-fn regex_failure_order_preserves_native_errors_and_outside_start_behavior() {
+fn regex_failure_order_compiles_before_searching_past_the_start() {
     let budget = MemoryBudget::new(16 * 1024);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
@@ -140,9 +141,20 @@ fn regex_failure_order_preserves_native_errors_and_outside_start_behavior() {
         );
         assert_eq!(budget.used(), 0);
     }
+    // `replace_text_regexp` compiles the pattern before it searches, so a start past the end still reports an invalid pattern and otherwise copies the input.
+    assert_eq!(
+        run(
+            "regexp_replace",
+            &[text("a"), text("["), text("x"), Value::Int(3)],
+            &control,
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("2201B")
+    );
     let result = run(
         "regexp_replace",
-        &[text("a"), text("["), text("x"), Value::Int(3)],
+        &[text("a"), text("a"), text("x"), Value::Int(3)],
         &control,
     )
     .unwrap();

@@ -6,7 +6,7 @@
 
 //! `PostgreSQL` replacement syntax shares the native capture interpolator while admitting its exact output buffer before expansion.
 
-use super::{compile, parameter, string};
+use super::{char_byte_offset, compile, parameter, search_loop, string};
 use crate::{
     error::{Result, SQLError},
     expr::conversion::value_to_string_with_control,
@@ -35,11 +35,14 @@ pub(super) fn evaluate(
     let replacement = value_to_string_with_control(&args[2], control)?;
     let (start, occurrence, flags) = match args {
         [_, _, _] => (1, 1, control.copy_text("")?),
-        [_, _, _, Value::Str(flags) | Value::FixedChar(flags)] => (
-            1,
-            usize::from(!flags.contains('g')),
-            control.copy_text(flags)?,
-        ),
+        [_, _, _, Value::Str(flags) | Value::FixedChar(flags)] => {
+            reject_integer_flags(flags)?;
+            (
+                1,
+                usize::from(!flags.contains('g')),
+                control.copy_text(flags)?,
+            )
+        }
         [_, _, _, start] => (
             parameter(Some(start), 1, 1, "start", control)?,
             1,
@@ -47,12 +50,12 @@ pub(super) fn evaluate(
         ),
         [_, _, _, start, occurrence] => (
             parameter(Some(start), 1, 1, "start", control)?,
-            parameter(Some(occurrence), 1, 0, "N", control)?,
+            parameter(Some(occurrence), 1, 0, "n", control)?,
             control.copy_text("")?,
         ),
         [_, _, _, start, occurrence, flags] => (
             parameter(Some(start), 1, 1, "start", control)?,
-            parameter(Some(occurrence), 1, 0, "N", control)?,
+            parameter(Some(occurrence), 1, 0, "n", control)?,
             value_to_string_with_control(flags, control)?,
         ),
         _ => unreachable!("regexp_replace arity was checked"),
@@ -71,6 +74,23 @@ pub(super) fn evaluate(
     )
 }
 
+/// `textregexreplace` resolves a four-argument call with an unknown literal to its text flags, so flags that begin with a digit most likely meant `start`; `PostgreSQL` reports that first character with a hint before it parses the flags.
+fn reject_integer_flags(flags: &str) -> Result<()> {
+    match flags.chars().next() {
+        Some(first) if first.is_ascii_digit() => Err(SQLError::Diagnostic {
+            sqlstate: "22023".into(),
+            message: format!("invalid regular expression option: \"{first}\""),
+            detail: None,
+            hint: Some(
+                "If you meant to use regexp_replace() with a start parameter, cast the fourth argument to integer explicitly."
+                    .into(),
+            ),
+        }),
+        _ => Ok(()),
+    }
+}
+
+/// `replace_text_regexp`: the pattern is compiled before the search starts, the search covers the whole input from character `start`, and the `occurrence`-th match, or every match when it is zero, is replaced while the rest of the input is copied unchanged.
 fn replace(
     input: &str,
     pattern: &str,
@@ -80,42 +100,29 @@ fn replace(
     flags: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {
-    let base_chars = start - 1;
-    let mut char_count = 0;
-    let mut byte_start = input.len();
-    for (offset, (byte, _)) in input.char_indices().enumerate() {
-        control.check()?;
-        if offset == base_chars {
-            byte_start = byte;
-        }
-        char_count += 1;
-    }
-    if base_chars > char_count {
-        return control.copy_text(input).map_err(Into::into);
-    }
-    let (prefix, tail) = input.split_at(byte_start);
     let regex = compile(pattern, flags, super::GlobalFlag::Accepted, control)?;
     let replacement = postgres_replacement(replacement, control)?;
     let mut output = ProductionString::new(*control);
-    output.push_str(prefix)?;
-    let mut end = 0;
-    for (index, capture) in regex.captures_iter(tail).enumerate() {
+    let Some(start) = char_byte_offset(input, start - 1, control)? else {
+        output.push_str(input)?;
+        return output.finish().map_err(Into::into);
+    };
+    let mut copied = 0;
+    for (index, captures) in search_loop(&regex, input, start).enumerate() {
         control.check()?;
-        if occurrence != 0 && index != occurrence - 1 {
+        if occurrence != 0 && index + 1 != occurrence {
             continue;
         }
-        let matched = capture.get(0).ok_or_else(|| {
-            SQLError::Internal("regex capture set omitted its mandatory full match".into())
-        })?;
-        output.push_str(&tail[end..matched.start()])?;
-        let expanded = expand(&regex, &capture, &replacement, control)?;
+        let matched = captures.get_match();
+        output.push_str(&input[copied..matched.start()])?;
+        let expanded = expand(&regex, &captures, &replacement, control)?;
         output.push_str(&expanded)?;
-        end = matched.end();
+        copied = matched.end();
         if occurrence != 0 {
             break;
         }
     }
-    output.push_str(&tail[end..])?;
+    output.push_str(&input[copied..])?;
     output.finish().map_err(Into::into)
 }
 

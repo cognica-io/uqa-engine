@@ -7,7 +7,8 @@
 //! Capture, position and predicate results retain only admitted SQL values.
 
 use super::{
-    compile, flags, invalid_parameter, nth_capture, parameter, plain, string, tail, GlobalFlag,
+    char_byte_offset, compile, flags, invalid_parameter, parameter, plain, search_loop, string,
+    GlobalFlag,
 };
 use crate::error::{Result, SQLError};
 use crate::expr::{conversion::value_to_string_with_control, out_of_range};
@@ -132,11 +133,11 @@ fn count(
         GlobalFlag::rejected_by("regexp_count"),
         control,
     )?;
-    let Some((tail, _)) = tail(input, start, control)? else {
+    let Some(start) = char_byte_offset(input, start - 1, control)? else {
         return plain(Value::Int(0), control);
     };
     let mut count = 0_i64;
-    for _ in regex.find_iter(tail) {
+    for _ in search_loop(&regex, input, start) {
         control.check()?;
         count = count
             .checked_add(1)
@@ -153,7 +154,7 @@ fn selected(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     let start = parameter(args.get(2), 1, 1, "start", control)?;
-    let occurrence = parameter(args.get(3), 1, 1, "N", control)?;
+    let occurrence = parameter(args.get(3), 1, 1, "n", control)?;
     let position = name == "regexp_instr";
     let end_option = if position {
         let value = args
@@ -183,13 +184,30 @@ fn selected(
     };
     let regex = compile(pattern, &flags, GlobalFlag::rejected_by(function), control)?;
     let absent = || plain(if position { Value::Int(0) } else { Value::Null }, control);
-    let Some((tail, base_chars)) = tail(input, start, control)? else {
+    let Some(start) = char_byte_offset(input, start - 1, control)? else {
         return absent();
     };
-    let Some(captures) = nth_capture(&regex, tail, occurrence, control)? else {
+    let mut selected = None;
+    for (index, captures) in search_loop(&regex, input, start).enumerate() {
+        control.check()?;
+        if index + 1 == occurrence {
+            selected = Some(captures);
+            break;
+        }
+    }
+    let Some(captures) = selected else {
         return absent();
     };
-    let Some(matched) = captures.get(group) else {
+    // `PostgreSQL` numbers subexpressions only when the pattern has some; otherwise subexpression 1 names the whole match.
+    let subexpressions = captures.len() - 1;
+    let matched = if group == 0 || (group == 1 && subexpressions == 0) {
+        Some(captures.get_match())
+    } else if group <= subexpressions {
+        captures.get(group)
+    } else {
+        None
+    };
+    let Some(matched) = matched else {
         return absent();
     };
     if !position {
@@ -200,8 +218,8 @@ fn selected(
     } else {
         matched.end()
     };
-    let mut position = base_chars;
-    for _ in tail[..byte_offset].chars() {
+    let mut position = 0_usize;
+    for _ in input[..byte_offset].chars() {
         control.check()?;
         position = position
             .checked_add(1)
