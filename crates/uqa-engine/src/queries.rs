@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Engine query entry points, statement gates and execution clocks.
+//! Engine query entry points, statement gates, execution clocks and the statement thread context.
 
 use uqa_execution::ColumnarBatch;
 
@@ -16,8 +16,8 @@ struct SQLExecutionScope<'a> {
     depth: &'a std::sync::atomic::AtomicUsize,
     statement_clock: &'a std::sync::atomic::AtomicI64,
     previous_clock: Option<i64>,
-    /// The transaction start the statement's input functions and `now()` read, entered for the outermost statement on the executing thread; a nested statement keeps its caller's.
-    _transaction_clock: Option<uqa_sql::expr::TransactionClockScope>,
+    /// The statement thread context, whose transaction start the statement's input functions and `now()` read and whose cancellation its evaluation observes, entered for the outermost statement on the executing thread; a nested statement keeps its caller's.
+    _statement_thread: Option<uqa_execution::statement::thread_scope::StatementThreadScope>,
 }
 
 impl<'a> SQLExecutionScope<'a> {
@@ -31,16 +31,14 @@ impl<'a> SQLExecutionScope<'a> {
                 std::sync::atomic::Ordering::Relaxed,
             )
         });
-        let transaction_clock = (!nested).then(|| {
-            uqa_sql::expr::TransactionClockScope::enter(engine.transaction_timestamp_micros())
-        });
+        let statement_thread = (!nested).then(|| engine.statement_thread_context().enter());
         (
             Self {
                 engine,
                 depth,
                 statement_clock,
                 previous_clock,
-                _transaction_clock: transaction_clock,
+                _statement_thread: statement_thread,
             },
             nested,
         )
@@ -65,6 +63,22 @@ impl Drop for SQLExecutionScope<'_> {
 }
 
 impl Engine {
+    /// The thread context this session's statements evaluate under: its transaction clock, live date order and interval style, and its cancellation token. Direct APIs that evaluate SQL expressions outside a statement enter the same context.
+    pub(crate) fn statement_thread_context(
+        &self,
+    ) -> uqa_execution::statement::thread_context::StatementThreadContext {
+        uqa_execution::statement::thread_context::StatementThreadContext {
+            temporal_input: uqa_sql::expr::TemporalInputContext {
+                transaction_clock_micros: self.session_transaction_clock_micros(),
+                interval_style: self.session.interval_style(),
+                date_order: uqa_sql::semantics::parameters::datestyle::date_order(
+                    &self.session.setting("DateStyle"),
+                ),
+            },
+            cancellation: Some(self.runtime.cancellation.clone()),
+        }
+    }
+
     /// Public typed reads own a statement boundary; internal execution adapters retain their caller's existing scope instead.
     pub(crate) fn with_direct_read_snapshot<R>(
         &self,

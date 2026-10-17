@@ -13,6 +13,8 @@ use uqa_sql::ast::TransactionStmt;
 impl Engine {
     pub fn run_transaction_statement(&self, tx: TransactionStmt) -> Result<(), SQLError> {
         let _statement = self.lock_statement_gate();
+        // Deferred constraint triggers and WITH HOLD cursor materialization evaluate SQL expressions at COMMIT under the session's statement context.
+        let _statement_thread = self.statement_thread_context().enter();
         let apply_on_commit = self.prepare_transaction_completion(&tx)?;
         let mut guard = self.session.transactions.lock();
         let failed = guard

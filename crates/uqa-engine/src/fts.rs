@@ -182,7 +182,7 @@ impl Engine {
         doc_id: DocId,
         document: Document,
     ) -> Result<(), SQLError> {
-        self.with_implicit_row_write_transaction(
+        self.with_evaluating_row_write_transaction(
             table,
             doc_id,
             uqa_sql::ast::LockStrength::ForUpdate,

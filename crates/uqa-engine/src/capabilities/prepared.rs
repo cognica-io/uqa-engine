@@ -54,7 +54,7 @@ impl Engine {
             analysis: self.prepared_definition_context(),
             aggregates: self,
             registry: self,
-            transaction_timestamp_micros: Some(self.transaction_timestamp_micros()),
+            transaction_timestamp_micros: self.session_transaction_clock_micros(),
             interval_style: Some(self.session.interval_style()),
             date_order: Some(uqa_sql::semantics::parameters::datestyle::date_order(
                 &self.session.setting("DateStyle"),

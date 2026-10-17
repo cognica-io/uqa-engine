@@ -6,13 +6,15 @@
 
 //! Coverage for `Engine::cancel` propagating through the SQL surface.
 
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use uqa_core::{CancellationReason, QueryCancelled, Value};
-use uqa_engine::Engine;
-use uqa_sql::{expr::check_statement_cancellation, SQLError, SQLResult};
+use uqa_engine::{Engine, SQLFunctionOptions, SQLFunctionVolatility};
+use uqa_sql::{expr::check_statement_cancellation, SQLError};
 
 #[test]
 fn cancel_before_execute_aborts_query() {
@@ -84,10 +86,10 @@ fn register_cancel_and_observe(engine: &Arc<Engine>) -> Observations {
     observations
 }
 
-/// The evaluation observed the cancel request, and the statement failed with it.
-fn assert_observed_cancel_request(
+/// The evaluation observed the cancel request, and the statement or API call failed with it.
+fn assert_observed_cancel_request<T: std::fmt::Debug>(
     observations: &Observations,
-    result: Result<SQLResult, SQLError>,
+    result: Result<T, SQLError>,
 ) {
     assert_eq!(
         std::mem::take(&mut *observations.lock().unwrap()),
@@ -199,4 +201,102 @@ fn statement_timeout_interrupts_a_long_scalar_evaluation() {
     );
     assert!(started.elapsed() < Duration::from_secs(30));
     assert_eq!(engine.sql("SELECT 1 AS value", &[]).unwrap().rows.len(), 1);
+}
+
+/// Register `cancel_and_observe_key(text)`, a host function that a stored generated column reaches through an immutable SQL function whenever a direct API writes a row. Once `armed`, it cancels its session through `Engine::cancel`, records the statement cancellation `check_statement_cancellation` then reports and the transaction clock the evaluation reads, and fails with the cancellation.
+fn register_armed_generation_probe(
+    engine: &Arc<Engine>,
+    armed: &Arc<AtomicBool>,
+    clocks: &Arc<Mutex<Vec<Option<i64>>>>,
+) -> Observations {
+    let observations = Observations::default();
+    let recorded = Arc::clone(&observations);
+    let clocks = Arc::clone(clocks);
+    let armed = Arc::clone(armed);
+    let session = Arc::downgrade(engine);
+    engine
+        .register_scalar_function_with_options(
+            "cancel_and_observe_key",
+            SQLFunctionOptions::read_only(SQLFunctionVolatility::Immutable),
+            move |args: &[Value]| {
+                if !armed.load(Ordering::Acquire) {
+                    return Ok(args.first().cloned().unwrap_or(Value::Null));
+                }
+                session
+                    .upgrade()
+                    .expect("the session outlives its API calls")
+                    .cancel();
+                clocks
+                    .lock()
+                    .unwrap()
+                    .push(uqa_sql::expr::transaction_clock_micros());
+                let observed = check_statement_cancellation();
+                recorded.lock().unwrap().push(observed);
+                observed?;
+                Ok(Value::Null)
+            },
+        )
+        .unwrap();
+    observations
+}
+
+#[test]
+fn direct_row_writes_observe_engine_cancel_while_generating_columns() {
+    let engine = Arc::new(Engine::new());
+    let armed = Arc::new(AtomicBool::new(false));
+    let clocks = Arc::new(Mutex::new(Vec::new()));
+    let observations = register_armed_generation_probe(&engine, &armed, &clocks);
+    engine
+        .sql(
+            "CREATE FUNCTION generated_key(input text) RETURNS text IMMUTABLE LANGUAGE sql AS 'SELECT cancel_and_observe_key(input)::text'; CREATE TABLE direct_docs (id INTEGER PRIMARY KEY, body TEXT, generated TEXT GENERATED ALWAYS AS (generated_key(body)) STORED); INSERT INTO direct_docs (id, body) VALUES (1, 'stored')",
+            &[],
+        )
+        .unwrap();
+    let stored = engine
+        .find_doc_id_by_field("direct_docs", "id", &Value::Int(1))
+        .unwrap()
+        .expect("the stored row");
+    let added = BTreeMap::from([
+        ("id".to_string(), Value::Int(2)),
+        ("body".to_string(), Value::Str("added".into())),
+    ]);
+    let updates = BTreeMap::from([("body".to_string(), Value::Str("updated".into()))]);
+    armed.store(true, Ordering::Release);
+
+    assert_observed_cancel_request(
+        &observations,
+        engine.add_document("direct_docs", 2, added.clone()),
+    );
+    engine.reset_cancellation();
+    assert_observed_cancel_request(
+        &observations,
+        engine.update_document_fields("direct_docs", stored, updates.clone(), BTreeMap::new()),
+    );
+    engine.reset_cancellation();
+    assert_observed_cancel_request(
+        &observations,
+        engine.patch_document_fields("direct_docs", stored, &updates, &BTreeMap::new()),
+    );
+    engine.reset_cancellation();
+    // Outside any transaction a memory engine has no transaction clock, so the evaluation reads the wall clock as `now()` does.
+    assert_eq!(std::mem::take(&mut *clocks.lock().unwrap()), [None; 3]);
+
+    engine.begin().unwrap();
+    assert_observed_cancel_request(&observations, engine.add_document("direct_docs", 2, added));
+    engine.reset_cancellation();
+    engine.rollback().unwrap();
+    // Inside a transaction the evaluation reads the transaction's start.
+    let clocks = std::mem::take(&mut *clocks.lock().unwrap());
+    assert!(matches!(clocks.as_slice(), [Some(_)]), "{clocks:?}");
+
+    armed.store(false, Ordering::Release);
+    let rows = engine
+        .sql(
+            "SELECT id, body, generated FROM direct_docs ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.rows[0]["body"], Value::Str("stored".into()));
+    assert_eq!(rows.rows[0]["generated"], Value::Str("stored".into()));
 }
