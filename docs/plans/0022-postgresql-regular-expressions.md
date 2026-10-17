@@ -291,3 +291,6 @@ These issues were found while correcting the units above and remain separate; #3
 | [#1044](https://github.com/cognica-io/uqa-engine/issues/1044) | Implement the ^@ starts-with operator | #980 |
 | [#1045](https://github.com/cognica-io/uqa-engine/issues/1045) | Implement the pg_operator catalog and the regoper and regoperator types | #980 |
 | [#1046](https://github.com/cognica-io/uqa-engine/issues/1046) | Evaluate Cypher =~ with PostgreSQL's regular expressions as AGE does | #980 |
+| [#1047](https://github.com/cognica-io/uqa-engine/issues/1047) | Decode Cypher string escapes and reject unknown escapes as AGE does | #980 |
+| [#1048](https://github.com/cognica-io/uqa-engine/issues/1048) | Support CREATE, ALTER and DROP for operators, casts, operator classes and operator families | #980 |
+| [#1049](https://github.com/cognica-io/uqa-engine/issues/1049) | Provide the pg_catalog tables and views that PostgreSQL 18 has and UQA lacks | #980 |
