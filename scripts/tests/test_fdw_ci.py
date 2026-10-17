@@ -57,6 +57,7 @@ class ForeignHandlerScopeTests(unittest.TestCase):
             "crates/uqa-analysis/src/nori.rs", "crates/uqa-scoring/src/bm25.rs",
             "crates/uqa-storage-redb/src/lib.rs", "crates/uqa-graph/src/lib.rs",
             "docs/plans/0018-extension-progress.md", "HISTORY.md", "README.md",
+            "scripts/fdw_ci.py", "scripts/tests/test_fdw_ci.py",
         ):
             with self.subTest(path=path):
                 self.assertFalse(affected(path))
@@ -84,7 +85,60 @@ class ForeignHandlerHistoryTests(unittest.TestCase):
         return self.git("rev-parse", "HEAD")
 
     def pr(self, base, revision):
-        return select(self.root, {"pull_request": {"base": {"sha": base}}}, "pull_request", revision)
+        return select(self.root, {"action": "ready_for_review", "pull_request": {
+            "draft": False, "base": {"sha": base}}}, "pull_request", revision)
+
+    def test_product_pushes_wait_until_the_final_ready_transition(self):
+        first = self.commit("crates/uqa-fdw/src/lib.rs", "first correction\n")
+        final = self.commit("crates/uqa-fdw/src/lib.rs", "reviewed correction\n")
+        for revision in (first, final):
+            for action in ("opened", "synchronize", "reopened", "edited", "labeled"):
+                for draft in (True, False):
+                    with self.subTest(action=action, draft=draft, revision=revision):
+                        event = {"action": action, "pull_request": {
+                            "draft": draft, "base": {"sha": self.base}}}
+                        self.assertFalse(select(self.root, event, "pull_request", revision)["required"])
+        accepted = self.pr(self.base, final)
+        self.assertTrue(accepted["required"])
+        self.assertEqual(accepted["fingerprint"], fingerprint(self.root, final))
+        self.assertNotEqual(accepted["fingerprint"], fingerprint(self.root, first))
+
+    def test_a_draft_does_not_admit_validation_even_with_a_ready_event(self):
+        revision = self.commit("crates/uqa-fdw/src/lib.rs", "unfinished\n")
+        event = {"action": "ready_for_review", "pull_request": {
+            "draft": True, "base": {"sha": self.base}}}
+        self.assertFalse(select(self.root, event, "pull_request", revision)["required"])
+
+    def test_event_only_changes_do_not_repeat_unchanged_feature_commands(self):
+        path = ".github/workflows/fdw-features.yml"
+        workflow = "name: Foreign handlers\non:\n  pull_request:\n\npermissions:\n  contents: read\nenv:\n  CARGO_INCREMENTAL: '0'\njobs:\n  features:\n    run: cargo test -p uqa-fdw\n"
+        base = self.commit(path, workflow)
+        ready = workflow.replace("  pull_request:\n", "  pull_request:\n    types: [ready_for_review]\n")
+        revision = self.commit(path, ready)
+        self.assertFalse(self.pr(base, revision)["required"])
+        revision = self.commit("scripts/fdw_ci.py", "selector policy\n")
+        self.assertFalse(self.pr(base, revision)["required"])
+        revision = self.commit("crates/uqa-fdw/src/lib.rs", "product correction\n")
+        self.assertEqual(self.pr(base, revision)["paths"], ["crates/uqa-fdw/src/lib.rs"])
+
+    def test_commands_environment_and_unreadable_workflows_still_require_validation(self):
+        path = ".github/workflows/fdw-features.yml"
+        workflow = "name: Foreign handlers\non:\n  pull_request:\npermissions:\n  contents: read\nenv:\n  CARGO_INCREMENTAL: '0'\njobs:\n  features:\n    run: cargo test -p uqa-fdw\n"
+        base = self.commit(path, workflow)
+        for changed in (workflow.replace("cargo test", "cargo clippy"),
+                        workflow.replace("CARGO_INCREMENTAL: '0'", "CARGO_INCREMENTAL: '1'"),
+                        workflow.replace("on:", "'on':"), ""):
+            with self.subTest(changed=changed):
+                revision = self.commit(path, changed)
+                self.assertTrue(self.pr(base, revision)["required"])
+
+    def test_actual_readiness_change_keeps_the_previous_matrix_definition(self):
+        root = Path(__file__).resolve().parents[2]
+        current = (root / ".github/workflows/fdw-features.yml").read_text()
+        previous = current.replace("    types: [ready_for_review]\n", "")
+        base = self.commit(".github/workflows/fdw-features.yml", previous)
+        revision = self.commit(".github/workflows/fdw-features.yml", current)
+        self.assertFalse(self.pr(base, revision)["required"])
 
     def test_pull_request_retains_earlier_product_change_after_documentation_commit(self):
         product = self.commit("crates/uqa-fdw/src/lib.rs", "corrected\n")
@@ -147,6 +201,17 @@ class ForeignHandlerHistoryTests(unittest.TestCase):
 
 
 class ForeignHandlerWorkflowTests(unittest.TestCase):
+    def test_only_readiness_starts_the_pr_matrix_and_main_does_not_repeat_it(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/fdw-features.yml").read_text()
+        self.assertEqual(workflow.split("on:\n", 1)[1].split("\npermissions:", 1)[0].strip(),
+                         "pull_request:\n    types: [ready_for_review]\n  workflow_call:")
+        main = (root / ".github/workflows/ci.yml").read_text()
+        self.assertNotIn("uses: ./.github/workflows/fdw-features.yml", main)
+        self.assertNotIn("test-fdw-linux", main)
+        full = (root / ".github/workflows/full-ci.yml").read_text()
+        self.assertIn("uses: ./.github/workflows/fdw-features.yml", full)
+
     def test_reuse_is_exact_and_evidence_is_saved_only_after_the_complete_matrix(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/fdw-features.yml").read_text()
         self.assertNotIn('      - "crates/**"', workflow)

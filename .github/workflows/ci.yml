@@ -10,13 +10,14 @@ on:
       - "examples/rust/**"
       - "tests/**"
       - "scripts/**"
+      - "!scripts/fdw_ci.py"
+      - "!scripts/tests/test_fdw_ci.py"
+      - "!scripts/tests/test_premerge_ci.py"
       - "benchmarks/**"
       - ".github/scripts/**"
       - rust-toolchain.toml
       - ".cargo/**"
-      - .github/workflows/ci.yml
       - .github/workflows/workspace-tests.yml
-      - .github/workflows/fdw-features.yml
       - ".github/actions/setup-nextest/**"
       - .config/nextest.toml
   workflow_dispatch:
@@ -76,11 +77,6 @@ jobs:
     uses: ./.github/workflows/workspace-tests.yml
     with:
       os: ubuntu-24.04
-
-  test-fdw-linux:
-    name: test FDW feature configurations
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
-    uses: ./.github/workflows/fdw-features.yml
 
   test-macos:
     name: test macOS
@@ -291,7 +287,7 @@ jobs:
   gate:
     name: pre-merge CI
     if: ${{ always() }}
-    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference, nori-benchmark, concurrent-transactions]
+    needs: [test-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference, nori-benchmark, concurrent-transactions]
     runs-on: ubuntu-24.04
     env:
       RESULTS: ${{ join(needs.*.result, ' ') }}

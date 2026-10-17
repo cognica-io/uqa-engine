@@ -37,13 +37,14 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             '      - "examples/rust/**"\n'
             '      - "tests/**"\n'
             '      - "scripts/**"\n'
+            '      - "!scripts/fdw_ci.py"\n'
+            '      - "!scripts/tests/test_fdw_ci.py"\n'
+            '      - "!scripts/tests/test_premerge_ci.py"\n'
             '      - "benchmarks/**"\n'
             '      - ".github/scripts/**"\n'
             "      - rust-toolchain.toml\n"
             '      - ".cargo/**"\n'
-            "      - .github/workflows/ci.yml\n"
             "      - .github/workflows/workspace-tests.yml\n"
-            "      - .github/workflows/fdw-features.yml\n"
             '      - ".github/actions/setup-nextest/**"\n'
             "      - .config/nextest.toml\n"
         )
@@ -59,7 +60,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "(github.event_name == 'workflow_dispatch' && inputs.run_rust) }}"
         )
 
-        self.assertEqual(self.workflow.count(condition), 9)
+        self.assertEqual(self.workflow.count(condition), 8)
         self.assertIn("(github.event_name == 'workflow_dispatch' && (inputs.run_rust || inputs.run_nori_allocations))", self.workflow)
         self.assertNotIn("if: ${{ inputs.run_rust }}", self.workflow)
 
