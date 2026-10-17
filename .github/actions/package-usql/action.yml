@@ -14,6 +14,9 @@ runs:
         CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
         CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
       run: cargo build --locked -p uqa-cli --bin usql --profile release-stripped --features arrow,duckdb --target '${{ inputs.target }}'
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
     - name: Package the executable, licenses and pinned installers
       shell: bash
       run: python scripts/usql-release.py package --target '${{ inputs.target }}' --directory dist/usql
