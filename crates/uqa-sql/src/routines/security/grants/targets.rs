@@ -12,7 +12,7 @@ use crate::{
     routines::lifecycle::{
         alter_routine_kind_name, ambiguous_routine_error,
         names::{routine_lookup_keys_with_builtins, RoutineNameCatalog},
-        routine_signature_display, wrong_routine_kind_error,
+        routine_name_display, routine_signature_display, wrong_routine_kind_error,
     },
     SQLError,
 };
@@ -103,7 +103,12 @@ pub fn named(
                 "function"
             };
             let message = display_types.map_or_else(
-                || format!("could not find a {missing_kind} named \"{name}\""),
+                || {
+                    format!(
+                        "could not find a {missing_kind} named \"{}\"",
+                        routine_name_display(name)
+                    )
+                },
                 |types| {
                     format!(
                         "{missing_kind} {} does not exist",

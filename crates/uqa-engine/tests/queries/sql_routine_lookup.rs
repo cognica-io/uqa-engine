@@ -4,9 +4,23 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Routine lookup for `DROP` and `ALTER` as `LookupFuncWithArgs` performs it: an argument list selects a routine of any kind, which must then be of the command's kind, while a bare name considers only routines of that kind after search-path shadowing. Diagnostics spell the name as written and the argument types as `format_type_be` does.
+//! Routine lookup for `DROP` and `ALTER` as `LookupFuncWithArgs` performs it: an argument list selects a routine of any kind, which must then be of the command's kind, while a bare name considers only routines of that kind after search-path shadowing. Diagnostics use semantic routine-name components and spell argument types as `format_type_be` does.
 
 use uqa_engine::Engine;
+
+#[test]
+fn quoted_routine_lookup_diagnostics_match_postgresql() {
+    for reference in [
+        include_str!(
+            "../../../uqa-sql/src/routines/lifecycle/names/tests/quoted-names-postgresql.json"
+        ),
+        include_str!(
+            "../../../uqa-sql/src/routines/lifecycle/names/tests/quoted-lifecycle-postgresql.json"
+        ),
+    ] {
+        crate::pg18_oracle::verify(&Engine::new(), reference);
+    }
+}
 
 fn fails(engine: &Engine, sql: &str, sqlstate: &str, message: &str) -> uqa_sql::SQLError {
     let error = engine.sql(sql, &[]).unwrap_err();

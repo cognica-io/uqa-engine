@@ -9,8 +9,8 @@
 use super::{
     alter_routine_kind_matches, alter_routine_kind_name, ambiguous_routine_error,
     names::{routine_lookup_keys, RoutineNameCatalog},
-    require_routine_ownership, routine_signature_display, wrong_routine_kind_error,
-    RoutineDropResolution, RoutineDropTarget,
+    require_routine_ownership, routine_name_display, routine_signature_display,
+    wrong_routine_kind_error, RoutineDropResolution, RoutineDropTarget,
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::{
@@ -76,9 +76,10 @@ pub fn resolve_sql_function_drop_targets(
                 resolution.targets.push(target);
             }
         } else {
+            let name = routine_name_display(&item.name);
             let spelled = match &item.arg_types {
-                Some(types) => format!("{}({})", item.name, types.join(", ")),
-                None => format!("{}()", item.name),
+                Some(types) => format!("{name}({})", types.join(", ")),
+                None => format!("{name}()"),
             };
             if stmt.if_exists {
                 resolution.notices.push(crate::SQLNotice::notice(format!(
@@ -92,7 +93,7 @@ pub fn resolve_sql_function_drop_targets(
                     "{kind} {} does not exist",
                     routine_signature_display(catalog, &item.name, types)
                 ),
-                None => format!("could not find a {kind} named \"{}\"", item.name),
+                None => format!("could not find a {kind} named \"{name}\""),
             };
             return Err(SQLError::Routine {
                 sqlstate: "42883".into(),
@@ -218,8 +219,9 @@ pub fn resolve_sql_routine_alter_target(
         [] => Err(SQLError::Routine {
             sqlstate: "42883".into(),
             message: format!(
-                "could not find a {} named \"{requested_name}\"",
-                missing_routine_kind(kind)
+                "could not find a {} named \"{}\"",
+                missing_routine_kind(kind),
+                routine_name_display(requested_name)
             ),
         }),
         _ => Err(ambiguous_routine_error(kind_name, requested_name)),
