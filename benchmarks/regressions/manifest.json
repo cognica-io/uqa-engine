@@ -11800,6 +11800,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_native_btree_support_matches_implemented_fixed_builtin_reference_classes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/btree/tests/native.rs",
+      "capability": "Selected native B-tree invocation",
+      "workload": "Forty-three independent PostgreSQL configurations and 832 pairs across the 31 non-pattern classes with implemented endpoint carriers and fixed built-in collations.",
+      "invariant": "Selected production comparators match PostgreSQL ordering for every pair and release all temporary allowance; catalog-only types are not executable support claims.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

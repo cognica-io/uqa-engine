@@ -222,3 +222,5 @@ fn selected_pattern_support_ignores_collation_and_keeps_postgresql_byte_order() 
     }
     assert_eq!(observations, 375);
 }
+
+mod native;
