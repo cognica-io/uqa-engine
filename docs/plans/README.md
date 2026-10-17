@@ -1,5 +1,7 @@
 # Implementation plans
 
+The [usql shell correction](usql-shell-parity.md) is active: the complete input, completion, formatting and psql-command scope is being implemented in one PR with logical commits. Its live checklist retains all acceptance requirements; implementation and qualification are pending.
+
 The [PostgreSQL regular-expression plan](0022-postgresql-regular-expressions.md) delivers #981, #982, #983 and #980 one unit per pull request. Its first unit corrects the `substring` pattern forms (#981) and gives the `substring` and `substr` overloads their catalog identities: the independent 69-statement PostgreSQL 18.4 transcript passes on memory, native SQLite, SQLite Key/Value and redb, with nine stored-definition, deferred-error and catalog cases repeated after reopening, together with SQL owner, planner and catalog checks. Automatic Linux/macOS acceptance remains required. The related issues #984, #985, #988, #989, #990 and the CONTEXT evidence for #306 remain separate.
 
 The [retained DATE output correction](0018-retained-date-output.md) is verified and merged in [PR #974](https://github.com/cognica-io/uqa-engine/pull/974) as `03e99ac97`, closing #971. Actual Linux/macOS reports pass 919 checks / 1,333 cases and eight independent-process histories per OS, with no failures, errors or skips; all six final-ready FDW configurations pass. The tested tree equals the merge tree. Its local/remote branch and completed worktree are removed, and root main is updated with the unrelated parity README edit preserved.
