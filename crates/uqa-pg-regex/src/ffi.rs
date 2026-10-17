@@ -35,11 +35,13 @@ pub(crate) const THROW_ALLOC_SIZE: c_int = 3;
 pub(crate) const THROW_ALLOC_PRODUCT: c_int = 4;
 pub(crate) const THROW_OUT_OF_MEMORY: c_int = 5;
 pub(crate) const THROW_LOCALE: c_int = 6;
+pub(crate) const THROW_STACK: c_int = 7;
 
 /// Results of the Rust callbacks.
 pub(crate) const CALLBACK_OK: c_int = 0;
 pub(crate) const CALLBACK_REFUSED: c_int = 1;
 pub(crate) const CALLBACK_PANICKED: c_int = 2;
+pub(crate) const CALLBACK_RESTART: c_int = 3;
 
 /// `PostgreSQL`'s `errMsg` buffer size in `regexp.c`, including the terminating NUL.
 pub(crate) const ERROR_BUFFER_SIZE: usize = 100;
@@ -65,13 +67,6 @@ extern "C" {
         search_start: usize,
         nmatch: usize,
         pmatch: *mut MatchSpan,
-        thrown: *mut Thrown,
-    ) -> c_int;
-
-    /// Free a compiled expression and its `regex_t` through the operation's memory context.
-    pub(crate) fn uqa_pg_regex_release(
-        operation: *mut c_void,
-        expression: *mut RegexT,
         thrown: *mut Thrown,
     ) -> c_int;
 

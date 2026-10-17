@@ -27,6 +27,8 @@ pub struct Budget {
     pub interrupts: usize,
     /// Largest stack depth reported by the engine.
     pub deepest: usize,
+    /// Lowest and highest addresses of a local of the stack-depth hook, which lie on the stack the engine runs on.
+    pub frames: Option<(usize, usize)>,
     /// Refuse every reservation above this many live bytes.
     pub limit: Option<usize>,
     /// Refuse exactly the reservation with this zero-based index.
@@ -83,6 +85,11 @@ impl RegexResources for Budget {
     }
 
     fn stack_too_deep(&mut self, depth: usize) -> bool {
+        let marker = 0u8;
+        let address = std::hint::black_box(std::ptr::addr_of!(marker)) as usize;
+        self.frames = Some(self.frames.map_or((address, address), |(lowest, highest)| {
+            (lowest.min(address), highest.max(address))
+        }));
         self.deepest = self.deepest.max(depth);
         self.stack_limit.is_some_and(|limit| depth > limit)
     }

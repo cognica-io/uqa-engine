@@ -6,7 +6,7 @@
 
 //! The engine against an independent `PostgreSQL` 18.4 reference.
 //!
-//! `tests/fixtures/regex_oracle.input.json` lists each case's inputs and SQL; `regex_oracle.expected.json` is that SQL's result from `PostgreSQL` 18.4, captured with `tests/parity/pg18/capture_command_completion_oracle.py --rows --details --notices` in a disposable database. The SQL calls `regexp_match`, `regexp_instr`, `regexp_like` and the match operators, so each case is reproduced here with the compile flags, search start and match slots that `src/backend/utils/adt/regexp.c` passes to `pg_regcomp` and `pg_regexec` for those functions.
+//! `tests/fixtures/regex_oracle.input.json` lists each case's inputs and SQL; `regex_oracle.expected.json` is that SQL's result from `PostgreSQL` 18.4, captured with `tests/parity/pg18/capture_command_completion_oracle.py --rows --details --notices` in a disposable database. The SQL calls `regexp_match`, `regexp_instr`, `regexp_like` and the match operators, so each case is reproduced here with the compile flags, search start and match slots that `src/backend/utils/adt/regexp.c` passes to `pg_regcomp` and `pg_regexec` for those functions. The reference server runs with its default `max_stack_depth` of 2 MB, the engine stack budget the crate applies.
 
 use serde_json::{json, Value};
 use uqa_pg_regex::{
@@ -97,8 +97,28 @@ fn rendered_sql(case: &Value) -> String {
             literal(field(case, "pattern")),
             literal(field(case, "flags"))
         ),
+        "repeated" => format!(
+            "SELECT {} ~ (repeat({}, {count}) || {} || repeat({}, {count}))",
+            subject_sql(case),
+            literal(field(case, "opening")),
+            literal(field(case, "core")),
+            literal(field(case, "closing")),
+            count = case["count"].as_u64().unwrap()
+        ),
         other => panic!("unknown case kind {other}"),
     }
+}
+
+/// The pattern of a `repeated` case: `count` openings, the core and `count` closings.
+#[cfg(not(target_family = "wasm"))]
+fn repeated_pattern(case: &Value) -> String {
+    let count = usize::try_from(case["count"].as_u64().unwrap()).unwrap();
+    format!(
+        "{}{}{}",
+        field(case, "opening").repeat(count),
+        field(case, "core"),
+        field(case, "closing").repeat(count)
+    )
 }
 
 /// A statement failure as `PostgreSQL` reports it.
@@ -225,7 +245,12 @@ fn evaluate_match(case: &Value) -> Result<Value, Failure> {
 
 /// `textregexeq` and its relatives: `RE_compile_and_execute` with no match slots, hence `REG_NOSUB`.
 fn evaluate_operator(case: &Value) -> Result<&'static str, Failure> {
-    let (flags, negated) = match field(case, "operator") {
+    operator_result(case, field(case, "operator"), field(case, "pattern"))
+}
+
+/// `subject operator pattern` for a case's subject and collation, with the hooks applying no limit of their own.
+fn operator_result(case: &Value, operator: &str, pattern: &str) -> Result<&'static str, Failure> {
+    let (flags, negated) = match operator {
         "~" => (REG_ADVANCED, false),
         "~*" => (REG_ADVANCED | REG_ICASE, false),
         "!~" => (REG_ADVANCED, true),
@@ -234,7 +259,7 @@ fn evaluate_operator(case: &Value) -> Result<&'static str, Failure> {
     };
     let mut budget = Budget::unlimited();
     let mut regex = Regex::compile(
-        field(case, "pattern"),
+        pattern,
         flags | REG_NOSUB,
         collation(field(case, "collation")),
         &mut budget,
@@ -313,7 +338,7 @@ fn reference_sql_matches_the_recorded_inputs() {
         );
         rendered += 1;
     }
-    assert_eq!(rendered, 271);
+    assert_eq!(rendered, 277);
 }
 
 #[test]
@@ -406,4 +431,27 @@ fn class_members_over_every_code_point_equal_postgresql() {
             });
         }
     });
+}
+
+/// Patterns whose recursion approaches `PostgreSQL`'s default `max_stack_depth` of 2 MB, which `PostgreSQL` accepts below it and rejects beyond it as too complex. The hooks apply no limit, so the engine's own budget decides. WebAssembly runs the engine on a call stack that these depths would exhaust, so the comparison runs on native targets only.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn stack_depth_limits_equal_postgresql() {
+    let mut compared = 0;
+    for (case, result) in cases() {
+        if field(&case, "kind") != "repeated" {
+            continue;
+        }
+        let name = field(&case, "name");
+        match (
+            operator_result(&case, "~", &repeated_pattern(&case)),
+            expected_failure(&result),
+        ) {
+            (Err(failure), Some(expected)) => assert_eq!(failure, expected, "{name}"),
+            (Ok(value), None) => assert_eq!(Some(value), expected_value(&result), "{name}"),
+            (actual, expected) => panic!("{name}: engine {actual:?}, PostgreSQL {expected:?}"),
+        }
+        compared += 1;
+    }
+    assert_eq!(compared, 6);
 }

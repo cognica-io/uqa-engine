@@ -29,6 +29,10 @@ include = [
 icu_casemap = { workspace = true }
 icu_properties = { workspace = true }
 
+# Engine operations move to a separately allocated stack when the thread lacks headroom. WebAssembly runs the engine on its own call stack, which cannot be switched.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+stacker = { workspace = true }
+
 [build-dependencies]
 cc = "1.2"
 

@@ -6086,6 +6086,111 @@
         }
       ],
       "notices": []
+    },
+    {
+      "sql": "SELECT 'a' COLLATE \"C\" ~ (repeat('(?:', 5000) || 'a' || repeat(')', 5000))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'a' COLLATE \"C\" ~ (repeat('(?:', 10000) || 'a' || repeat(')', 10000))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: regular expression is too complex",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'a' COLLATE \"C\" ~ (repeat('(', 2000) || 'a' || repeat(')', 2000))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 'a' COLLATE \"C\" ~ (repeat('(', 10000) || 'a' || repeat(')', 10000))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: regular expression is too complex",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '' COLLATE \"C\" ~ (repeat('a', 20000) || '' || repeat('', 20000))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '' COLLATE \"C\" ~ (repeat('a', 60000) || '' || repeat('', 60000))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: regular expression is too complex",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
     }
   ]
 }

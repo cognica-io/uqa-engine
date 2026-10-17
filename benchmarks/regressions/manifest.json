@@ -9816,6 +9816,71 @@
       "invariant": "Both compilation and matching fail with REG_ETOOBIG instead of exceeding the caller's stack limit."
     },
     {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "stack_depth_limits_equal_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/oracle.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "Six independently captured PostgreSQL 18.4 statements with nested capturing and non-capturing groups and long literals below and beyond the default max_stack_depth of 2 MB.",
+      "invariant": "Patterns PostgreSQL accepts compile and match with its results, and patterns it rejects fail with REG_ETOOBIG at the engine's 2 MB budget while the hooks set no limit."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "deep_operations_on_a_small_thread_run_on_a_separate_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "5000 nested groups compiled and matched on a 512 KiB thread with 128 KiB of its stack left.",
+      "invariant": "The operations complete on a separately allocated stack although compilation needs more than a megabyte of engine stack, and every reserved byte is released."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "an_execution_with_little_stack_left_runs_on_a_separate_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "A match over 1000 nested capturing groups with 96 KiB of thread stack left.",
+      "invariant": "Matching dissects every group on a separately allocated stack and fills every span."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "an_operation_that_outgrows_its_thread_stack_starts_again_on_a_separate_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "5000 nested groups compiled with 1 MiB of thread stack left, against the same compilation with headroom to spare.",
+      "invariant": "The first attempt is abandoned when it outgrows the thread's stack, its reservations come back, and the second attempt completes on a separately allocated stack."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "operations_beyond_the_stack_budget_report_regular_expression_too_complex",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "10000 nested capturing and non-capturing groups compiled with hooks that set no stack limit.",
+      "invariant": "Compilation fails with REG_ETOOBIG at the 2 MB budget, the hooks never see a deeper stack, and no reserved byte remains."
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "default_btree_classes_match_independent_pg18_key_declarations",

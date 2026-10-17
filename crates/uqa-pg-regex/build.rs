@@ -39,5 +39,7 @@ fn main() {
     }
     // The imported files are compiled exactly as PostgreSQL ships them; their upstream warning profile is not UQA's to change.
     build.warnings(false);
+    // PostgreSQL compiles the engine with -O2. The stack each recursion level uses, which MAX_STACK_DEPTH bounds, depends on the optimization level, and unoptimized frames would refuse patterns that PostgreSQL accepts, so every profile compiles the engine as PostgreSQL does.
+    build.opt_level(2);
     build.compile("uqa_pg_regex");
 }

@@ -14,14 +14,15 @@ use std::ffi::{c_int, c_void};
 use std::panic::{self, AssertUnwindSafe};
 use std::ptr::{self, NonNull};
 
-use crate::ffi::{CALLBACK_OK, CALLBACK_PANICKED, CALLBACK_REFUSED};
+use crate::ffi::{CALLBACK_OK, CALLBACK_PANICKED, CALLBACK_REFUSED, CALLBACK_RESTART};
 use crate::memory::MemoryContext;
 use crate::resources::RegexResources;
+use crate::stack::MAX_STACK_DEPTH;
 
 pub(crate) struct Operation<'a> {
     context: *mut MemoryContext,
     resources: &'a mut dyn RegexResources,
-    cancellable: bool,
+    depth_limit: usize,
     panic: Option<Box<dyn Any + Send + 'static>>,
 }
 
@@ -30,16 +31,16 @@ pub(crate) struct Operation<'a> {
 struct Panicked;
 
 impl<'a> Operation<'a> {
-    /// An operation whose engine allocations go to `context`. Freeing a compiled expression is not cancellable, as `PostgreSQL`'s free paths check no interrupts.
+    /// An operation whose engine allocations go to `context` and whose engine stack may reach `depth_limit` bytes, at most [`MAX_STACK_DEPTH`], on the stack it runs on.
     pub(crate) fn new(
         context: *mut MemoryContext,
         resources: &'a mut dyn RegexResources,
-        cancellable: bool,
+        depth_limit: usize,
     ) -> Self {
         Self {
             context,
             resources,
-            cancellable,
+            depth_limit,
             panic: None,
         }
     }
@@ -145,9 +146,6 @@ extern "C" fn uqa_pg_regex_callback_free(operation: *mut c_void, pointer: *mut c
 extern "C" fn uqa_pg_regex_callback_interrupt(operation: *mut c_void) -> c_int {
     // SAFETY: C passes back the pointer of the operation it is serving.
     let operation = unsafe { Operation::from_raw(operation) };
-    if !operation.cancellable {
-        return CALLBACK_OK;
-    }
     status(operation.guard(|operation| !operation.resources.cancel_requested()))
 }
 
@@ -155,5 +153,13 @@ extern "C" fn uqa_pg_regex_callback_interrupt(operation: *mut c_void) -> c_int {
 extern "C" fn uqa_pg_regex_callback_stack(operation: *mut c_void, depth: usize) -> c_int {
     // SAFETY: C passes back the pointer of the operation it is serving.
     let operation = unsafe { Operation::from_raw(operation) };
+    if depth > MAX_STACK_DEPTH {
+        // PostgreSQL's default max_stack_depth: the engine fails with REG_ETOOBIG.
+        return CALLBACK_REFUSED;
+    }
+    if depth > operation.depth_limit {
+        // This stack cannot go deeper with STACK_DEPTH_SLOP to spare; the operation runs again on a larger one.
+        return CALLBACK_RESTART;
+    }
     status(operation.guard(|operation| !operation.resources.stack_too_deep(depth)))
 }

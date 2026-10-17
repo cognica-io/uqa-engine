@@ -2600,6 +2600,72 @@
       "pattern": "\\W",
       "flags": "",
       "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '\\W', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "5000 nested non-capturing groups",
+      "kind": "repeated",
+      "collation": "C",
+      "subject": "a",
+      "opening": "(?:",
+      "core": "a",
+      "closing": ")",
+      "count": 5000,
+      "sql": "SELECT 'a' COLLATE \"C\" ~ (repeat('(?:', 5000) || 'a' || repeat(')', 5000))"
+    },
+    {
+      "name": "10000 nested non-capturing groups exceed the stack depth limit",
+      "kind": "repeated",
+      "collation": "C",
+      "subject": "a",
+      "opening": "(?:",
+      "core": "a",
+      "closing": ")",
+      "count": 10000,
+      "sql": "SELECT 'a' COLLATE \"C\" ~ (repeat('(?:', 10000) || 'a' || repeat(')', 10000))"
+    },
+    {
+      "name": "2000 nested capturing groups",
+      "kind": "repeated",
+      "collation": "C",
+      "subject": "a",
+      "opening": "(",
+      "core": "a",
+      "closing": ")",
+      "count": 2000,
+      "sql": "SELECT 'a' COLLATE \"C\" ~ (repeat('(', 2000) || 'a' || repeat(')', 2000))"
+    },
+    {
+      "name": "10000 nested capturing groups exceed the stack depth limit",
+      "kind": "repeated",
+      "collation": "C",
+      "subject": "a",
+      "opening": "(",
+      "core": "a",
+      "closing": ")",
+      "count": 10000,
+      "sql": "SELECT 'a' COLLATE \"C\" ~ (repeat('(', 10000) || 'a' || repeat(')', 10000))"
+    },
+    {
+      "name": "a 20000-character literal",
+      "kind": "repeated",
+      "collation": "C",
+      "subject": "",
+      "opening": "a",
+      "core": "",
+      "closing": "",
+      "count": 20000,
+      "sql": "SELECT '' COLLATE \"C\" ~ (repeat('a', 20000) || '' || repeat('', 20000))"
+    },
+    {
+      "name": "a 60000-character literal exceeds the stack depth limit",
+      "kind": "repeated",
+      "collation": "C",
+      "subject": "",
+      "opening": "a",
+      "core": "",
+      "closing": "",
+      "count": 60000,
+      "sql": "SELECT '' COLLATE \"C\" ~ (repeat('a', 60000) || '' || repeat('', 60000))"
     }
   ]
 }

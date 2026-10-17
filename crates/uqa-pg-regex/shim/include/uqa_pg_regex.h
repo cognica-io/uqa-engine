@@ -10,10 +10,11 @@
  * Every engine call enters through one of the operation functions below.
  * Each establishes a per-thread error frame and records the Rust operation
  * whose memory context and resource hooks serve the call.  Cancellation,
- * panics of the Rust hooks and PostgreSQL's allocation-size errors leave the
- * engine with longjmp to that frame, which lies in C code called directly by
- * Rust; no longjmp crosses a Rust frame.  The Rust wrapper then frees every
- * chunk of the abandoned operation.
+ * panics of the Rust hooks, a stack too small for the operation and
+ * PostgreSQL's allocation-size errors leave the engine with longjmp to that
+ * frame, which lies in C code called directly by Rust; no longjmp crosses a
+ * Rust frame.  The Rust wrapper then frees every chunk of the abandoned
+ * operation.
  */
 #ifndef UQA_PG_REGEX_H
 #define UQA_PG_REGEX_H
@@ -43,11 +44,12 @@
 #define UQA_PG_REGEX_THROW_ALLOC_PRODUCT	4	/* overflowing array size */
 #define UQA_PG_REGEX_THROW_OUT_OF_MEMORY	5	/* failure without NO_OOM */
 #define UQA_PG_REGEX_THROW_LOCALE			6	/* invalid locale token */
+#define UQA_PG_REGEX_THROW_STACK			7	/* needs a larger stack */
 
 typedef struct UQAPgRegexThrown
 {
 	int			kind;			/* UQA_PG_REGEX_THROW_* */
-	size_t		first;			/* request size or first factor */
+	size_t		first;			/* request size, first factor or depth */
 	size_t		second;			/* second factor */
 } UQAPgRegexThrown;
 
@@ -55,6 +57,7 @@ typedef struct UQAPgRegexThrown
 #define UQA_PG_REGEX_CALLBACK_OK		0
 #define UQA_PG_REGEX_CALLBACK_REFUSED	1	/* allocation refused or failed, cancel requested, stack too deep */
 #define UQA_PG_REGEX_CALLBACK_PANICKED	2	/* the hook panicked; the payload is kept */
+#define UQA_PG_REGEX_CALLBACK_RESTART	3	/* the stack cannot go deeper; run again */
 
 /* Engine operations, called by the Rust wrapper. */
 extern int	uqa_pg_regex_compile(void *operation, const pg_wchar *pattern,
@@ -64,8 +67,6 @@ extern int	uqa_pg_regex_execute(void *operation, regex_t *re,
 								 const pg_wchar *data, size_t length,
 								 size_t search_start, size_t nmatch,
 								 regmatch_t *pmatch, UQAPgRegexThrown *thrown);
-extern int	uqa_pg_regex_release(void *operation, regex_t *re,
-								 UQAPgRegexThrown *thrown);
 extern size_t uqa_pg_regex_subexpressions(const regex_t *re);
 extern size_t uqa_pg_regex_error_message(int code, char *buffer, size_t size);
 extern size_t uqa_pg_regex_match_size(void);

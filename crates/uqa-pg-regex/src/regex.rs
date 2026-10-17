@@ -8,22 +8,23 @@
 #![allow(unsafe_code)] // Compiled state is owned through pointers returned by the C shim.
 
 use std::any::Any;
-use std::ffi::c_long;
+use std::ffi::{c_int, c_long};
 use std::panic::{self, AssertUnwindSafe};
 use std::ptr::{self, NonNull};
 
 use crate::collation::RegexCollation;
 use crate::error::RegexError;
 use crate::ffi::{self, RegexT, Thrown};
-use crate::flags::{CompileFlags, REG_INVARG, REG_NOMATCH, REG_OKAY};
+use crate::flags::{CompileFlags, REG_ETOOBIG, REG_INVARG, REG_NOMATCH, REG_OKAY};
 use crate::memory::{self, MemoryContext, OwnedContext};
 use crate::operation::Operation;
 use crate::resources::RegexResources;
 use crate::span::MatchSpan;
+use crate::stack::{self, Attempt};
 
 /// A pattern compiled by `PostgreSQL`'s `pg_regcomp`.
 ///
-/// The compiled state lives in its own memory context, charged to the resources passed to [`Regex::compile`]; dropping the expression frees it with `pg_regfree` and releases every reserved byte. Executions allocate their working memory in a separate context that is empty again when [`Regex::exec`] returns.
+/// The compiled state lives in its own memory context, charged to the resources passed to [`Regex::compile`]; dropping the expression deletes that context and releases every reserved byte, as `RE_compile_and_cache` deletes the context of an expression it discards. Executions allocate their working memory in a separate context that is empty again when [`Regex::exec`] returns. Compilation and execution run with the stack headroom described at [`crate::MAX_STACK_DEPTH`].
 ///
 /// An expression borrows its resources mutably for its whole life and is used by one thread at a time; it is neither `Send` nor `Sync`. Expressions on different threads are independent.
 pub struct Regex<'r> {
@@ -53,7 +54,7 @@ impl<'r> Regex<'r> {
     ///
     /// Like `RE_compile_and_cache`, the wrapper converts the pattern into a buffer of one code point slot per pattern byte plus one and gives the compiled expression its own memory context, both in memory charged to `resources`. Their requests fail as `palloc` and context creation fail in `PostgreSQL`: a pattern of 268,435,455 bytes or more with [`RegexError::InvalidAllocationSize`] before anything is allocated, and a refused reservation with [`RegexError::OutOfMemory`].
     ///
-    /// The engine's own failures return [`RegexError::Engine`], which `PostgreSQL` reports as `invalid regular expression: <explanation>`, including `REG_ESPACE` when `resources` refuse an engine allocation; [`RegexError::Cancelled`] when `resources` request cancellation; and [`RegexError::InvalidAllocationSize`] or [`RegexError::InvalidAllocationProduct`] when the engine requests an invalid size.
+    /// The engine's own failures return [`RegexError::Engine`], which `PostgreSQL` reports as `invalid regular expression: <explanation>`, including `REG_ESPACE` when `resources` refuse an engine allocation and `REG_ETOOBIG` beyond [`crate::MAX_STACK_DEPTH`] or a lower limit of `resources`; [`RegexError::Cancelled`] when `resources` request cancellation; and [`RegexError::InvalidAllocationSize`] or [`RegexError::InvalidAllocationProduct`] when the engine requests an invalid size.
     pub fn compile(
         pattern: &str,
         flags: CompileFlags,
@@ -64,12 +65,23 @@ impl<'r> Regex<'r> {
         let Some(context) = OwnedContext::new(resources) else {
             return Err(RegexError::OutOfMemory);
         };
-        // A hook called directly from Rust may panic as well; the context is freed before the panic continues.
-        let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
-            compile_into(&context, pattern, bytes, flags, collation, &mut *resources)
-        }));
+        let outcome = stack::run(|depth_limit| {
+            // A hook called directly from Rust may panic as well; the chunks are freed with the context before the panic continues.
+            panic::catch_unwind(AssertUnwindSafe(|| {
+                compile_into(
+                    &context,
+                    pattern,
+                    bytes,
+                    flags,
+                    collation,
+                    &mut *resources,
+                    depth_limit,
+                )
+            }))
+            .unwrap_or_else(|payload| Attempt::Finished(Err(Stop::Panic(payload))))
+        });
         match outcome {
-            Ok(Ok(expression)) => {
+            Some(Ok(expression)) => {
                 // SAFETY: a successful compilation returns a live regex_t.
                 let subexpressions =
                     unsafe { ffi::uqa_pg_regex_subexpressions(expression.as_ptr()) };
@@ -80,13 +92,13 @@ impl<'r> Regex<'r> {
                     subexpressions,
                 })
             }
-            Ok(Err(stop)) => {
+            Some(Err(stop)) => {
                 context.release(resources);
                 Err(stop.resume())
             }
-            Err(payload) => {
+            None => {
                 context.release(resources);
-                panic::resume_unwind(payload)
+                Err(RegexError::Engine(REG_ETOOBIG))
             }
         }
     }
@@ -112,58 +124,30 @@ impl<'r> Regex<'r> {
         search_start: usize,
         matches: &mut [MatchSpan],
     ) -> Result<bool, RegexError> {
-        // pg_regexec rejects a NULL string even when it is empty.
-        static EMPTY: [u32; 1] = [0];
         if c_long::try_from(input.len()).is_err() {
             return Err(RegexError::Engine(REG_INVARG));
         }
-        matches.fill(MatchSpan::UNSET);
-        let data = if input.is_empty() {
-            EMPTY.as_ptr()
-        } else {
-            input.as_ptr()
-        };
-        let pmatch = if matches.is_empty() {
-            ptr::null_mut()
-        } else {
-            matches.as_mut_ptr()
-        };
-        let mut context = MemoryContext::unlinked();
-        // SAFETY: the context stays at this address until it is released below.
-        unsafe { MemoryContext::initialize(&raw mut context) };
-        let mut thrown = Thrown::default();
-        let mut operation = Operation::new(&raw mut context, &mut *self.resources, true);
-        // SAFETY: the expression is live, `data` holds `input.len()` code points and `pmatch` holds `matches.len()` slots for the duration of the call.
-        let code = unsafe {
-            ffi::uqa_pg_regex_execute(
-                operation.as_raw(),
-                self.expression.as_ptr(),
-                data,
-                input.len(),
+        let expression = self.expression;
+        let resources = &mut *self.resources;
+        let outcome = stack::run(|depth_limit| {
+            execute(
+                expression,
+                &mut *resources,
+                input,
                 search_start,
-                matches.len(),
-                pmatch,
-                &raw mut thrown,
+                &mut *matches,
+                depth_limit,
             )
+        });
+        let result = match outcome {
+            Some(Ok(REG_OKAY)) => return Ok(true),
+            Some(Ok(REG_NOMATCH)) => Ok(false),
+            Some(Ok(code)) => Err(Stop::Error(RegexError::Engine(code))),
+            Some(Err(stop)) => Err(stop),
+            None => Err(Stop::Error(RegexError::Engine(REG_ETOOBIG))),
         };
-        let stop = (code == ffi::THROWN).then(|| stopped(thrown, operation.take_panic()));
-        // SAFETY: the C call has returned, so nothing refers to the execution's chunks any more.
-        let leftover = unsafe { MemoryContext::free_all(&raw mut context) };
-        if leftover > 0 {
-            self.resources.release(leftover);
-        }
-        if let Some(stop) = stop {
-            matches.fill(MatchSpan::UNSET);
-            return Err(stop.resume());
-        }
-        match code {
-            REG_OKAY => Ok(true),
-            REG_NOMATCH => Ok(false),
-            code => {
-                matches.fill(MatchSpan::UNSET);
-                Err(RegexError::Engine(code))
-            }
-        }
+        matches.fill(MatchSpan::UNSET);
+        result.map_err(Stop::resume)
     }
 }
 
@@ -172,31 +156,12 @@ impl Drop for Regex<'_> {
         let Some(context) = self.context.take() else {
             return;
         };
-        let mut thrown = Thrown::default();
-        let mut operation = Operation::new(context.as_ptr(), &mut *self.resources, false);
-        // SAFETY: the expression was compiled in this context and is freed exactly once.
-        let code = unsafe {
-            ffi::uqa_pg_regex_release(
-                operation.as_raw(),
-                self.expression.as_ptr(),
-                &raw mut thrown,
-            )
-        };
-        let stop = (code == ffi::THROWN).then(|| stopped(thrown, operation.take_panic()));
-        // Every chunk the release did not reach is freed with the context before its release hook runs.
+        // Deleting the context frees the compiled expression, as RE_compile_and_cache deletes the context of an expression it discards instead of calling pg_regfree; no engine code runs.
         let released = panic::catch_unwind(AssertUnwindSafe(|| {
             context.release(&mut *self.resources);
         }));
-        let payload = match stop {
-            // Releasing frees memory only, so only a panicking hook can stop it.
-            Some(Stop::Error(error)) => {
-                unreachable!("releasing a compiled expression failed: {error}")
-            }
-            Some(Stop::Panic(payload)) => Some(payload),
-            None => released.err(),
-        };
-        // During unwinding from another panic, a second panic would abort the process, so the hook's panic ends here; every byte has been freed either way.
-        if let Some(payload) = payload {
+        // All memory is freed before the release hook runs. During unwinding from another panic, a second panic would abort the process, so the hook's panic ends here.
+        if let Err(payload) = released {
             if !std::thread::panicking() {
                 panic::resume_unwind(payload);
             }
@@ -227,10 +192,13 @@ fn compile_into(
     flags: CompileFlags,
     collation: RegexCollation,
     resources: &mut dyn RegexResources,
-) -> Result<NonNull<RegexT>, Stop> {
+    depth_limit: usize,
+) -> Attempt<Result<NonNull<RegexT>, Stop>> {
     // SAFETY: the context is initialized and owned by the caller.
-    let buffer = unsafe { MemoryContext::allocate(context.as_ptr(), resources, bytes) }
-        .ok_or(Stop::Error(RegexError::OutOfMemory))?;
+    let Some(buffer) = (unsafe { MemoryContext::allocate(context.as_ptr(), resources, bytes) })
+    else {
+        return Attempt::Finished(Err(Stop::Error(RegexError::OutOfMemory)));
+    };
     let code_points = memory::code_point_slots(buffer);
     let mut length = 0;
     for character in pattern.chars() {
@@ -240,7 +208,7 @@ fn compile_into(
     }
     let mut thrown = Thrown::default();
     let mut result: *mut RegexT = ptr::null_mut();
-    let mut operation = Operation::new(context.as_ptr(), resources, true);
+    let mut operation = Operation::new(context.as_ptr(), resources, depth_limit);
     // SAFETY: the buffer holds `length` code points; `result` and `thrown` are valid for writes.
     let code = unsafe {
         ffi::uqa_pg_regex_compile(
@@ -254,23 +222,85 @@ fn compile_into(
         )
     };
     if code == ffi::THROWN {
-        // The pattern buffer and every engine chunk are freed with the context.
-        return Err(stopped(thrown, operation.take_panic()));
+        let stopped = stopped(thrown, operation.take_panic());
+        if let Attempt::Restart = stopped {
+            // SAFETY: the C call has returned, so nothing refers to the abandoned attempt's chunks any more.
+            unsafe { context.reset(resources) };
+        }
+        // Otherwise the pattern buffer and every engine chunk are freed with the context.
+        return stopped.map(Err);
     }
     // SAFETY: the buffer is a live chunk of this context and the engine no longer refers to it.
     unsafe { MemoryContext::free(buffer, resources) };
     if code != REG_OKAY {
-        return Err(Stop::Error(RegexError::Engine(code)));
+        return Attempt::Finished(Err(Stop::Error(RegexError::Engine(code))));
     }
-    Ok(NonNull::new(result).expect("pg_regcomp success provides the compiled expression"))
+    Attempt::Finished(Ok(
+        NonNull::new(result).expect("pg_regcomp success provides the compiled expression")
+    ))
+}
+
+/// One attempt at `pg_regexec`, with working memory in a context of its own that is empty again when the attempt returns.
+fn execute(
+    expression: NonNull<RegexT>,
+    resources: &mut dyn RegexResources,
+    input: &[u32],
+    search_start: usize,
+    matches: &mut [MatchSpan],
+    depth_limit: usize,
+) -> Attempt<Result<c_int, Stop>> {
+    // pg_regexec rejects a NULL string even when it is empty.
+    static EMPTY: [u32; 1] = [0];
+    matches.fill(MatchSpan::UNSET);
+    let data = if input.is_empty() {
+        EMPTY.as_ptr()
+    } else {
+        input.as_ptr()
+    };
+    let pmatch = if matches.is_empty() {
+        ptr::null_mut()
+    } else {
+        matches.as_mut_ptr()
+    };
+    let mut context = MemoryContext::unlinked();
+    // SAFETY: the context stays at this address until it is freed below.
+    unsafe { MemoryContext::initialize(&raw mut context) };
+    let mut thrown = Thrown::default();
+    let mut operation = Operation::new(&raw mut context, resources, depth_limit);
+    // SAFETY: the expression is live, `data` holds `input.len()` code points and `pmatch` holds `matches.len()` slots for the duration of the call.
+    let code = unsafe {
+        ffi::uqa_pg_regex_execute(
+            operation.as_raw(),
+            expression.as_ptr(),
+            data,
+            input.len(),
+            search_start,
+            matches.len(),
+            pmatch,
+            &raw mut thrown,
+        )
+    };
+    let stopped = (code == ffi::THROWN).then(|| stopped(thrown, operation.take_panic()));
+    // SAFETY: the C call has returned, so nothing refers to the execution's chunks any more.
+    let leftover = unsafe { MemoryContext::free_all(&raw mut context) };
+    if leftover > 0 {
+        resources.release(leftover);
+    }
+    match stopped {
+        Some(stopped) => stopped.map(Err),
+        None => Attempt::Finished(Ok(code)),
+    }
 }
 
 /// Map a failure reported through the C error frame.
-fn stopped(thrown: Thrown, panic: Option<Box<dyn Any + Send + 'static>>) -> Stop {
+fn stopped(thrown: Thrown, panic: Option<Box<dyn Any + Send + 'static>>) -> Attempt<Stop> {
     let error = match thrown.kind {
         ffi::THROW_CALLBACK => {
-            return Stop::Panic(panic.expect("a callback failure records its panic"));
+            return Attempt::Finished(Stop::Panic(
+                panic.expect("a callback failure records its panic"),
+            ));
         }
+        ffi::THROW_STACK => return Attempt::Restart,
         ffi::THROW_CANCELED => RegexError::Cancelled,
         ffi::THROW_ALLOC_SIZE => RegexError::InvalidAllocationSize(thrown.first),
         ffi::THROW_ALLOC_PRODUCT => {
@@ -282,7 +312,7 @@ fn stopped(thrown: Thrown, panic: Option<Box<dyn Any + Send + 'static>>) -> Stop
         ),
         kind => unreachable!("the C shim reports only known failure kinds, not {kind}"),
     };
-    Stop::Error(error)
+    Attempt::Finished(Stop::Error(error))
 }
 
 /// The engine's offsets are C `long` values.

@@ -12,5 +12,7 @@ mod collations;
 mod oracle;
 #[path = "resources.rs"]
 mod resources;
+#[path = "stack.rs"]
+mod stack;
 #[path = "support.rs"]
 mod support;

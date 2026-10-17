@@ -12,6 +12,7 @@
 //! - [`Regex::exec`] runs `pg_regexec` on code points from a search start and fills [`MatchSpan`] slots; [`Regex::subexpression_count`] is `re_nsub`.
 //! - Failures are [`RegexError`] values: the engine's `REG_*` code with `pg_regerror`'s exact explanation, a cancellation, or an error `PostgreSQL` raises with its own SQLSTATE.
 //! - Every engine allocation is charged to the caller's [`RegexResources`] before it happens and released after it is freed. The same hooks answer the engine's interrupt and stack-depth checks. Dropping a [`Regex`] releases every reserved byte.
+//! - The engine recurses on the stack. Every operation may use [`MAX_STACK_DEPTH`], `PostgreSQL`'s default `max_stack_depth` of 2 MB, with [`STACK_DEPTH_SLOP`] to spare, on a separately allocated stack when the thread's own lacks that headroom, and fails with `REG_ETOOBIG` beyond it.
 //!
 //! Character classes, case-insensitive matching and word boundaries follow the collation's strategy: `PostgreSQL`'s ASCII table for `C`, `PostgreSQL`'s own Unicode 16 tables for the builtin provider, and ICU's definitions over ICU4X Unicode 16 data for ICU collations. The C shims keep all engine state per operation and per thread, so operations on different threads are independent. `UPSTREAM.md` lists the imported files and every local adaptation.
 //!
@@ -28,8 +29,9 @@
 //!     fn cancel_requested(&mut self) -> bool {
 //!         false
 //!     }
-//!     fn stack_too_deep(&mut self, depth: usize) -> bool {
-//!         depth > 256 * 1024
+//!     fn stack_too_deep(&mut self, _depth: usize) -> bool {
+//!         // The engine stops at MAX_STACK_DEPTH by itself; a hook may only set a lower limit.
+//!         false
 //!     }
 //! }
 //!
@@ -53,6 +55,7 @@ mod operation;
 mod regex;
 mod resources;
 mod span;
+mod stack;
 
 pub use collation::{CollationCtype, CollationLocale, RegexCollation};
 pub use error::{ErrorMessage, RegexError};
@@ -66,3 +69,4 @@ pub use flags::{
 pub use regex::Regex;
 pub use resources::RegexResources;
 pub use span::MatchSpan;
+pub use stack::{MAX_STACK_DEPTH, STACK_DEPTH_SLOP};

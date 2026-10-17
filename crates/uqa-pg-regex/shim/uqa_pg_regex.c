@@ -12,7 +12,9 @@
  * error handler to reset the memory context of the failed operation.  This
  * file keeps that structure: each operation function establishes an error
  * frame with sigsetjmp before it enters the engine, and the failure paths
- * below siglongjmp to the innermost frame.  The frame belongs to C code called
+ * below siglongjmp to the innermost frame.  The same path abandons an
+ * operation whose stack cannot go deeper, which the Rust wrapper then runs
+ * again on a larger stack.  The frame belongs to C code called
  * directly by Rust, and the Rust callbacks return before any longjmp starts,
  * so no Rust frame lies between a longjmp and its frame.  Frames form a
  * per-thread stack, so a resource hook may itself run another operation, and
@@ -197,26 +199,6 @@ uqa_pg_regex_execute(void *operation, regex_t *re, const pg_wchar *data,
 	return code;
 }
 
-/*
- * uqa_pg_regex_release - free a compiled expression and its regex_t
- */
-int
-uqa_pg_regex_release(void *operation, regex_t *re, UQAPgRegexThrown *thrown)
-{
-	UQAPgRegexFrame frame;
-
-	enter_frame(&frame, operation, thrown);
-	if (uqa_pg_regex_sigsetjmp(frame.env) != 0)
-	{
-		leave_frame(&frame);
-		return UQA_PG_REGEX_THROWN;
-	}
-	pg_regfree(re);
-	pfree(re);
-	leave_frame(&frame);
-	return REG_OKAY;
-}
-
 size_t
 uqa_pg_regex_subexpressions(const regex_t *re)
 {
@@ -334,7 +316,9 @@ uqa_pg_regex_check_for_interrupts(void)
 
 /*
  * stack_is_too_deep(): measure the stack used since the operation entered the
- * engine and let the caller decide.  The engine then fails with REG_ETOOBIG.
+ * engine and let the Rust wrapper decide.  A refusal makes the engine fail
+ * with REG_ETOOBIG; a stack that cannot go deeper with room to spare abandons
+ * the operation, which the wrapper runs again on a larger stack.
  */
 bool
 stack_is_too_deep(void)
@@ -349,6 +333,8 @@ stack_is_too_deep(void)
 		here - frame->stack_base;
 	status = uqa_pg_regex_callback_stack(frame->operation, depth);
 	check_callback(status);
+	if (status == UQA_PG_REGEX_CALLBACK_RESTART)
+		throw_failure(UQA_PG_REGEX_THROW_STACK, depth, 0);
 	return status == UQA_PG_REGEX_CALLBACK_REFUSED;
 }
 

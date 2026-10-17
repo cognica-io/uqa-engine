@@ -252,6 +252,17 @@ impl OwnedContext {
         Self::LAYOUT.size() + unsafe { MemoryContext::bytes(self.context.as_ptr()) }
     }
 
+    /// Free every chunk but keep the context, as `PostgreSQL` resets a memory context, then release their reservations.
+    ///
+    /// # Safety
+    /// No pointer into the context's chunks may be used afterwards.
+    pub(crate) unsafe fn reset(&self, resources: &mut dyn RegexResources) {
+        let chunks = MemoryContext::free_all(self.context.as_ptr());
+        if chunks > 0 {
+            resources.release(chunks);
+        }
+    }
+
     /// Free every remaining chunk and the context itself, then release their reservations. All memory is freed before the hook runs, so a panicking hook cannot leak it.
     pub(crate) fn release(self, resources: &mut dyn RegexResources) {
         // SAFETY: this owner is consumed, so no pointer into the context or its chunks remains in use.
