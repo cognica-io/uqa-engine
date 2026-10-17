@@ -43,12 +43,12 @@ sh install-usql.sh --bin-dir "$HOME/bin" --archive-dir ./downloads
 ```
 
 ```powershell
-pwsh -File .\install-usql.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install-usql.ps1
 # Optional destination or previously downloaded archive and checksum:
-pwsh -File .\install-usql.ps1 -BinDir "$HOME\bin" -ArchiveDirectory .\downloads
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install-usql.ps1 -BinDir "$HOME\bin" -ArchiveDirectory .\downloads
 ```
 
-The defaults are `$HOME/.local/bin` on Linux/macOS and `%LOCALAPPDATA%\UQA\bin` on Windows. Add the chosen directory to `PATH` if the installer reports that it is missing. The archive also contains license notices and a manifest recording the source commit, target and enabled features. Installers verify downloads before replacing an existing executable; failed downloads or checksums preserve the previous installation.
+The defaults are `$HOME/.local/bin` on Linux/macOS and `%LOCALAPPDATA%\UQA\bin` on Windows. Add the chosen directory to `PATH` if the installer reports that it is missing. The Windows example sets the execution policy only for that PowerShell process, leaving persistent policy unchanged. The archive also contains license notices and a manifest recording the source commit, target and enabled features. Installers verify downloads before replacing an existing executable; failed downloads or checksums preserve the previous installation.
 
 ## Invocation
 
