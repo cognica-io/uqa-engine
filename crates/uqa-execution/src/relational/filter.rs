@@ -7,9 +7,9 @@
 //! Pipelined WHERE filtering.
 
 use super::{
-    truthy, BackwardScanSupport, Batch, DefaultExpressionEvaluator, ExecResult, PhysicalOperator,
-    PhysicalScanDirection, RowSchema, SQLParam, ScalarExpr, SharedExpressionEvaluator,
-    SharedRowPredicate,
+    truthy, BackwardScanSupport, Batch, DefaultExpressionEvaluator, ExecError, ExecResult,
+    PhysicalOperator, PhysicalScanDirection, RowSchema, SQLParam, ScalarExpr,
+    SharedExpressionEvaluator, SharedRowPredicate,
 };
 
 /// Pipelined `WHERE` operator. Drops rows whose predicate evaluates
@@ -26,6 +26,8 @@ enum FilterCondition<'a> {
         evaluator: SharedExpressionEvaluator<'a>,
     },
     Row(SharedRowPredicate<'a>),
+    /// A predicate that names a column its input does not produce. Reading that column would yield NULL for every row, so the first input row reports the defect instead.
+    Unresolved(String),
 }
 
 impl Filter<'static> {
@@ -68,6 +70,16 @@ impl<'a> Filter<'a> {
         }
     }
 
+    /// A filter whose predicate reads `column`, which `child` does not produce. Statement validation reports a user's unknown column before execution, so a row reaching this filter exposes a predicate that was placed on the wrong input; it fails with an internal error instead of reading NULL.
+    pub fn unresolved(child: Box<dyn PhysicalOperator + 'a>, column: String) -> Self {
+        let schema = child.row_schema().clone();
+        Self {
+            child,
+            condition: FilterCondition::Unresolved(column),
+            schema,
+        }
+    }
+
     fn filter_batch(&self, batch: Batch) -> ExecResult<Option<Batch>> {
         let mut kept = Vec::with_capacity(batch.rows.len());
         for row in batch.rows {
@@ -82,6 +94,11 @@ impl<'a> Filter<'a> {
                     predicate.calls(),
                 )?),
                 FilterCondition::Row(predicate) => predicate.keep_physical(&batch.schema, &row)?,
+                FilterCondition::Unresolved(column) => {
+                    return Err(ExecError::SQL(uqa_sql::SQLError::Internal(format!(
+                        "a predicate placed on its input reads {column}, which the input does not produce"
+                    ))));
+                }
             };
             if keep {
                 kept.push(row);

@@ -7,8 +7,8 @@
 //! Physical assembly for table-function sources and `ROWS FROM` groups.
 
 use super::{
-    attach_qualifier_filter, qualify_source_operator_with_columns, resolve_user_table_function,
-    table_function_column_types, validate_table_function_alias_count,
+    attach_closed_qualifier_filter, qualify_source_operator_with_columns,
+    resolve_user_table_function, table_function_column_types, validate_table_function_alias_count,
     validate_table_function_column_definition, ColumnPrune, CteScope, PhysicalOperator,
     QualifierFilters, RowsFromOperator, SQLError, SQLParam, SourceContext, SourcePlan,
     TableFunctionCall, TableFunctionTypeRequest,
@@ -143,7 +143,7 @@ pub(super) fn build_function_group_source_operator<'a, S: Clone + Send + Sync + 
         column_aliases,
         ctes.lock_identities.emit,
     );
-    Ok(attach_qualifier_filter(
+    Ok(attach_closed_qualifier_filter(
         operator, qualifier, filters, context, params, ctes,
     ))
 }
@@ -230,7 +230,7 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
         &[],
         ctes.lock_identities.emit,
     );
-    Ok(attach_qualifier_filter(
+    Ok(attach_closed_qualifier_filter(
         operator, qualifier, filters, context, params, ctes,
     ))
 }
