@@ -131,7 +131,7 @@ def install_binstall(tool: str, target: str, directory: pathlib.Path, destinatio
         def handle(self) -> None:
             try:
                 super().handle()
-            except (BrokenPipeError, ConnectionResetError):
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 # Availability probes may close without downloading the body.
                 pass
 
