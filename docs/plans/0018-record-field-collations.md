@@ -1,6 +1,6 @@
 # Record field collation preservation
 
-This unit fixes [#958](https://github.com/cognica-io/uqa-engine/issues/958) while original #638 record 65 continues after [PR #957](https://github.com/cognica-io/uqa-engine/pull/957). An anonymous ROW currently loses its fields' selected collations when it becomes a shared value. The reproduced SQL test retains text OID 25 but loses collation OIDs 950 and 963. This unit preserves that metadata; complete selected comparison invocation remains original record 65 work.
+This unit fixes [#958](https://github.com/cognica-io/uqa-engine/issues/958) while original #638 record 65 continues after verified and merged [PR #957](https://github.com/cognica-io/uqa-engine/pull/957). An anonymous ROW currently loses its fields' selected collations when it becomes a shared value. The reproduced SQL test retains text OID 25 but loses collation OIDs 950 and 963. This unit preserves that metadata; complete selected comparison invocation remains original record 65 work.
 
 ## Owners and representation
 
