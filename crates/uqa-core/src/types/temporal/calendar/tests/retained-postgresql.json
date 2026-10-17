@@ -1,0 +1,106 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE TYPE retained_date AS (value integer)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "PREPARE retained_date_value AS SELECT '(-2147483647)'::retained_date",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "EXECUTE retained_date_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "retained_date"
+          ],
+          "type_oids": [
+            38503
+          ],
+          "rows": [
+            [
+              "(-2147483647)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TYPE retained_date ALTER ATTRIBUTE value TYPE date",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "EXECUTE retained_date_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "retained_date"
+          ],
+          "type_oids": [
+            38503
+          ],
+          "rows": [
+            [
+              "(5881610-07-13)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ],
+  "provenance": {
+    "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "scope": "Same-width retained integer field read as date after ALTER TYPE; all reads remain within the owned tuple",
+    "reference_sha256": "cae4543359652e9194caf51a9ecf62c8da43488a56bbe741c3fc955783c03d07"
+  },
+  "observation": {
+    "physical_date_days": -2147483647,
+    "unix_days": -2147472690,
+    "output": "5881610-07-13"
+  }
+}

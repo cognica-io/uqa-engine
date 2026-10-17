@@ -12319,6 +12319,48 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_date_output_matches_postgresql_after_same_width_descriptor_change",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/temporal/calendar/tests.rs",
+      "capability": "Retained date output",
+      "workload": "Independent PostgreSQL same-width composite reinterpretation, admitted date round trips and zero/adequate output allowances.",
+      "invariant": "Retained physical dates preserve unsigned Julian output; valid DATE input/output, provider values and production reservations remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "physical_date_output_preserves_the_admitted_gregorian_calendar",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/temporal/calendar/tests.rs",
+      "capability": "Retained date output",
+      "workload": "Independent PostgreSQL same-width composite reinterpretation, admitted date round trips and zero/adequate output allowances.",
+      "invariant": "Retained physical dates preserve unsigned Julian output; valid DATE input/output, provider values and production reservations remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "retained_date_output_matches_postgresql_after_type_change",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/sql_composites/type_changes.rs",
+      "capability": "Retained date output",
+      "workload": "Independent PostgreSQL same-width composite reinterpretation, admitted date round trips and zero/adequate output allowances.",
+      "invariant": "Retained physical dates preserve unsigned Julian output; valid DATE input/output, provider values and production reservations remain unchanged.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }
