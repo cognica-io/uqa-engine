@@ -17,7 +17,7 @@ $Target = switch ($Architecture) {
     'ARM64' { 'aarch64-pc-windows-msvc' }
     default { throw "Unsupported architecture: $Architecture" }
 }
-$Asset = "usql-$Version-$Target.zip"
+$Asset = "uqa-cli-$Version-$Target.zip"
 $TempDir = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
 $Staged = $null
 New-Item -ItemType Directory -Path $TempDir | Out-Null

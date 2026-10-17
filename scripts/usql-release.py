@@ -6,15 +6,19 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
+import http.server
 import importlib.util
 import io
 import json
+import os
 import pathlib
 import re
 import subprocess
 import tarfile
 import tempfile
+import threading
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -44,8 +48,9 @@ def executable(target: str) -> str:
 def asset_name(target: str) -> str:
     if target not in TARGETS:
         raise ValueError(f"unsupported release target: {target}")
-    suffix = ".zip" if "windows" in target else ".tar.gz"
-    return f"usql-{version()}-{target}{suffix}"
+    suffix = ".zip" if "windows" in target else ".tgz"
+    # Match cargo-binstall's crate/version/target discovery convention.
+    return f"uqa-cli-{version()}-{target}{suffix}"
 
 
 def checksum(path: pathlib.Path) -> str:
@@ -120,7 +125,41 @@ def verify(target: str, directory: pathlib.Path) -> None:
     LICENSES.check_archive(archive, LICENSES.canonical_payloads(), require_nori=True, require_kuromoji=True)
 
 
-def smoke(target: str, directory: pathlib.Path) -> None:
+def install_binstall(tool: str, target: str, directory: pathlib.Path, destination: pathlib.Path) -> None:
+    """Exercise the release download/extraction before its public URL exists."""
+    class DownloadHandler(http.server.SimpleHTTPRequestHandler):
+        def handle(self) -> None:
+            try:
+                super().handle()
+            except (BrokenPipeError, ConnectionResetError):
+                # Availability probes may close without downloading the body.
+                pass
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    handler = functools.partial(DownloadHandler, directory=str(directory))
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            # Only the transport origin is replaced. Binstall selects the archive
+            # format and binary path, with no source or third-party fallback.
+            url = f"http://127.0.0.1:{server.server_port}/{{ name }}-{{ version }}-{{ target }}{{ archive-suffix }}"
+            env = {key: value for key, value in os.environ.items() if key not in ("GH_TOKEN", "GITHUB_TOKEN")}
+            subprocess.run([tool, "--manifest-path", str(ROOT / "crates/uqa-cli"),
+                            "--targets", target, "--pkg-url", url, "--allow-insecure-http",
+                            "--strategies", "crate-meta-data", "--no-discover-github-token",
+                            "--root", str(destination.parent / "cargo-root"),
+                            "--settings", str(destination.parent / "binstall.toml"),
+                            "--no-confirm", "--no-track", "--install-path", str(destination), "uqa-cli"],
+                           env=env, check=True)
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+def smoke(target: str, directory: pathlib.Path, binstall: str | None = None) -> None:
     verify(target, directory)
     directory = directory.resolve()
     with tempfile.TemporaryDirectory(prefix="usql-installed-") as temporary:
@@ -134,6 +173,11 @@ def smoke(target: str, directory: pathlib.Path) -> None:
                        "--bin-dir", str(destination)]
         subprocess.run(command, check=True)
         binary = destination / executable(target)
+        if binstall:
+            cargo_destination = work / "cargo bin"
+            install_binstall(binstall, target, directory, cargo_destination)
+            if (cargo_destination / executable(target)).read_bytes() != binary.read_bytes():
+                raise ValueError("cargo-binstall did not install the exact release executable")
 
         def query(sql: str) -> str:
             result = subprocess.run([str(binary), "--db", str(work / "smoke.uqa"), "--copy-text", "-c", sql],
@@ -170,6 +214,7 @@ def main() -> None:
     parser.add_argument("--target", choices=TARGETS)
     parser.add_argument("--directory", type=pathlib.Path, required=True)
     parser.add_argument("--binary", type=pathlib.Path)
+    parser.add_argument("--binstall", help="cargo-binstall executable to verify during smoke")
     args = parser.parse_args()
     if args.command != "verify" and not args.target:
         parser.error("package and smoke require --target")
@@ -177,7 +222,7 @@ def main() -> None:
         binary = args.binary or ROOT / "target" / args.target / "release-stripped" / executable(args.target)
         print(package(args.target, binary, args.directory))
     elif args.command == "smoke":
-        smoke(args.target, args.directory)
+        smoke(args.target, args.directory, args.binstall)
     else:
         for target in (args.target,) if args.target else TARGETS:
             verify(target, args.directory)

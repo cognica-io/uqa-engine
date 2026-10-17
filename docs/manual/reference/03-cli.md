@@ -23,7 +23,16 @@ Current source builds include the memory foreign-data wrapper. Add `--features a
 
 ## Standalone release installation (development source)
 
-Starting with the next release, GitHub releases attach `usql-<version>-<target>.tar.gz` for Linux and macOS, `.zip` archives for Windows, matching `.sha256` files, and `install-usql.sh` / `install-usql.ps1`. Each system has x86_64 and ARM64 builds on native runners. The standalone executable includes Nori, Kuromoji, Arrow and DuckDB; no Python or Rust installation is needed. Linux builds target GNU libc on Ubuntu 24.04, so use Ubuntu 24.04 or a compatible newer distribution; these are not musl/Alpine binaries.
+Starting with the next release, GitHub releases attach `uqa-cli-<version>-<target>.tgz` for Linux and macOS, `.zip` archives for Windows, matching `.sha256` files, and `install-usql.sh` / `install-usql.ps1`. Each system has x86_64 and ARM64 builds on native runners. The standalone executable includes Nori, Kuromoji, Arrow and DuckDB; no Python or Rust installation is needed. Linux builds target GNU libc on Ubuntu 24.04, so use Ubuntu 24.04 or a compatible newer distribution; these are not musl/Alpine binaries.
+
+With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall#installation) installed, Cargo users can download the same official binary without compiling UQA:
+
+```sh
+cargo binstall uqa-cli --strategies crate-meta-data
+usql
+```
+
+The installed command is `usql`, while the crate name is `uqa-cli`. `--strategies crate-meta-data` selects the project's release artifacts and fails if no matching binary exists; it cannot fall back to compilation or third-party builds. To select a release, replace `uqa-cli` with `uqa-cli@<version>`. The existing 0.5.4 and earlier releases do not have these standalone assets. Cargo's built-in `cargo install` still compiles source. Use the attached installer below when you want it to verify the accompanying SHA-256 file; cargo-binstall downloads through HTTPS but does not consume these checksum sidecars.
 
 Download the installer from the desired [GitHub release](https://github.com/cognica-io/uqa-engine/releases), then run it. Each attached installer is pinned to that release version and downloads the matching architecture's archive over HTTPS, verifies its SHA-256 checksum, and installs into a user directory without changing shell configuration:
 

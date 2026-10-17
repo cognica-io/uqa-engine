@@ -17,9 +17,12 @@ runs:
     - name: Package the executable, licenses and pinned installers
       shell: bash
       run: python scripts/usql-release.py package --target '${{ inputs.target }}' --directory dist/usql
+    - uses: cargo-bins/cargo-binstall@3be4ad2b146f3302f92e5956c54fedbb6ae8cccc # v1.25.3
+      with:
+        version: 1.25.3
     - name: Install and exercise the exact release archive
       shell: bash
-      run: python scripts/usql-release.py smoke --target '${{ inputs.target }}' --directory dist/usql
+      run: python scripts/usql-release.py smoke --target '${{ inputs.target }}' --directory dist/usql --binstall cargo-binstall
     - uses: actions/upload-artifact@v4
       with:
         name: usql-${{ inputs.target }}
