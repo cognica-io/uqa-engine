@@ -87,12 +87,19 @@ pub fn routine_signature_label(name: &str, types: &[String]) -> String {
     format!("{name}({})", display_types.join(", "))
 }
 
-/// `func_signature_string`: the routine name as the command wrote it and each argument type as `format_type_be` spells it.
+/// `NameListToString` joins semantic name components for diagnostics without changing the quoted name used for lookup.
+pub fn routine_name_display(name: &str) -> String {
+    crate::compiler::parse_regobject_name(name)
+        .map_or_else(|| name.to_owned(), |parts| parts.join("."))
+}
+
+/// `func_signature_string`: semantic routine-name components joined as `NameListToString`, and argument types as `format_type_be` spells them. Diagnostic spelling never replaces the quoted name used for lookup.
 pub fn routine_signature_display(
     catalog: &dyn names::RoutineNameCatalog,
     name: &str,
     types: &[String],
 ) -> String {
+    let name = routine_name_display(name);
     let types = types
         .iter()
         .map(|type_name| catalog.routine_type_display(type_name))
@@ -110,6 +117,7 @@ pub fn wrong_routine_kind_error(signature: &str, expected_kind: &str) -> SQLErro
 
 /// `LookupFuncWithArgs`: a name without an argument list selects more than one routine of the command's kind.
 pub fn ambiguous_routine_error(kind: &str, name: &str) -> SQLError {
+    let name = routine_name_display(name);
     SQLError::Diagnostic {
         sqlstate: "42725".into(),
         message: format!("{kind} name \"{name}\" is not unique"),

@@ -1,0 +1,363 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT int4multirange(VARIADIC ARRAY['[1,4)'::int4range, NULL])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int4multirange(VARIADIC ARRAY[['[1,4)'::int4range]])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "21000",
+        "message": "multiranges cannot be constructed from multidimensional arrays",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int4multirange(NULL, '[1,4)'::int4range)::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int8multirange(VARIADIC ARRAY['[1,4)'::int8range, NULL])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int8multirange(VARIADIC ARRAY[['[1,4)'::int8range]])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "21000",
+        "message": "multiranges cannot be constructed from multidimensional arrays",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int8multirange(NULL, '[1,4)'::int8range)::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT nummultirange(VARIADIC ARRAY['[1,4)'::numrange, NULL])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT nummultirange(VARIADIC ARRAY[['[1,4)'::numrange]])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "21000",
+        "message": "multiranges cannot be constructed from multidimensional arrays",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT nummultirange(NULL, '[1,4)'::numrange)::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT datemultirange(VARIADIC ARRAY['[2000-01-01,2000-01-04)'::daterange, NULL])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT datemultirange(VARIADIC ARRAY[['[2000-01-01,2000-01-04)'::daterange]])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "21000",
+        "message": "multiranges cannot be constructed from multidimensional arrays",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT datemultirange(NULL, '[2000-01-01,2000-01-04)'::daterange)::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tsmultirange(VARIADIC ARRAY['[2000-01-01,2000-01-04)'::tsrange, NULL])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tsmultirange(VARIADIC ARRAY[['[2000-01-01,2000-01-04)'::tsrange]])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "21000",
+        "message": "multiranges cannot be constructed from multidimensional arrays",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tsmultirange(NULL, '[2000-01-01,2000-01-04)'::tsrange)::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tstzmultirange(VARIADIC ARRAY['[2000-01-01,2000-01-04)'::tstzrange, NULL])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tstzmultirange(VARIADIC ARRAY[['[2000-01-01,2000-01-04)'::tstzrange]])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "21000",
+        "message": "multiranges cannot be constructed from multidimensional arrays",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT tstzmultirange(NULL, '[2000-01-01,2000-01-04)'::tstzrange)::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int4multirange(NULL)::text, int4multirange(VARIADIC NULL::int4range[])::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "int4multirange",
+            "int4multirange"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int4multirange()::text, int4multirange(VARIADIC ARRAY[]::int4range[])::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "int4multirange",
+            "int4multirange"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{}",
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int4multirange(VARIADIC ARRAY['[5,8)'::int4range,'[1,6)'::int4range])::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "int4multirange"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[1,8)}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int4multirange(VARIADIC ARRAY[NULL::int4range])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int4multirange(VARIADIC ARRAY[[NULL::int4range]])::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "21000",
+        "message": "multiranges cannot be constructed from multidimensional arrays",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int4multirange('[1,4)'::int4range,NULL)::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT int4multirange(VARIADIC '[0:1]={\"[5,8)\",\"[1,6)\"}'::int4range[])::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "int4multirange"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[1,8)}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ],
+  "provenance": {
+    "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "postgresql_source_revision": "f5cc81719e6da4cbdb1f797c48b693e91018153a",
+    "source_file": "src/backend/utils/adt/multirangetypes.c",
+    "scope": "Builtin multirange constructors: NULL elements, multiple arguments, array rank, empty and nondefault lower-bound arrays.",
+    "capture_sha256": "14b8c5327e85ec18c27f5c1bead16d2729fb88381c49d26e2738fdb1afe22315"
+  },
+  "postgresql": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+}

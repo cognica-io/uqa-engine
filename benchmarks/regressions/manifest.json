@@ -12400,6 +12400,61 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "multirange_constructor_input_errors_preserve_postgresql_and_production_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/scalar_range/tests/constructor_inputs.rs",
+      "capability": "Multirange constructor inputs",
+      "workload": "All six builtin families with NULL members, multidimensional arrays, strict NULL inputs, empty and nondefault lower-bound arrays.",
+      "invariant": "Independent PostgreSQL values and exact errors match; rejection preserves admitted inputs and releases partial values under the original memory/cancellation owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "multirange_constructor_inputs_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_input.rs",
+      "capability": "Multirange constructor inputs",
+      "workload": "All six builtin families with NULL members, multidimensional arrays, strict NULL inputs, empty and nondefault lower-bound arrays.",
+      "invariant": "Independent PostgreSQL values and exact errors match; rejection preserves admitted inputs and releases partial values under the original memory/cancellation owners.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_signature_diagnostics_match_postgresql_identifiers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/names/tests.rs",
+      "capability": "Routine catalog identity diagnostics",
+      "workload": "Independent PostgreSQL DROP FUNCTION diagnostics for quoted identifiers containing a space or a dot.",
+      "invariant": "Diagnostic display removes SQL lookup quoting without changing the exact function identity or argument signature.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "quoted_routine_lookup_diagnostics_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/sql_routine_lookup.rs",
+      "capability": "Routine catalog identity diagnostics",
+      "workload": "Thirty-two independent PostgreSQL observations cover quoted routine lookup, DROP/ALTER/GRANT errors, ambiguity, IF EXISTS notices and quoted versus qualified successful selection.",
+      "invariant": "The public adapter preserves exact SQLSTATE, message, DETAIL, HINT and notices while the original quoted identity still selects the intended routine.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
