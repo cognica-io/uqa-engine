@@ -76,6 +76,38 @@ impl Engine {
 }
 
 impl EnumLabelCatalog for Engine {
+    fn compare_range_bounds(
+        &self,
+        range_oid: u32,
+        left: &uqa_core::Value,
+        right: &uqa_core::Value,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<std::cmp::Ordering, SQLError> {
+        uqa_execution::catalog::range_type::support::compare_bounds(
+            &self.catalog_read_view(),
+            self,
+            Some(&self.session.range_comparison_states),
+            range_oid,
+            (left, right),
+            control,
+        )
+    }
+
+    fn range_bound_equality_key(
+        &self,
+        range_oid: u32,
+        value: &uqa_core::Value,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Vec<u8>>, SQLError> {
+        uqa_execution::catalog::range_type::support::bound_equality_key(
+            &self.catalog_read_view(),
+            self,
+            range_oid,
+            value,
+            control,
+        )
+    }
+
     fn value_range_type(
         &self,
         oid: u32,

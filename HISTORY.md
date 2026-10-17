@@ -24,6 +24,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Interpret physical domain values through their base type when invoking selected B-tree support, preserving enum comparison state and avoiding invalid-Datum errors.
+
 - Use selected record-field collations during comparison, including arrays and physical records, and preserve PostgreSQL ordering and delayed indeterminate-collation errors. Selected B-tree pattern support retains byte ordering and fixed-character padding semantics.
 
 - Preserve selected field collations when constructing and retaining anonymous rows, including JSON and spill round trips, while continuing to read older row descriptors.

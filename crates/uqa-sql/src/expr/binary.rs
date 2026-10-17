@@ -12,7 +12,10 @@ use uqa_core::memory::{Produced, ProductionControl};
 
 mod btree;
 mod comparison;
-pub use btree::{compare_btree_inputs_with_catalog_and_control, with_btree_input, BTreeInput};
+pub use btree::{
+    compare_btree_inputs_with_catalog_and_control, compare_btree_inputs_with_invocation_state,
+    with_btree_input, BTreeInput,
+};
 mod selected;
 pub use selected::{
     compare_selected_grouping_values_with_catalog, compare_selected_values_with_catalog,
