@@ -23,10 +23,12 @@ use uqa_core::Value;
 /// Transform a parameter default and check its assignment to the declared type, as
 /// `interpret_function_parameter_list` does before visiting the next parameter.
 /// Only unknown constants are read here; calls and domain checks remain delayed.
+/// The declaration supplies its shell identity before replacing defined type names with catalog identities.
 pub(super) fn analyze_parameter_default(
     context: &RoutineCompilationContext<'_>,
     expression: &mut Expr,
     type_name: &str,
+    shell_oid: Option<u32>,
 ) -> Result<Option<RoutineDefaultType>, SQLError> {
     let aggregate = |name: &str| context.catalog.has_registered_aggregate_function(name);
     let original = ExpressionPlan::lower_with(expression.clone(), &aggregate);
@@ -39,7 +41,7 @@ pub(super) fn analyze_parameter_default(
         &mut bound,
         &binding.context(),
     )?;
-    if let Some(oid) = context.types.shell_type_oid(type_name)? {
+    if let Some(oid) = shell_oid {
         return Err(match source.as_ref() {
             None => error("0A000", "cannot accept a value of a shell type"),
             Some(source) => error(

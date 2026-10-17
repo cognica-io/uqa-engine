@@ -7,8 +7,11 @@
 //! Undefined type notices precede language validation without creating a callable value type.
 
 use crate::{
-    ast::{CreateFunction, FunctionParamMode, FunctionReturns},
-    routines::compilation::RoutineCompilationContext,
+    ast::{CreateFunction, FunctionParamMode, FunctionReturns, RoutineColumnTypeReference},
+    routines::{
+        compilation::{RoutineCompilationContext, RoutineParserCatalog},
+        declaration::RoutineTypeCatalog,
+    },
     SQLError, SQLNotice,
 };
 
@@ -26,9 +29,17 @@ impl RoutineShellTypes {
         context: &RoutineCompilationContext<'_>,
         language: &str,
         name: &str,
+        reference: Option<&RoutineColumnTypeReference>,
         mode: FunctionParamMode,
-    ) -> Result<bool, SQLError> {
-        let oid = resolve(context, language, name, false)?;
+    ) -> Result<Option<u32>, SQLError> {
+        let oid = resolve(
+            context.types,
+            context.parsers,
+            language,
+            name,
+            reference,
+            false,
+        )?;
         if self.argument.is_none() {
             self.argument = oid;
         }
@@ -39,7 +50,7 @@ impl RoutineShellTypes {
             self.outputs += 1;
             self.output = oid;
         }
-        Ok(oid.is_some())
+        Ok(oid)
     }
 
     pub(super) fn result(
@@ -47,8 +58,16 @@ impl RoutineShellTypes {
         context: &RoutineCompilationContext<'_>,
         language: &str,
         name: &str,
+        reference: Option<&RoutineColumnTypeReference>,
     ) -> Result<bool, SQLError> {
-        self.result = resolve(context, language, name, true)?;
+        self.result = resolve(
+            context.types,
+            context.parsers,
+            language,
+            name,
+            reference,
+            true,
+        )?;
         Ok(self.result.is_some())
     }
 
@@ -93,12 +112,18 @@ impl RoutineShellTypes {
 }
 
 fn resolve(
-    context: &RoutineCompilationContext<'_>,
+    types: &dyn RoutineTypeCatalog,
+    parsers: &dyn RoutineParserCatalog,
     language: &str,
     name: &str,
+    reference: Option<&RoutineColumnTypeReference>,
     result: bool,
 ) -> Result<Option<u32>, SQLError> {
-    let Some(oid) = context.types.shell_type_oid(name)? else {
+    // A column already has a value type; its structured reference is resolved by declaration binding.
+    if reference.is_some() {
+        return Ok(None);
+    }
+    let Some(oid) = types.shell_type_oid(name)? else {
         return Ok(None);
     };
     let parsed = crate::parse_regtype_name(name)?
@@ -111,10 +136,13 @@ fn resolve(
         )));
     }
     let position = if result { "return" } else { "argument" };
-    context.parsers.parser_notice(
+    parsers.parser_notice(
         SQLNotice::notice(format!("{position} type {written} is only a shell"))
             .with_sqlstate("42809"),
     );
-    context.types.require_type_oid_usage(oid)?;
+    types.require_type_oid_usage(oid)?;
     Ok(Some(oid))
 }
+
+#[cfg(test)]
+mod tests;
