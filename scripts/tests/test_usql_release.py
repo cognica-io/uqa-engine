@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import pathlib
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -106,25 +107,26 @@ class CLIReleaseTest(unittest.TestCase):
                 self.assertEqual(list(bin_dir.iterdir()), [installed])
 
     @unittest.skipUnless(os.name == "nt", "Windows installer")
-    def test_windows_installer_selects_both_targets_and_preserves_install_on_bad_checksum(self):
-        for architecture, target in (("AMD64", CLI.TARGETS[4]), ("ARM64", CLI.TARGETS[5])):
-            with self.subTest(target=target), tempfile.TemporaryDirectory() as temporary:
-                work = pathlib.Path(temporary)
-                archive_dir = work / "downloaded assets"
-                shutil.copytree(self.assets, archive_dir)
-                bin_dir = work / "installed bin"
-                env = {**os.environ, "PROCESSOR_ARCHITEW6432": architecture}
-                command = ["pwsh", "-NoProfile", "-File", str(archive_dir / "install-usql.ps1"),
-                           "-ArchiveDirectory", str(archive_dir), "-BinDir", str(bin_dir)]
-                subprocess.run(command, env=env, check=True, capture_output=True)
-                installed = bin_dir / "usql.exe"
-                self.assertEqual(installed.read_bytes(), self.payload)
-                installed.write_bytes(b"previous working installation")
-                (archive_dir / (CLI.asset_name(target) + ".sha256")).write_text("invalid")
-                failed = subprocess.run(command, env=env, capture_output=True)
-                self.assertNotEqual(failed.returncode, 0)
-                self.assertEqual(installed.read_bytes(), b"previous working installation")
-                self.assertEqual(list(bin_dir.iterdir()), [installed])
+    def test_native_windows_installer_preserves_install_on_bad_checksum(self):
+        # Both Windows architectures run this test natively. Windows may reset
+        # architecture environment variables when starting a child process.
+        target = {"amd64": CLI.TARGETS[4], "arm64": CLI.TARGETS[5]}[platform.machine().lower()]
+        with tempfile.TemporaryDirectory() as temporary:
+            work = pathlib.Path(temporary)
+            archive_dir = work / "downloaded assets"
+            shutil.copytree(self.assets, archive_dir)
+            bin_dir = work / "installed bin"
+            command = ["pwsh", "-NoProfile", "-File", str(archive_dir / "install-usql.ps1"),
+                       "-ArchiveDirectory", str(archive_dir), "-BinDir", str(bin_dir)]
+            subprocess.run(command, check=True, capture_output=True)
+            installed = bin_dir / "usql.exe"
+            self.assertEqual(installed.read_bytes(), self.payload)
+            installed.write_bytes(b"previous working installation")
+            (archive_dir / (CLI.asset_name(target) + ".sha256")).write_text("invalid")
+            failed = subprocess.run(command, capture_output=True)
+            self.assertNotEqual(failed.returncode, 0, failed.stdout.decode(errors="replace"))
+            self.assertEqual(installed.read_bytes(), b"previous working installation")
+            self.assertEqual(list(bin_dir.iterdir()), [installed])
 
     @unittest.skipIf(os.name == "nt", "POSIX download transport")
     def test_downloads_are_pinned_and_unsupported_platforms_do_not_install(self):

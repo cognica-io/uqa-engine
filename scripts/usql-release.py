@@ -137,7 +137,9 @@ def smoke(target: str, directory: pathlib.Path) -> None:
 
         def query(sql: str) -> str:
             result = subprocess.run([str(binary), "--db", str(work / "smoke.uqa"), "--copy-text", "-c", sql],
-                                    cwd=work, input="", encoding="utf-8", capture_output=True, check=True)
+                                    cwd=work, input="", encoding="utf-8", capture_output=True)
+            if result.returncode:
+                raise RuntimeError(f"installed CLI failed for {sql!r}: {result.stdout}{result.stderr}")
             return result.stdout.strip()
 
         if query("SELECT 1") != "1":
