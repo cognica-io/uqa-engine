@@ -23,9 +23,9 @@ use std::process::ExitCode;
 
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
-use rustyline::highlight::{CmdKind, Highlighter, MatchingBracketHighlighter};
+use rustyline::highlight::{CmdKind, Highlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
-use rustyline::validate::{MatchingBracketValidator, Validator};
+use rustyline::validate::Validator;
 use rustyline::{
     CompletionType, Config, Context, EditMode, Editor, Helper, Result as RustylineResult,
 };
@@ -84,14 +84,27 @@ impl<W: Write> Write for TrackedWriter<W> {
         }
     }
 }
+mod arguments;
 mod completion;
 mod diagnostics;
 mod display;
+mod highlight;
+mod interrupt;
+mod lexer;
 mod meta;
 mod migration_io;
 mod output;
+mod printing;
 mod repl;
+mod shell;
+mod shell_catalog;
+mod shell_commands;
+mod shell_copy;
+mod shell_history;
+mod shell_notifications;
+mod sql_help;
 mod statements;
+mod variables;
 
 use completion::{UsqlEditor, UsqlHelper};
 use display::{
@@ -99,13 +112,8 @@ use display::{
     print_backslash_help, print_columns, result_row, sequence_row, sql_type_name, u64_count_value,
     usize_count_value,
 };
-use migration_io::{
-    open_engine, open_engine_with_key, print_migration_report, print_migration_report_stdout,
-};
-use output::{
-    history_path, print_result, print_result_copy_text_with_engine,
-    print_result_expanded_with_engine, print_result_with_engine, value_to_display,
-};
+use migration_io::{open_engine, print_migration_report, print_migration_report_stdout};
+use output::{history_path, print_result, print_result_copy_text_with_engine, value_to_display};
 use repl::{PromptLineOutcome, Session};
 #[cfg(test)]
 use statements::contains_statement_terminator;
@@ -116,6 +124,10 @@ use statements::{
 
 /// Run `usql` with the current process arguments and standard streams.
 pub fn run_from_env() -> ExitCode {
+    if let Err(error) = interrupt::install() {
+        eprintln!("{error}");
+        return ExitCode::FAILURE;
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     run_from_args(&args)
 }
@@ -181,10 +193,20 @@ fn run_cli(args: CliArgs) -> ExitCode {
     session.copy_text = args.copy_text;
     let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut out = TrackedWriter::new(stdout.lock());
+    // Do not hold stdout's lock while waiting for input: signal-driven process exit
+    // flushes stdout from the interrupt thread.
+    let mut out = TrackedWriter::new(stdout);
 
     let exit = if let Some(command) = args.command {
-        match session.execute_command_text_with_history(&command, &mut out, false) {
+        let result = if command.trim_start().starts_with('\\') {
+            match session.process_line(&command, &mut String::new(), &mut out, false) {
+                PromptLineOutcome::Failed => Err("shell command failed".into()),
+                _ => Ok(()),
+            }
+        } else {
+            session.execute_command_text_with_history(&command, &mut out, false)
+        };
+        match result {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 let _ = writeln!(out, "ERROR: {err}");
@@ -192,6 +214,7 @@ fn run_cli(args: CliArgs) -> ExitCode {
             }
         }
     } else {
+        let generation = interrupt::generation();
         let mut scripts_succeeded = true;
         for script in &args.scripts {
             if let Err(err) = session.run_file(script, &mut out) {
@@ -199,11 +222,16 @@ fn run_cli(args: CliArgs) -> ExitCode {
                 scripts_succeeded = false;
                 break;
             }
+            if session.shell.quit {
+                break;
+            }
         }
 
-        if !scripts_succeeded {
+        if interrupt::generation() != generation {
+            ExitCode::from(3)
+        } else if !scripts_succeeded {
             ExitCode::FAILURE
-        } else if !args.scripts.is_empty() && !stdin.is_terminal() {
+        } else if session.shell.quit || (!args.scripts.is_empty() && !stdin.is_terminal()) {
             ExitCode::SUCCESS
         } else {
             session.run_repl(&mut out)
@@ -347,3 +375,6 @@ fn usage_text() -> &'static str {
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod shell_tests;

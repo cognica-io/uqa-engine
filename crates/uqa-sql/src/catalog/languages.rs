@@ -10,6 +10,10 @@ pub const INTERNAL_LANGUAGE: u32 = 12;
 pub const C_LANGUAGE: u32 = 13;
 pub const SQL_LANGUAGE: u32 = 14;
 pub const PLPGSQL_LANGUAGE: u32 = 13_647;
+pub const PLPGSQL_EXTENSION: u32 = 13_643;
+pub const PLPGSQL_CALL_HANDLER: u32 = 13_644;
+pub const PLPGSQL_INLINE_HANDLER: u32 = 13_645;
+pub const PLPGSQL_VALIDATOR: u32 = 13_646;
 
 pub const fn language_name(oid: u32) -> Option<&'static str> {
     match oid {

@@ -10,6 +10,7 @@ mod attributes;
 mod composites;
 mod constraint_definitions;
 mod constraints;
+mod extensions;
 pub(crate) mod foreign;
 mod indexes;
 pub(in crate::catalog) use indexes::IndexRelations;
@@ -31,6 +32,8 @@ pub use constraints::build_pg_constraint;
 pub(crate) use constraints::build_requested_pg_constraint;
 pub(crate) use constraints::visit_table_constraint_tuples;
 pub(crate) use constraints::{constraint_index_oid, constraint_parent_oid, constraint_row_oid};
+pub use extensions::build_pg_extension;
+pub(super) use extensions::extension_class_row;
 pub(crate) use indexes::legacy::catalog_index_relations as legacy_index_relations;
 pub use indexes::{
     build_pg_index, build_pg_indexes, catalog_index_relations, index_access_method_oid,

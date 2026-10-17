@@ -12,14 +12,14 @@ use uqa_sql::{SQLError, SQLNotice};
 pub(super) fn sql_error_text(error: &SQLError) -> String {
     let mut text = format!("{}: {error}", error.sqlstate().unwrap_or("XX000"));
     append_fields(&mut text, error.detail(), error.hint());
-    text
+    crate::printing::message_text(&text)
 }
 
 /// A notice as the CLI prints it: its level and message, then its detail and hint on lines of their own.
 pub(super) fn sql_notice_text(notice: &SQLNotice) -> String {
     let mut text = format!("{}: {}", notice.level.as_str(), notice.message);
     append_fields(&mut text, notice.detail.as_deref(), notice.hint.as_deref());
-    text
+    crate::printing::message_text(&text)
 }
 
 fn append_fields(text: &mut String, detail: Option<&str>, hint: Option<&str>) {
@@ -48,5 +48,16 @@ mod tests {
         let text = sql_error_text(&error);
         assert!(text.starts_with("42601: "));
         assert!(text.ends_with("\nDETAIL: parser detail\nHINT: parser hint"));
+    }
+}
+
+#[cfg(test)]
+mod terminal_tests {
+    #[test]
+    fn diagnostic_controls_cannot_become_terminal_commands() {
+        let notice = uqa_sql::SQLNotice::notice("value \x1b[31mred");
+        let text = super::sql_notice_text(&notice);
+        assert!(!text.contains('\x1b'));
+        assert!(text.contains("red"));
     }
 }

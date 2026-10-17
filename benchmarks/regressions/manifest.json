@@ -9699,188 +9699,6 @@
       "invariant": "Deterministic frame isolation preserves every generated tag, payload type and unrelated message and rejects an unexpected generator shape."
     },
     {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "matches_spans_and_diagnostics_equal_postgresql",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/oracle.rs",
-      "capability": "PostgreSQL regular expression matching",
-      "workload": "207 independently captured PostgreSQL 18.4 statements covering match selection, subexpression spans, back-references, lookaround, constraint escapes, directors, flags, collations and invalid-pattern diagnostics.",
-      "invariant": "Compilation and matching return PostgreSQL's spans, captured substrings, operator results and invalid-pattern messages."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "class_members_over_every_code_point_equal_postgresql",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/oracle.rs",
-      "capability": "PostgreSQL regular expression character classes",
-      "workload": "64 class and escape patterns evaluated over every Unicode scalar value under the C, builtin and ICU collation strategies.",
-      "invariant": "Every class member and non-member equals the independent PostgreSQL 18.4 result."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "compiled_state_is_charged_and_dropping_releases_every_byte",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/resources.rs",
-      "capability": "PostgreSQL regular expression memory",
-      "workload": "One compiled expression with lookbehind, classes, bounds, a back-reference and lookahead, executed once.",
-      "invariant": "Compiled state is fully charged, execution memory is returned when matching ends, and dropping the expression releases every reserved byte."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "every_refused_compile_reservation_reports_out_of_memory_without_leaking",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/resources.rs",
-      "capability": "PostgreSQL regular expression memory",
-      "workload": "Each reservation of a representative compilation refused in turn.",
-      "invariant": "Refusing the expression's memory context or converted pattern fails with out of memory (53200) as PostgreSQL's context creation and palloc do, every refused engine allocation reports REG_ESPACE, and no reserved byte remains."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "every_refused_execution_reservation_reports_out_of_memory_and_keeps_the_expression",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/resources.rs",
-      "capability": "PostgreSQL regular expression memory",
-      "workload": "Each reservation of a matching run with 21 subexpressions, a back-reference and lookbehind refused in turn.",
-      "invariant": "Every refusal reports REG_ESPACE, returns all execution memory and leaves the compiled expression usable with unchanged results."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "a_byte_limit_fails_compilation_with_out_of_memory",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/resources.rs",
-      "capability": "PostgreSQL regular expression bounded work",
-      "workload": "A nested bounded repetition that expands beyond a 256 KiB allowance.",
-      "invariant": "Compilation stops with REG_ESPACE without exceeding the allowance and releases every reserved byte."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "compilation_stops_at_every_interrupt_check",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/resources.rs",
-      "capability": "PostgreSQL regular expression cancellation",
-      "workload": "Cancellation requested at each interrupt check of a representative compilation.",
-      "invariant": "Every request stops compilation with a cancellation and leaves no reserved byte."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "execution_stops_at_every_interrupt_check_and_keeps_the_expression",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/resources.rs",
-      "capability": "PostgreSQL regular expression cancellation",
-      "workload": "Cancellation requested at each interrupt check of a matching run with back-references and lookbehind.",
-      "invariant": "Every request stops matching with a cancellation, returns all execution memory and keeps the compiled expression usable."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "a_deep_stack_reports_regular_expression_too_complex",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/resources.rs",
-      "capability": "PostgreSQL regular expression bounded work",
-      "workload": "Two hundred nested subexpressions compiled and matched under stack limits below their measured depths.",
-      "invariant": "Both compilation and matching fail with REG_ETOOBIG instead of exceeding the caller's stack limit."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "stack_depth_limits_equal_postgresql",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/oracle.rs",
-      "capability": "PostgreSQL regular expression bounded work",
-      "workload": "Six independently captured PostgreSQL 18.4 statements with nested capturing and non-capturing groups and long literals below and beyond the default max_stack_depth of 2 MB.",
-      "invariant": "Patterns PostgreSQL accepts compile and match with its results, and patterns it rejects fail with REG_ETOOBIG at the engine's 2 MB budget while the hooks set no limit."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "deep_operations_on_a_small_thread_run_on_a_separate_stack",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/stack.rs",
-      "capability": "PostgreSQL regular expression bounded work",
-      "workload": "5000 nested groups compiled and matched on a 512 KiB thread with 128 KiB of its stack left.",
-      "invariant": "The operations complete on a separately allocated stack although compilation needs more than a megabyte of engine stack, and every reserved byte is released."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "an_execution_with_little_stack_left_runs_on_a_separate_stack",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/stack.rs",
-      "capability": "PostgreSQL regular expression bounded work",
-      "workload": "A match over 1000 nested capturing groups with 96 KiB of thread stack left.",
-      "invariant": "Matching dissects every group on a separately allocated stack and fills every span."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "an_operation_that_outgrows_its_thread_stack_starts_again_on_a_separate_stack",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/stack.rs",
-      "capability": "PostgreSQL regular expression bounded work",
-      "workload": "5000 nested groups compiled with 1 MiB of thread stack left, against the same compilation with headroom to spare.",
-      "invariant": "The first attempt is abandoned when it outgrows the thread's stack, its reservations come back, and the second attempt completes on a separately allocated stack."
-    },
-    {
-      "package": "uqa-pg-regex",
-      "kind": "test",
-      "test": "operations_beyond_the_stack_budget_report_regular_expression_too_complex",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-pg-regex/tests/stack.rs",
-      "capability": "PostgreSQL regular expression bounded work",
-      "workload": "10000 nested capturing and non-capturing groups compiled with hooks that set no stack limit.",
-      "invariant": "Compilation fails with REG_ETOOBIG at the 2 MB budget, the hooks never see a deeper stack, and no reserved byte remains."
-    },
-    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "default_btree_classes_match_independent_pg18_key_declarations",
@@ -12731,6 +12549,321 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "values_sources_apply_only_the_predicates_placed_on_their_qualifier",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/values_source/tests.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "values_sources_fail_instead_of_reading_an_unproduced_column",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/values_source/tests.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rejected_right_rows_are_absent_from_inner_and_left_lateral_joins",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/lateral_join.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unaliased_relations_keep_their_columns_from_the_only_named_relation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "whole_row_references_of_values_lists_stay_in_the_residual",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/relation_columns.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "derived_and_function_relations_receive_only_their_columns",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/relation_columns.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "column_free_retrieval_predicates_keep_the_only_named_relation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/relation_columns.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "aliased_and_nested_joins_expose_only_their_visible_relations",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/relation_columns.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "values_where_predicates_match_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/values_where_predicates_oracle.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "column_free_graph_retrieval_beside_an_unaliased_relation_reads_the_named_table",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_graph_functions.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "matches_spans_and_diagnostics_equal_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/oracle.rs",
+      "capability": "PostgreSQL regular expression matching",
+      "workload": "207 independently captured PostgreSQL 18.4 statements covering match selection, subexpression spans, back-references, lookaround, constraint escapes, directors, flags, collations and invalid-pattern diagnostics.",
+      "invariant": "Compilation and matching return PostgreSQL's spans, captured substrings, operator results and invalid-pattern messages."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "class_members_over_every_code_point_equal_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/oracle.rs",
+      "capability": "PostgreSQL regular expression character classes",
+      "workload": "64 class and escape patterns evaluated over every Unicode scalar value under the C, builtin and ICU collation strategies.",
+      "invariant": "Every class member and non-member equals the independent PostgreSQL 18.4 result."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "compiled_state_is_charged_and_dropping_releases_every_byte",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression memory",
+      "workload": "One compiled expression with lookbehind, classes, bounds, a back-reference and lookahead, executed once.",
+      "invariant": "Compiled state is fully charged, execution memory is returned when matching ends, and dropping the expression releases every reserved byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "every_refused_compile_reservation_reports_out_of_memory_without_leaking",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression memory",
+      "workload": "Each reservation of a representative compilation refused in turn.",
+      "invariant": "Refusing the expression's memory context or converted pattern fails with out of memory (53200) as PostgreSQL's context creation and palloc do, every refused engine allocation reports REG_ESPACE, and no reserved byte remains."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "every_refused_execution_reservation_reports_out_of_memory_and_keeps_the_expression",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression memory",
+      "workload": "Each reservation of a matching run with 21 subexpressions, a back-reference and lookbehind refused in turn.",
+      "invariant": "Every refusal reports REG_ESPACE, returns all execution memory and leaves the compiled expression usable with unchanged results."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "a_byte_limit_fails_compilation_with_out_of_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "A nested bounded repetition that expands beyond a 256 KiB allowance.",
+      "invariant": "Compilation stops with REG_ESPACE without exceeding the allowance and releases every reserved byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "compilation_stops_at_every_interrupt_check",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression cancellation",
+      "workload": "Cancellation requested at each interrupt check of a representative compilation.",
+      "invariant": "Every request stops compilation with a cancellation and leaves no reserved byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "execution_stops_at_every_interrupt_check_and_keeps_the_expression",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression cancellation",
+      "workload": "Cancellation requested at each interrupt check of a matching run with back-references and lookbehind.",
+      "invariant": "Every request stops matching with a cancellation, returns all execution memory and keeps the compiled expression usable."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "a_deep_stack_reports_regular_expression_too_complex",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "Two hundred nested subexpressions compiled and matched under stack limits below their measured depths.",
+      "invariant": "Both compilation and matching fail with REG_ETOOBIG instead of exceeding the caller's stack limit."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "stack_depth_limits_equal_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/oracle.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "Six independently captured PostgreSQL 18.4 statements with nested capturing and non-capturing groups and long literals below and beyond the default max_stack_depth of 2 MB.",
+      "invariant": "Patterns PostgreSQL accepts compile and match with its results, and patterns it rejects fail with REG_ETOOBIG at the engine's 2 MB budget while the hooks set no limit."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "deep_operations_on_a_small_thread_run_on_a_separate_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "5000 nested groups compiled and matched on a 512 KiB thread with 128 KiB of its stack left.",
+      "invariant": "The operations complete on a separately allocated stack although compilation needs more than a megabyte of engine stack, and every reserved byte is released."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "an_execution_with_little_stack_left_runs_on_a_separate_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "A match over 1000 nested capturing groups with 96 KiB of thread stack left.",
+      "invariant": "Matching dissects every group on a separately allocated stack and fills every span."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "an_operation_that_outgrows_its_thread_stack_starts_again_on_a_separate_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "5000 nested groups compiled with 1 MiB of thread stack left, against the same compilation with headroom to spare.",
+      "invariant": "The first attempt is abandoned when it outgrows the thread's stack, its reservations come back, and the second attempt completes on a separately allocated stack."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "operations_beyond_the_stack_budget_report_regular_expression_too_complex",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "10000 nested capturing and non-capturing groups compiled with hooks that set no stack limit.",
+      "invariant": "Compilation fails with REG_ETOOBIG at the 2 MB budget, the hooks never see a deeper stack, and no reserved byte remains."
     },
     {
       "package": "uqa-sql",

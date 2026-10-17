@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Extend the Rust `usql` shell with query-buffer commands, variables and conditionals, script includes, native file COPY, printing formats, pager/editor integration, query cancellation and idle LISTEN notifications.
+
 - Build standalone `usql` release archives for Linux, macOS and Windows on x86_64 and ARM64, with bundled Nori, Kuromoji, Arrow and DuckDB, SHA-256 checksums, user-directory installers and `cargo binstall` installation without compilation.
 
 - Support PostgreSQL's six native range subtype-distance functions, preserving floating conversion order, temporal infinity values and numeric range diagnostics.
@@ -31,6 +33,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Return `regexp_matches` as PostgreSQL's set-returning function in `FROM`, `LATERAL`, `ROWS FROM`, `WITH ORDINALITY` and select lists, with one `text[]` row per match under `g`, PostgreSQL's advancement after empty matches, no rows for no match or a NULL argument, named arguments and its `pg_proc` identities, instead of one row holding the first match or NULL. `regexp_match`, `regexp_like`, `regexp_count`, `regexp_instr` and `regexp_substr` now validate every flag before rejecting `g` with PostgreSQL's global-option message, and `regexp_match` accepts its named arguments.
+
+- Apply `WHERE` predicates to `VALUES` lists in `FROM` and to the right relation of `LATERAL` joins and table functions, which previously returned every row once the planner placed the predicate on that source. This covers lists alone, joined with each other, tables and functions, and inside aggregates, subqueries, CTEs, set operations, views, SQL routines, prepared statements and `INSERT ... SELECT`. Unqualified columns of an unaliased `VALUES` list or subquery are no longer attributed to the only named relation beside it, which reported `42703` or ignored the predicate. A relation's own name in `WHERE` is its whole-row value, so `v = ROW(...)`, `v IS NULL`, `row_to_json(v)` and `(v).x` on `VALUES` lists, derived tables and aliased tables no longer read a missing column, and a predicate on an outer relation no longer filters a different relation of the same name inside a parenthesized join alias.
+
+- Correct `usql` quoted-input validation, multiline syntax highlighting, live qualified-name completion, explicit timing/expanded settings, Unicode alignment, terminal-control escaping and PostgreSQL typed output. Catalog commands honor patterns and read relation ACLs and bundled PL/pgSQL extension metadata; `\dg` and `\da` inspect roles and aggregates, with UQA graphs and analyzers retained under their explicit commands.
 
 - Evaluate the POSIX and SQL regular-expression forms of `substring`, including `SIMILAR ... ESCAPE` and `FROM ... FOR` with text arguments, by their resolved PostgreSQL signature instead of reporting `42804` or returning a positional slice for a pattern that parses as an integer, with PostgreSQL's NULL handling and planning-time translation errors for the SQL form. The `substring` and `substr` overloads now have PostgreSQL's catalog identities, so CHECK constraints, defaults, `regprocedure` input and routine privileges accept them instead of reporting an internal error.
 

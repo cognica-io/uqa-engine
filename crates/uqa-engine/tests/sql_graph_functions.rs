@@ -148,6 +148,35 @@ fn graph_neighbors_label_filter() {
     assert_eq!(ids, vec![2]);
 }
 
+/// A retrieval predicate that reads no column restricts the only named relation even beside an unaliased VALUES list or subquery, whose columns stay with the residual filter.
+#[test]
+fn column_free_graph_retrieval_beside_an_unaliased_relation_reads_the_named_table() {
+    let engine = engine_with_simple_graph();
+    for sql in [
+        "SELECT id FROM seeds, (SELECT 1) WHERE graph_pagerank('g') ORDER BY id",
+        "SELECT id FROM seeds, (VALUES (1)) WHERE graph_pagerank('g') ORDER BY id",
+        "SELECT id FROM seeds, (VALUES (1), (2)) WHERE graph_pagerank('g') AND column1 = 2 AND status = 'indexed' ORDER BY id",
+    ] {
+        let result = engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        let ids: Vec<i64> = result
+            .rows
+            .iter()
+            .filter_map(|row| match row.get("id") {
+                Some(Value::Int(n)) => Some(*n),
+                _ => None,
+            })
+            .collect();
+        let expected = if sql.contains("status") {
+            vec![1, 3, 4]
+        } else {
+            vec![1, 2, 3, 4]
+        };
+        assert_eq!(ids, expected, "{sql}");
+    }
+}
+
 #[test]
 fn graph_centrality_combines_with_relational_filter() {
     let engine = engine_with_simple_graph();

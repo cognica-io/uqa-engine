@@ -16,13 +16,14 @@ use crate::{
 
 /// Engine seam for a correlated right-hand relation.
 ///
-/// The physical operator owns join iteration, `ON` filtering, and outer-row
-/// preservation. The engine callback only evaluates the right relation and
-/// scalar predicate in the current correlated scope.
+/// The physical operator owns join iteration, `ON` filtering, and outer-row preservation. The engine callback only evaluates the right relation, the predicates placed on that relation, and the scalar join predicate in the current correlated scope.
 pub type LateralRows = Box<dyn Iterator<Item = ExecResult<OwnedPhysicalRow>> + Send>;
 
 pub trait LateralSource: Send {
     fn rows_for(&mut self, left: &OwnedPhysicalRow) -> ExecResult<LateralRows>;
+
+    /// Whether a produced right row satisfies the predicates placed on the right relation itself. A rejected row is absent from the join input: it neither matches a left row nor produces a NULL-extended row.
+    fn admits(&mut self, right: &OwnedPhysicalRow) -> ExecResult<bool>;
 
     fn matches(&mut self, joined: &OwnedPhysicalRow) -> ExecResult<bool>;
 }
@@ -153,6 +154,9 @@ impl PhysicalOperator for LateralJoin<'_> {
                 .and_then(Iterator::next)
                 .transpose()?;
             if let Some(right) = next_right {
+                if !self.source.admits(&right)? {
+                    continue;
+                }
                 let left = self.current_left.as_ref().ok_or_else(|| {
                     ExecError::Other(
                         "lateral join produced a right row without a current left row".into(),
@@ -238,6 +242,10 @@ mod tests {
             Ok(Box::new((1..=end).map(|value| Ok(right_row(value)))))
         }
 
+        fn admits(&mut self, _right: &OwnedPhysicalRow) -> ExecResult<bool> {
+            Ok(true)
+        }
+
         fn matches(&mut self, joined: &OwnedPhysicalRow) -> ExecResult<bool> {
             Ok(joined.get("r.n") == Some(&Value::Int(2)))
         }
@@ -267,11 +275,67 @@ mod tests {
         assert_eq!(rows[1].get("r.n"), Some(&Value::Int(2)));
     }
 
+    /// The right relation `1..=l.n` with `r.n <> 2` placed on it, joined on `r.n = 2`.
+    struct RejectingRangeSource;
+
+    impl LateralSource for RejectingRangeSource {
+        fn rows_for(&mut self, left: &OwnedPhysicalRow) -> ExecResult<LateralRows> {
+            RangeSource.rows_for(left)
+        }
+
+        fn admits(&mut self, right: &OwnedPhysicalRow) -> ExecResult<bool> {
+            Ok(right.get("r.n") != Some(&Value::Int(2)))
+        }
+
+        fn matches(&mut self, joined: &OwnedPhysicalRow) -> ExecResult<bool> {
+            RangeSource.matches(joined)
+        }
+    }
+
+    /// The planner places conjuncts on the right relation of inner and cross joins, and propagates join-key constants into the right relation of a left join, whose left rows then lose every rejected match.
+    #[test]
+    fn rejected_right_rows_are_absent_from_inner_and_left_lateral_joins() {
+        let n = |value: i64| Value::Int(value);
+        for (kind, expected) in [
+            (JoinKind::Cross, vec![(n(1), n(1)), (n(2), n(1))]),
+            (JoinKind::Inner, Vec::new()),
+            (
+                JoinKind::Left,
+                vec![(n(1), Value::Null), (n(2), Value::Null)],
+            ),
+        ] {
+            let left = TableScan::from_rows(
+                vec!["l.n".into()],
+                vec![
+                    row(&[("l.n", Value::Int(1))]),
+                    row(&[("l.n", Value::Int(2))]),
+                ],
+            );
+            let mut join = LateralJoin::new(
+                Box::new(left),
+                Box::new(RejectingRangeSource),
+                kind,
+                row(&[("l.n", Value::Null)]),
+                row(&[("r.n", Value::Null)]),
+            );
+            let (_, rows) = run_to_rows(&mut join).unwrap();
+            let actual = rows
+                .iter()
+                .map(|row| (row["l.n"].clone(), row["r.n"].clone()))
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected, "{kind:?}");
+        }
+    }
+
     struct LargeRangeSource;
 
     impl LateralSource for LargeRangeSource {
         fn rows_for(&mut self, _left: &OwnedPhysicalRow) -> ExecResult<LateralRows> {
             Ok(Box::new((0..10_000).map(|value| Ok(right_row(value)))))
+        }
+
+        fn admits(&mut self, _right: &OwnedPhysicalRow) -> ExecResult<bool> {
+            Ok(true)
         }
 
         fn matches(&mut self, _joined: &OwnedPhysicalRow) -> ExecResult<bool> {
@@ -306,6 +370,10 @@ mod tests {
                 ]
                 .into_iter(),
             ))
+        }
+
+        fn admits(&mut self, _right: &OwnedPhysicalRow) -> ExecResult<bool> {
+            Ok(true)
         }
 
         fn matches(&mut self, _joined: &OwnedPhysicalRow) -> ExecResult<bool> {

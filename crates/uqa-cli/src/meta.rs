@@ -19,14 +19,15 @@ impl Session {
         let arg = parts.next().unwrap_or("").trim();
         let result = match cmd {
             "q" | "quit" | "exit" => return PromptLineOutcome::Quit,
-            "?" | "help" | "h" => {
+            "?" | "help" => {
                 print_backslash_help(out);
                 Ok(())
             }
+            "h" => crate::sql_help::print(arg, out),
             "history" => match arg {
                 "" => {
                     for line in &self.history {
-                        let _ = writeln!(out, "{line}");
+                        let _ = writeln!(out, "{}", crate::printing::message_text(line));
                     }
                     Ok(())
                 }
@@ -43,6 +44,7 @@ impl Session {
                     match removal {
                         Ok(()) => {
                             self.history.clear();
+                            self.shell.clear_history = true;
                             let _ = writeln!(out, "history cleared");
                             Ok(())
                         }
@@ -51,25 +53,13 @@ impl Session {
                 }
                 other => Err(format!("usage: \\history [clear] (got {other:?})")),
             },
-            "open" => {
-                if arg.is_empty() {
-                    Err("usage: \\open <path>".into())
-                } else {
-                    match open_engine_with_key(Path::new(arg), None) {
-                        Ok((engine, location, key)) => {
-                            self.engine = engine;
-                            self.db_path = Some(PathBuf::from(arg));
-                            self.db_key = key;
-                            self.location = location;
-                            let _ = writeln!(out, "opened {arg}");
-                            Ok(())
-                        }
-                        Err(err) => Err(err),
-                    }
-                }
-            }
             "new" => {
                 self.engine = Engine::new();
+                if let Err(error) = crate::shell_notifications::configure(&self.engine) {
+                    let _ = writeln!(out, "ERROR: {error}");
+                    return PromptLineOutcome::Failed;
+                }
+                self.shell.listen_seen = false;
                 self.db_path = None;
                 self.db_key = None;
                 self.location = ":memory:".into();
@@ -78,6 +68,11 @@ impl Session {
             }
             "reset" => match open_engine(self.db_path.as_deref(), self.db_key.as_deref()) {
                 Ok((engine, location, key)) => {
+                    if let Err(error) = crate::shell_notifications::configure(&engine) {
+                        let _ = writeln!(out, "ERROR: {error}");
+                        return PromptLineOutcome::Failed;
+                    }
+                    self.shell.listen_seen = false;
                     self.engine = engine;
                     self.db_key = key;
                     self.location = location;
@@ -87,31 +82,15 @@ impl Session {
                 Err(err) => Err(format!("reset failed: {err}")),
             },
             "where" => {
-                let _ = writeln!(out, "{}", self.location);
+                let _ = writeln!(out, "{}", crate::printing::terminal_text(&self.location));
                 Ok(())
             }
-            "timing" => {
-                self.show_timing = !self.show_timing;
-                let state = if self.show_timing { "on" } else { "off" };
-                let _ = writeln!(out, "Timing is {state}.");
-                Ok(())
-            }
-            "expanded" | "x" => {
-                self.expanded = !self.expanded;
-                let state = if self.expanded { "on" } else { "off" };
-                let _ = writeln!(out, "Expanded display is {state}.");
-                Ok(())
-            }
-            "o" => self.handle_output_redirect(arg, out),
-            "dt" | "tables" => self.cmd_list_tables(out),
-            "describe" | "d" => self.cmd_describe_table(arg, out),
-            "di" => self.cmd_list_indexes(out),
             "stats" => self.cmd_show_stats(arg, out),
             "ds" => self.cmd_list_sequences(arg, out),
-            "dg" | "graphs" => self.cmd_list_graphs(out),
-            "dfs" | "dS" => self.cmd_list_foreign_servers(out),
+            "graphs" => self.cmd_list_graphs(out),
+            "dfs" => self.cmd_list_foreign_servers(out),
             "dft" | "dF" => self.cmd_list_foreign_tables(out),
-            "da" | "analyzers" => self
+            "analyzers" => self
                 .engine
                 .list_named_analyzers()
                 .map_err(|err| format!("Failed to read analyzers: {err}"))
@@ -124,13 +103,6 @@ impl Session {
                         }
                     }
                 }),
-            "run" => {
-                if arg.is_empty() {
-                    Err("usage: \\run <file>".into())
-                } else {
-                    self.run_file(Path::new(arg), out)
-                }
-            }
             "migrate-python-db" => self.handle_migrate_python_db(arg, out),
             other => {
                 print_backslash_help(out);
@@ -160,7 +132,12 @@ impl Session {
             return Ok(());
         }
         let path = PathBuf::from(arg);
-        match OpenOptions::new().create(true).append(true).open(&path) {
+        match OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+        {
             Ok(_) => {
                 self.output_path = Some(path);
                 let _ = writeln!(out, "Output redirected to: {arg}");
@@ -168,75 +145,6 @@ impl Session {
             }
             Err(error) => Err(format!("Output redirection failed for {arg}: {error}")),
         }
-    }
-
-    pub(super) fn cmd_list_tables(&self, out: &mut impl Write) -> Result<(), String> {
-        let table_names = self
-            .engine
-            .table_names()
-            .map_err(|err| format!("Failed to read tables: {err}"))?;
-        let mut rows = Vec::new();
-        for name in table_names {
-            let columns = match self.engine.describe_table(&name) {
-                Ok(Some(columns)) => usize_count_value(columns.len()),
-                Ok(None) => {
-                    return Err(format!(
-                        "table '{name}' disappeared while listing its metadata"
-                    ));
-                }
-                Err(err) => return Err(format!("Failed to describe table '{name}': {err}")),
-            };
-            let row_count = self
-                .engine
-                .table_doc_ids(&name)
-                .map(|doc_ids| usize_count_value(doc_ids.len()))
-                .map_err(|err| format!("Failed to count rows in '{name}': {err}"))?;
-            rows.push(result_row(vec![
-                ("table_name", Value::Str(name.clone())),
-                ("type", Value::Str("table".into())),
-                ("columns", columns),
-                ("rows", row_count),
-            ]));
-        }
-        let foreign_tables = self
-            .engine
-            .list_foreign_tables()
-            .map_err(|err| format!("Failed to read foreign tables: {err}"))?;
-        for name in foreign_tables {
-            match self.engine.foreign_table_definition(&name) {
-                Ok(Some(table)) => {
-                    rows.push(result_row(vec![
-                        ("table_name", Value::Str(name)),
-                        ("type", Value::Str("foreign".into())),
-                        ("columns", usize_count_value(table.columns.len())),
-                        ("rows", Value::Str(String::new())),
-                    ]));
-                }
-                Ok(None) => {
-                    return Err(format!(
-                        "foreign table '{name}' disappeared while listing its metadata"
-                    ));
-                }
-                Err(err) => return Err(format!("Failed to read foreign table '{name}': {err}")),
-            }
-        }
-        if rows.is_empty() {
-            let _ = writeln!(out, "No tables.");
-            return Ok(());
-        }
-        print_result(
-            &SQLResult::from_rows(
-                vec![
-                    "table_name".into(),
-                    "type".into(),
-                    "columns".into(),
-                    "rows".into(),
-                ],
-                rows,
-            ),
-            out,
-        );
-        Ok(())
     }
 
     pub(super) fn cmd_describe_table(
@@ -249,7 +157,7 @@ impl Session {
         }
         match self.engine.describe_table(name) {
             Ok(Some(cols)) => {
-                let _ = writeln!(out, "Table \"{name}\"");
+                let _ = writeln!(out, "Table {}", crate::printing::terminal_text(name));
                 print_columns(&cols, out);
                 return Ok(());
             }
@@ -260,8 +168,9 @@ impl Session {
             Ok(Some(table)) => {
                 let _ = writeln!(
                     out,
-                    "Foreign table \"{name}\" (server: {})",
-                    table.server_name
+                    "Foreign table \"{}\" (server: {})",
+                    crate::printing::terminal_text(name),
+                    crate::printing::terminal_text(&table.server_name)
                 );
                 let rows = table
                     .columns
@@ -287,47 +196,6 @@ impl Session {
             Err(err) => return Err(format!("Failed to read foreign table '{name}': {err}")),
         }
         Err(format!("Table '{name}' does not exist."))
-    }
-
-    pub(super) fn cmd_list_indexes(&self, out: &mut impl Write) -> Result<(), String> {
-        let table_names = self
-            .engine
-            .table_names()
-            .map_err(|err| format!("Failed to read tables: {err}"))?;
-        if table_names.is_empty() {
-            let _ = writeln!(out, "No tables.");
-            return Ok(());
-        }
-        let mut by_table: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        let stats = self
-            .engine
-            .fts_index_stats(None)
-            .map_err(|err| format!("Failed to read index statistics: {err}"))?;
-        for stat in stats {
-            by_table
-                .entry(stat.table_name)
-                .or_default()
-                .push(stat.field);
-        }
-        if by_table.is_empty() {
-            let _ = writeln!(out, "No indexed fields.");
-            return Ok(());
-        }
-        let rows = by_table
-            .into_iter()
-            .map(|(table, mut fields)| {
-                fields.sort();
-                result_row(vec![
-                    ("table_name", Value::Str(table)),
-                    ("indexed_fields", Value::Str(fields.join(", "))),
-                ])
-            })
-            .collect();
-        print_result(
-            &SQLResult::from_rows(vec!["table_name".into(), "indexed_fields".into()], rows),
-            out,
-        );
-        Ok(())
     }
 
     pub(super) fn cmd_show_stats(&self, name: &str, out: &mut impl Write) -> Result<(), String> {

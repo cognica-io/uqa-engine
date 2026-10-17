@@ -87,7 +87,7 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync +
             build_join_source_operator(context, from, params, ctes, prune, filters, recheck_path)
         }
         SourcePlan::Values { .. } => {
-            build_values_source_operator(context, from, params, ctes, prune)
+            build_values_source_operator(context, from, params, ctes, prune, filters)
         }
         SourcePlan::Function { .. } => {
             build_function_source_operator(context, from, params, ctes, prune, filters)

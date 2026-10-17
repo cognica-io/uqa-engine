@@ -29,6 +29,8 @@ pub const NAMESPACE_CLASS: u32 = 2615;
 pub const COLLATION_CLASS: u32 = 3456;
 /// `pg_language`.
 pub const LANGUAGE_CLASS: u32 = 2612;
+/// `pg_extension`.
+pub const EXTENSION_CLASS: u32 = 3079;
 /// `pg_authid`: roles, which every database shares.
 pub const ROLE_CLASS: u32 = 1260;
 /// `pg_auth_members`: role memberships, which every database shares.
