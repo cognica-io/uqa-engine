@@ -131,6 +131,92 @@ fn table_range_aliases_are_the_filter_ownership_names() {
 }
 
 #[test]
+fn unaliased_relations_keep_their_columns_from_the_only_named_relation() {
+    let fixture = Fixture::new();
+    let context = fixture.context();
+    let scope = fixture.scope();
+    let UnifiedPlan::Query(body) =
+        UnifiedPlan::lower(uqa_sql::compile("SELECT 5 AS column1").unwrap().remove(0))
+    else {
+        panic!("query")
+    };
+    let greater = |lhs: ScalarExpr, rhs: ScalarExpr| ScalarExpr::Binary {
+        op: BinaryOp::Greater,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+    };
+    let one = || ScalarExpr::Literal(Value::Int(1));
+    for unaliased in [
+        SourcePlan::Values {
+            rows: vec![vec![one()]],
+            alias: None,
+            column_aliases: Vec::new(),
+            internal_relation: None,
+            internal_column_types: Vec::new(),
+            internal_column_collations: Vec::new(),
+        },
+        SourcePlan::Subquery {
+            body: body.clone(),
+            alias: None,
+            column_aliases: Vec::new(),
+        },
+    ] {
+        let from = SourcePlan::Join {
+            left: Box::new(SourcePlan::Table {
+                bound_columns: None,
+                name: "filter_alias_source".into(),
+                qualifier: "filter_alias_source".into(),
+                alias: None,
+                column_aliases: Vec::new(),
+                include_descendants: true,
+            }),
+            right: Box::new(unaliased),
+            kind: JoinKind::Cross,
+            on: None,
+            using: None,
+            natural: false,
+            alias: None,
+            column_aliases: Vec::new(),
+            lateral: false,
+            strategy: JoinExecutionStrategy::Auto,
+        };
+        assert_eq!(
+            source_column_owners(scope, &from).unwrap().get("column1"),
+            Some(&None)
+        );
+        let unqualified = greater(ScalarExpr::Column("column1".into()), one());
+        let mixed = greater(
+            ScalarExpr::qualified_column("filter_alias_source", "id"),
+            ScalarExpr::Column("column1".into()),
+        );
+        let owned = greater(ScalarExpr::Column("id".into()), one());
+        let block = query_block(
+            ScalarExpr::And(vec![unqualified.clone(), mixed.clone(), owned]),
+            from.clone(),
+        );
+
+        let filters = qualifier_filters_for_stmt(context, &block, &from, scope)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            filters,
+            QualifierFilters::from([(
+                "filter_alias_source".into(),
+                vec![greater(
+                    ScalarExpr::qualified_column("filter_alias_source", "id"),
+                    one()
+                )]
+            )])
+        );
+        assert_eq!(
+            final_filter_after_qualifier_pushdown(context, &block, &from, Some(&filters), scope)
+                .unwrap(),
+            Some(ScalarExpr::And(vec![unqualified, mixed]))
+        );
+    }
+}
+
+#[test]
 fn internal_relation_attributes_never_push_into_catalog_sources() {
     let fixture = Fixture::new();
     let context = fixture.context();

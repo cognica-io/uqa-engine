@@ -142,6 +142,7 @@
       "functions.substring-pattern-forms",
       "functions.uuid-extraction",
       "query.window-frames",
+      "query.source-predicate-placement",
       "aggregates.null-and-enum-inputs",
       "expressions.boolean-conditions",
       "expressions.interval-arithmetic",
@@ -1156,6 +1157,14 @@
       "supported_version": "Unreleased: 69 PostgreSQL 18.4 cases on memory and SQLite engines cover the default RANGE frame ending at the current row's last peer, ROWS, RANGE and GROUPS frames with CURRENT ROW, offset and unbounded bounds, RANGE offsets selected and coerced through the in_range support of integer, numeric, floating-point, date, time, timestamp and interval keys with NULL ordering values, EXCLUDE CURRENT ROW, GROUP, TIES and NO OTHERS, first_value, last_value and nth_value, rank, dense_rank, percent_rank, cume_dist, row_number, ntile, lag and lead, every built-in and registered aggregate over a frame with or without FILTER, named window references, query ORDER BY on columns the target list omits, and the frame, offset, argument and window-reference errors, and ParseFuncOrColumn's errors for OVER, FILTER, DISTINCT, aggregate ORDER BY and WITHIN GROUP after function resolution (42P20, 42P10, 42809, 22004, 22013, 22014, 22016, 0A000, 42883 and 42725 with PostgreSQL's hints). The zoned interval reference additionally covers session-dependent timestamptz RANGE offsets in ascending and descending windows, calendar days versus elapsed hours and persistent reopening.",
       "status": "verified",
       "open_issue": null
+    },
+    {
+      "id": "query.source-predicate-placement",
+      "postgresql_reference": "PostgreSQL 18.4 live results, SQLSTATEs, messages and command tags in tests/parity/pg18/values_where_predicates_oracle.expected.json (120 Simple Query statements captured from tests/parity/pg18/values_where_predicates_oracle.input.json); https://www.postgresql.org/docs/18/queries-values.html; https://www.postgresql.org/docs/18/queries-table-expressions.html#QUERIES-LATERAL",
+      "uqa_test": "cargo test -p uqa-engine --test integration values_where_predicates_match_postgresql_and_reopen; cargo test -p uqa-execution --lib values_sources_apply_only_the_predicates_placed_on_their_qualifier; cargo test -p uqa-execution --lib rejected_right_rows_are_absent_from_every_join_kind; cargo test -p uqa-planner --lib unaliased_relations_keep_their_columns_from_the_only_named_relation",
+      "supported_version": "PostgreSQL 18.4 WHERE predicates over VALUES lists alone, joined with each other, tables and table functions, and beside unaliased VALUES lists and subqueries whose unqualified columns are not attributed to the only named relation; inside aggregates with HAVING, windows, DISTINCT, correlated and uncorrelated subqueries, derived tables, CTEs, recursive CTEs and set operations; on LATERAL subqueries, LATERAL VALUES lists, implicit lateral table functions and ROWS FROM groups; in stored views, SQL routines, typed and inferred prepared statements, row locking, INSERT ... SELECT, UPDATE ... FROM, DELETE ... USING and MERGE; and predicate errors raised for VALUES rows that a later join would discard, across memory, native SQLite, SQLite Key/Value and redb reopening",
+      "status": "partial",
+      "open_issue": "#1004: PostgreSQL pulls a single-row VALUES list up into constants and orders scan quals by cost, so a predicate that fails only for rows excluded by the derived join equality raises no error there, while UQA evaluates the placed predicate on every row. #1002: VALUES rows that reference outer columns in correlated subqueries and LATERAL report 42P01 or XX000 instead of evaluating against the outer row."
     },
     {
       "id": "aggregates.null-and-enum-inputs",

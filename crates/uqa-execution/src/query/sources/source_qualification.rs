@@ -33,13 +33,25 @@ pub(super) fn attach_qualifier_filter<'a, S: Clone + 'static>(
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
 ) -> Box<dyn PhysicalOperator + 'a> {
+    filter_qualified_source(operator, qualifier, filters, || {
+        context.relational.evaluator(params, ctes)
+    })
+}
+
+/// Apply the predicates placed on one source qualifier, evaluated by the caller's expression scope.
+pub(super) fn filter_qualified_source<'a>(
+    operator: Box<dyn PhysicalOperator + 'a>,
+    qualifier: &str,
+    filters: Option<&QualifierFilters>,
+    evaluator: impl FnOnce() -> crate::SharedExpressionEvaluator<'a>,
+) -> Box<dyn PhysicalOperator + 'a> {
     let Some(predicate) = qualifier_filter(filters, qualifier) else {
         return operator;
     };
     Box::new(crate::Filter::with_evaluator(
         operator,
         predicate,
-        context.relational.evaluator(params, ctes),
+        evaluator(),
     ))
 }
 

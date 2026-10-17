@@ -26,7 +26,7 @@ pub mod context;
 use context::{FilterPushdownContext, FilterPushdownScope};
 mod source_columns;
 
-use source_columns::{source_column_owners, ColumnOwners};
+use source_columns::{has_unqualified_relation, source_column_owners, ColumnOwners};
 
 pub fn qualifier_filters_for_stmt(
     context: FilterPushdownContext<'_>,
@@ -51,9 +51,7 @@ pub fn qualifier_filters_for_stmt(
     if from_quals.is_empty() {
         return Ok(None);
     }
-    let single_qualifier = (from_quals.len() == 1)
-        .then(|| from_quals.iter().next().cloned())
-        .flatten();
+    let single_qualifier = sole_column_owner(from, &from_quals);
     let column_owners = source_column_owners(scope, from)?;
     let nullable_qualifiers = outer_join_nullable_qualifiers(from);
     let mut filters = QualifierFilters::new();
@@ -88,6 +86,14 @@ pub fn qualifier_filters_for_stmt(
 }
 
 pub use uqa_sql::semantics::outer_join_nullable_qualifiers;
+
+/// The qualifier that owns every unqualified column of a FROM clause: its only named relation, unless an unaliased VALUES list or subquery also exposes columns without a qualifier.
+fn sole_column_owner(from: &SourcePlan, from_quals: &BTreeSet<String>) -> Option<String> {
+    if from_quals.len() != 1 || has_unqualified_relation(from) {
+        return None;
+    }
+    from_quals.iter().next().cloned()
+}
 
 /// Project a multi-relation disjunction onto each relation as a necessary
 /// predicate. For `(A1 AND B1) OR (A2 AND B2)`, `A1 OR A2` is safe to apply to
@@ -172,7 +178,7 @@ fn qualifier_filter_for_part(
     }
     let qualifiers = expr_qualifiers(part);
     let has_unqualified = expr_has_unqualified_column(part);
-    if qualifiers.len() == 1 && (!has_unqualified || from_quals.len() == 1) {
+    if qualifiers.len() == 1 && (!has_unqualified || single_qualifier.is_some()) {
         let qualifier = qualifiers.iter().next()?;
         if from_quals.contains(qualifier) {
             return Some((qualifier.clone(), part.clone()));
@@ -219,9 +225,7 @@ pub fn final_filter_after_qualifier_pushdown(
         return Ok(Some(filter.clone()));
     }
     let from_quals = from_qualifier_set(from);
-    let single_qualifier = (from_quals.len() == 1)
-        .then(|| from_quals.iter().next().cloned())
-        .flatten();
+    let single_qualifier = sole_column_owner(from, &from_quals);
     let column_owners = source_column_owners(scope, from)?;
     let mut guaranteed = Vec::new();
     collect_guaranteed_join_filters(from, &mut guaranteed);
@@ -314,9 +318,7 @@ pub fn cte_output_filters(
     }
 
     let from_qualifiers = from_qualifier_set(from);
-    let single_qualifier = (from_qualifiers.len() == 1)
-        .then(|| from_qualifiers.iter().next().cloned())
-        .flatten();
+    let single_qualifier = sole_column_owner(from, &from_qualifiers);
     let column_owners = source_column_owners(scope, from)?;
     let mut grouped: BTreeMap<String, (String, Vec<ScalarExpr>)> = BTreeMap::new();
     for part in flatten_and_filter_parts(filter) {

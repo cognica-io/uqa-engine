@@ -12549,6 +12549,61 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "values_sources_apply_only_the_predicates_placed_on_their_qualifier",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/values_source/tests.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join; an unqualified column is never attributed to the only named relation while an unaliased VALUES list or subquery is in scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rejected_right_rows_are_absent_from_every_join_kind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/lateral_join.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join; an unqualified column is never attributed to the only named relation while an unaliased VALUES list or subquery is in scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unaliased_relations_keep_their_columns_from_the_only_named_relation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join; an unqualified column is never attributed to the only named relation while an unaliased VALUES list or subquery is in scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "values_where_predicates_match_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/values_where_predicates_oracle.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join; an unqualified column is never attributed to the only named relation while an unaliased VALUES list or subquery is in scope.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

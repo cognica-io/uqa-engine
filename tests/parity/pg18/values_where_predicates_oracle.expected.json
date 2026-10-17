@@ -1,0 +1,3170 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "reference": "PostgreSQL 18.4 in a disposable Docker database",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "f4941dbc3c22255fc8aefd8c1b12f4e3d92a550183eb2e8a36c71a54991b2228"
+  },
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_t",
+      "sql": "CREATE TABLE t(a int, b text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_t_rows",
+      "sql": "INSERT INTO t VALUES (1, 'one'), (2, 'two'), (3, 'three')",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_u",
+      "sql": "CREATE TABLE u(c int)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_u_rows",
+      "sql": "INSERT INTO u VALUES (1), (2), (3)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_target",
+      "sql": "CREATE TABLE target(x int)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_alone",
+      "sql": "SELECT x FROM (VALUES (1), (2)) v(x) WHERE x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_count",
+      "sql": "SELECT count(*) FROM (VALUES (1), (2)) v(x) WHERE x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_function_predicate",
+      "sql": "SELECT x FROM (VALUES ('ab'), ('c')) v(x) WHERE length(x) > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "ab"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_qualified",
+      "sql": "SELECT v.x FROM (VALUES (1), (2)) v(x) WHERE v.x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_default_names",
+      "sql": "SELECT * FROM (VALUES (1, 'a'), (2, 'b')) v WHERE column1 > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "column1",
+            "column2"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_partial_aliases",
+      "sql": "SELECT * FROM (VALUES (1, 'a'), (2, 'b')) v(x) WHERE column2 = 'b'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "column2"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_unaliased",
+      "sql": "SELECT * FROM (VALUES (1), (2)) WHERE column1 > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "column1"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_not_null",
+      "sql": "SELECT x FROM (VALUES (1), (NULL), (3)) v(x) WHERE x IS NOT NULL ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_or_null",
+      "sql": "SELECT x FROM (VALUES (1), (NULL), (3)) v(x) WHERE x > 1 OR x IS NULL ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ],
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_numeric",
+      "sql": "SELECT x FROM (VALUES (1.5), (2.5)) v(x) WHERE x > 2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            1700
+          ],
+          "rows": [
+            [
+              "2.5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_row_comparison",
+      "sql": "SELECT * FROM (VALUES (1, 'a'), (2, 'b')) v(x, y) WHERE (x, y) > (1, 'a')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_constant_conjunct",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) WHERE 1 = 1 AND x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_false",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_uncorrelated_subquery",
+      "sql": "SELECT x FROM (VALUES (1), (2), (3)) v(x) WHERE x > (SELECT 1) ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_membership",
+      "sql": "SELECT x FROM (VALUES (1), (2), (3)) v(x) WHERE x IN (SELECT y FROM (VALUES (2), (3)) w(y) WHERE y < 3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_between",
+      "sql": "SELECT x FROM (VALUES (1), (2), (3)) v(x) WHERE x BETWEEN 2 AND 3 AND x <> 3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_like",
+      "sql": "SELECT upper(y) FROM (VALUES (1, 'a'), (2, 'b')) v(x, y) WHERE y LIKE 'b%'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "upper"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "B"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_any_array",
+      "sql": "SELECT x FROM (VALUES (1), (2), (3)) v(x) WHERE x = ANY (ARRAY[1, 3]) ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_predicate_error",
+      "sql": "SELECT x FROM (VALUES (1), (0)) v(x) WHERE 1 / x > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "values_guarded_division",
+      "sql": "SELECT x FROM (VALUES (0), (1), (2)) v(x) WHERE x <> 0 AND 2 / x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_volatile_predicate",
+      "sql": "SELECT count(*) FROM (VALUES (1), (2)) v(x) WHERE random() >= 0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_row_lock",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) WHERE x > 1 FOR UPDATE",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_join_values",
+      "sql": "SELECT x FROM (VALUES (1), (2)) v(x) JOIN (VALUES (2)) w(y) ON true WHERE x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_cross_values",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x), (VALUES (3), (4)) w(y) WHERE x > 1 AND y < 4",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_disjunction",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x), (VALUES (1), (2)) w(y) WHERE (x = 1 AND y = 2) OR (x = 2 AND y = 1) ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_join_table",
+      "sql": "SELECT t.a, v.x FROM t JOIN (VALUES (1), (2)) v(x) ON t.a = v.x WHERE v.x > 1 ORDER BY 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_cross_table",
+      "sql": "SELECT * FROM t, (VALUES (1), (2)) v(x) WHERE x > 1 AND a = 3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "three",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_join_using",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) JOIN (VALUES (2), (3)) w(x) USING (x) WHERE x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_natural_join",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) NATURAL JOIN (VALUES (2), (3)) w(x) WHERE x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_left_preserved",
+      "sql": "SELECT * FROM (VALUES (1), (2), (5)) v(x) LEFT JOIN t ON t.a = v.x WHERE v.x > 1 ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "2",
+              "two"
+            ],
+            [
+              "5",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_left_nullable",
+      "sql": "SELECT * FROM t LEFT JOIN (VALUES (1), (2)) v(x) ON t.a = v.x WHERE v.x IS NULL ORDER BY a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "three",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_full_join",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) FULL JOIN (VALUES (2), (3)) w(y) ON x = y WHERE x > 1 OR y > 2 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ],
+            [
+              null,
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_join_alias",
+      "sql": "SELECT * FROM ((VALUES (1), (2)) v(x) JOIN (VALUES (2)) w(y) ON true) j WHERE j.x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_join_error",
+      "sql": "SELECT * FROM (VALUES (0), (1)) v(x) JOIN (VALUES (1), (2)) w(y) ON x = y WHERE 1 / x > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "values_join_function",
+      "sql": "SELECT * FROM generate_series(1, 3) g, (VALUES (1), (2)) v(x) WHERE x > 1 AND g > 2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_join_unnest",
+      "sql": "SELECT * FROM unnest(ARRAY[1, 2, 3]) u(z) JOIN (VALUES (1), (2)) v(x) ON z = x WHERE x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_join_grouped",
+      "sql": "SELECT t.b, count(*) FROM t JOIN (VALUES (1), (2), (2)) v(x) ON t.a = v.x WHERE v.x > 1 GROUP BY t.b ORDER BY 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "b",
+            "count"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "two",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_join_row_lock",
+      "sql": "SELECT t.a FROM t JOIN (VALUES (1), (2)) v(x) ON t.a = v.x WHERE v.x > 1 FOR UPDATE OF t",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unaliased_values_beside_table",
+      "sql": "SELECT * FROM t, (VALUES (1), (2)) WHERE column1 > 1 ORDER BY a",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "column1"
+          ],
+          "type_oids": [
+            23,
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "one",
+              "2"
+            ],
+            [
+              "2",
+              "two",
+              "2"
+            ],
+            [
+              "3",
+              "three",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unaliased_values_unqualified",
+      "sql": "SELECT a, column1 FROM t, (VALUES (1), (2)) WHERE a > column1 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "column1"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unaliased_values_qualified",
+      "sql": "SELECT a, column1 FROM t, (VALUES (1), (2)) WHERE t.a > column1 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "column1"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unaliased_values_beside_values",
+      "sql": "SELECT * FROM (VALUES (1), (2)), (VALUES (3), (4)) w(y) WHERE column1 > 1 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "column1",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "3"
+            ],
+            [
+              "2",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unaliased_values_join_values",
+      "sql": "SELECT * FROM (VALUES (1), (2)) JOIN (VALUES (2), (4)) w(y) ON true WHERE y > 3 AND column1 = 2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "column1",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unaliased_subquery_beside_table",
+      "sql": "SELECT * FROM t, (SELECT 5 AS c) WHERE c > 1 ORDER BY a",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            23,
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "one",
+              "5"
+            ],
+            [
+              "2",
+              "two",
+              "5"
+            ],
+            [
+              "3",
+              "three",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unaliased_subquery_beside_values",
+      "sql": "SELECT * FROM (SELECT 1 AS k), u WHERE c > 1 AND k = 1 ORDER BY c",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "c"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "1",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_ambiguous",
+      "sql": "CREATE TABLE amb(column1 int)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unaliased_values_ambiguous",
+      "sql": "SELECT * FROM amb, (VALUES (1)) WHERE column1 > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42702",
+        "message": "column reference \"column1\" is ambiguous",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "values_group_having",
+      "sql": "SELECT x % 2 AS k, count(*) FROM (VALUES (1), (2), (3), (4), (5)) v(x) WHERE x > 1 GROUP BY x % 2 HAVING count(*) > 1 ORDER BY k",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "count"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "2"
+            ],
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_having",
+      "sql": "SELECT sum(x) FROM (VALUES (1), (2), (3)) v(x) WHERE x > 1 HAVING sum(x) > 4",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sum"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_filtered_aggregate",
+      "sql": "SELECT count(*) FILTER (WHERE x > 1), count(*) FROM (VALUES (1), (2), (3)) v(x) WHERE x < 3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count",
+            "count"
+          ],
+          "type_oids": [
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_rollup",
+      "sql": "SELECT x, count(*) FROM (VALUES (1), (2), (2), (3)) v(x) WHERE x > 1 GROUP BY ROLLUP (x) ORDER BY 1 NULLS LAST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "count"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "1"
+            ],
+            [
+              null,
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_window",
+      "sql": "SELECT x, sum(x) OVER () FROM (VALUES (1), (2), (3)) v(x) WHERE x > 1 ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "sum"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ],
+            [
+              "3",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_distinct_limit",
+      "sql": "SELECT DISTINCT x FROM (VALUES (1), (2), (2), (3)) v(x) WHERE x > 1 ORDER BY x LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_distinct_on",
+      "sql": "SELECT DISTINCT ON (k) k, x FROM (VALUES (1, 10), (1, 5), (2, 7)) v(k, x) WHERE x > 5 ORDER BY k, x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "10"
+            ],
+            [
+              "2",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_correlated_scalar",
+      "sql": "SELECT a, (SELECT count(*) FROM (VALUES (1), (2), (3)) v(x) WHERE x > 1 AND x <= t.a) FROM t ORDER BY a",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "count"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "0"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_correlated_unqualified",
+      "sql": "SELECT a, (SELECT count(*) FROM (VALUES (1), (2), (3)) v(x) WHERE x < a) FROM t ORDER BY a",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "count"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "0"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_correlated_exists",
+      "sql": "SELECT a FROM t WHERE EXISTS (SELECT 1 FROM (VALUES (2), (3)) v(x) WHERE x = t.a) ORDER BY a",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_in_subquery",
+      "sql": "SELECT a FROM t WHERE a IN (SELECT x FROM (VALUES (1), (2), (3)) v(x) WHERE x > 1) ORDER BY a",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_not_in_subquery",
+      "sql": "SELECT a FROM t WHERE a NOT IN (SELECT x FROM (VALUES (1), (2), (3)) v(x) WHERE x > 2) ORDER BY a",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_outer_exists",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) WHERE EXISTS (SELECT 1 FROM u WHERE u.c = v.x + 1) ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_scalar_subquery_predicate",
+      "sql": "SELECT k, x FROM (VALUES (1, 10), (2, 20)) v(k, x) WHERE k = (SELECT max(c) - 1 FROM u)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "20"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "derived_table",
+      "sql": "SELECT * FROM (SELECT x FROM (VALUES (1), (2)) v(x) WHERE x > 1) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "derived_table_outer_predicate",
+      "sql": "SELECT * FROM (SELECT * FROM (VALUES (1), (2)) v(x)) s WHERE x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "cte",
+      "sql": "WITH c AS (SELECT x FROM (VALUES (1), (2)) v(x) WHERE x > 1) SELECT * FROM c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "cte_materialized",
+      "sql": "WITH c AS MATERIALIZED (SELECT x FROM (VALUES (1), (2)) v(x) WHERE x > 1) SELECT * FROM c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "recursive_cte",
+      "sql": "WITH RECURSIVE r(n) AS (SELECT x FROM (VALUES (1), (5)) v(x) WHERE x > 1 UNION ALL SELECT n + 1 FROM r WHERE n < 7) SELECT * FROM r ORDER BY n",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ],
+            [
+              "6"
+            ],
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "union_all",
+      "sql": "SELECT x FROM (VALUES (1), (2)) v(x) WHERE x > 1 UNION ALL SELECT x FROM (VALUES (3), (4)) w(x) WHERE x < 4 ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "union",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) WHERE x > 1 UNION SELECT * FROM (VALUES (2), (3)) w(x) WHERE x < 3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "except",
+      "sql": "SELECT * FROM (VALUES (1), (2), (3)) v(x) WHERE x > 1 EXCEPT SELECT * FROM (VALUES (3)) w(x) WHERE x > 0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_values",
+      "sql": "SELECT a, x FROM t, LATERAL (VALUES (1), (2), (3)) v(x) WHERE x > 2 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "3"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_values_cross",
+      "sql": "SELECT a, x FROM t CROSS JOIN LATERAL (VALUES (1), (2)) v(x) WHERE v.x = 2 AND t.a = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_values_propagated",
+      "sql": "SELECT a, x FROM t JOIN LATERAL (VALUES (1), (2), (3)) v(x) ON v.x = t.a WHERE t.a = 2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_values_left",
+      "sql": "SELECT a, x FROM t LEFT JOIN LATERAL (VALUES (1), (2), (3)) v(x) ON v.x = t.a + 1 WHERE v.x IS NULL ORDER BY 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_subquery",
+      "sql": "SELECT t.a, s.x FROM t, LATERAL (SELECT t.a * g AS x FROM generate_series(1, 2) g) s WHERE s.x > 2 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "4"
+            ],
+            [
+              "3",
+              "3"
+            ],
+            [
+              "3",
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_subquery_table",
+      "sql": "SELECT t.a, s.c FROM t, LATERAL (SELECT c FROM u WHERE u.c <= t.a) s WHERE s.c > 1 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "c"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_subquery_values",
+      "sql": "SELECT t.a, s.n FROM t, LATERAL (SELECT count(*) AS n FROM (VALUES (1), (2), (3)) v(x) WHERE x < t.a) s WHERE s.n > 1 ORDER BY 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_left_subquery",
+      "sql": "SELECT a, s.x FROM t LEFT JOIN LATERAL (SELECT t.a * 10 AS x) s ON true WHERE s.x > 10 ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "20"
+            ],
+            [
+              "3",
+              "30"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_on_and_where",
+      "sql": "SELECT t.a, s.x FROM t JOIN LATERAL (SELECT t.a + g AS x FROM generate_series(0, 1) g) s ON s.x > t.a WHERE s.x < 4 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "function_source",
+      "sql": "SELECT a, x FROM t, generate_series(1, 3) g(x) WHERE g.x > 2 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "3"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "function_source_unqualified",
+      "sql": "SELECT a, x FROM t, generate_series(1, 3) g(x) WHERE x > 2 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "3"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "function_source_output_name",
+      "sql": "SELECT a, g FROM t, generate_series(1, 3) g WHERE g.g > 2 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "g"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "3"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "rows_from_source",
+      "sql": "SELECT a, x FROM t, ROWS FROM (generate_series(1, 3)) g(x) WHERE x > 2 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "3"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_function",
+      "sql": "SELECT a, x FROM t, LATERAL generate_series(1, t.a) g(x) WHERE g.x > 1 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "function_window",
+      "sql": "SELECT a, x, sum(x) OVER (PARTITION BY a) FROM t, generate_series(1, 3) g(x) WHERE x > 1 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x",
+            "sum"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "5"
+            ],
+            [
+              "1",
+              "3",
+              "5"
+            ],
+            [
+              "2",
+              "2",
+              "5"
+            ],
+            [
+              "2",
+              "3",
+              "5"
+            ],
+            [
+              "3",
+              "2",
+              "5"
+            ],
+            [
+              "3",
+              "3",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "function_cte",
+      "sql": "WITH c AS (SELECT t.a, g.x FROM t, generate_series(1, 3) g(x) WHERE g.x > 2) SELECT * FROM c ORDER BY 1",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "3"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_view",
+      "sql": "CREATE VIEW values_view AS SELECT x FROM (VALUES (1), (2), (3)) v(x) WHERE x > 1",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "values_view_rows",
+      "sql": "SELECT * FROM values_view ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_view",
+      "sql": "CREATE VIEW lateral_view AS SELECT t.a, g.x FROM t, generate_series(1, 3) g(x) WHERE g.x > 2",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral_view_rows",
+      "sql": "SELECT * FROM lateral_view ORDER BY 1",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "3"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unaliased_view",
+      "sql": "CREATE VIEW unaliased_view AS SELECT a, column1 FROM t, (VALUES (1), (2)) WHERE a > column1",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unaliased_view_rows",
+      "sql": "SELECT * FROM unaliased_view ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "column1"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "routine",
+      "sql": "CREATE FUNCTION values_above(int) RETURNS bigint LANGUAGE sql AS $$ SELECT count(*) FROM (VALUES (1), (2), (3)) v(x) WHERE x > $1 $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "routine_call",
+      "sql": "SELECT values_above(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "values_above"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_typed",
+      "sql": "PREPARE values_typed(int) AS SELECT x FROM (VALUES (1), (2), (3)) v(x) WHERE x > $1 ORDER BY x",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_typed_1",
+      "sql": "EXECUTE values_typed(1)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_typed_2",
+      "sql": "EXECUTE values_typed(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_inferred",
+      "sql": "PREPARE values_inferred AS SELECT count(*) FROM (VALUES (1), (2), (3)) v(x) WHERE x > $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_inferred_0",
+      "sql": "EXECUTE values_inferred(0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_inferred_2",
+      "sql": "EXECUTE values_inferred(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_function_source",
+      "sql": "PREPARE function_above(int) AS SELECT a, x FROM t, generate_series(1, 3) g(x) WHERE g.x > $1 AND t.a = 1 ORDER BY 2",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_function_source",
+      "sql": "EXECUTE function_above(1)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "1",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_select",
+      "sql": "INSERT INTO target SELECT x FROM (VALUES (1), (2), (3)) v(x) WHERE x > 1",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_select_rows",
+      "sql": "SELECT x FROM target ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_on_conflict",
+      "sql": "INSERT INTO target SELECT x FROM (VALUES (7), (8)) v(x) WHERE x > 7 ON CONFLICT DO NOTHING",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_function_source",
+      "sql": "INSERT INTO target SELECT g.x FROM t, generate_series(1, 2) g(x) WHERE g.x > 1 AND t.a = 1",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_rows",
+      "sql": "SELECT x FROM target ORDER BY x",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "2"
+            ],
+            [
+              "3"
+            ],
+            [
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "update_from",
+      "sql": "UPDATE t SET b = v.y FROM (VALUES (1, 'uno'), (2, 'dos')) v(x, y) WHERE t.a = v.x AND v.x > 1 RETURNING t.a, t.b",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "dos"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "update_from_source_predicate",
+      "sql": "UPDATE t SET b = 'w' FROM (VALUES (1), (3)) v(x) WHERE v.x > 1 AND t.a = 1 RETURNING t.a, t.b",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "w"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "delete_using",
+      "sql": "DELETE FROM target USING (VALUES (1), (3)) v(x) WHERE target.x = v.x AND v.x > 1 RETURNING target.x",
+      "command_tags": [
+        "DELETE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "delete_using_no_match",
+      "sql": "DELETE FROM target USING (VALUES (1), (2)) v(x) WHERE v.x > 5 RETURNING target.x",
+      "command_tags": [
+        "DELETE 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "delete_using_function",
+      "sql": "DELETE FROM target USING generate_series(1, 3) g(x) WHERE target.x = g.x AND g.x > 1 RETURNING target.x",
+      "command_tags": [
+        "DELETE 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "merge_using",
+      "sql": "MERGE INTO t USING (SELECT * FROM (VALUES (2, 'm2'), (3, 'm3')) v(k, y) WHERE k > 2) s ON t.a = s.k WHEN MATCHED THEN UPDATE SET b = s.y",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_rows",
+      "sql": "SELECT * FROM t ORDER BY a",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "w"
+            ],
+            [
+              "2",
+              "dos"
+            ],
+            [
+              "3",
+              "m3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "target_rows",
+      "sql": "SELECT x FROM target ORDER BY x",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

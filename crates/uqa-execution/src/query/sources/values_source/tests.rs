@@ -57,6 +57,8 @@ fn values_from_sources_preserve_postgresql_collations_through_qualification() {
                 &crate::catalog::test_support::empty_scope(),
                 || Arc::new(Services),
                 None,
+                None,
+                || panic!("no predicate is placed on the list"),
             )
             .unwrap();
             let name = if alias.is_some() { "x" } else { "column1" };
@@ -82,4 +84,62 @@ fn values_from_sources_preserve_postgresql_collations_through_qualification() {
             crate::query::relational::values::test_support::assert_values(&case.sql, &values);
         }
     }
+}
+
+#[test]
+fn values_sources_apply_only_the_predicates_placed_on_their_qualifier() {
+    let UnifiedPlan::Query(plan) =
+        UnifiedPlan::lower(uqa_sql::compile("VALUES (1), (2), (3)").unwrap().remove(0))
+    else {
+        panic!("query")
+    };
+    let RelationalPlan::Values { rows, .. } = plan.root else {
+        panic!("VALUES")
+    };
+    let comparison = |qualifier: &str, op, value| ScalarExpr::Binary {
+        op,
+        lhs: Box::new(ScalarExpr::qualified_column(qualifier, "x")),
+        rhs: Box::new(ScalarExpr::Literal(uqa_core::Value::Int(value))),
+    };
+    let filters = uqa_sql::plan::source_projection::QualifierFilters::from([
+        (
+            "v".to_string(),
+            vec![
+                comparison("v", uqa_sql::ast::BinaryOp::Greater, 1),
+                comparison("v", uqa_sql::ast::BinaryOp::NotEqual, 3),
+            ],
+        ),
+        (
+            "w".to_string(),
+            vec![comparison("w", uqa_sql::ast::BinaryOp::Equal, 1)],
+        ),
+    ]);
+    let source = SourcePlan::Values {
+        rows,
+        alias: Some("v".into()),
+        column_aliases: vec!["x".into()],
+        internal_relation: None,
+        internal_column_types: Vec::new(),
+        internal_column_collations: Vec::new(),
+    };
+    let mut operator = build_values_source(
+        &Services,
+        &Services,
+        &source,
+        &[],
+        &crate::catalog::test_support::empty_scope(),
+        || Arc::new(Services),
+        None,
+        Some(&filters),
+        || crate::relational::DefaultExpressionEvaluator::shared(Vec::new()),
+    )
+    .unwrap();
+    let (_, actual) = crate::physical::run_to_rows(operator.as_mut()).unwrap();
+    assert_eq!(
+        actual
+            .iter()
+            .map(|row| row["x"].clone())
+            .collect::<Vec<_>>(),
+        [uqa_core::Value::Int(2)]
+    );
 }

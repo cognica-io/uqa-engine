@@ -104,12 +104,52 @@ fn collect_source_column_owners(
         } if !column_aliases.is_empty() => {
             register_column_owners(owners, alias, column_aliases.clone());
         }
+        SourcePlan::Values {
+            rows,
+            alias: None,
+            internal_relation: None,
+            ..
+        } => {
+            register_unqualified_columns(
+                owners,
+                (1..=rows.first().map_or(0, Vec::len)).map(|index| format!("column{index}")),
+            );
+        }
+        SourcePlan::Subquery {
+            body, alias: None, ..
+        } => {
+            register_unqualified_columns(
+                owners,
+                query_plan_output_columns(body).unwrap_or_default(),
+            );
+        }
         SourcePlan::Values { alias: None, .. }
         | SourcePlan::Function { .. }
-        | SourcePlan::FunctionGroup { .. }
-        | SourcePlan::Subquery { alias: None, .. } => {}
+        | SourcePlan::FunctionGroup { .. } => {}
     }
     Ok(())
+}
+
+/// Whether the FROM clause contains an unaliased VALUES list or subquery. PostgreSQL exposes the columns of such a relation without any qualifier, so an unqualified column reference cannot be attributed to a qualifier merely because it is the only one in the clause.
+pub(super) fn has_unqualified_relation(source: &SourcePlan) -> bool {
+    match source {
+        SourcePlan::Join {
+            left,
+            right,
+            alias: None,
+            ..
+        } => has_unqualified_relation(left) || has_unqualified_relation(right),
+        SourcePlan::Values {
+            alias,
+            internal_relation,
+            ..
+        } => alias.is_none() && internal_relation.is_none(),
+        SourcePlan::Subquery { alias, .. } => alias.is_none(),
+        SourcePlan::Join { .. }
+        | SourcePlan::Table { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => false,
+    }
 }
 
 fn relation_source_columns(
@@ -163,5 +203,15 @@ fn register_column_owners(
             .entry(column)
             .and_modify(|owner| *owner = None)
             .or_insert_with(|| Some(qualifier.to_string()));
+    }
+}
+
+/// A column of a relation without a qualifier belongs to no qualifier, whichever other relation also defines its name.
+fn register_unqualified_columns(
+    owners: &mut ColumnOwners,
+    columns: impl IntoIterator<Item = String>,
+) {
+    for column in columns {
+        owners.insert(column, None);
     }
 }

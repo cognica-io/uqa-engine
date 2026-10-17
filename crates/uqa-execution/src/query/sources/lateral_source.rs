@@ -17,6 +17,11 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) context: SourceContext<'a, S>,
     pub(super) right: SourcePlan,
     pub(super) on: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
+    /// The planner's predicates on the right relation's qualifiers, bound to `right_schema`. The planner removes them from the query block's residual filter, so every produced right row must satisfy them.
+    pub(super) right_filter: Option<(
+        crate::scalar::PreparedExpressions<ScalarExpr>,
+        crate::SharedExpressionEvaluator<'a>,
+    )>,
     pub(super) function_arguments: Option<crate::scalar::PreparedExpressions<Vec<ScalarExpr>>>,
     pub(super) params: &'a [SQLParam],
     pub(super) ctes: CteScope<S>,
@@ -25,6 +30,20 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
 }
 
 impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSource<'_, S> {
+    fn admits(&mut self, right: &crate::OwnedPhysicalRow) -> crate::ExecResult<bool> {
+        let Some((predicate, evaluator)) = self.right_filter.as_ref() else {
+            return Ok(true);
+        };
+        Ok(uqa_sql::expr::truthy(
+            &evaluator.evaluate_physical_with_function_states(
+                predicate,
+                &right.schema,
+                &right.row,
+                predicate.calls(),
+            )?,
+        ))
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "preserves source schema and row identity"

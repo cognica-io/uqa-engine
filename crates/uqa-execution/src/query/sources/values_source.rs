@@ -7,9 +7,9 @@
 
 /// Build the physical operator for a VALUES source.
 use super::{
-    eval_scalar, qualify_source_operator_with_columns, ColumnPrune, CteScope, PhysicalOperator,
-    PlanSubqueryArena, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, SourceContext,
-    SourcePlan,
+    eval_scalar, filter_qualified_source, qualify_source_operator_with_columns, ColumnPrune,
+    CteScope, PhysicalOperator, PlanSubqueryArena, QualifierFilters, SQLError, SQLParam,
+    ScalarEvalContext, ScalarExpr, SourceContext, SourcePlan,
 };
 use std::sync::Arc;
 
@@ -22,6 +22,7 @@ pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
     prune: Option<&ColumnPrune>,
+    filters: Option<&QualifierFilters>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     build_values_source(
         context.ctes.routines,
@@ -31,9 +32,16 @@ pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>
         ctes,
         || context.relational.expression_scope(ctes.clone()),
         prune,
+        filters,
+        || context.relational.evaluator(params, ctes),
     )
 }
 
+/// Build a VALUES list with the predicates the planner placed on its qualifier. The planner removes those conjuncts from the query block's residual filter, so the list applies them to its own rows like every other source.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "borrows the caller's scopes and its source predicate placement"
+)]
 fn build_values_source<'a, S: Clone + 'static>(
     routines: &dyn uqa_sql::routines::RoutineResolution,
     types: &dyn crate::FunctionTypeResolver,
@@ -42,7 +50,9 @@ fn build_values_source<'a, S: Clone + 'static>(
     ctes: &CteScope<S>,
     expression_scope: impl FnOnce() -> Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
     prune: Option<&ColumnPrune>,
-) -> Result<Box<dyn PhysicalOperator>, SQLError> {
+    filters: Option<&QualifierFilters>,
+    evaluator: impl FnOnce() -> crate::SharedExpressionEvaluator<'a>,
+) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     match from {
         SourcePlan::Values {
             rows,
@@ -90,14 +100,18 @@ fn build_values_source<'a, S: Clone + 'static>(
             }
             let operator: Box<dyn crate::PhysicalOperator> =
                 Box::new(crate::TableScan::from_physical_rows(schema, rows));
-            Ok(qualify_source_operator_with_columns(
+            let operator = qualify_source_operator_with_columns(
                 operator,
                 &source_columns,
                 alias.as_deref().unwrap_or_default(),
                 prune,
                 column_aliases,
                 ctes.lock_identities.emit,
-            ))
+            );
+            Ok(match alias.as_deref() {
+                Some(qualifier) => filter_qualified_source(operator, qualifier, filters, evaluator),
+                None => operator,
+            })
         }
         _ => unreachable!("VALUES source builder called for a different source kind"),
     }
