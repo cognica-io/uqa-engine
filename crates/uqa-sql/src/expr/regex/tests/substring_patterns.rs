@@ -73,7 +73,7 @@ fn assert_reference(
     reason = "replays every PostgreSQL reference cell of both pattern forms"
 )]
 fn substring_pattern_forms_match_the_postgresql_reference() {
-    let budget = MemoryBudget::new(64 * 1024);
+    let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
     // Positional and unrelated dispatches belong to other kernels.
@@ -242,7 +242,7 @@ fn substring_pattern_forms_match_the_postgresql_reference() {
 
 #[test]
 fn substring_pattern_forms_keep_only_their_result_and_release_rejected_output() {
-    let budget = MemoryBudget::new(16 * 1024);
+    let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
     for (similar, args) in [
@@ -258,28 +258,40 @@ fn substring_pattern_forms_keep_only_their_result_and_release_rejected_output() 
         drop(result);
         assert_eq!(budget.used(), 0);
     }
-    let held = control.copy_text("earlier value").unwrap();
-    let retained = budget.used();
-    // The input copy fits; copying the equally long whole match exceeds the remaining allowance.
-    let input = "a".repeat(10 * 1024);
+    // The input copies, the compiled pattern and the search fit; copying the equally long whole match exceeds the remaining allowance. The match is longer than the compiled pattern and its search use, so the copy is the allocation that reaches the call's peak.
+    let length = 256 * 1024;
+    let input = "a".repeat(length);
     for (similar, args) in [
         (false, vec![text(&input), text("a*")]),
         (true, vec![text(&input), text("a%"), text("#")]),
     ] {
+        let measured = MemoryBudget::new(1 << 24);
+        let measured_control = ProductionControl::new(&measured, &token, &token);
+        let held = measured_control.copy_text("earlier value").unwrap();
+        drop(evaluate(similar, &args, &measured_control).unwrap());
+        drop(held);
+        let budget = MemoryBudget::new(measured.peak() - length / 4);
+        let control = ProductionControl::new(&budget, &token, &token);
+        let held = control.copy_text("earlier value").unwrap();
+        let retained = budget.used();
         assert_eq!(
             evaluate(similar, &args, &control).unwrap_err().sqlstate(),
             Some("53200")
         );
+        assert!(
+            budget.peak() > retained + 4 * length,
+            "the input's code points were admitted before the match was refused"
+        );
         assert_eq!(budget.used(), retained);
+        assert_eq!(&*held, "earlier value");
+        drop(held);
+        assert_eq!(budget.used(), 0);
     }
-    assert_eq!(&*held, "earlier value");
-    drop(held);
-    assert_eq!(budget.used(), 0);
 }
 
 #[test]
 fn substring_pattern_forms_observe_both_cancellation_scopes() {
-    let budget = MemoryBudget::new(8192);
+    let budget = MemoryBudget::new(1 << 20);
     for cancel_original in [true, false] {
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();

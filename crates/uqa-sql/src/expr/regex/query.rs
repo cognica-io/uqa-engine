@@ -4,18 +4,23 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Capture, position and predicate results retain only admitted SQL values.
+//! Capture, count, position and predicate results of `regexp.c`, which retain only admitted SQL values.
 
 use super::{
-    char_byte_offset, compile, flags, invalid_parameter, parameter, plain, search_loop, string,
-    GlobalFlag,
+    argument_text, engine, flag_text,
+    flags::ReFlags,
+    invalid_parameter,
+    match_set::{MatchSet, Search},
+    parameter, plain, string, SingleResult,
 };
 use crate::error::{Result, SQLError};
-use crate::expr::{conversion::value_to_string_with_control, out_of_range};
+use crate::expr::out_of_range;
+use std::borrow::Cow;
 use uqa_core::{
-    memory::{Produced, ProductionControl, ProductionVec},
-    ArrayValue, Value,
+    memory::{Produced, ProductionControl},
+    Value,
 };
+use uqa_pg_regex::{CompileFlags, REG_ADVANCED, REG_ICASE, REG_NOSUB};
 
 /// `regexp_match`: the capture array of the first match, or NULL. `regexp_matches` returns rows through [`super::RegexMatches`].
 pub(super) fn captures(
@@ -28,49 +33,25 @@ pub(super) fn captures(
             "regexp_match takes 2 or 3 args".into(),
         ));
     }
-    let input = value_to_string_with_control(&args[0], control)?;
-    let pattern = value_to_string_with_control(&args[1], control)?;
-    let flags = flags(args.get(2), control)?;
-    let global = GlobalFlag::Rejected {
+    if args.iter().any(|value| matches!(value, Value::Null)) {
+        return plain(Value::Null, control);
+    }
+    let input = argument_text(&args[0], control)?;
+    let pattern = argument_text(&args[1], control)?;
+    let flags = ReFlags::parse(&flag_text(args.get(2), control)?)?.reject_global(SingleResult {
         function: "regexp_match",
         hint: Some("Use the regexp_matches function instead."),
+    })?;
+    let search = Search {
+        start: 0,
+        subexpressions: true,
+        ignore_degenerate: false,
     };
-    let regex = compile(&pattern, &flags, global, collation, control)?;
-    let captures = regex.captures(&input);
-    control.check()?;
-    let Some(captures) = captures else {
+    let matches = MatchSet::find(&input, &pattern, flags, collation, search, control)?;
+    if matches.len() == 0 {
         return plain(Value::Null, control);
-    };
-    capture_array(&captures, control)
-}
-
-/// The `text[]` value of one match: its parenthesized subexpressions, or the whole match when the pattern has none. A subexpression that did not participate is NULL.
-pub(super) fn capture_array(
-    captures: &regex::Captures<'_>,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Value>> {
-    let mut groups = ProductionVec::new(*control);
-    if captures.len() == 1 {
-        let matched = captures.get(0).ok_or_else(|| {
-            SQLError::Internal("regex capture set omitted its mandatory full match".into())
-        })?;
-        groups.push_produced(string(control.copy_text(matched.as_str())?, control)?)?;
-    } else {
-        groups.reserve(captures.len() - 1)?;
-        for matched in captures.iter().skip(1) {
-            let value = match matched {
-                Some(matched) => string(control.copy_text(matched.as_str())?, control)?,
-                None => plain(Value::Null, control)?,
-            };
-            groups.push_produced(value)?;
-        }
     }
-    let array = ArrayValue::try_new_with_control(groups.finish()?, control)?
-        .ok_or_else(|| SQLError::TypeMismatch("invalid regexp_match result".into()))?;
-    let (array, memory) = array.into_parts();
-    control
-        .finish(Value::Array(array), memory)
-        .map_err(Into::into)
+    matches.row(0, control)
 }
 
 pub(super) fn evaluate(
@@ -99,34 +80,50 @@ pub(super) fn evaluate(
     let input = if matches!(name, "regex_match_op" | "regex_imatch_op") {
         pattern_input(&args[0], control)?
     } else {
-        value_to_string_with_control(&args[0], control)?
+        argument_text(&args[0], control)?
     };
-    let pattern = value_to_string_with_control(&args[1], control)?;
+    let pattern = argument_text(&args[1], control)?;
     match name {
         "regexp_count" => count(&input, &pattern, args, collation, control),
         "regexp_instr" | "regexp_substr" => {
             selected(name, &input, &pattern, args, collation, control)
         }
-        // `~*` is `regexp_like` with the `i` flag; `~` and `regexp_like` take the flags written.
-        "regexp_like" | "regex_match_op" | "regex_imatch_op" => {
-            let flags = if name == "regex_imatch_op" {
-                control.copy_text("i").map_err(SQLError::from)?
-            } else {
-                flags(args.get(2), control)?
-            };
-            let regex = compile(
-                &pattern,
-                &flags,
-                GlobalFlag::rejected_by("regexp_like"),
-                collation,
-                control,
-            )?;
-            plain(Value::Bool(regex.is_match(&input)), control)
+        "regexp_like" => {
+            let flags = ReFlags::parse(&flag_text(args.get(2), control)?)?
+                .reject_global(SingleResult::named("regexp_like"))?;
+            matches_anywhere(&input, &pattern, flags.cflags, collation, control)
         }
+        // `textregexeq` and `texticregexeq`.
+        "regex_match_op" => matches_anywhere(&input, &pattern, REG_ADVANCED, collation, control),
+        "regex_imatch_op" => matches_anywhere(
+            &input,
+            &pattern,
+            REG_ADVANCED | REG_ICASE,
+            collation,
+            control,
+        ),
         _ => unreachable!("regular-expression family membership was checked"),
     }
 }
 
+/// `RE_compile_and_execute` without subexpressions: whether `pattern` matches anywhere in `input`. The pattern is compiled before the input is converted.
+fn matches_anywhere(
+    input: &str,
+    pattern: &str,
+    cflags: CompileFlags,
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let call = engine::RegexCall::new(control);
+    let mut allowance = call.allowance();
+    let mut regex = call.compile(pattern, cflags | REG_NOSUB, collation, &mut allowance)?;
+    let points = engine::code_points(input, control)?;
+    let found = call.execute(&mut regex, &points, 0, &mut [])?;
+    drop(regex);
+    plain(Value::Bool(found), control)
+}
+
+/// `regexp_count`: the number of matches from character `start`, empty matches included.
 fn count(
     input: &str,
     pattern: &str,
@@ -135,27 +132,20 @@ fn count(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     let start = parameter(args.get(2), 1, 1, "start", control)?;
-    let flags = flags(args.get(3), control)?;
-    let regex = compile(
-        pattern,
-        &flags,
-        GlobalFlag::rejected_by("regexp_count"),
-        collation,
-        control,
-    )?;
-    let Some(start) = char_byte_offset(input, start - 1, control)? else {
-        return plain(Value::Int(0), control);
+    let flags = ReFlags::parse(&flag_text(args.get(3), control)?)?
+        .reject_global(SingleResult::named("regexp_count"))?
+        .every_match();
+    let search = Search {
+        start: start - 1,
+        subexpressions: false,
+        ignore_degenerate: false,
     };
-    let mut count = 0_i64;
-    for _ in search_loop(&regex, input, start) {
-        control.check()?;
-        count = count
-            .checked_add(1)
-            .ok_or_else(|| out_of_range("integer"))?;
-    }
+    let matches = MatchSet::find(input, pattern, flags, collation, search, control)?;
+    let count = i64::try_from(matches.len()).map_err(|_| out_of_range("integer"))?;
     plain(Value::Int(count), control)
 }
 
+/// `regexp_instr` and `regexp_substr`: the position or text of match `n` from character `start`, or of its subexpression `subexpr`. Every parameter is validated before the flags, and the flags before the pattern.
 fn selected(
     name: &str,
     input: &str,
@@ -164,9 +154,9 @@ fn selected(
     collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    let position = name == "regexp_instr";
     let start = parameter(args.get(2), 1, 1, "start", control)?;
     let occurrence = parameter(args.get(3), 1, 1, "n", control)?;
-    let position = name == "regexp_instr";
     let end_option = if position {
         let value = args
             .get(4)
@@ -180,8 +170,7 @@ fn selected(
     } else {
         0
     };
-    let flags = flags(args.get(if position { 5 } else { 4 }), control)?;
-    let group = parameter(
+    let subexpression = parameter(
         args.get(if position { 6 } else { 5 }),
         0,
         0,
@@ -193,62 +182,43 @@ fn selected(
     } else {
         "regexp_substr"
     };
-    let regex = compile(
-        pattern,
-        &flags,
-        GlobalFlag::rejected_by(function),
-        collation,
-        control,
-    )?;
+    let flags = ReFlags::parse(&flag_text(args.get(if position { 5 } else { 4 }), control)?)?
+        .reject_global(SingleResult::named(function))?
+        .every_match();
+    let search = Search {
+        start: start - 1,
+        subexpressions: subexpression > 0,
+        ignore_degenerate: false,
+    };
+    let matches = MatchSet::find(input, pattern, flags, collation, search, control)?;
     let absent = || plain(if position { Value::Int(0) } else { Value::Null }, control);
-    let Some(start) = char_byte_offset(input, start - 1, control)? else {
+    // `PostgreSQL` records the whole match as the only pattern when the expression has no subexpressions, so subexpression 1 then names the whole match.
+    if occurrence > matches.len() || subexpression > matches.patterns() {
         return absent();
-    };
-    let mut selected = None;
-    for (index, captures) in search_loop(&regex, input, start).enumerate() {
-        control.check()?;
-        if index + 1 == occurrence {
-            selected = Some(captures);
-            break;
-        }
     }
-    let Some(captures) = selected else {
-        return absent();
-    };
-    // `PostgreSQL` numbers subexpressions only when the pattern has some; otherwise subexpression 1 names the whole match.
-    let subexpressions = captures.len() - 1;
-    let matched = if group == 0 || (group == 1 && subexpressions == 0) {
-        Some(captures.get_match())
-    } else if group <= subexpressions {
-        captures.get(group)
-    } else {
-        None
-    };
-    let Some(matched) = matched else {
-        return absent();
-    };
-    if !position {
-        return string(control.copy_text(matched.as_str())?, control);
-    }
-    let byte_offset = if end_option == 0 {
-        matched.start()
-    } else {
-        matched.end()
-    };
-    let mut position = 0_usize;
-    for _ in input[..byte_offset].chars() {
-        control.check()?;
-        position = position
+    let span = matches.span(occurrence - 1, subexpression.saturating_sub(1));
+    if position {
+        let offset = if end_option == 1 {
+            span.end()
+        } else {
+            span.start()
+        };
+        let Some(offset) = offset else {
+            return absent();
+        };
+        let position = offset
             .checked_add(1)
+            .and_then(|value| i64::try_from(value).ok())
             .ok_or_else(|| out_of_range("integer"))?;
+        return plain(Value::Int(position), control);
     }
-    let position = position
-        .checked_add(1)
-        .and_then(|value| i64::try_from(value).ok())
-        .ok_or_else(|| out_of_range("integer"))?;
-    plain(Value::Int(position), control)
+    match matches.text(span, control)? {
+        Some(text) => string(text, control),
+        None => absent(),
+    }
 }
 
+/// `SIMILAR TO`: `textregexeq(input, similar_to_escape(pattern, escape))`. The strict translation runs, and can fail, before a NULL input yields NULL.
 fn similar(
     args: &[Value],
     collation: u32,
@@ -264,35 +234,37 @@ fn similar(
     }
     let escape = args
         .get(2)
-        .map(|value| value_to_string_with_control(value, control))
+        .map(|value| argument_text(value, control))
         .transpose()?;
-    let input_pattern = value_to_string_with_control(&args[1], control)?;
+    let input_pattern = argument_text(&args[1], control)?;
     let pattern = crate::expr::scalar_helpers::similar_to_regex_with_control(
         &input_pattern,
-        escape.as_ref().map(|value| value.as_str()),
+        escape.as_deref().map(AsRef::as_ref),
         control,
     )?;
     if matches!(args[0], Value::Null) {
         return plain(Value::Null, control);
     }
     let input = pattern_input(&args[0], control)?;
-    let regex = compile(
-        &pattern,
-        "",
-        GlobalFlag::rejected_by("similar_to"),
-        collation,
-        control,
-    )?;
-    plain(Value::Bool(regex.is_match(&input)), control)
+    matches_anywhere(&input, &pattern, REG_ADVANCED, collation, control)
 }
 
-fn pattern_input(value: &Value, control: &ProductionControl<'_>) -> Result<Produced<String>> {
+/// The text an operator matches: a `character(n)` value keeps its padding, as `bpcharregexeq` reads the stored value.
+fn pattern_input<'v>(
+    value: &'v Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Cow<'v, str>>> {
     match value {
-        Value::FixedChar(text) => control.copy_text(text).map_err(Into::into),
-        Value::Datum(datum) => pattern_input(
-            &*crate::expr::datums::read_with_control(datum, control)?,
-            control,
-        ),
-        _ => value_to_string_with_control(value, control),
+        Value::FixedChar(text) => control
+            .finish(Cow::Borrowed(text.as_str()), control.empty_reservation())
+            .map_err(Into::into),
+        Value::Datum(datum) => {
+            let stored = crate::expr::datums::read_with_control(datum, control)?;
+            let (text, memory) = control
+                .copy_text(&pattern_input(&stored, control)?)?
+                .into_parts();
+            control.finish(Cow::Owned(text), memory).map_err(Into::into)
+        }
+        _ => argument_text(value, control),
     }
 }

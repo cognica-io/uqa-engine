@@ -6,29 +6,24 @@
 
 //! `regexp_split_to_table` and `regexp_split_to_array`: the text between the matches `PostgreSQL`'s `setup_regexp_matches` finds when it ignores degenerate matches.
 
-use super::{compile, flags, next_search_start, plain, string, GlobalFlag, LocalRegex};
-use crate::{
-    error::{Result, SQLError},
-    expr::conversion::value_to_string_with_control,
+use super::{
+    argument_text, flag_text,
+    flags::ReFlags,
+    match_set::{MatchSet, Search},
+    plain, string, SingleResult,
 };
+use crate::error::{Result, SQLError};
 use uqa_core::{
     memory::{Produced, ProductionControl, ProductionVec},
     ArrayValue, Value,
 };
 
-/// The pieces of one split. The cursor owns its admitted input and compiled pattern, so a caller can draw each piece under its own control.
+/// The pieces of one split. Preparing the cursor finds every match; the cursor owns the input's code points and the match spans, so a caller can draw each piece under its own control.
 #[derive(Debug)]
 pub struct RegexSplit {
-    input: Produced<String>,
-    regex: LocalRegex,
-    /// The byte offset where the next piece begins: the end of the last match that split the input.
-    piece_start: usize,
-    /// The end of the last match found, whether or not it split the input.
-    previous_match_end: usize,
-    /// The byte offset of the next search, or `None` once no further match can split the input.
-    search_start: Option<usize>,
-    /// Whether the final piece has been returned.
-    finished: bool,
+    matches: MatchSet,
+    /// The piece returned next: the text before match `next`, or after the last match once `next` equals the match count.
+    next: usize,
 }
 
 impl RegexSplit {
@@ -36,7 +31,7 @@ impl RegexSplit {
     ///
     /// # Errors
     ///
-    /// Reports `PostgreSQL`'s diagnostics for an invalid flag, the `g` flag and an invalid pattern, an exhausted allowance and cancellation.
+    /// Reports `PostgreSQL`'s diagnostics for an invalid flag, the `g` flag, an invalid collation or pattern and a failed search, an exhausted allowance and cancellation.
     pub fn new(
         function: &'static str,
         arguments: &[Value],
@@ -52,27 +47,21 @@ impl RegexSplit {
         if arguments.iter().any(|value| matches!(value, Value::Null)) {
             return Ok(None);
         }
-        let input = value_to_string_with_control(&arguments[0], control)?;
-        let pattern = value_to_string_with_control(&arguments[1], control)?;
-        let flags = flags(arguments.get(2), control)?;
-        let regex = compile(
-            &pattern,
-            &flags,
-            GlobalFlag::rejected_by(function),
-            collation,
-            control,
-        )?;
-        Ok(Some(Self {
-            input,
-            regex,
-            piece_start: 0,
-            previous_match_end: 0,
-            search_start: Some(0),
-            finished: false,
-        }))
+        let input = argument_text(&arguments[0], control)?;
+        let pattern = argument_text(&arguments[1], control)?;
+        let flags = ReFlags::parse(&flag_text(arguments.get(2), control)?)?
+            .reject_global(SingleResult::named(function))?
+            .every_match();
+        let search = Search {
+            start: 0,
+            subexpressions: false,
+            ignore_degenerate: true,
+        };
+        let matches = MatchSet::find(&input, &pattern, flags, collation, search, control)?;
+        Ok(Some(Self { matches, next: 0 }))
     }
 
-    /// The next piece, or `None` after the last one. A match splits the input unless it is degenerate: empty at the start or end of the input, or empty immediately after the previous match.
+    /// The next piece, or `None` after the last one, `build_regexp_split_result`.
     ///
     /// # Errors
     ///
@@ -82,35 +71,32 @@ impl RegexSplit {
         control: &ProductionControl<'_>,
     ) -> Result<Option<Produced<Value>>> {
         control.check()?;
-        if self.finished {
+        let count = self.matches.len();
+        if self.next > count {
             return Ok(None);
         }
-        while let Some(start) = self.search_start {
-            let Some(matched) = self.regex.find_at(&self.input, start) else {
-                self.search_start = None;
-                break;
-            };
-            control.check()?;
-            let splits =
-                matched.start() < self.input.len() && matched.end() > self.previous_match_end;
-            if splits {
-                let piece = control.copy_text(&self.input[self.piece_start..matched.start()])?;
-                let piece = string(piece, control)?;
-                self.piece_start = matched.end();
-                self.previous_match_end = matched.end();
-                self.search_start = next_search_start(&self.input, matched);
-                return Ok(Some(piece));
-            }
-            self.previous_match_end = matched.end();
-            self.search_start = next_search_start(&self.input, matched);
-        }
-        let piece = string(control.copy_text(&self.input[self.piece_start..])?, control)?;
-        self.finished = true;
+        let start = if self.next == 0 {
+            Some(0)
+        } else {
+            self.matches.span(self.next - 1, 0).end()
+        };
+        let end = if self.next == count {
+            Some(self.matches.input_len())
+        } else {
+            self.matches.span(self.next, 0).start()
+        };
+        let (Some(start), Some(end)) = (start, end) else {
+            return Err(SQLError::Internal(
+                "a regular expression split lost a match boundary".into(),
+            ));
+        };
+        let piece = string(self.matches.slice(start..end, control)?, control)?;
+        self.next += 1;
         Ok(Some(piece))
     }
 }
 
-/// `regexp_split_to_array`: every piece of the split as one `text[]` value, or NULL for a NULL argument. The cursor's input copy and compiled pattern are released before the array is returned.
+/// `regexp_split_to_array`: every piece of the split as one `text[]` value, or NULL for a NULL argument. The cursor's code points and spans are released before the array is returned.
 pub(super) fn array(
     args: &[Value],
     collation: u32,

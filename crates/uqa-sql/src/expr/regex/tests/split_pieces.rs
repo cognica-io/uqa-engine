@@ -175,10 +175,12 @@ fn regexp_split_pieces_match_the_postgresql_reference() {
 #[test]
 fn regexp_split_admits_each_piece_and_keeps_the_cursor_before_a_rejected_one() {
     let token = CancellationToken::new();
-    let input = format!("a,{}", "b".repeat(2048));
+    // The second piece is larger than the compiled pattern and its search, so refusing it is the last step to fail.
+    let second_length = 64 * 1024;
+    let input = format!("a,{}", "b".repeat(second_length));
     let arguments = [text(&input), text(",")];
-    // Measure the cursor's admitted input and pattern and its first piece under an ample allowance.
-    let ample = MemoryBudget::new(1 << 20);
+    // The cursor finds every match when it is created and keeps its input and match spans under the creating allowance; each piece is admitted under the allowance of the control that requests it. Measure the first piece under an ample allowance.
+    let ample = MemoryBudget::new(1 << 22);
     let ample_control = ProductionControl::new(&ample, &token, &token);
     let mut split = RegexSplit::new(
         "regexp_split_to_table",
@@ -195,42 +197,51 @@ fn regexp_split_admits_each_piece_and_keeps_the_cursor_before_a_rejected_one() {
     drop(split);
     assert_eq!(ample.used(), 0);
 
-    // Leave room for the cursor and its first piece, but not for the 2048-character second piece.
-    let limited = MemoryBudget::new(retained + first_bytes + 512);
-    let control = ProductionControl::new(&limited, &token, &token);
+    // Request pieces under an allowance with room for the first piece, but not for the long second piece.
     let mut split = RegexSplit::new(
         "regexp_split_to_table",
         &arguments,
         DEFAULT_COLLATION,
-        &control,
+        &ample_control,
     )
     .unwrap()
     .unwrap();
+    assert_eq!(ample.used(), retained);
+    let limited = MemoryBudget::new(first_bytes + 512);
+    let control = ProductionControl::new(&limited, &token, &token);
     let first = split.next_piece(&control).unwrap().unwrap();
     assert_eq!(*first, text("a"));
     assert_eq!(
         split.next_piece(&control).unwrap_err().sqlstate(),
         Some("53200")
     );
-    assert_eq!(limited.used(), retained + first_bytes);
+    assert_eq!(limited.used(), first_bytes);
+    assert_eq!(ample.used(), retained);
     // The rejected piece is produced again under another allowance, and the cursor then ends.
     let second = split.next_piece(&ample_control).unwrap().unwrap();
-    assert_eq!(*second, text(&"b".repeat(2048)));
+    assert_eq!(*second, text(&"b".repeat(second_length)));
     assert!(split.next_piece(&control).unwrap().is_none());
     drop(second);
+    drop(split);
     assert_eq!(ample.used(), 0);
     drop(first);
-    drop(split);
     assert_eq!(limited.used(), 0);
 
-    // The array releases its cursor and partial pieces when its result is rejected.
-    let tight = MemoryBudget::new(retained + first_bytes + 512);
+    // The array releases its input, match spans and partial pieces when its long second piece is refused.
+    let measured = MemoryBudget::new(1 << 22);
+    let measured_control = ProductionControl::new(&measured, &token, &token);
+    drop(run("regexp_split_to_array", &arguments, &measured_control).unwrap());
+    let tight = MemoryBudget::new(measured.peak() - second_length / 2);
     let control = ProductionControl::new(&tight, &token, &token);
     assert_eq!(
         run("regexp_split_to_array", &arguments, &control)
             .unwrap_err()
             .sqlstate(),
         Some("53200")
+    );
+    assert!(
+        tight.peak() > retained + first_bytes,
+        "the search and the first piece were admitted before the second piece was refused"
     );
     assert_eq!(tight.used(), 0);
 }

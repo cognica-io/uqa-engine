@@ -156,7 +156,8 @@
     ],
     "uqa-sql": [
       "uqa-core",
-      "uqa-pg-query"
+      "uqa-pg-query",
+      "uqa-pg-regex"
     ],
     "uqa-storage": [
       "uqa-analysis",

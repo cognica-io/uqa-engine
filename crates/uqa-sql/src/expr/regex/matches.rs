@@ -4,25 +4,24 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `regexp_matches`: one capture array per match, advancing as `PostgreSQL`'s `setup_regexp_matches` does.
+//! `regexp_matches`: one capture array per match.
 
-use super::{compile, flags, next_search_start, query::capture_array, GlobalFlag, LocalRegex};
-use crate::{
-    error::{Result, SQLError},
-    expr::conversion::value_to_string_with_control,
+use super::{
+    argument_text, flag_text,
+    flags::ReFlags,
+    match_set::{MatchSet, Search},
 };
+use crate::error::{Result, SQLError};
 use uqa_core::{
     memory::{Produced, ProductionControl},
     Value,
 };
 
-/// The rows of one `regexp_matches` call. The cursor owns its admitted input and compiled pattern, so a caller can draw each row under its own control.
+/// The rows of one `regexp_matches` call. Like `PostgreSQL`'s first call, preparing the cursor finds every match; the cursor owns the input's code points and the match spans, so a caller can draw each row under its own control.
 #[derive(Debug)]
 pub struct RegexMatches {
-    input: Produced<String>,
-    regex: LocalRegex,
-    /// The byte offset of the next search, or `None` after the last row.
-    next_start: Option<usize>,
+    matches: MatchSet,
+    next: usize,
 }
 
 impl RegexMatches {
@@ -30,7 +29,7 @@ impl RegexMatches {
     ///
     /// # Errors
     ///
-    /// Reports `PostgreSQL`'s diagnostics for an invalid flag or pattern, an exhausted allowance and cancellation.
+    /// Reports `PostgreSQL`'s diagnostics for an invalid flag, collation or pattern and for a failed search, an exhausted allowance and cancellation.
     pub fn new(
         arguments: &[Value],
         collation: u32,
@@ -45,15 +44,16 @@ impl RegexMatches {
         if arguments.iter().any(|value| matches!(value, Value::Null)) {
             return Ok(None);
         }
-        let input = value_to_string_with_control(&arguments[0], control)?;
-        let pattern = value_to_string_with_control(&arguments[1], control)?;
-        let flags = flags(arguments.get(2), control)?;
-        let regex = compile(&pattern, &flags, GlobalFlag::Accepted, collation, control)?;
-        Ok(Some(Self {
-            input,
-            regex,
-            next_start: Some(0),
-        }))
+        let input = argument_text(&arguments[0], control)?;
+        let pattern = argument_text(&arguments[1], control)?;
+        let flags = ReFlags::parse(&flag_text(arguments.get(2), control)?)?;
+        let search = Search {
+            start: 0,
+            subexpressions: true,
+            ignore_degenerate: false,
+        };
+        let matches = MatchSet::find(&input, &pattern, flags, collation, search, control)?;
+        Ok(Some(Self { matches, next: 0 }))
     }
 
     /// The capture array of the next match, or `None` after the last one.
@@ -63,23 +63,11 @@ impl RegexMatches {
     /// Reports an exhausted allowance or cancellation. The cursor stays at the failed match, and rows already returned remain valid.
     pub fn next_row(&mut self, control: &ProductionControl<'_>) -> Result<Option<Produced<Value>>> {
         control.check()?;
-        let Some(start) = self.next_start else {
+        if self.next >= self.matches.len() {
             return Ok(None);
-        };
-        let Some(captures) = self.regex.captures_at(&self.input, start) else {
-            self.next_start = None;
-            return Ok(None);
-        };
-        control.check()?;
-        let whole = captures.get(0).ok_or_else(|| {
-            SQLError::Internal("regex capture set omitted its mandatory full match".into())
-        })?;
-        let row = capture_array(&captures, control)?;
-        self.next_start = if self.regex.is_global() {
-            next_search_start(&self.input, whole)
-        } else {
-            None
-        };
+        }
+        let row = self.matches.row(self.next, control)?;
+        self.next += 1;
         Ok(Some(row))
     }
 }

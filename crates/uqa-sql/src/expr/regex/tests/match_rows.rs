@@ -225,7 +225,7 @@ fn regexp_matches_rows_admit_each_row_and_keep_the_cursor_at_a_rejected_one() {
     let token = CancellationToken::new();
     let input = format!("a{}", "b".repeat(2048));
     let arguments = [text(&input), text("a|b+"), text("g")];
-    // Measure the cursor's admitted input and pattern and its first row under an ample allowance.
+    // The cursor finds every match when it is created and keeps its input and match spans under the creating allowance; each row is admitted under the allowance of the control that requests it. Measure the first row under an ample allowance.
     let ample = MemoryBudget::new(1 << 20);
     let ample_control = ProductionControl::new(&ample, &token, &token);
     let mut cursor = RegexMatches::new(&arguments, DEFAULT_COLLATION, &ample_control)
@@ -238,19 +238,21 @@ fn regexp_matches_rows_admit_each_row_and_keep_the_cursor_at_a_rejected_one() {
     drop(cursor);
     assert_eq!(ample.used(), 0);
 
-    // Leave room for the cursor and its first row, but not for the 2048-character second row.
-    let limited = MemoryBudget::new(retained + first_bytes + 512);
-    let control = ProductionControl::new(&limited, &token, &token);
-    let mut cursor = RegexMatches::new(&arguments, DEFAULT_COLLATION, &control)
+    // Request rows under an allowance with room for the first row, but not for the 2048-character second row.
+    let mut cursor = RegexMatches::new(&arguments, DEFAULT_COLLATION, &ample_control)
         .unwrap()
         .unwrap();
+    assert_eq!(ample.used(), retained);
+    let limited = MemoryBudget::new(first_bytes + 512);
+    let control = ProductionControl::new(&limited, &token, &token);
     let first = cursor.next_row(&control).unwrap().unwrap();
     assert_eq!(value_to_string(&first).unwrap(), "{a}");
     assert_eq!(
         cursor.next_row(&control).unwrap_err().sqlstate(),
         Some("53200")
     );
-    assert_eq!(limited.used(), retained + first_bytes);
+    assert_eq!(limited.used(), first_bytes);
+    assert_eq!(ample.used(), retained);
     assert_eq!(value_to_string(&first).unwrap(), "{a}");
     // The rejected match is produced again under another allowance, and the cursor then ends.
     let second = cursor.next_row(&ample_control).unwrap().unwrap();
@@ -260,9 +262,9 @@ fn regexp_matches_rows_admit_each_row_and_keep_the_cursor_at_a_rejected_one() {
     );
     assert!(cursor.next_row(&control).unwrap().is_none());
     drop(second);
+    drop(cursor);
     assert_eq!(ample.used(), 0);
     drop(first);
-    drop(cursor);
     assert_eq!(limited.used(), 0);
 }
 

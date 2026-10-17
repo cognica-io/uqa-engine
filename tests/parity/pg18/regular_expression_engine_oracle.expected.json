@@ -1,0 +1,5713 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "reference": "PostgreSQL 18.4 in a disposable Docker database",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "1e5d5144535a94b64a38ab87e0db692f04bca43103582829e948c66acf1a77de"
+  },
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_alternation_longest",
+      "sql": "SELECT regexp_match('ab', 'a|ab')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{ab}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_replace_alternation",
+      "sql": "SELECT regexp_replace('ab ab', 'a|ab', 'X', 'g')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "X X"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_substr_alternation",
+      "sql": "SELECT regexp_substr('ab', 'a|ab')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_substr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "ab"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_instr_alternation_end",
+      "sql": "SELECT regexp_instr('ab', 'a|ab', 1, 1, 1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_instr"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_count_alternation",
+      "sql": "SELECT regexp_count('ababab', 'ab|abab')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_count_alternation_prefix",
+      "sql": "SELECT regexp_count('aaa', 'a|aa')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_nongreedy_first_atom",
+      "sql": "SELECT regexp_match('abc01234xyz', '(.*?)(\\d+)(.*)')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{abc,0,\"\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_greedy_first_atom",
+      "sql": "SELECT regexp_match('abc01234xyz', '(.*)(\\d+)(.*)')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{abc0123,4,xyz}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_nongreedy_group_forced_greedy",
+      "sql": "SELECT regexp_match('abc01234xyz', '(?:(.*?)(\\d+)(.*)){1,1}')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{abc,01234,xyz}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_nongreedy_whole",
+      "sql": "SELECT regexp_match('XY1234Z', 'Y*?([0-9]{1,3})')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_greedy_whole",
+      "sql": "SELECT regexp_match('XY1234Z', 'Y*([0-9]{1,3})')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{123}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_nongreedy_suffix",
+      "sql": "SELECT regexp_match('abcdd', 'a.*?d')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{abcd}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_alternation_groups",
+      "sql": "SELECT regexp_match('abcd', '(a|ab)(c|bcd)(d*)')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{ab,c,d}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_split_table_alternation",
+      "sql": "SELECT regexp_split_to_table('xabx', 'a|ab')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "x"
+            ],
+            [
+              "x"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_split_array_alternation",
+      "sql": "SELECT regexp_split_to_array('xabx', 'a|ab')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{x,x}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_matches_alternation",
+      "sql": "SELECT regexp_matches('ab ab', 'a|ab', 'g')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{ab}"
+            ],
+            [
+              "{ab}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_substring_alternation",
+      "sql": "SELECT substring('ab' from 'a|ab')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substring"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "ab"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_substring_nongreedy",
+      "sql": "SELECT substring('XY1234Z' from 'Y*?([0-9]{1,3})')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substring"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_similar_substring_middle",
+      "sql": "SELECT substring('aXbXc' similar '%#\"X%#\"%' escape '#')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substring"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XbXc"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_similar_substring_suffix",
+      "sql": "SELECT substring('aXbXc' similar '%#\"X%#\"' escape '#')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substring"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XbXc"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_matches_doc_groups",
+      "sql": "SELECT regexp_matches('foobarbequebazilbarfbonk', '(b[^b]+)(b[^b]+)', 'g')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{bar,beque}"
+            ],
+            [
+              "{bazil,barf}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_backreference",
+      "sql": "SELECT regexp_match('abab', '(ab)\\1')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{ab}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_backreference_mismatch",
+      "sql": "SELECT regexp_match('abac', '(ab)\\1')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_backreference_repeated",
+      "sql": "SELECT regexp_match('xaaay', '(a)\\1\\1')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_backreference_anchored",
+      "sql": "SELECT regexp_like(repeat('ab', 100), '^(a.)\\1*$')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_like"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_lookahead",
+      "sql": "SELECT regexp_match('foobar', 'foo(?=bar)')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{foo}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_negative_lookahead",
+      "sql": "SELECT regexp_match('foobaz', 'foo(?!bar)')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{foo}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_lookbehind",
+      "sql": "SELECT regexp_match('xfoobar', '(?<=x)foo')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{foo}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_negative_lookbehind",
+      "sql": "SELECT regexp_match('yfoo', '(?<!x)foo')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{foo}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_lookbehind_before_start",
+      "sql": "SELECT regexp_count('ab', '(?<=a)b', 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_word_boundary",
+      "sql": "SELECT regexp_replace('hello world', '\\yw', 'W')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello World"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_word_end",
+      "sql": "SELECT regexp_replace('hello world', 'o\\M', '0', 'g')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hell0 world"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_word_start",
+      "sql": "SELECT regexp_replace('hello world', '\\mw', 'W')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello World"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_word_boundaries_counted",
+      "sql": "SELECT regexp_count('one two three', '\\y')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_not_word_boundary",
+      "sql": "SELECT regexp_replace('abc', '\\Yb', 'X')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "aXc"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_bracket_word_start",
+      "sql": "SELECT regexp_match('foo bar', '[[:<:]]bar')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{bar}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_bracket_word_end",
+      "sql": "SELECT regexp_match('foo bar', 'foo[[:>:]]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{foo}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_string_start",
+      "sql": "SELECT regexp_match('ab' || chr(10) || 'cd', '\\Acd', 'n')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_string_end",
+      "sql": "SELECT regexp_match('ab' || chr(10) || 'cd', 'ab\\Z', 'n')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_director_literal",
+      "sql": "SELECT regexp_match('a.b', '***=.')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{.}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_director_advanced",
+      "sql": "SELECT regexp_match('AbC', '***:(?i)abc')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{AbC}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_embedded_case",
+      "sql": "SELECT regexp_match('AbC', '(?i)abc')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{AbC}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_embedded_expanded",
+      "sql": "SELECT regexp_match('a b', '(?x)a b')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_embedded_expanded_escape",
+      "sql": "SELECT regexp_match('a b', '(?x)a\\ b')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"a b\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_embedded_quote",
+      "sql": "SELECT regexp_match('a+b', '(?q)a+b')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a+b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_embedded_basic",
+      "sql": "SELECT regexp_match('a+b', '(?b)a+b')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a+b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_embedded_newline",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', '(?n)^b')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_embedded_not_leading",
+      "sql": "SELECT regexp_match('ab', 'a(?i)b')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: quantifier operand invalid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "are_class_escapes",
+      "sql": "SELECT regexp_match('a1_b c', '(\\w+)\\s(\\w)')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a1_b,c}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_class_escape_digit",
+      "sql": "SELECT regexp_match('ab12', '\\d+')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{12}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_class_escape_negated",
+      "sql": "SELECT regexp_match('ab12', '\\D+\\W*\\S')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{ab1}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_class_escape_in_bracket",
+      "sql": "SELECT regexp_match('a1-2b', '[\\d-]+')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1-2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_negated_class_escape_in_bracket",
+      "sql": "SELECT regexp_match('ab12', '[^\\d]+')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{ab}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_hex_escape",
+      "sql": "SELECT regexp_match('xAy', '\\x41')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{A}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_unicode_escape",
+      "sql": "SELECT regexp_match('x' || chr(233), '\u00e9') IS NOT NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_long_unicode_escape",
+      "sql": "SELECT regexp_match('x' || chr(128512), '\\U0001F600') IS NOT NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_octal_escape",
+      "sql": "SELECT regexp_match('xay', '\\0141')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_tab_escape",
+      "sql": "SELECT regexp_match('a' || chr(9) || 'b', 'a\\tb') IS NOT NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_bounds_exact",
+      "sql": "SELECT regexp_match('aaaa', 'a{2}')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{aa}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_bounds_open",
+      "sql": "SELECT regexp_match('aaaa', 'a{2,}')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{aaaa}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_bounds_nongreedy",
+      "sql": "SELECT regexp_match('aaaa', 'a{2,3}?')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{aa}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_collating_element",
+      "sql": "SELECT regexp_match('a-b', '[[.hyphen.]]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{-}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_equivalence_class",
+      "sql": "SELECT regexp_match('xay', '[[=a=]]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_dot_newline_default",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', 'a.b') IS NOT NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_anchor_newline_default",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', '^b')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_escaped_brace",
+      "sql": "SELECT regexp_match('a{', 'a\\{')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"a{\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "are_bracket_close_first",
+      "sql": "SELECT regexp_match('a]b', '[]a]+')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a]}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_newline_dot",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', 'a.b', 'n')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_newline_anchor",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', '^b', 'n')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_multiline_anchor",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', 'a$', 'm')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_partial_dot",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', 'a.b', 'p')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_partial_anchor",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', '^b', 'p')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_inverse_partial_dot",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', 'a.b', 'w') IS NOT NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_inverse_partial_anchor",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', '^b', 'w')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_newline_bracket",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', 'a[^x]b', 'n')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_sensitive_after_newline",
+      "sql": "SELECT regexp_match('a' || chr(10) || 'b', '^b', 'ns')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_expanded",
+      "sql": "SELECT regexp_match('ab', 'a b # comment', 'x')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{ab}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_expanded_bracket_space",
+      "sql": "SELECT regexp_match('a b', 'a[ ]b', 'x')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"a b\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_tight_after_expanded",
+      "sql": "SELECT regexp_match('a b', 'a b', 'xt')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"a b\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_quote",
+      "sql": "SELECT regexp_match('a.b', '.', 'q')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{.}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_quote_case",
+      "sql": "SELECT regexp_like('A.B', 'a.b', 'qi')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_like"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_quote_expanded",
+      "sql": "SELECT regexp_match('a b', 'a b', 'qx')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid argument to regex function",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "flag_basic_plus_literal",
+      "sql": "SELECT regexp_match('a+', 'a+', 'b')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a+}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_basic_bound",
+      "sql": "SELECT regexp_like('aa', '^a\\{2\\}$', 'b')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_like"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_basic_group",
+      "sql": "SELECT regexp_match('ab', '\\(a\\)b', 'b')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_basic_expanded",
+      "sql": "SELECT regexp_match('a b', 'a b', 'bx')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_extended_alternation",
+      "sql": "SELECT regexp_match('ab', 'a|b', 'e')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_extended_backreference",
+      "sql": "SELECT regexp_match('abab', '(ab)\\1', 'e')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid backreference number",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "flag_extended_escape",
+      "sql": "SELECT regexp_match('a1', '\\d', 'e')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_case_then_sensitive",
+      "sql": "SELECT regexp_match('A', 'a', 'ic')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_sensitive_then_case",
+      "sql": "SELECT regexp_match('A', 'a', 'ci')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{A}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "flag_invalid",
+      "sql": "SELECT regexp_match('a', 'a', 'z')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "flag_invalid_multibyte",
+      "sql": "SELECT regexp_match('a', 'a', chr(233))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"\u00e9\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "flag_invalid_before_pattern",
+      "sql": "SELECT regexp_like('a', '(', 'z')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "flag_global_before_pattern",
+      "sql": "SELECT regexp_like('a', '(', 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "regexp_like() does not support the \"global\" option",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "flag_global_match_hint",
+      "sql": "SELECT regexp_match('a', '(', 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "regexp_match() does not support the \"global\" option",
+        "detail": null,
+        "hint": "Use the regexp_matches function instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_open_parenthesis",
+      "sql": "SELECT regexp_match('ab', '(')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: parentheses () not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_close_parenthesis",
+      "sql": "SELECT regexp_match('ab', ')')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: parentheses () not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_open_bracket",
+      "sql": "SELECT regexp_match('ab', '[')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: brackets [] not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_unclosed_bracket",
+      "sql": "SELECT regexp_match('ab', '[a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: brackets [] not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_reversed_bound",
+      "sql": "SELECT regexp_match('ab', 'a{2,1}')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid repetition count(s)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_bound_too_large",
+      "sql": "SELECT regexp_match('ab', 'a{256}')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid repetition count(s)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_unclosed_brace",
+      "sql": "SELECT regexp_match('ab', 'a{1')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: braces {} not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_leading_quantifier",
+      "sql": "SELECT regexp_match('ab', '*')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: quantifier operand invalid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_double_quantifier",
+      "sql": "SELECT regexp_match('ab', 'a**')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: quantifier operand invalid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_trailing_backslash",
+      "sql": "SELECT regexp_match('ab', 'a\\')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid escape \\ sequence",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_reversed_range",
+      "sql": "SELECT regexp_match('ab', '[z-a]')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid character range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_unknown_class",
+      "sql": "SELECT regexp_match('ab', '[[:foo:]]')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid character class",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_unknown_collating_element",
+      "sql": "SELECT regexp_match('ab', '[[.foo.]]')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid collating element",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_missing_backreference",
+      "sql": "SELECT regexp_match('ab', '(a)\\2')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid backreference number",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_unknown_escape",
+      "sql": "SELECT regexp_match('ab', '\\z')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid escape \\ sequence",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_short_unicode_escape",
+      "sql": "SELECT regexp_match('ab', '\\u12')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid escape \\ sequence",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_class_escape_range",
+      "sql": "SELECT regexp_match('ab', '[\\w-z]')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid character range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_unknown_embedded_option",
+      "sql": "SELECT regexp_match('ab', '(?z)a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: invalid embedded option",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_quantified_lookahead",
+      "sql": "SELECT regexp_match('ab', '(?=a)*')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: quantifier operand invalid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_nested_repetition",
+      "sql": "SELECT regexp_match('ab', '((((a{1,100}){1,100}){1,100}){1,100})')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: regular expression is too complex",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_pattern_in_operator",
+      "sql": "SELECT 'a' ~ '('",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: parentheses () not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_pattern_in_case_operator",
+      "sql": "SELECT 'a' ~* '['",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: brackets [] not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_pattern_in_similar",
+      "sql": "SELECT 'a' SIMILAR TO '('",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: parentheses () not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_pattern_in_split",
+      "sql": "SELECT regexp_split_to_array('a', '(')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: parentheses () not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_pattern_in_matches",
+      "sql": "SELECT regexp_matches('a', '(')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: parentheses () not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_pattern_in_substring",
+      "sql": "SELECT substring('a' from '(')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: parentheses () not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_pattern_past_start",
+      "sql": "SELECT regexp_replace('abc', '[', 'x', 10)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: brackets [] not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_start_before_pattern",
+      "sql": "SELECT regexp_count('a', '(', 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"start\": 0",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_occurrence_before_pattern",
+      "sql": "SELECT regexp_instr('a', '(', 1, 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"n\": 0",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_replace_start_before_pattern",
+      "sql": "SELECT regexp_replace('a', '(', 'x', 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"start\": 0",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "replace_group",
+      "sql": "SELECT regexp_replace('abc', '(b)', '[\\1]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a[b]c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_whole_match",
+      "sql": "SELECT regexp_replace('abc', 'b', '[\\&]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a[b]c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_backslash",
+      "sql": "SELECT regexp_replace('abc', 'b', '[\\\\]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a[\\]c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_zero_escape",
+      "sql": "SELECT regexp_replace('abc', 'b', '[\\0]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a[\\0]c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_trailing_backslash",
+      "sql": "SELECT regexp_replace('abc', 'b', 'x\\')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "ax\\c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_missing_group",
+      "sql": "SELECT regexp_replace('abc', '(b)', '<\\2>')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a<>c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_unmatched_group",
+      "sql": "SELECT regexp_replace('abc', '(x)?b', '[\\1]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a[]c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_other_escape",
+      "sql": "SELECT regexp_replace('abc', 'b', '\\q')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a\\qc"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_whole_match_global",
+      "sql": "SELECT regexp_replace('aaa', 'a', '\\&\\&', 'g')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "aaaaaa"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_reordered_groups",
+      "sql": "SELECT regexp_replace('abc', '(a)(b)(c)', '\\3\\2\\1')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "cba"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_group_then_digit",
+      "sql": "SELECT regexp_replace('abcdefghij', '(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)', '\\10')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_multibyte_group",
+      "sql": "SELECT regexp_replace(chr(233) || 'x' || chr(233), '(x)', '<\\1>') = chr(233) || '<x>' || chr(233)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_occurrence_with_group",
+      "sql": "SELECT regexp_replace('a1b2c3', '([a-z])(\\d)', '\\2\\1', 1, 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a12bc3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_empty_matches",
+      "sql": "SELECT regexp_replace('abc', 'x*', '-', 'g')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "-a-b-c-"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "operator_match",
+      "sql": "SELECT 'abc' ~ 'b', 'abc' ~* 'B', 'abc' !~ 'b', 'abc' !~* 'B'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "operator_longest_irrelevant",
+      "sql": "SELECT 'ab' ~ '^(a|ab)$'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "operator_name",
+      "sql": "SELECT 'ab'::name ~ 'b$', 'AB'::name ~* 'b$'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "operator_character_padding",
+      "sql": "SELECT 'ab '::char(3) ~ 'b $', 'ab '::char(3) ~ 'b$'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "operator_backreference",
+      "sql": "SELECT 'abab' ~ '^(ab)\\1$'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "similar_basic",
+      "sql": "SELECT 'abc' SIMILAR TO 'a%', 'abc' NOT SIMILAR TO 'b%', 'abc' SIMILAR TO '(a|b)_c'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "similar_alternation_whole",
+      "sql": "SELECT 'ab' SIMILAR TO 'a|ab'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "similar_escape_class",
+      "sql": "SELECT 'a1' SIMILAR TO 'a\\d'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "similar_bracket",
+      "sql": "SELECT 'a]' SIMILAR TO 'a[]]'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "work_nested_star",
+      "sql": "SELECT regexp_like(repeat('a', 5000), '(a*)*b')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_like"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "work_count_long_input",
+      "sql": "SELECT regexp_count(repeat('ab', 10000), 'ab')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "10000"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "work_replace_long_input",
+      "sql": "SELECT length(regexp_replace(repeat('a', 100000), 'a', 'bb', 'g'))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "length"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "200000"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "work_split_long_input",
+      "sql": "SELECT array_length(regexp_split_to_array(repeat('a,', 5000), ','), 1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_length"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5001"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "work_backreference_long_input",
+      "sql": "SELECT regexp_like(repeat('a', 400), '^(a+)\\1$')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_like"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "work_nested_groups",
+      "sql": "SELECT regexp_like('a', repeat('(', 500) || 'a' || repeat(')', 500))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_like"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "work_nested_noncapturing_groups",
+      "sql": "SELECT regexp_like('a', repeat('(?:', 2000) || 'a' || repeat(')', 2000))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_like"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "work_nested_groups_too_complex",
+      "sql": "SELECT regexp_like('a', repeat('(', 10000) || 'a' || repeat(')', 10000))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: regular expression is too complex",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "work_bounded_repetition_chain",
+      "sql": "SELECT regexp_like(repeat('a', 10200), '^(a{255}){40}$')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_like"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_alpha_latin",
+      "sql": "SELECT regexp_like(chr(233) COLLATE \"C\", '^[[:alpha:]]$') AS c, regexp_like(chr(233) COLLATE \"POSIX\", '^[[:alpha:]]$') AS posix, regexp_like(chr(233) COLLATE \"ucs_basic\", '^[[:alpha:]]$') AS ucs_basic, regexp_like(chr(233) COLLATE \"pg_c_utf8\", '^[[:alpha:]]$') AS pg_c_utf8, regexp_like(chr(233) COLLATE \"pg_unicode_fast\", '^[[:alpha:]]$') AS pg_unicode_fast, regexp_like(chr(233) COLLATE \"unicode\", '^[[:alpha:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_alpha_hiragana",
+      "sql": "SELECT regexp_like(chr(12354) COLLATE \"C\", '^[[:alpha:]]$') AS c, regexp_like(chr(12354) COLLATE \"POSIX\", '^[[:alpha:]]$') AS posix, regexp_like(chr(12354) COLLATE \"ucs_basic\", '^[[:alpha:]]$') AS ucs_basic, regexp_like(chr(12354) COLLATE \"pg_c_utf8\", '^[[:alpha:]]$') AS pg_c_utf8, regexp_like(chr(12354) COLLATE \"pg_unicode_fast\", '^[[:alpha:]]$') AS pg_unicode_fast, regexp_like(chr(12354) COLLATE \"unicode\", '^[[:alpha:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_alpha_combining_mark",
+      "sql": "SELECT regexp_like(chr(769) COLLATE \"C\", '^[[:alpha:]]$') AS c, regexp_like(chr(769) COLLATE \"POSIX\", '^[[:alpha:]]$') AS posix, regexp_like(chr(769) COLLATE \"ucs_basic\", '^[[:alpha:]]$') AS ucs_basic, regexp_like(chr(769) COLLATE \"pg_c_utf8\", '^[[:alpha:]]$') AS pg_c_utf8, regexp_like(chr(769) COLLATE \"pg_unicode_fast\", '^[[:alpha:]]$') AS pg_unicode_fast, regexp_like(chr(769) COLLATE \"unicode\", '^[[:alpha:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_digit_arabic_indic",
+      "sql": "SELECT regexp_like(chr(1633) COLLATE \"C\", '^[[:digit:]]$') AS c, regexp_like(chr(1633) COLLATE \"POSIX\", '^[[:digit:]]$') AS posix, regexp_like(chr(1633) COLLATE \"ucs_basic\", '^[[:digit:]]$') AS ucs_basic, regexp_like(chr(1633) COLLATE \"pg_c_utf8\", '^[[:digit:]]$') AS pg_c_utf8, regexp_like(chr(1633) COLLATE \"pg_unicode_fast\", '^[[:digit:]]$') AS pg_unicode_fast, regexp_like(chr(1633) COLLATE \"unicode\", '^[[:digit:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_digit_fullwidth",
+      "sql": "SELECT regexp_like(chr(65296) COLLATE \"C\", '^[[:digit:]]$') AS c, regexp_like(chr(65296) COLLATE \"POSIX\", '^[[:digit:]]$') AS posix, regexp_like(chr(65296) COLLATE \"ucs_basic\", '^[[:digit:]]$') AS ucs_basic, regexp_like(chr(65296) COLLATE \"pg_c_utf8\", '^[[:digit:]]$') AS pg_c_utf8, regexp_like(chr(65296) COLLATE \"pg_unicode_fast\", '^[[:digit:]]$') AS pg_unicode_fast, regexp_like(chr(65296) COLLATE \"unicode\", '^[[:digit:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_alnum_arabic_indic",
+      "sql": "SELECT regexp_like(chr(1633) COLLATE \"C\", '^[[:alnum:]]$') AS c, regexp_like(chr(1633) COLLATE \"POSIX\", '^[[:alnum:]]$') AS posix, regexp_like(chr(1633) COLLATE \"ucs_basic\", '^[[:alnum:]]$') AS ucs_basic, regexp_like(chr(1633) COLLATE \"pg_c_utf8\", '^[[:alnum:]]$') AS pg_c_utf8, regexp_like(chr(1633) COLLATE \"pg_unicode_fast\", '^[[:alnum:]]$') AS pg_unicode_fast, regexp_like(chr(1633) COLLATE \"unicode\", '^[[:alnum:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_alnum_roman_numeral",
+      "sql": "SELECT regexp_like(chr(8544) COLLATE \"C\", '^[[:alnum:]]$') AS c, regexp_like(chr(8544) COLLATE \"POSIX\", '^[[:alnum:]]$') AS posix, regexp_like(chr(8544) COLLATE \"ucs_basic\", '^[[:alnum:]]$') AS ucs_basic, regexp_like(chr(8544) COLLATE \"pg_c_utf8\", '^[[:alnum:]]$') AS pg_c_utf8, regexp_like(chr(8544) COLLATE \"pg_unicode_fast\", '^[[:alnum:]]$') AS pg_unicode_fast, regexp_like(chr(8544) COLLATE \"unicode\", '^[[:alnum:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_upper_latin",
+      "sql": "SELECT regexp_like(chr(201) COLLATE \"C\", '^[[:upper:]]$') AS c, regexp_like(chr(201) COLLATE \"POSIX\", '^[[:upper:]]$') AS posix, regexp_like(chr(201) COLLATE \"ucs_basic\", '^[[:upper:]]$') AS ucs_basic, regexp_like(chr(201) COLLATE \"pg_c_utf8\", '^[[:upper:]]$') AS pg_c_utf8, regexp_like(chr(201) COLLATE \"pg_unicode_fast\", '^[[:upper:]]$') AS pg_unicode_fast, regexp_like(chr(201) COLLATE \"unicode\", '^[[:upper:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_upper_circled",
+      "sql": "SELECT regexp_like(chr(9398) COLLATE \"C\", '^[[:upper:]]$') AS c, regexp_like(chr(9398) COLLATE \"POSIX\", '^[[:upper:]]$') AS posix, regexp_like(chr(9398) COLLATE \"ucs_basic\", '^[[:upper:]]$') AS ucs_basic, regexp_like(chr(9398) COLLATE \"pg_c_utf8\", '^[[:upper:]]$') AS pg_c_utf8, regexp_like(chr(9398) COLLATE \"pg_unicode_fast\", '^[[:upper:]]$') AS pg_unicode_fast, regexp_like(chr(9398) COLLATE \"unicode\", '^[[:upper:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_upper_titlecase",
+      "sql": "SELECT regexp_like(chr(453) COLLATE \"C\", '^[[:upper:]]$') AS c, regexp_like(chr(453) COLLATE \"POSIX\", '^[[:upper:]]$') AS posix, regexp_like(chr(453) COLLATE \"ucs_basic\", '^[[:upper:]]$') AS ucs_basic, regexp_like(chr(453) COLLATE \"pg_c_utf8\", '^[[:upper:]]$') AS pg_c_utf8, regexp_like(chr(453) COLLATE \"pg_unicode_fast\", '^[[:upper:]]$') AS pg_unicode_fast, regexp_like(chr(453) COLLATE \"unicode\", '^[[:upper:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_lower_latin",
+      "sql": "SELECT regexp_like(chr(233) COLLATE \"C\", '^[[:lower:]]$') AS c, regexp_like(chr(233) COLLATE \"POSIX\", '^[[:lower:]]$') AS posix, regexp_like(chr(233) COLLATE \"ucs_basic\", '^[[:lower:]]$') AS ucs_basic, regexp_like(chr(233) COLLATE \"pg_c_utf8\", '^[[:lower:]]$') AS pg_c_utf8, regexp_like(chr(233) COLLATE \"pg_unicode_fast\", '^[[:lower:]]$') AS pg_unicode_fast, regexp_like(chr(233) COLLATE \"unicode\", '^[[:lower:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_lower_ordinal",
+      "sql": "SELECT regexp_like(chr(170) COLLATE \"C\", '^[[:lower:]]$') AS c, regexp_like(chr(170) COLLATE \"POSIX\", '^[[:lower:]]$') AS posix, regexp_like(chr(170) COLLATE \"ucs_basic\", '^[[:lower:]]$') AS ucs_basic, regexp_like(chr(170) COLLATE \"pg_c_utf8\", '^[[:lower:]]$') AS pg_c_utf8, regexp_like(chr(170) COLLATE \"pg_unicode_fast\", '^[[:lower:]]$') AS pg_unicode_fast, regexp_like(chr(170) COLLATE \"unicode\", '^[[:lower:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_space_no_break",
+      "sql": "SELECT regexp_like(chr(160) COLLATE \"C\", '^[[:space:]]$') AS c, regexp_like(chr(160) COLLATE \"POSIX\", '^[[:space:]]$') AS posix, regexp_like(chr(160) COLLATE \"ucs_basic\", '^[[:space:]]$') AS ucs_basic, regexp_like(chr(160) COLLATE \"pg_c_utf8\", '^[[:space:]]$') AS pg_c_utf8, regexp_like(chr(160) COLLATE \"pg_unicode_fast\", '^[[:space:]]$') AS pg_unicode_fast, regexp_like(chr(160) COLLATE \"unicode\", '^[[:space:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_space_ideographic",
+      "sql": "SELECT regexp_like(chr(12288) COLLATE \"C\", '^[[:space:]]$') AS c, regexp_like(chr(12288) COLLATE \"POSIX\", '^[[:space:]]$') AS posix, regexp_like(chr(12288) COLLATE \"ucs_basic\", '^[[:space:]]$') AS ucs_basic, regexp_like(chr(12288) COLLATE \"pg_c_utf8\", '^[[:space:]]$') AS pg_c_utf8, regexp_like(chr(12288) COLLATE \"pg_unicode_fast\", '^[[:space:]]$') AS pg_unicode_fast, regexp_like(chr(12288) COLLATE \"unicode\", '^[[:space:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_space_next_line",
+      "sql": "SELECT regexp_like(chr(133) COLLATE \"C\", '^[[:space:]]$') AS c, regexp_like(chr(133) COLLATE \"POSIX\", '^[[:space:]]$') AS posix, regexp_like(chr(133) COLLATE \"ucs_basic\", '^[[:space:]]$') AS ucs_basic, regexp_like(chr(133) COLLATE \"pg_c_utf8\", '^[[:space:]]$') AS pg_c_utf8, regexp_like(chr(133) COLLATE \"pg_unicode_fast\", '^[[:space:]]$') AS pg_unicode_fast, regexp_like(chr(133) COLLATE \"unicode\", '^[[:space:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_blank_no_break",
+      "sql": "SELECT regexp_like(chr(160) COLLATE \"C\", '^[[:blank:]]$') AS c, regexp_like(chr(160) COLLATE \"POSIX\", '^[[:blank:]]$') AS posix, regexp_like(chr(160) COLLATE \"ucs_basic\", '^[[:blank:]]$') AS ucs_basic, regexp_like(chr(160) COLLATE \"pg_c_utf8\", '^[[:blank:]]$') AS pg_c_utf8, regexp_like(chr(160) COLLATE \"pg_unicode_fast\", '^[[:blank:]]$') AS pg_unicode_fast, regexp_like(chr(160) COLLATE \"unicode\", '^[[:blank:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_punct_dollar",
+      "sql": "SELECT regexp_like(chr(36) COLLATE \"C\", '^[[:punct:]]$') AS c, regexp_like(chr(36) COLLATE \"POSIX\", '^[[:punct:]]$') AS posix, regexp_like(chr(36) COLLATE \"ucs_basic\", '^[[:punct:]]$') AS ucs_basic, regexp_like(chr(36) COLLATE \"pg_c_utf8\", '^[[:punct:]]$') AS pg_c_utf8, regexp_like(chr(36) COLLATE \"pg_unicode_fast\", '^[[:punct:]]$') AS pg_unicode_fast, regexp_like(chr(36) COLLATE \"unicode\", '^[[:punct:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_punct_dash",
+      "sql": "SELECT regexp_like(chr(8212) COLLATE \"C\", '^[[:punct:]]$') AS c, regexp_like(chr(8212) COLLATE \"POSIX\", '^[[:punct:]]$') AS posix, regexp_like(chr(8212) COLLATE \"ucs_basic\", '^[[:punct:]]$') AS ucs_basic, regexp_like(chr(8212) COLLATE \"pg_c_utf8\", '^[[:punct:]]$') AS pg_c_utf8, regexp_like(chr(8212) COLLATE \"pg_unicode_fast\", '^[[:punct:]]$') AS pg_unicode_fast, regexp_like(chr(8212) COLLATE \"unicode\", '^[[:punct:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_punct_plus",
+      "sql": "SELECT regexp_like(chr(43) COLLATE \"C\", '^[[:punct:]]$') AS c, regexp_like(chr(43) COLLATE \"POSIX\", '^[[:punct:]]$') AS posix, regexp_like(chr(43) COLLATE \"ucs_basic\", '^[[:punct:]]$') AS ucs_basic, regexp_like(chr(43) COLLATE \"pg_c_utf8\", '^[[:punct:]]$') AS pg_c_utf8, regexp_like(chr(43) COLLATE \"pg_unicode_fast\", '^[[:punct:]]$') AS pg_unicode_fast, regexp_like(chr(43) COLLATE \"unicode\", '^[[:punct:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_cntrl_next_line",
+      "sql": "SELECT regexp_like(chr(133) COLLATE \"C\", '^[[:cntrl:]]$') AS c, regexp_like(chr(133) COLLATE \"POSIX\", '^[[:cntrl:]]$') AS posix, regexp_like(chr(133) COLLATE \"ucs_basic\", '^[[:cntrl:]]$') AS ucs_basic, regexp_like(chr(133) COLLATE \"pg_c_utf8\", '^[[:cntrl:]]$') AS pg_c_utf8, regexp_like(chr(133) COLLATE \"pg_unicode_fast\", '^[[:cntrl:]]$') AS pg_unicode_fast, regexp_like(chr(133) COLLATE \"unicode\", '^[[:cntrl:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_graph_latin",
+      "sql": "SELECT regexp_like(chr(233) COLLATE \"C\", '^[[:graph:]]$') AS c, regexp_like(chr(233) COLLATE \"POSIX\", '^[[:graph:]]$') AS posix, regexp_like(chr(233) COLLATE \"ucs_basic\", '^[[:graph:]]$') AS ucs_basic, regexp_like(chr(233) COLLATE \"pg_c_utf8\", '^[[:graph:]]$') AS pg_c_utf8, regexp_like(chr(233) COLLATE \"pg_unicode_fast\", '^[[:graph:]]$') AS pg_unicode_fast, regexp_like(chr(233) COLLATE \"unicode\", '^[[:graph:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_print_no_break",
+      "sql": "SELECT regexp_like(chr(160) COLLATE \"C\", '^[[:print:]]$') AS c, regexp_like(chr(160) COLLATE \"POSIX\", '^[[:print:]]$') AS posix, regexp_like(chr(160) COLLATE \"ucs_basic\", '^[[:print:]]$') AS ucs_basic, regexp_like(chr(160) COLLATE \"pg_c_utf8\", '^[[:print:]]$') AS pg_c_utf8, regexp_like(chr(160) COLLATE \"pg_unicode_fast\", '^[[:print:]]$') AS pg_unicode_fast, regexp_like(chr(160) COLLATE \"unicode\", '^[[:print:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_xdigit_fullwidth",
+      "sql": "SELECT regexp_like(chr(65313) COLLATE \"C\", '^[[:xdigit:]]$') AS c, regexp_like(chr(65313) COLLATE \"POSIX\", '^[[:xdigit:]]$') AS posix, regexp_like(chr(65313) COLLATE \"ucs_basic\", '^[[:xdigit:]]$') AS ucs_basic, regexp_like(chr(65313) COLLATE \"pg_c_utf8\", '^[[:xdigit:]]$') AS pg_c_utf8, regexp_like(chr(65313) COLLATE \"pg_unicode_fast\", '^[[:xdigit:]]$') AS pg_unicode_fast, regexp_like(chr(65313) COLLATE \"unicode\", '^[[:xdigit:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_word_escape_latin",
+      "sql": "SELECT regexp_like(chr(233) COLLATE \"C\", '^\\w$') AS c, regexp_like(chr(233) COLLATE \"POSIX\", '^\\w$') AS posix, regexp_like(chr(233) COLLATE \"ucs_basic\", '^\\w$') AS ucs_basic, regexp_like(chr(233) COLLATE \"pg_c_utf8\", '^\\w$') AS pg_c_utf8, regexp_like(chr(233) COLLATE \"pg_unicode_fast\", '^\\w$') AS pg_unicode_fast, regexp_like(chr(233) COLLATE \"unicode\", '^\\w$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_word_escape_mark",
+      "sql": "SELECT regexp_like(chr(769) COLLATE \"C\", '^\\w$') AS c, regexp_like(chr(769) COLLATE \"POSIX\", '^\\w$') AS posix, regexp_like(chr(769) COLLATE \"ucs_basic\", '^\\w$') AS ucs_basic, regexp_like(chr(769) COLLATE \"pg_c_utf8\", '^\\w$') AS pg_c_utf8, regexp_like(chr(769) COLLATE \"pg_unicode_fast\", '^\\w$') AS pg_unicode_fast, regexp_like(chr(769) COLLATE \"unicode\", '^\\w$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_digit_escape_arabic_indic",
+      "sql": "SELECT regexp_like(chr(1633) COLLATE \"C\", '^\\d$') AS c, regexp_like(chr(1633) COLLATE \"POSIX\", '^\\d$') AS posix, regexp_like(chr(1633) COLLATE \"ucs_basic\", '^\\d$') AS ucs_basic, regexp_like(chr(1633) COLLATE \"pg_c_utf8\", '^\\d$') AS pg_c_utf8, regexp_like(chr(1633) COLLATE \"pg_unicode_fast\", '^\\d$') AS pg_unicode_fast, regexp_like(chr(1633) COLLATE \"unicode\", '^\\d$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_space_escape_no_break",
+      "sql": "SELECT regexp_like(chr(160) COLLATE \"C\", '^\\s$') AS c, regexp_like(chr(160) COLLATE \"POSIX\", '^\\s$') AS posix, regexp_like(chr(160) COLLATE \"ucs_basic\", '^\\s$') AS ucs_basic, regexp_like(chr(160) COLLATE \"pg_c_utf8\", '^\\s$') AS pg_c_utf8, regexp_like(chr(160) COLLATE \"pg_unicode_fast\", '^\\s$') AS pg_unicode_fast, regexp_like(chr(160) COLLATE \"unicode\", '^\\s$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_negated_alpha",
+      "sql": "SELECT regexp_like(chr(233) COLLATE \"C\", '^[^[:alpha:]]$') AS c, regexp_like(chr(233) COLLATE \"POSIX\", '^[^[:alpha:]]$') AS posix, regexp_like(chr(233) COLLATE \"ucs_basic\", '^[^[:alpha:]]$') AS ucs_basic, regexp_like(chr(233) COLLATE \"pg_c_utf8\", '^[^[:alpha:]]$') AS pg_c_utf8, regexp_like(chr(233) COLLATE \"pg_unicode_fast\", '^[^[:alpha:]]$') AS pg_unicode_fast, regexp_like(chr(233) COLLATE \"unicode\", '^[^[:alpha:]]$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "class_range_latin",
+      "sql": "SELECT regexp_like(chr(233) COLLATE \"C\", '^[a-' || chr(255) || ']$') AS c, regexp_like(chr(233) COLLATE \"POSIX\", '^[a-' || chr(255) || ']$') AS posix, regexp_like(chr(233) COLLATE \"ucs_basic\", '^[a-' || chr(255) || ']$') AS ucs_basic, regexp_like(chr(233) COLLATE \"pg_c_utf8\", '^[a-' || chr(255) || ']$') AS pg_c_utf8, regexp_like(chr(233) COLLATE \"pg_unicode_fast\", '^[a-' || chr(255) || ']$') AS pg_unicode_fast, regexp_like(chr(233) COLLATE \"unicode\", '^[a-' || chr(255) || ']$') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "word_boundary_latin",
+      "sql": "SELECT regexp_count(('a' || chr(233) || 'b') COLLATE \"C\", '\\y') AS c, regexp_count(('a' || chr(233) || 'b') COLLATE \"POSIX\", '\\y') AS posix, regexp_count(('a' || chr(233) || 'b') COLLATE \"ucs_basic\", '\\y') AS ucs_basic, regexp_count(('a' || chr(233) || 'b') COLLATE \"pg_c_utf8\", '\\y') AS pg_c_utf8, regexp_count(('a' || chr(233) || 'b') COLLATE \"pg_unicode_fast\", '\\y') AS pg_unicode_fast, regexp_count(('a' || chr(233) || 'b') COLLATE \"unicode\", '\\y') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "4",
+              "4",
+              "4",
+              "2",
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "word_start_latin",
+      "sql": "SELECT regexp_replace(('x ' || chr(233) || 'y') COLLATE \"C\", '\\m', '|', 'g') = 'x |' || chr(233) || 'y' AS c, regexp_replace(('x ' || chr(233) || 'y') COLLATE \"POSIX\", '\\m', '|', 'g') = 'x |' || chr(233) || 'y' AS posix, regexp_replace(('x ' || chr(233) || 'y') COLLATE \"ucs_basic\", '\\m', '|', 'g') = 'x |' || chr(233) || 'y' AS ucs_basic, regexp_replace(('x ' || chr(233) || 'y') COLLATE \"pg_c_utf8\", '\\m', '|', 'g') = 'x |' || chr(233) || 'y' AS pg_c_utf8, regexp_replace(('x ' || chr(233) || 'y') COLLATE \"pg_unicode_fast\", '\\m', '|', 'g') = 'x |' || chr(233) || 'y' AS pg_unicode_fast, regexp_replace(('x ' || chr(233) || 'y') COLLATE \"unicode\", '\\m', '|', 'g') = 'x |' || chr(233) || 'y' AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_latin_upper_input",
+      "sql": "SELECT regexp_like(chr(201) COLLATE \"C\", chr(233), 'i') AS c, regexp_like(chr(201) COLLATE \"POSIX\", chr(233), 'i') AS posix, regexp_like(chr(201) COLLATE \"ucs_basic\", chr(233), 'i') AS ucs_basic, regexp_like(chr(201) COLLATE \"pg_c_utf8\", chr(233), 'i') AS pg_c_utf8, regexp_like(chr(201) COLLATE \"pg_unicode_fast\", chr(233), 'i') AS pg_unicode_fast, regexp_like(chr(201) COLLATE \"unicode\", chr(233), 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_latin_lower_input",
+      "sql": "SELECT regexp_like(chr(233) COLLATE \"C\", chr(201), 'i') AS c, regexp_like(chr(233) COLLATE \"POSIX\", chr(201), 'i') AS posix, regexp_like(chr(233) COLLATE \"ucs_basic\", chr(201), 'i') AS ucs_basic, regexp_like(chr(233) COLLATE \"pg_c_utf8\", chr(201), 'i') AS pg_c_utf8, regexp_like(chr(233) COLLATE \"pg_unicode_fast\", chr(201), 'i') AS pg_unicode_fast, regexp_like(chr(233) COLLATE \"unicode\", chr(201), 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_sharp_s_capital_input",
+      "sql": "SELECT regexp_like(chr(7838) COLLATE \"C\", chr(223), 'i') AS c, regexp_like(chr(7838) COLLATE \"POSIX\", chr(223), 'i') AS posix, regexp_like(chr(7838) COLLATE \"ucs_basic\", chr(223), 'i') AS ucs_basic, regexp_like(chr(7838) COLLATE \"pg_c_utf8\", chr(223), 'i') AS pg_c_utf8, regexp_like(chr(7838) COLLATE \"pg_unicode_fast\", chr(223), 'i') AS pg_unicode_fast, regexp_like(chr(7838) COLLATE \"unicode\", chr(223), 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_sharp_s_small_input",
+      "sql": "SELECT regexp_like(chr(223) COLLATE \"C\", chr(7838), 'i') AS c, regexp_like(chr(223) COLLATE \"POSIX\", chr(7838), 'i') AS posix, regexp_like(chr(223) COLLATE \"ucs_basic\", chr(7838), 'i') AS ucs_basic, regexp_like(chr(223) COLLATE \"pg_c_utf8\", chr(7838), 'i') AS pg_c_utf8, regexp_like(chr(223) COLLATE \"pg_unicode_fast\", chr(7838), 'i') AS pg_unicode_fast, regexp_like(chr(223) COLLATE \"unicode\", chr(7838), 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_kelvin_input",
+      "sql": "SELECT regexp_like(chr(8490) COLLATE \"C\", 'k', 'i') AS c, regexp_like(chr(8490) COLLATE \"POSIX\", 'k', 'i') AS posix, regexp_like(chr(8490) COLLATE \"ucs_basic\", 'k', 'i') AS ucs_basic, regexp_like(chr(8490) COLLATE \"pg_c_utf8\", 'k', 'i') AS pg_c_utf8, regexp_like(chr(8490) COLLATE \"pg_unicode_fast\", 'k', 'i') AS pg_unicode_fast, regexp_like(chr(8490) COLLATE \"unicode\", 'k', 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_kelvin_pattern",
+      "sql": "SELECT regexp_like('k' COLLATE \"C\", chr(8490), 'i') AS c, regexp_like('k' COLLATE \"POSIX\", chr(8490), 'i') AS posix, regexp_like('k' COLLATE \"ucs_basic\", chr(8490), 'i') AS ucs_basic, regexp_like('k' COLLATE \"pg_c_utf8\", chr(8490), 'i') AS pg_c_utf8, regexp_like('k' COLLATE \"pg_unicode_fast\", chr(8490), 'i') AS pg_unicode_fast, regexp_like('k' COLLATE \"unicode\", chr(8490), 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_final_sigma_input",
+      "sql": "SELECT regexp_like(chr(962) COLLATE \"C\", chr(931), 'i') AS c, regexp_like(chr(962) COLLATE \"POSIX\", chr(931), 'i') AS posix, regexp_like(chr(962) COLLATE \"ucs_basic\", chr(931), 'i') AS ucs_basic, regexp_like(chr(962) COLLATE \"pg_c_utf8\", chr(931), 'i') AS pg_c_utf8, regexp_like(chr(962) COLLATE \"pg_unicode_fast\", chr(931), 'i') AS pg_unicode_fast, regexp_like(chr(962) COLLATE \"unicode\", chr(931), 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_sigma_against_final",
+      "sql": "SELECT regexp_like(chr(963) COLLATE \"C\", chr(962), 'i') AS c, regexp_like(chr(963) COLLATE \"POSIX\", chr(962), 'i') AS posix, regexp_like(chr(963) COLLATE \"ucs_basic\", chr(962), 'i') AS ucs_basic, regexp_like(chr(963) COLLATE \"pg_c_utf8\", chr(962), 'i') AS pg_c_utf8, regexp_like(chr(963) COLLATE \"pg_unicode_fast\", chr(962), 'i') AS pg_unicode_fast, regexp_like(chr(963) COLLATE \"unicode\", chr(962), 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_dotless_i_input",
+      "sql": "SELECT regexp_like(chr(305) COLLATE \"C\", 'I', 'i') AS c, regexp_like(chr(305) COLLATE \"POSIX\", 'I', 'i') AS posix, regexp_like(chr(305) COLLATE \"ucs_basic\", 'I', 'i') AS ucs_basic, regexp_like(chr(305) COLLATE \"pg_c_utf8\", 'I', 'i') AS pg_c_utf8, regexp_like(chr(305) COLLATE \"pg_unicode_fast\", 'I', 'i') AS pg_unicode_fast, regexp_like(chr(305) COLLATE \"unicode\", 'I', 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_dotted_capital_i_pattern",
+      "sql": "SELECT regexp_like('i' COLLATE \"C\", chr(304), 'i') AS c, regexp_like('i' COLLATE \"POSIX\", chr(304), 'i') AS posix, regexp_like('i' COLLATE \"ucs_basic\", chr(304), 'i') AS ucs_basic, regexp_like('i' COLLATE \"pg_c_utf8\", chr(304), 'i') AS pg_c_utf8, regexp_like('i' COLLATE \"pg_unicode_fast\", chr(304), 'i') AS pg_unicode_fast, regexp_like('i' COLLATE \"unicode\", chr(304), 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_titlecase_input",
+      "sql": "SELECT regexp_like(chr(453) COLLATE \"C\", chr(454), 'i') AS c, regexp_like(chr(453) COLLATE \"POSIX\", chr(454), 'i') AS posix, regexp_like(chr(453) COLLATE \"ucs_basic\", chr(454), 'i') AS ucs_basic, regexp_like(chr(453) COLLATE \"pg_c_utf8\", chr(454), 'i') AS pg_c_utf8, regexp_like(chr(453) COLLATE \"pg_unicode_fast\", chr(454), 'i') AS pg_unicode_fast, regexp_like(chr(453) COLLATE \"unicode\", chr(454), 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_double_s_against_sharp_s",
+      "sql": "SELECT regexp_like('ss' COLLATE \"C\", chr(223), 'i') AS c, regexp_like('ss' COLLATE \"POSIX\", chr(223), 'i') AS posix, regexp_like('ss' COLLATE \"ucs_basic\", chr(223), 'i') AS ucs_basic, regexp_like('ss' COLLATE \"pg_c_utf8\", chr(223), 'i') AS pg_c_utf8, regexp_like('ss' COLLATE \"pg_unicode_fast\", chr(223), 'i') AS pg_unicode_fast, regexp_like('ss' COLLATE \"unicode\", chr(223), 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_lower_class_upper_input",
+      "sql": "SELECT regexp_like(chr(201) COLLATE \"C\", '^[[:lower:]]$', 'i') AS c, regexp_like(chr(201) COLLATE \"POSIX\", '^[[:lower:]]$', 'i') AS posix, regexp_like(chr(201) COLLATE \"ucs_basic\", '^[[:lower:]]$', 'i') AS ucs_basic, regexp_like(chr(201) COLLATE \"pg_c_utf8\", '^[[:lower:]]$', 'i') AS pg_c_utf8, regexp_like(chr(201) COLLATE \"pg_unicode_fast\", '^[[:lower:]]$', 'i') AS pg_unicode_fast, regexp_like(chr(201) COLLATE \"unicode\", '^[[:lower:]]$', 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_upper_class_lower_input",
+      "sql": "SELECT regexp_like(chr(233) COLLATE \"C\", '^[[:upper:]]$', 'i') AS c, regexp_like(chr(233) COLLATE \"POSIX\", '^[[:upper:]]$', 'i') AS posix, regexp_like(chr(233) COLLATE \"ucs_basic\", '^[[:upper:]]$', 'i') AS ucs_basic, regexp_like(chr(233) COLLATE \"pg_c_utf8\", '^[[:upper:]]$', 'i') AS pg_c_utf8, regexp_like(chr(233) COLLATE \"pg_unicode_fast\", '^[[:upper:]]$', 'i') AS pg_unicode_fast, regexp_like(chr(233) COLLATE \"unicode\", '^[[:upper:]]$', 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_latin_range_upper_input",
+      "sql": "SELECT regexp_like(chr(201) COLLATE \"C\", '^[' || chr(224) || '-' || chr(255) || ']$', 'i') AS c, regexp_like(chr(201) COLLATE \"POSIX\", '^[' || chr(224) || '-' || chr(255) || ']$', 'i') AS posix, regexp_like(chr(201) COLLATE \"ucs_basic\", '^[' || chr(224) || '-' || chr(255) || ']$', 'i') AS ucs_basic, regexp_like(chr(201) COLLATE \"pg_c_utf8\", '^[' || chr(224) || '-' || chr(255) || ']$', 'i') AS pg_c_utf8, regexp_like(chr(201) COLLATE \"pg_unicode_fast\", '^[' || chr(224) || '-' || chr(255) || ']$', 'i') AS pg_unicode_fast, regexp_like(chr(201) COLLATE \"unicode\", '^[' || chr(224) || '-' || chr(255) || ']$', 'i') AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_operator_latin",
+      "sql": "SELECT chr(201) COLLATE \"C\" ~* chr(233) AS c, chr(201) COLLATE \"POSIX\" ~* chr(233) AS posix, chr(201) COLLATE \"ucs_basic\" ~* chr(233) AS ucs_basic, chr(201) COLLATE \"pg_c_utf8\" ~* chr(233) AS pg_c_utf8, chr(201) COLLATE \"pg_unicode_fast\" ~* chr(233) AS pg_unicode_fast, chr(201) COLLATE \"unicode\" ~* chr(233) AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_replace_latin",
+      "sql": "SELECT regexp_replace((chr(201) || 'x') COLLATE \"C\", chr(233), '-', 'i') = '-x' AS c, regexp_replace((chr(201) || 'x') COLLATE \"POSIX\", chr(233), '-', 'i') = '-x' AS posix, regexp_replace((chr(201) || 'x') COLLATE \"ucs_basic\", chr(233), '-', 'i') = '-x' AS ucs_basic, regexp_replace((chr(201) || 'x') COLLATE \"pg_c_utf8\", chr(233), '-', 'i') = '-x' AS pg_c_utf8, regexp_replace((chr(201) || 'x') COLLATE \"pg_unicode_fast\", chr(233), '-', 'i') = '-x' AS pg_unicode_fast, regexp_replace((chr(201) || 'x') COLLATE \"unicode\", chr(233), '-', 'i') = '-x' AS unicode",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "posix",
+            "ucs_basic",
+            "pg_c_utf8",
+            "pg_unicode_fast",
+            "unicode"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "collation_from_pattern_operand",
+      "sql": "SELECT chr(233) ~ ('^[[:alpha:]]$' COLLATE \"C\"), chr(233) ~ ('^[[:alpha:]]$' COLLATE \"pg_unicode_fast\")",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "collation_from_function_pattern",
+      "sql": "SELECT regexp_like(chr(233), '^[[:alpha:]]$' COLLATE \"C\")",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_like"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "collation_explicit_conflict",
+      "sql": "SELECT regexp_like(chr(233) COLLATE \"C\", '^[[:alpha:]]$' COLLATE \"POSIX\")",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P21",
+        "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "collation_implicit_conflict_table",
+      "sql": "CREATE TABLE regex_collations (a text COLLATE \"C\", b text COLLATE \"POSIX\")",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "collation_implicit_conflict_rows",
+      "sql": "INSERT INTO regex_collations VALUES ('a', 'a')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "collation_implicit_conflict_operator",
+      "sql": "SELECT a ~ b FROM regex_collations",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for regular expression",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "collation_implicit_conflict_function",
+      "sql": "SELECT regexp_like(a, b) FROM regex_collations",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for regular expression",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "collation_implicit_conflict_replace",
+      "sql": "SELECT regexp_replace(a, b, 'x') FROM regex_collations",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for regular expression",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "collation_implicit_conflict_similar",
+      "sql": "SELECT a SIMILAR TO b FROM regex_collations",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for regular expression",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "collation_implicit_conflict_resolved",
+      "sql": "SELECT a ~ (b COLLATE \"C\") FROM regex_collations",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "collation_column_classes",
+      "sql": "SELECT regexp_like(a || chr(233), '[[:alpha:]]$') FROM regex_collations",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_like"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "collation_implicit_conflict_drop",
+      "sql": "DROP TABLE regex_collations",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "stored_view",
+      "sql": "CREATE VIEW regex_engine_view AS SELECT regexp_match('ab', 'a|ab') AS longest, regexp_like(chr(233) COLLATE \"C\", '^[[:alpha:]]$') AS c_alpha, regexp_like(chr(233) COLLATE \"pg_c_utf8\", '^[[:alpha:]]$') AS utf8_alpha, regexp_replace('abab', '(ab)\\1', '[\\&]') AS replaced, regexp_split_to_array('xabx', 'a|ab') AS pieces",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "stored_view_rows",
+      "sql": "SELECT * FROM regex_engine_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "longest",
+            "c_alpha",
+            "utf8_alpha",
+            "replaced",
+            "pieces"
+          ],
+          "type_oids": [
+            1009,
+            16,
+            16,
+            25,
+            1009
+          ],
+          "rows": [
+            [
+              "{ab}",
+              "f",
+              "t",
+              "[abab]",
+              "{x,x}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "stored_check_table",
+      "sql": "CREATE TABLE regex_engine_checked (code text COLLATE \"C\" CHECK (code ~ '^[[:alpha:]]+$'), label text COLLATE \"pg_c_utf8\" CHECK (label ~* '^\u00e9+$'))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "stored_check_accepts",
+      "sql": "INSERT INTO regex_engine_checked VALUES ('abc', chr(201) || chr(233))",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "stored_check_rejects_c_class",
+      "sql": "INSERT INTO regex_engine_checked VALUES (chr(233), chr(233))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"regex_engine_checked\" violates check constraint \"regex_engine_checked_code_check\"",
+        "detail": "Failing row contains (\u00e9, \u00e9).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "stored_check_rejects_case",
+      "sql": "INSERT INTO regex_engine_checked VALUES ('abc', 'e')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"regex_engine_checked\" violates check constraint \"regex_engine_checked_label_check\"",
+        "detail": "Failing row contains (abc, e).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "stored_check_rows",
+      "sql": "SELECT code, label = chr(201) || chr(233) AS label_kept FROM regex_engine_checked",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "code",
+            "label_kept"
+          ],
+          "type_oids": [
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "abc",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "stored_default_table",
+      "sql": "CREATE TABLE regex_engine_defaults (id integer, tag text DEFAULT regexp_replace('xabx', 'a|ab', '-'))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "stored_default_rows",
+      "sql": "INSERT INTO regex_engine_defaults (id) VALUES (1)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "stored_default_values",
+      "sql": "SELECT id, tag FROM regex_engine_defaults",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "tag"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "x-x"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

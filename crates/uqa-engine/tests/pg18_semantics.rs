@@ -134,6 +134,8 @@ mod range_subtype_distance;
 mod regexp_matches;
 #[path = "pg18_semantics/regexp_split.rs"]
 mod regexp_split;
+#[path = "pg18_semantics/regular_expression_engine.rs"]
+mod regular_expression_engine;
 #[path = "pg18_semantics/regular_expression_identities.rs"]
 mod regular_expression_identities;
 #[path = "pg18_semantics/reverse_overloads.rs"]

@@ -6,18 +6,18 @@
 
 //! `PostgreSQL` `substring` pattern forms. The POSIX form is `textregexsubstr`; the SQL form is defined as `substring($1, similar_to_escape($2, $3))`, so it shares the same extraction after the existing escape translation.
 
-use super::{compile, plain, string};
+use super::{argument_text, engine, plain, string};
 use crate::{
     ast::FunctionDispatch,
     error::{Result, SQLError},
-    expr::conversion::value_to_string_with_control,
 };
 use uqa_core::{
     memory::{Produced, ProductionControl},
     Value,
 };
+use uqa_pg_regex::{MatchSpan, REG_ADVANCED};
 
-/// The `substring` pattern overload selected by binding, under the call's input collation (`PostgreSQL`'s `inputcollid`, zero when indeterminate); every other dispatch belongs to another kernel.
+/// The `substring` pattern overload selected by binding, under the call's input collation; every other dispatch belongs to another kernel.
 pub(in crate::expr) fn evaluate_dispatched(
     dispatch: FunctionDispatch,
     arguments: &[Value],
@@ -49,8 +49,8 @@ fn evaluate(
         if arguments.iter().any(|value| matches!(value, Value::Null)) {
             return plain(Value::Null, control);
         }
-        let input = value_to_string_with_control(&arguments[0], control)?;
-        let pattern = value_to_string_with_control(&arguments[1], control)?;
+        let input = argument_text(&arguments[0], control)?;
+        let pattern = argument_text(&arguments[1], control)?;
         return extract(&input, &pattern, collation, control);
     }
     // The planner folds a constant NULL argument of this strict form before execution. At run time PostgreSQL evaluates its inlined body, `textregexsubstr($1, similar_to_escape($2, $3))`: a NULL pattern or escape yields NULL, the translation runs and can fail even for a NULL input, and only the extraction is skipped for that input.
@@ -65,7 +65,7 @@ fn evaluate(
     if matches!(arguments[0], Value::Null) {
         return plain(Value::Null, control);
     }
-    let input = value_to_string_with_control(&arguments[0], control)?;
+    let input = argument_text(&arguments[0], control)?;
     extract(&input, pattern, collation, control)
 }
 
@@ -91,32 +91,27 @@ fn translate(
     crate::expr::pattern::escape(true, pattern_and_escape, control).map(Some)
 }
 
-/// `textregexsubstr`: the first parenthesized subexpression when the pattern has one, otherwise the whole match. No match, or a first subexpression that did not participate in the match, yields NULL.
+/// `textregexsubstr`: the first parenthesized subexpression when the pattern has one, otherwise the whole match. No match, or a first subexpression that did not take part in the match, yields NULL. The pattern is compiled before the input is converted.
 fn extract(
     input: &str,
     pattern: &str,
     collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
-    let regex = compile(
-        pattern,
-        "",
-        super::GlobalFlag::rejected_by("substring"),
-        collation,
-        control,
-    )?;
-    let captures = regex.captures(input);
-    control.check()?;
-    let Some(captures) = captures else {
-        return plain(Value::Null, control);
-    };
-    let selected = if regex.captures_len() > 1 {
-        captures.get(1)
+    let call = engine::RegexCall::new(control);
+    let mut allowance = call.allowance();
+    let mut regex = call.compile(pattern, REG_ADVANCED, collation, &mut allowance)?;
+    let points = engine::code_points(input, control)?;
+    let mut spans = [MatchSpan::UNSET; 2];
+    let found = call.execute(&mut regex, &points, 0, &mut spans)?;
+    let selected = if regex.subexpression_count() > 0 {
+        spans[1]
     } else {
-        captures.get(0)
+        spans[0]
     };
-    match selected {
-        Some(matched) => string(control.copy_text(matched.as_str())?, control),
+    drop(regex);
+    match selected.range().filter(|_| found) {
+        Some(range) => string(engine::text(&points, range, control)?, control),
         None => plain(Value::Null, control),
     }
 }

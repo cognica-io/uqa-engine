@@ -17,6 +17,7 @@ exclude.workspace = true
 [dependencies]
 uqa-core = { workspace = true }
 uqa-pg-query = { workspace = true }
+uqa-pg-regex = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true }
 chrono = { workspace = true }
@@ -33,9 +34,6 @@ zerovec = { workspace = true }
 writeable = { workspace = true }
 libm = { workspace = true }
 lz4_flex = { workspace = true }
-regex = { workspace = true }
-regex-automata = { workspace = true }
-regex-syntax = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
