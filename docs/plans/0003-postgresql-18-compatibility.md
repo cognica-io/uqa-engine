@@ -139,7 +139,7 @@ The following compact ledger is the readable projection of the machine-readable 
 
 <!-- pg18-manifest-status:start -->
 
-Manifest inventory: 147 evidence items — 91 `verified`, 55 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
+Manifest inventory: 150 evidence items — 92 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
 
 | Milestone | Name | Status | Exit gate |
 | --- | --- | --- | --- |
@@ -209,7 +209,7 @@ Manifest inventory: 147 evidence items — 91 `verified`, 55 `partial`, 0 `expli
 | `functions.gamma-functions` | `M1` | `verified` |
 | `functions.string-binary-lengths` | `M1` | `verified` |
 | `functions.substring-pattern-forms` | `M1` | `partial` |
-| `functions.regexp-matches-rows` | `M1` | `partial` |
+| `functions.regexp-matches-rows` | `M1` | `verified` |
 | `functions.uuid-extraction` | `M1` | `verified` |
 | `execution.static-row-schema-and-spill-v1` | `M3` | `partial` |
 | `types.declared-identity-casts-and-catalog` | `M3` | `partial` |
@@ -300,6 +300,9 @@ Manifest inventory: 147 evidence items — 91 `verified`, 55 `partial`, 0 `expli
 | `queries.correlated-stored-view-scope` | `M1` | `verified` |
 | `types.array-element-selection` | `M1` | `verified` |
 | `ddl.relation-attribute-slots` | `M3` | `verified` |
+| `functions.regular-expression-engine` | `M1` | `partial` |
+| `functions.input-collation-case-mapping` | `M1` | `partial` |
+| `query.set-returning-contexts` | `M1` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 

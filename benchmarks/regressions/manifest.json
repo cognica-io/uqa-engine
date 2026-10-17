@@ -13122,6 +13122,22 @@
       ]
     },
     {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "regexp_search_loop_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/regexp_search_loop.rs",
+      "capability": "Regular-expression search loop",
+      "workload": "Independent PostgreSQL 18.4 regexp_count, regexp_instr, regexp_substr and regexp_replace statements covering start positions, empty matches after non-empty ones, anchors before the start, occurrence and subexpression parameters and flags that begin with a digit, with replacement output beyond the allowance and canceled scopes.",
+      "invariant": "The functions search the whole input from the start position as PostgreSQL does and return its counts, positions, substrings and replacements, a refused replacement output releases its partial text and keeps earlier values, and both cancellation scopes stop production.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "regex_output_quota_failure_releases_partial_replacements_and_keeps_earlier_values",
