@@ -3,8 +3,8 @@
   "provenance": {
     "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
     "postgresql_source_revision": "f5cc81719e6da4cbdb1f797c48b693e91018153a",
-    "source_file": "src/backend/commands/typecmds.c",
-    "scope": "Range declaration order, shell completion, support signatures, generated identities and transaction rollback; only correctly typed native routines are invoked."
+    "source_file": "src/backend/parser/parse_func.c",
+    "scope": "Quoted DROP FUNCTION lookup diagnostics for exact integer signatures; semantic names with whitespace or a literal dot remain distinct lookup identities."
   },
   "cases": [
     {

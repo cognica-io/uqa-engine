@@ -355,7 +355,7 @@
   "provenance": {
     "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
     "postgresql_source_revision": "f5cc81719e6da4cbdb1f797c48b693e91018153a",
-    "source_file": "src/backend/commands/typecmds.c",
+    "source_file": "src/backend/utils/adt/multirangetypes.c",
     "scope": "Builtin multirange constructors: NULL elements, multiple arguments, array rank, empty and nondefault lower-bound arrays.",
     "capture_sha256": "14b8c5327e85ec18c27f5c1bead16d2729fb88381c49d26e2738fdb1afe22315"
   },
