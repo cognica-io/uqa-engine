@@ -25,8 +25,10 @@ pub fn scalar_record_field_type_with_control(
     engine: Option<&dyn crate::expr::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<uqa_core::RecordFieldType>, SQLError> {
+    control.check()?;
     if matches!(expression, ScalarExpr::Literal(Value::Null | Value::Str(_))) {
         return Ok(Some(uqa_core::RecordFieldType {
+            collation_oid: Some(0),
             oid: 705,
             type_modifier: -1,
         }));
@@ -34,8 +36,27 @@ pub fn scalar_record_field_type_with_control(
     let Some(name) = operand_type_name(expression, schema, params, engine, control, true)? else {
         return Ok(None);
     };
-    let ty = resolve_operand_type(&name, engine, control)?;
-    Ok(ty.map(|ty| uqa_core::RecordFieldType {
+    let Some(ty) = resolve_operand_type(&name, engine, control)? else {
+        return Ok(None);
+    };
+    let collation_oid = if let Some(oid) = schema.input_collation(expression) {
+        oid
+    } else if let Some(clause) = crate::catalog::collations::expression::scalar_clause(expression)?
+    {
+        crate::catalog::collations::expression::select_with_control(
+            clause.name,
+            clause.oid,
+            Some(&ty),
+            None,
+            control,
+        )?
+    } else {
+        u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(&ty))
+            .expect("declared field collation identity")
+    };
+    control.check()?;
+    Ok(Some(uqa_core::RecordFieldType {
+        collation_oid: Some(collation_oid),
         oid: crate::catalog::type_metadata::pg_type_oid(&ty) as u32,
         type_modifier: crate::catalog::type_metadata::pg_type_modifier(&ty) as i32,
     }))

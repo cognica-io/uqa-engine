@@ -355,6 +355,7 @@ fn typed_rows_keep_field_identities_through_spill() {
             [20, 23]
                 .into_iter()
                 .map(|oid| uqa_core::RecordFieldType {
+                    collation_oid: None,
                     oid,
                     type_modifier: -1,
                 })

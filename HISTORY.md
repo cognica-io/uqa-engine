@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve selected field collations when constructing and retaining anonymous rows, including JSON and spill round trips, while continuing to read older row descriptors.
+
 - Check cancellation while removing fixed-character padding for equality keys, sharing the same borrowed normalization used by SQL comparisons without changing successful key bytes.
 
 - Read retained `int2vector` and `oidvector` composite fields through the shared SQL Datum codec, preserving stored and prepared values across domain rebinding and persistent reopening. Match PostgreSQL vector-header diagnostics while retaining bounded reads, memory ownership and cancellation.

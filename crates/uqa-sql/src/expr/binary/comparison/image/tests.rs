@@ -65,6 +65,7 @@ fn row(values: Vec<Value>, types: &[ColumnType]) -> Value {
             types
                 .iter()
                 .map(|ty| RecordFieldType {
+                    collation_oid: None,
                     oid: type_metadata::pg_type_oid(ty) as u32,
                     type_modifier: type_metadata::pg_type_modifier(ty) as i32,
                 })

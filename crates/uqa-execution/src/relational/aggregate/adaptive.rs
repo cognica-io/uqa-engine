@@ -403,6 +403,7 @@ mod tests {
     fn row_key_accounting_includes_the_header_and_descriptor_capacity() {
         let mut fields = Vec::with_capacity(64);
         fields.push(uqa_core::RecordFieldType {
+            collation_oid: None,
             oid: 23,
             type_modifier: -1,
         });

@@ -39,6 +39,7 @@ pub(super) fn record(
 
 fn field_type(ty: &ColumnType) -> RecordFieldType {
     RecordFieldType {
+        collation_oid: None,
         oid: type_metadata::pg_type_oid(ty) as u32,
         type_modifier: type_metadata::pg_type_modifier(ty) as i32,
     }

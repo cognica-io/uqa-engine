@@ -48,6 +48,7 @@ fn containers(value: &Value, oid: u32) -> [Value; 3] {
             RowValue::typed(
                 vec![value.clone()],
                 vec![RecordFieldType {
+                    collation_oid: None,
                     oid,
                     type_modifier: -1,
                 }],

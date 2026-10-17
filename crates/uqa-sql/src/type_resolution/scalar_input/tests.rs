@@ -8,6 +8,54 @@ use super::*;
 use crate::RowSchema;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+#[test]
+fn row_field_collations_use_analyzed_inputs_and_observe_cancellation() {
+    let schema = RowSchema::with_types(
+        vec!["selected".into(), "indeterminate".into()],
+        vec![Some(ColumnType::Text); 2],
+    )
+    .with_column_collations([Some(950), Some(0)]);
+    let expressions = [
+        (ScalarExpr::Column("selected".into()), 950),
+        (ScalarExpr::Position(1), 0),
+        (ScalarExpr::Literal(Value::Null), 0),
+        (
+            ScalarExpr::Collated {
+                expr: Box::new(ScalarExpr::Literal(Value::Str("B".into()))),
+                ty: ColumnType::Text,
+                collation: crate::ir::ResultCollation::new(
+                    crate::catalog::collations::derivation::Derivation::Explicit(963),
+                    100,
+                ),
+            },
+            963,
+        ),
+    ];
+    for cancel in [None, Some(false), Some(true)] {
+        let budget = MemoryBudget::new(4096);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        if let Some(owner) = cancel {
+            if owner {
+                original.cancel();
+            } else {
+                invoking.cancel();
+            }
+        }
+        for (expression, expected) in &expressions {
+            let field =
+                scalar_record_field_type_with_control(expression, &schema, &[], None, &control);
+            if cancel.is_some() {
+                assert_eq!(field.unwrap_err().sqlstate(), Some("57014"));
+            } else {
+                assert_eq!(field.unwrap().unwrap().collation_oid, Some(*expected));
+            }
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}
+
 fn domain(base: ColumnType) -> ColumnType {
     ColumnType::Domain {
         collation_oid: None,

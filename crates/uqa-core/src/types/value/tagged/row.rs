@@ -29,15 +29,28 @@ pub(super) fn decoded(
                 let Value::Map(ty) = ty else {
                     return Err(malformed("field type is not an object"));
                 };
-                if ty.len() != 2 {
-                    return Err(malformed("field type must contain oid and type_modifier"));
+                if ty
+                    .keys()
+                    .any(|name| !matches!(name.as_str(), "oid" | "type_modifier" | "collation_oid"))
+                {
+                    return Err(malformed("field type contains unknown metadata"));
                 }
                 let oid = int_field(ty, "oid")
                     .ok_or_else(|| malformed("field type OID is not an unsigned 32-bit integer"))?;
                 let type_modifier = int_field(ty, "type_modifier").ok_or_else(|| {
                     malformed("field type modifier is not a signed 32-bit integer")
                 })?;
-                decoded.push(RecordFieldType { oid, type_modifier });
+                let collation_oid = match ty.get("collation_oid") {
+                    None | Some(Value::Null) => None,
+                    Some(_) => Some(int_field(ty, "collation_oid").ok_or_else(|| {
+                        malformed("field collation OID is not an unsigned 32-bit integer")
+                    })?),
+                };
+                decoded.push(RecordFieldType {
+                    oid,
+                    type_modifier,
+                    collation_oid,
+                });
             }
             Some(decoded)
         }

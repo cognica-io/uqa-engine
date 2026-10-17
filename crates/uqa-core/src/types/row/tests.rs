@@ -12,9 +12,69 @@ use crate::{
 
 fn field(oid: u32) -> RecordFieldType {
     RecordFieldType {
+        collation_oid: None,
         oid,
         type_modifier: -1,
     }
+}
+
+#[test]
+fn row_collations_survive_json_copy_and_both_cancellation_owners() {
+    let fields: Vec<_> = [None, Some(0), Some(950), Some(963), Some(u32::MAX)]
+        .into_iter()
+        .map(|collation_oid| RecordFieldType {
+            oid: 25,
+            type_modifier: -1,
+            collation_oid,
+        })
+        .collect();
+    let source =
+        Value::Row(RowValue::typed(vec![Value::Null; fields.len()], fields.clone()).unwrap());
+    let encoded = serde_json::to_string(&source).unwrap();
+    let ordinary: Value = serde_json::from_str(&encoded).unwrap();
+    assert!(source.has_same_representation(&ordinary));
+    let budget = MemoryBudget::new(4096);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let decoded = JsonValueDecoder::new(&budget, &original)
+        .value(&encoded)
+        .unwrap();
+    assert!(source.has_same_representation(&decoded));
+    drop(decoded);
+    let copied = control.copy_value(&source).unwrap();
+    assert!(source.has_same_representation(&copied));
+    assert_eq!(budget.used(), copied.reserved_bytes());
+    drop(copied);
+    assert_eq!(budget.used(), 0);
+    for cancel_original in [false, true] {
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let mut values = ProductionVec::new(control);
+        let mut types = ProductionVec::new(control);
+        for field in &fields {
+            values
+                .push_produced(control.copy_value(&Value::Null).unwrap())
+                .unwrap();
+            types.push_copy(*field).unwrap();
+        }
+        let values = values.finish().unwrap();
+        let types = types.finish().unwrap();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        assert!(matches!(
+            RowValue::typed_with_control(values, types, &control),
+            Err(ValueRetentionError::Cancelled(_))
+        ));
+        assert_eq!(budget.used(), 0);
+    }
+    assert!(JsonValueDecoder::new(&MemoryBudget::new(0), &original)
+        .value(&encoded)
+        .is_err());
 }
 
 fn typed(oid: u32) -> Value {
@@ -44,6 +104,7 @@ fn descriptors_distinguish_representation_without_changing_value_order() {
             vec![
                 field(23),
                 RecordFieldType {
+                    collation_oid: None,
                     oid: 25,
                     type_modifier: 8,
                 },
@@ -128,6 +189,10 @@ fn malformed_row_descriptors_fail_both_decoders_and_release_their_allowance() {
         r#"{"$uqa_type":"row","values":[1],"field_types":[{"oid":23,"type_modifier":2147483648}]}"#,
         r#"{"$uqa_type":"row","values":[1],"field_types":[{"oid":23}]}"#,
         r#"{"$uqa_type":"row","values":null,"field_types":[]}"#,
+        r#"{"$uqa_type":"row","values":[1],"field_types":[{"oid":25,"type_modifier":-1,"collation_oid":-1}]}"#,
+        r#"{"$uqa_type":"row","values":[1],"field_types":[{"oid":25,"type_modifier":-1,"collation_oid":4294967296}]}"#,
+        r#"{"$uqa_type":"row","values":[1],"field_types":[{"oid":25,"type_modifier":-1,"collation_oid":"C"}]}"#,
+        r#"{"$uqa_type":"row","values":[1],"field_types":[{"oid":25,"type_modifier":-1,"collation":950}]}"#,
     ] {
         assert!(serde_json::from_str::<Value>(text).is_err(), "{text}");
         let budget = MemoryBudget::new(1 << 20);

@@ -86,6 +86,7 @@ fn typed_row_exact_lookup_keeps_command_frame_masking_and_equality() {
         uqa_core::RowValue::typed(
             vec![Value::Int(1)],
             vec![uqa_core::RecordFieldType {
+                collation_oid: None,
                 oid: 28,
                 type_modifier: -1,
             }],

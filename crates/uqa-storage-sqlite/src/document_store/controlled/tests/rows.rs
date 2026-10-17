@@ -36,10 +36,12 @@ fn document() -> StoredDocument {
                         vec![Value::Int(1), Value::Null],
                         vec![
                             uqa_core::RecordFieldType {
+                                collation_oid: None,
                                 oid: 20,
                                 type_modifier: -1,
                             },
                             uqa_core::RecordFieldType {
+                                collation_oid: None,
                                 oid: 23,
                                 type_modifier: -1,
                             },

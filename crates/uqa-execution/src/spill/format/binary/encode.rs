@@ -315,7 +315,7 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
         Value::Row(values) => {
             add_size(total, 8, "row length")?;
             if let Some(fields) = values.field_types() {
-                add_row_descriptor_size(total, fields.len())?;
+                add_row_descriptor_size(total, fields)?;
             }
             for value in values {
                 add_value_size(total, value, depth + 1)?;
@@ -334,15 +334,25 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
     }
 }
 
-fn add_row_descriptor_size(total: &mut usize, fields: usize) -> ExecResult<()> {
+fn add_row_descriptor_size(
+    total: &mut usize,
+    fields: &[uqa_core::RecordFieldType],
+) -> ExecResult<()> {
     add_size(total, 8, "row descriptor length")?;
     add_size(
         total,
         fields
-            .checked_mul(8)
+            .len()
+            .checked_mul(9)
             .ok_or_else(|| spill_error("row descriptor size overflow"))?,
         "row descriptor",
-    )
+    )?;
+    for field in fields {
+        if field.collation_oid.is_some() {
+            add_size(total, 4, "row field collation")?;
+        }
+    }
+    Ok(())
 }
 
 fn temporal_payload_size(value: &TemporalValue) -> usize {
@@ -642,7 +652,7 @@ fn encode_row(
     depth: usize,
 ) -> ExecResult<()> {
     if let Some(fields) = values.field_types() {
-        write_tag(writer, 19)?;
+        write_tag(writer, 25)?;
         write_u64(writer, fields.len())?;
         for field in fields {
             write_raw(writer, &field.oid.to_le_bytes(), "row field type OID")?;
@@ -651,6 +661,10 @@ fn encode_row(
                 &field.type_modifier.to_le_bytes(),
                 "row field type modifier",
             )?;
+            write_tag(writer, u8::from(field.collation_oid.is_some()))?;
+            if let Some(oid) = field.collation_oid {
+                write_raw(writer, &oid.to_le_bytes(), "row field collation OID")?;
+            }
         }
     } else {
         write_tag(writer, 13)?;

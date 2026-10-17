@@ -579,6 +579,7 @@ fn typed_row_exact_lookup_uses_equality_for_stored_and_private_rows() {
         uqa_core::RowValue::typed(
             vec![Value::Int(1)],
             vec![uqa_core::RecordFieldType {
+                collation_oid: None,
                 oid: 28,
                 type_modifier: -1,
             }],
@@ -608,6 +609,7 @@ fn typed_row_exact_lookup_uses_equality_for_stored_and_private_rows() {
         uqa_core::RowValue::typed(
             vec![Value::Null],
             vec![uqa_core::RecordFieldType {
+                collation_oid: None,
                 oid: 114,
                 type_modifier: -1,
             }],

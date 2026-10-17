@@ -89,6 +89,7 @@ mod tests {
                 values,
                 oids.iter()
                     .map(|oid| RecordFieldType {
+                        collation_oid: None,
                         oid: *oid,
                         type_modifier: -1,
                     })

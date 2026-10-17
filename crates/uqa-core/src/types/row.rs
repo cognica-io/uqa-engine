@@ -14,6 +14,9 @@ use crate::memory::{MemoryError, Produced, ProductionControl};
 pub struct RecordFieldType {
     pub oid: u32,
     pub type_modifier: i32,
+    /// Selected field collation. Zero retains an indeterminate or noncollatable selection; absent legacy metadata leaves default resolution to the SQL owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation_oid: Option<u32>,
 }
 
 /// An anonymous row and its optional producer descriptor. A boxed header keeps the inline dynamic value layout independent of descriptor storage.

@@ -226,6 +226,7 @@ fn native_range_physical_comparison_retains_selected_bounds_and_original_allowan
                 uqa_core::RowValue::typed(
                     vec![value],
                     vec![uqa_core::RecordFieldType {
+                        collation_oid: None,
                         oid,
                         type_modifier: -1,
                     }],

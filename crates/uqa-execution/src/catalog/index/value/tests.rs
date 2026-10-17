@@ -272,6 +272,7 @@ fn typed_field_probes_preserve_btree_operator_errors() {
             uqa_core::RowValue::typed(
                 vec![value],
                 vec![uqa_core::RecordFieldType {
+                    collation_oid: None,
                     oid: uqa_sql::catalog::type_metadata::pg_type_oid(&ty)
                         .try_into()
                         .unwrap(),

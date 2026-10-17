@@ -50,6 +50,72 @@ fn expression(source: &str, schema: &RowSchema) -> ScalarExpr {
     uqa_sql::bind_type_introspection(scalar, schema, &[])
 }
 
+#[test]
+fn row_field_collations_agree_in_ordinary_and_admitted_contexts() {
+    let schema = RowSchema::with_types(vec!["payload".into()], vec![Some(ColumnType::Text)])
+        .with_column_collations([Some(950)]);
+    let row = uqa_sql::ResultRow::from([("payload".into(), Value::Str("B".into()))]);
+    let expression = expression(
+        "ROW(payload, 'a'::text COLLATE \"unicode\", NULL::text)",
+        &schema,
+    );
+    let context = ScalarEvalContext::from_row_lookup(&row, &[]).with_row_schema(&schema);
+    let ordinary = eval_scalar(&expression, &context).unwrap();
+    let budget = MemoryBudget::new(4096);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let output = eval_scalar_inner(&expression, &context, &control).unwrap();
+    assert!(ordinary.has_same_representation(&output));
+    let Value::Row(fields) = &*output else {
+        panic!("row");
+    };
+    assert_eq!(
+        fields
+            .field_types()
+            .unwrap()
+            .iter()
+            .map(|field| field.collation_oid)
+            .collect::<Vec<_>>(),
+        vec![Some(950), Some(963), Some(100)]
+    );
+    assert_eq!(budget.used(), output.reserved_bytes());
+    drop(output);
+    assert_eq!(budget.used(), 0);
+    let insufficient = MemoryBudget::new(0);
+    assert_eq!(
+        eval_scalar_inner(
+            &expression,
+            &context,
+            &ProductionControl::new(&insufficient, &original, &invoking)
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(insufficient.used(), 0);
+    for cancel_original in [false, true] {
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        assert_eq!(
+            eval_scalar_inner(
+                &expression,
+                &context,
+                &ProductionControl::new(&budget, &original, &invoking)
+            )
+            .unwrap_err()
+            .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(budget.used(), 0);
+    }
+}
+
 fn compare(result: Result<Value, SQLError>, case: &serde_json::Value) {
     let label = case["expression"].as_str().unwrap();
     if case["error"].is_null() {
