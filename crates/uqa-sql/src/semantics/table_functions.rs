@@ -311,27 +311,10 @@ fn builtin_table_function_overloads(
             };
             vec![overload(vec![ColumnType::AnyArray], 0, element.clone())]
         }
+        // The scalar and FROM positions select from the same catalog signatures.
         "regexp_matches" | "regexp_split_to_table" => {
-            let return_type = if name == "regexp_matches" {
-                ColumnType::Array(Box::new(ColumnType::Text))
-            } else {
-                ColumnType::Text
-            };
-            let named = |argument_names: &[&str]| BuiltinFunctionOverload {
-                variadic: false,
-                name: canonical_name.clone(),
-                argument_names: argument_names
-                    .iter()
-                    .map(|name| Some((*name).to_string()))
-                    .collect(),
-                argument_types: vec![ColumnType::Text; argument_names.len()],
-                default_arguments: 0,
-                return_type: return_type.clone(),
-            };
-            vec![
-                named(&["string", "pattern"]),
-                named(&["string", "pattern", "flags"]),
-            ]
+            crate::type_resolution::fixed_builtin_overloads(name)
+                .expect("regular-expression set functions have fixed catalog signatures")
         }
         "string_to_table" => vec![overload(
             vec![ColumnType::Text, ColumnType::Text],

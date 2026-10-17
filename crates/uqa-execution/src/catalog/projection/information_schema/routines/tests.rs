@@ -72,6 +72,10 @@ fn builtin_result_type_columns_follow_the_postgresql_view_definition() {
         assert_transcript_rows(&reference, "routines_return_types", &projected),
         48
     );
+    assert_eq!(
+        assert_transcript_rows(&reference, "routines_types", &projected),
+        29
+    );
 }
 
 /// Compare a transcript case's rows with the projected routines its first column names, and count them.

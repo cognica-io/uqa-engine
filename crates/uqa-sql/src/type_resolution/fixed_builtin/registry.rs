@@ -70,6 +70,9 @@ pub(super) fn lookup(name: &str) -> Option<(&'static str, &'static [Signature])>
     if let Some(signatures) = super::standard::lookup(local) {
         return Some(signatures);
     }
+    if let Some(signatures) = super::regular_expressions::lookup(local) {
+        return Some(signatures);
+    }
     if local.eq_ignore_ascii_case("pg_collation_for") {
         static ARGUMENTS: std::sync::LazyLock<[ColumnType; 1]> =
             std::sync::LazyLock::new(|| [ColumnType::Named("any".into())]);

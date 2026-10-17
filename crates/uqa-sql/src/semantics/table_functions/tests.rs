@@ -93,3 +93,56 @@ fn legacy_series_upgrade_reaches_stored_statement_and_view_sources() {
     assert!(crate::binding::view_dependencies::restoration::upgrade_legacy_view_dispatches(query));
     assert!(!crate::binding::view_dependencies::restoration::upgrade_legacy_view_dispatches(query));
 }
+
+#[test]
+fn regular_expression_set_functions_share_the_scalar_catalog_signatures() {
+    for (name, result) in [
+        (
+            "regexp_matches",
+            ColumnType::Array(Box::new(ColumnType::Text)),
+        ),
+        ("regexp_split_to_table", ColumnType::Text),
+    ] {
+        let overloads = builtin_table_function_overloads(name, &[]);
+        assert_eq!(
+            Some(&overloads),
+            crate::type_resolution::fixed_builtin_overloads(name).as_ref()
+        );
+        let declared = overloads
+            .iter()
+            .map(|overload| {
+                (
+                    overload.name.as_str(),
+                    overload
+                        .argument_names
+                        .iter()
+                        .map(|name| name.as_deref().unwrap())
+                        .collect::<Vec<_>>(),
+                    overload.argument_types.clone(),
+                    overload.default_arguments,
+                    overload.return_type.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let qualified = format!("pg_catalog.{name}");
+        assert_eq!(
+            declared,
+            [
+                (
+                    qualified.as_str(),
+                    vec!["string", "pattern"],
+                    vec![ColumnType::Text; 2],
+                    0,
+                    result.clone(),
+                ),
+                (
+                    qualified.as_str(),
+                    vec!["string", "pattern", "flags"],
+                    vec![ColumnType::Text; 3],
+                    0,
+                    result,
+                ),
+            ]
+        );
+    }
+}

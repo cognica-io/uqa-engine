@@ -142,13 +142,10 @@ pub fn resolve_set_function_binding(
 ) -> Result<Option<FunctionBinding>, SQLError> {
     let (argument_names, argument_types, explicit_variadic) =
         crate::function_call_argument_signature(args, schema, params, Some(resolver))?;
-    if binding.is_none()
+    let unbound_without_routines = binding.is_none()
         && engine
             .lookup_visible_sql_functions_for_analysis(name)?
-            .is_none()
-    {
-        return Ok(binding.cloned());
-    }
+            .is_none();
     if let Some(resolved) = crate::resolve_fixed_builtin_call(
         name,
         binding,
@@ -157,7 +154,12 @@ pub fn resolve_set_function_binding(
         explicit_variadic,
         Some(resolver),
     )? {
-        return Ok((!resolved.selected.binding.builtin).then_some(resolved.selected.binding));
+        // A call keeps its recorded built-in binding. A stored call analyzed before its built-in had catalog signatures takes the selected declaration, which EXECUTE authorization identifies.
+        return Ok((binding.is_none() || !resolved.selected.binding.builtin)
+            .then_some(resolved.selected.binding));
+    }
+    if unbound_without_routines {
+        return Ok(None);
     }
     let Some(function) = engine.resolve_static_sql_function_match(
         name,
@@ -822,3 +824,6 @@ pub fn validate_values_set_contexts(
         "set-returning functions are not allowed in VALUES",
     )
 }
+
+#[cfg(test)]
+mod tests;

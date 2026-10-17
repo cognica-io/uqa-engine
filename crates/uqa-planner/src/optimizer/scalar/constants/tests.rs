@@ -187,8 +187,8 @@ fn typed_row_constructors_require_the_live_catalog_even_with_constant_arguments(
 }
 
 fn bound_call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
-    let selected = match name {
-        "lower" | "upper" | "replace" => uqa_sql::resolve_fixed_builtin_call(
+    let text_signature = || {
+        uqa_sql::resolve_fixed_builtin_call(
             name,
             None,
             &vec![None; args.len()],
@@ -197,7 +197,12 @@ fn bound_call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
             None,
         )
         .unwrap()
-        .map(|call| call.selected.binding),
+        .map(|call| call.selected.binding)
+    };
+    let selected = match name {
+        "lower" | "upper" | "replace" => text_signature(),
+        // A text call of a regular-expression function carries the catalog declaration overload resolution selects.
+        "regexp_match" | "regexp_matches" if args.len() == 2 => text_signature(),
         _ => None,
     };
     ScalarExpr::Func {

@@ -9,6 +9,7 @@
 mod binding;
 pub(super) use binding::bind_call_in_place_with_control;
 mod registry;
+mod regular_expressions;
 mod selected;
 mod selection;
 mod standard;

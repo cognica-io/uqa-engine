@@ -11,6 +11,7 @@ mod array_transforms;
 mod catalog_qualification;
 mod fixed_overloads;
 mod range_containment;
+mod regular_expressions;
 mod variadic;
 
 fn dispatched(dispatch: FunctionDispatch, args: Vec<ScalarExpr>) -> ScalarExpr {
