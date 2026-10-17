@@ -11,6 +11,10 @@ use super::{BinaryOp, Result, SQLError, Value};
 use std::cmp::Ordering;
 use uqa_core::memory::ProductionControl;
 
+mod collations;
+pub use collations::{
+    compare_typed_values_with_catalog_and_collation, equal_typed_values_with_catalog_and_collation,
+};
 mod image;
 mod records;
 mod support;
@@ -281,7 +285,14 @@ fn values_equal_nullable_with_catalog(
                 {
                     Some(order.is_eq())
                 } else if matches!((x, y), (Value::Row(_), Value::Row(_))) {
-                    Some(equal_values(x, y, control, enums, false)?)
+                    Some(equal_values(
+                        x,
+                        y,
+                        control,
+                        enums,
+                        false,
+                        collations::DEFAULT,
+                    )?)
                 } else {
                     values_equal_nullable_with_catalog(x, y, control, enums)?
                 };
@@ -297,7 +308,14 @@ fn values_equal_nullable_with_catalog(
                 Some(true)
             }
         }
-        _ => Some(equal_values(a, b, control, enums, false)?),
+        _ => Some(equal_values(
+            a,
+            b,
+            control,
+            enums,
+            false,
+            collations::DEFAULT,
+        )?),
     };
     Ok(equal)
 }
@@ -495,11 +513,18 @@ pub fn compare_grouping_values_with_enum_catalog(
     control: &ProductionControl<'_>,
     enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Ordering> {
-    compare_typed_values_for_purpose(left, right, control, enums, EnumKeyOrder::Identity)
+    compare_typed_values_for_purpose(
+        left,
+        right,
+        control,
+        enums,
+        EnumKeyOrder::Identity,
+        collations::DEFAULT,
+    )
 }
 
 #[derive(Clone, Copy)]
-enum EnumKeyOrder {
+pub(super) enum EnumKeyOrder {
     Declaration,
     Identity,
 }
@@ -530,7 +555,14 @@ fn compare_typed_values_with_catalog(
     control: &ProductionControl<'_>,
     enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Ordering> {
-    compare_typed_values_for_purpose(left, right, control, enums, EnumKeyOrder::Declaration)
+    compare_typed_values_for_purpose(
+        left,
+        right,
+        control,
+        enums,
+        EnumKeyOrder::Declaration,
+        collations::DEFAULT,
+    )
 }
 
 fn compare_typed_values_for_purpose(
@@ -539,6 +571,7 @@ fn compare_typed_values_for_purpose(
     control: &ProductionControl<'_>,
     enums: Option<&dyn EnumLabelCatalog>,
     enum_order: EnumKeyOrder,
+    collation: u32,
 ) -> Result<Ordering> {
     control.check()?;
     if let Some(order) = super::super::datums::compare_jsonb_with_control(left, right, control)? {
@@ -564,6 +597,7 @@ fn compare_typed_values_for_purpose(
                 control,
                 enums,
                 enum_order,
+                collation,
             )
         }
         (_, Value::Datum(datum)) => {
@@ -573,42 +607,32 @@ fn compare_typed_values_for_purpose(
                 control,
                 enums,
                 enum_order,
+                collation,
             )
         }
         (Value::Array(left), Value::Array(right)) => {
-            validate_array_element_types(left, right)?;
-            let oid = left.element_type_oid().or(right.element_type_oid());
-            return left.cmp_by_with_control(right, control, |left, right, control| {
-                if let Some(order) = compare_declared_range(left, right, oid, control, enums)? {
-                    return Ok(order);
-                }
-                compare_typed_values_for_purpose(left, right, control, enums, enum_order)
-            });
+            return compare_arrays(left, right, control, enums, enum_order, collation);
         }
         (Value::Record(_) | Value::Row(_), Value::Record(_) | Value::Row(_)) => {
-            return records::compare(
-                left,
-                right,
-                enums,
-                control,
-                Some(match enum_order {
-                    EnumKeyOrder::Declaration => ComparisonSupport::Ordering,
-                    EnumKeyOrder::Identity => ComparisonSupport::Equality,
-                }),
-                Ordering::Equal,
-                |left, right, oid| {
-                    let order = match compare_declared_range(left, right, oid, control, enums)? {
-                        Some(order) => order,
-                        None => compare_typed_values_for_purpose(
-                            left, right, control, enums, enum_order,
-                        )?,
-                    };
-                    Ok((!order.is_eq()).then_some(order))
-                },
-            );
+            return records::compare_typed(left, right, enums, control, enum_order);
         }
         (Value::List(left), Value::List(right)) => {
-            return compare_sequence(left.iter(), right.iter(), control, enums, enum_order);
+            return compare_sequence(
+                left.iter(),
+                right.iter(),
+                control,
+                enums,
+                enum_order,
+                collation,
+            );
+        }
+        (Value::Str(left), Value::Str(right)) => {
+            return collations::compare_text(left, right, collation, enum_order, control);
+        }
+        (Value::FixedChar(left), Value::FixedChar(right)) => {
+            let left = uqa_core::fixed_char_comparison_text_with_control(left, control)?;
+            let right = uqa_core::fixed_char_comparison_text_with_control(right, control)?;
+            return collations::compare_text(left, right, collation, enum_order, control);
         }
         // Enum operators are declared on one enum type; binding coerces every other operand to it.
         (Value::Enum(left), Value::Enum(right)) if left.type_oid() == right.type_oid() => {
@@ -632,6 +656,24 @@ fn compare_typed_values_for_purpose(
         }
     }
     left.cmp_with_control(right, control).map_err(Into::into)
+}
+
+pub(super) fn compare_arrays(
+    left: &uqa_core::ArrayValue,
+    right: &uqa_core::ArrayValue,
+    control: &ProductionControl<'_>,
+    enums: Option<&dyn EnumLabelCatalog>,
+    enum_order: EnumKeyOrder,
+    collation: u32,
+) -> Result<Ordering> {
+    validate_array_element_types(left, right)?;
+    let oid = left.element_type_oid().or(right.element_type_oid());
+    left.cmp_by_with_control(right, control, |left, right, control| {
+        if let Some(order) = compare_declared_range(left, right, oid, control, enums)? {
+            return Ok(order);
+        }
+        compare_typed_values_for_purpose(left, right, control, enums, enum_order, collation)
+    })
 }
 
 fn comparison_operand_type(value: &Value) -> String {
@@ -698,7 +740,7 @@ pub fn equal_typed_values_with_enum_catalog(
     control: &ProductionControl<'_>,
     enums: Option<&dyn super::super::enums::EnumLabelCatalog>,
 ) -> Result<bool> {
-    equal_values(left, right, control, enums, true)
+    equal_values(left, right, control, enums, true, collations::DEFAULT)
 }
 
 fn equal_values(
@@ -707,6 +749,7 @@ fn equal_values(
     control: &ProductionControl<'_>,
     enums: Option<&dyn super::super::enums::EnumLabelCatalog>,
     typed: bool,
+    collation: u32,
 ) -> Result<bool> {
     control.check()?;
     if let Some(order) = super::super::datums::compare_jsonb_with_control(left, right, control)? {
@@ -733,6 +776,7 @@ fn equal_values(
             control,
             enums,
             typed,
+            collation,
         ),
         (_, Value::Datum(datum)) => equal_values(
             left,
@@ -740,6 +784,7 @@ fn equal_values(
             control,
             enums,
             typed,
+            collation,
         ),
         (Value::Array(left), Value::Array(right)) => {
             validate_array_element_types(left, right)?;
@@ -748,26 +793,28 @@ fn equal_values(
                 if let Some(order) = compare_declared_range(left, right, oid, control, enums)? {
                     return Ok(order.is_eq());
                 }
-                equal_values(left, right, control, enums, typed)
+                equal_values(left, right, control, enums, typed, collation)
             })
         }
-        (Value::Record(_) | Value::Row(_), Value::Record(_) | Value::Row(_)) => records::compare(
-            left,
-            right,
-            enums,
-            control,
-            Some(ComparisonSupport::Equality),
-            true,
-            |left, right, oid| {
-                let equal = match compare_declared_range(left, right, oid, control, enums)? {
-                    Some(order) => order.is_eq(),
-                    None => equal_values(left, right, control, enums, typed)?,
-                };
-                Ok((!equal).then_some(false))
-            },
-        ),
+        (Value::Record(_) | Value::Row(_), Value::Record(_) | Value::Row(_)) => {
+            records::equal_typed(left, right, enums, control, typed)
+        }
         (Value::List(left), Value::List(right)) => {
-            equal_sequence(left.iter(), right.iter(), control, enums, typed)
+            equal_sequence(left.iter(), right.iter(), control, enums, typed, collation)
+        }
+        (Value::Str(left), Value::Str(right)) => {
+            Ok(
+                collations::compare_text(left, right, collation, EnumKeyOrder::Identity, control)?
+                    .is_eq(),
+            )
+        }
+        (Value::FixedChar(left), Value::FixedChar(right)) => {
+            let left = uqa_core::fixed_char_comparison_text_with_control(left, control)?;
+            let right = uqa_core::fixed_char_comparison_text_with_control(right, control)?;
+            Ok(
+                collations::compare_text(left, right, collation, EnumKeyOrder::Identity, control)?
+                    .is_eq(),
+            )
         }
         (Value::Json(_), Value::Json(_)) => {
             Err(ComparisonSupport::Equality.error("42883", "json".into()))
@@ -847,11 +894,13 @@ fn equal_sequence<'a>(
     control: &ProductionControl<'_>,
     enums: Option<&dyn super::super::enums::EnumLabelCatalog>,
     typed: bool,
+    collation: u32,
 ) -> Result<bool> {
     loop {
         control.check()?;
         match (left.next(), right.next()) {
-            (Some(left), Some(right)) if equal_values(left, right, control, enums, typed)? => {}
+            (Some(left), Some(right))
+                if equal_values(left, right, control, enums, typed, collation)? => {}
             (None, None) => return Ok(true),
             _ => return Ok(false),
         }
@@ -864,13 +913,14 @@ fn compare_sequence<'a>(
     control: &ProductionControl<'_>,
     enums: Option<&dyn EnumLabelCatalog>,
     enum_order: EnumKeyOrder,
+    collation: u32,
 ) -> Result<Ordering> {
     loop {
         control.check()?;
         let ordering = match (left.next(), right.next()) {
-            (Some(left), Some(right)) => {
-                compare_typed_values_for_purpose(left, right, control, enums, enum_order)?
-            }
+            (Some(left), Some(right)) => compare_typed_values_for_purpose(
+                left, right, control, enums, enum_order, collation,
+            )?,
             (Some(_), None) => Ordering::Greater,
             (None, Some(_)) => Ordering::Less,
             (None, None) => return Ok(Ordering::Equal),

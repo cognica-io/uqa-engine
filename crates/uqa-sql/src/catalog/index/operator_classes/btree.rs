@@ -21,6 +21,24 @@ pub struct BuiltinBTreeOperatorClass {
     pub comparison_oid: u32,
 }
 
+/// Interpretation of the selected built-in support procedure, independently of the declared subtype.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinBTreeComparison {
+    Native,
+    Pattern,
+    RecordImage,
+}
+
+impl BuiltinBTreeOperatorClass {
+    pub fn comparison_kind(&self) -> BuiltinBTreeComparison {
+        match self.comparison_oid {
+            2166 | 2180 => BuiltinBTreeComparison::Pattern,
+            3187 => BuiltinBTreeComparison::RecordImage,
+            _ => BuiltinBTreeComparison::Native,
+        }
+    }
+}
+
 /// Built-in catalog metadata, not an assertion that an arbitrary class has an executable UQA comparator or exact-key implementation.
 pub fn builtin_btree_operator_classes() -> &'static [BuiltinBTreeOperatorClass] {
     &CLASSES

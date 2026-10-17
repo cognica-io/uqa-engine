@@ -58,7 +58,7 @@ pub fn equal_selected_values_with_catalog(
     super::equal_typed_values_with_enum_catalog(left, right, control, catalog)
 }
 
-fn selected_range_order(
+pub(super) fn selected_range_order(
     left: &Value,
     right: &Value,
     ty: Option<&ColumnType>,

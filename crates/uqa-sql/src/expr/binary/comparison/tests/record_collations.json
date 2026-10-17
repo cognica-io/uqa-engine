@@ -1,0 +1,140 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "docker_image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+  "setup": [
+    "CREATE TYPE c_record AS (v text COLLATE \"C\")",
+    "CREATE TYPE unicode_record AS (v text COLLATE \"unicode\")"
+  ],
+  "cases": [
+    {
+      "name": "btrecordcmp_equal_text_mismatch",
+      "sql": "SELECT pg_catalog.btrecordcmp(ROW('a'::text COLLATE \"C\"),ROW('a'::text COLLATE \"unicode\"))",
+      "sqlstate": "42P22",
+      "message": "could not determine which collation to use for string comparison",
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    },
+    {
+      "name": "record_eq_equal_text_mismatch",
+      "sql": "SELECT pg_catalog.record_eq(ROW('a'::text COLLATE \"C\"),ROW('a'::text COLLATE \"unicode\"))",
+      "sqlstate": "42P22",
+      "message": "could not determine which collation to use for string comparison",
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    },
+    {
+      "name": "btrecordcmp_unequal_text_mismatch",
+      "sql": "SELECT pg_catalog.btrecordcmp(ROW('a'::text COLLATE \"C\"),ROW('b'::text COLLATE \"unicode\"))",
+      "sqlstate": "42P22",
+      "message": "could not determine which collation to use for string comparison",
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    },
+    {
+      "name": "record_eq_unequal_text_mismatch",
+      "sql": "SELECT pg_catalog.record_eq(ROW('a'::text COLLATE \"C\"),ROW('b'::text COLLATE \"unicode\"))",
+      "sqlstate": "42P22",
+      "message": "could not determine which collation to use for string comparison",
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    },
+    {
+      "name": "btrecordcmp_null_text_mismatch",
+      "sql": "SELECT pg_catalog.btrecordcmp(ROW(NULL::text COLLATE \"C\"),ROW(NULL::text COLLATE \"unicode\"))",
+      "output": "0"
+    },
+    {
+      "name": "record_eq_null_text_mismatch",
+      "sql": "SELECT pg_catalog.record_eq(ROW(NULL::text COLLATE \"C\"),ROW(NULL::text COLLATE \"unicode\"))",
+      "output": "t"
+    },
+    {
+      "name": "btrecordcmp_one_null_mismatch",
+      "sql": "SELECT pg_catalog.btrecordcmp(ROW(NULL::text COLLATE \"C\"),ROW('a'::text COLLATE \"unicode\"))",
+      "output": "1"
+    },
+    {
+      "name": "record_eq_one_null_mismatch",
+      "sql": "SELECT pg_catalog.record_eq(ROW(NULL::text COLLATE \"C\"),ROW('a'::text COLLATE \"unicode\"))",
+      "output": "f"
+    },
+    {
+      "name": "btrecordcmp_deciding_prefix",
+      "sql": "SELECT pg_catalog.btrecordcmp(ROW(1,'a'::text COLLATE \"C\"),ROW(2,'b'::text COLLATE \"unicode\"))",
+      "output": "-1"
+    },
+    {
+      "name": "record_eq_deciding_prefix",
+      "sql": "SELECT pg_catalog.record_eq(ROW(1,'a'::text COLLATE \"C\"),ROW(2,'b'::text COLLATE \"unicode\"))",
+      "output": "f"
+    },
+    {
+      "name": "btrecordcmp_reached_mismatch",
+      "sql": "SELECT pg_catalog.btrecordcmp(ROW(1,'a'::text COLLATE \"C\"),ROW(1,'b'::text COLLATE \"unicode\"))",
+      "sqlstate": "42P22",
+      "message": "could not determine which collation to use for string comparison",
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    },
+    {
+      "name": "record_eq_reached_mismatch",
+      "sql": "SELECT pg_catalog.record_eq(ROW(1,'a'::text COLLATE \"C\"),ROW(1,'b'::text COLLATE \"unicode\"))",
+      "sqlstate": "42P22",
+      "message": "could not determine which collation to use for string comparison",
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    },
+    {
+      "name": "btrecordcmp_named_mismatch",
+      "sql": "SELECT pg_catalog.btrecordcmp(ROW('B')::c_record,ROW('a')::unicode_record)",
+      "sqlstate": "42P22",
+      "message": "could not determine which collation to use for string comparison",
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    },
+    {
+      "name": "record_eq_named_mismatch",
+      "sql": "SELECT pg_catalog.record_eq(ROW('B')::c_record,ROW('a')::unicode_record)",
+      "sqlstate": "42P22",
+      "message": "could not determine which collation to use for string comparison",
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    },
+    {
+      "name": "btrecordcmp_named_unicode",
+      "sql": "SELECT pg_catalog.btrecordcmp(ROW('B')::unicode_record,ROW('a')::unicode_record)",
+      "output": "1"
+    },
+    {
+      "name": "record_eq_named_unicode",
+      "sql": "SELECT pg_catalog.record_eq(ROW('B')::unicode_record,ROW('a')::unicode_record)",
+      "output": "f"
+    },
+    {
+      "name": "btrecordcmp_named_c",
+      "sql": "SELECT pg_catalog.btrecordcmp(ROW('B')::c_record,ROW('a')::c_record)",
+      "output": "-1"
+    },
+    {
+      "name": "record_eq_named_c",
+      "sql": "SELECT pg_catalog.record_eq(ROW('B')::c_record,ROW('a')::c_record)",
+      "output": "f"
+    },
+    {
+      "name": "btrecordcmp_array_field_mismatch",
+      "sql": "SELECT pg_catalog.btrecordcmp(ROW(ARRAY['a'::text] COLLATE \"C\"),ROW(ARRAY['b'::text] COLLATE \"unicode\"))",
+      "sqlstate": "42P22",
+      "message": "could not determine which collation to use for string comparison",
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    },
+    {
+      "name": "record_eq_array_field_mismatch",
+      "sql": "SELECT pg_catalog.record_eq(ROW(ARRAY['a'::text] COLLATE \"C\"),ROW(ARRAY['b'::text] COLLATE \"unicode\"))",
+      "sqlstate": "42P22",
+      "message": "could not determine which collation to use for string comparison",
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    },
+    {
+      "name": "btrecordcmp_empty_array_mismatch",
+      "sql": "SELECT pg_catalog.btrecordcmp(ROW(ARRAY[]::text[] COLLATE \"C\"),ROW(ARRAY[]::text[] COLLATE \"unicode\"))",
+      "output": "0"
+    },
+    {
+      "name": "record_eq_empty_array_mismatch",
+      "sql": "SELECT pg_catalog.record_eq(ROW(ARRAY[]::text[] COLLATE \"C\"),ROW(ARRAY[]::text[] COLLATE \"unicode\"))",
+      "output": "t"
+    }
+  ]
+}

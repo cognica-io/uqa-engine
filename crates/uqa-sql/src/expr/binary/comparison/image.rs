@@ -35,7 +35,7 @@ pub fn compare_record_images_with_catalog(
         control,
         None,
         Ordering::Equal,
-        |left, right, oid| {
+        |left, right, oid, _collation| {
             let order = match (matches!(left, Value::Null), matches!(right, Value::Null)) {
                 (true, true) => Ordering::Equal,
                 (true, false) => Ordering::Greater,

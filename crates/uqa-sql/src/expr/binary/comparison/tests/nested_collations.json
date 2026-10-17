@@ -1,0 +1,110 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "docker_image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+  "setup": [
+    "CREATE TYPE c_bound_record AS (v text COLLATE \"C\")",
+    "CREATE TYPE unicode_bound_record AS (v text COLLATE \"unicode\")",
+    "CREATE TYPE c_nested_record AS (v c_bound_record)",
+    "CREATE TYPE unicode_nested_record AS (v unicode_bound_record)",
+    "CREATE DOMAIN c_bound_text AS text COLLATE \"C\"",
+    "CREATE DOMAIN unicode_bound_text AS text COLLATE \"unicode\"",
+    "CREATE TYPE unicode_array_record AS (v text[] COLLATE \"unicode\")"
+  ],
+  "cases": [
+    {
+      "name": "scalar_C",
+      "sql": "SELECT sign(pg_catalog.bttextcmp('B'::text COLLATE \"C\",'a'::text COLLATE \"C\"))::integer",
+      "order": -1
+    },
+    {
+      "name": "array_C",
+      "sql": "SELECT sign(pg_catalog.btarraycmp(ARRAY['B'::text] COLLATE \"C\",ARRAY['a'::text] COLLATE \"C\"))::integer",
+      "order": -1
+    },
+    {
+      "name": "nested_array_C",
+      "sql": "SELECT sign(pg_catalog.btarraycmp(ARRAY[['B'::text]] COLLATE \"C\",ARRAY[['a'::text]] COLLATE \"C\"))::integer",
+      "order": -1
+    },
+    {
+      "name": "anonymous_record_C",
+      "sql": "SELECT sign(pg_catalog.btrecordcmp(ROW('B'::text COLLATE \"C\"),ROW('a'::text COLLATE \"C\")))::integer",
+      "order": -1
+    },
+    {
+      "name": "scalar_unicode",
+      "sql": "SELECT sign(pg_catalog.bttextcmp('B'::text COLLATE \"unicode\",'a'::text COLLATE \"unicode\"))::integer",
+      "order": 1
+    },
+    {
+      "name": "array_unicode",
+      "sql": "SELECT sign(pg_catalog.btarraycmp(ARRAY['B'::text] COLLATE \"unicode\",ARRAY['a'::text] COLLATE \"unicode\"))::integer",
+      "order": 1
+    },
+    {
+      "name": "nested_array_unicode",
+      "sql": "SELECT sign(pg_catalog.btarraycmp(ARRAY[['B'::text]] COLLATE \"unicode\",ARRAY[['a'::text]] COLLATE \"unicode\"))::integer",
+      "order": 1
+    },
+    {
+      "name": "anonymous_record_unicode",
+      "sql": "SELECT sign(pg_catalog.btrecordcmp(ROW('B'::text COLLATE \"unicode\"),ROW('a'::text COLLATE \"unicode\")))::integer",
+      "order": 1
+    },
+    {
+      "name": "scalar_pg_unicode_fast",
+      "sql": "SELECT sign(pg_catalog.bttextcmp('B'::text COLLATE \"pg_unicode_fast\",'a'::text COLLATE \"pg_unicode_fast\"))::integer",
+      "order": -1
+    },
+    {
+      "name": "array_pg_unicode_fast",
+      "sql": "SELECT sign(pg_catalog.btarraycmp(ARRAY['B'::text] COLLATE \"pg_unicode_fast\",ARRAY['a'::text] COLLATE \"pg_unicode_fast\"))::integer",
+      "order": -1
+    },
+    {
+      "name": "nested_array_pg_unicode_fast",
+      "sql": "SELECT sign(pg_catalog.btarraycmp(ARRAY[['B'::text]] COLLATE \"pg_unicode_fast\",ARRAY[['a'::text]] COLLATE \"pg_unicode_fast\"))::integer",
+      "order": -1
+    },
+    {
+      "name": "anonymous_record_pg_unicode_fast",
+      "sql": "SELECT sign(pg_catalog.btrecordcmp(ROW('B'::text COLLATE \"pg_unicode_fast\"),ROW('a'::text COLLATE \"pg_unicode_fast\")))::integer",
+      "order": -1
+    },
+    {
+      "name": "record_c",
+      "sql": "SELECT sign(pg_catalog.btrecordcmp(ROW('B')::c_bound_record,ROW('a')::c_bound_record))::integer",
+      "order": -1
+    },
+    {
+      "name": "nested_record_c",
+      "sql": "SELECT sign(pg_catalog.btrecordcmp(ROW(ROW('B')::c_bound_record)::c_nested_record,ROW(ROW('a')::c_bound_record)::c_nested_record))::integer",
+      "order": -1
+    },
+    {
+      "name": "domain_array_c",
+      "sql": "SELECT sign(pg_catalog.btarraycmp(ARRAY['B'::c_bound_text],ARRAY['a'::c_bound_text]))::integer",
+      "order": -1
+    },
+    {
+      "name": "record_unicode",
+      "sql": "SELECT sign(pg_catalog.btrecordcmp(ROW('B')::unicode_bound_record,ROW('a')::unicode_bound_record))::integer",
+      "order": 1
+    },
+    {
+      "name": "nested_record_unicode",
+      "sql": "SELECT sign(pg_catalog.btrecordcmp(ROW(ROW('B')::unicode_bound_record)::unicode_nested_record,ROW(ROW('a')::unicode_bound_record)::unicode_nested_record))::integer",
+      "order": 1
+    },
+    {
+      "name": "domain_array_unicode",
+      "sql": "SELECT sign(pg_catalog.btarraycmp(ARRAY['B'::unicode_bound_text],ARRAY['a'::unicode_bound_text]))::integer",
+      "order": 1
+    },
+    {
+      "name": "record_array_field_unicode",
+      "sql": "SELECT sign(pg_catalog.btrecordcmp(ROW(ARRAY['B'::text])::unicode_array_record,ROW(ARRAY['a'::text])::unicode_array_record))::integer",
+      "order": 1
+    }
+  ]
+}

@@ -11722,6 +11722,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "record_collation_matches_all_postgresql_lazy_field_cases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/tests/record_collations.rs",
+      "capability": "Selected record collation",
+      "workload": "Twenty-two independently captured PostgreSQL ordering/equality cases in ordinary and admitted calls, including named records, conflicting fields, NULLs, empty arrays and deciding prefixes.",
+      "invariant": "Every result and SQLSTATE/message/hint matches; unreachable string comparisons do not raise a later collation error and scratch is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_collation_reaches_array_elements_and_preserves_empty_and_null_shortcuts",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/tests/record_collations.rs",
+      "capability": "Selected array collation",
+      "workload": "Compare text arrays under C, Unicode and explicit zero, plus empty arrays, NULLs and anonymous fields with absent versus zero metadata.",
+      "invariant": "Selected order reaches non-null elements; legacy defaults and explicit indeterminate identities stay distinct, while empty and null comparisons retain their shortcuts.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_collation_keeps_equality_bounded_and_propagates_quota_and_both_cancellations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/tests/record_collations.rs",
+      "capability": "Controlled selected collation",
+      "workload": "Long combining sequences inside typed rows, using a zero-byte allowance and either cancellation owner.",
+      "invariant": "Deterministic equality computes no unused weights; ordering refuses unadmitted growth with 53200; both cancellations return 57014 and no reservation leaks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_btree_collation_matches_postgresql_nested_domains_arrays_and_records",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/tests/record_collations.rs",
+      "capability": "Selected native B-tree invocation",
+      "workload": "Nineteen independent PostgreSQL scalar, array, multidimensional, domain-array, anonymous-record, named-record and nested-record comparisons.",
+      "invariant": "Selected class invocation shares existing owners, propagates array selection, observes record-field selection independently, matches every order and releases scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_record_collation_reuses_selected_descriptors_and_preserves_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/tests/record_collations.rs",
+      "capability": "Selected physical record collation",
+      "workload": "Twenty-four logical/physical input combinations from six independent PostgreSQL named-record ordering/equality cases, including nonzero Datum offsets and conflicting collations.",
+      "invariant": "Logical and physical inputs agree on results and diagnostics using the selected descriptor, and physical decoding releases every temporary lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_pattern_support_ignores_collation_and_keeps_postgresql_byte_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/btree/tests.rs",
+      "capability": "Selected pattern B-tree invocation",
+      "workload": "Fifteen independent PostgreSQL pattern-support configurations with 375 pairs; repeat each pair with indeterminate invocation collation.",
+      "invariant": "Text/varchar/bpchar pattern support preserves byte ordering and fixed-character padding equivalence without consulting unused collation data or leaking scratch.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
