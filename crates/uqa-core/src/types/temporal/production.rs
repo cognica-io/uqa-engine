@@ -275,7 +275,7 @@ impl TemporalValue {
         }
         match self {
             Self::Date { days } => {
-                let (year, month, day) = super::calendar::to_calendar(*days);
+                let (year, month, day) = super::calendar::to_output_calendar(*days);
                 let displayed = if year > 0 { year } else { 1 - year };
                 let mut out = ProductionString::new(*control);
                 out.push_str(&control.format(format_args!("{displayed:04}-{month:02}-{day:02}"))?)?;

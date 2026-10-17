@@ -9,6 +9,24 @@
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn retained_date_output_matches_postgresql_after_type_change(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("retained-date-output.db");
+    let engine = super::addition::open(provider, &path);
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../uqa-core/src/types/temporal/calendar/tests/retained-postgresql.json"
+        )),
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn composite_attribute_types_match_postgresql(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("composite-types.db");
