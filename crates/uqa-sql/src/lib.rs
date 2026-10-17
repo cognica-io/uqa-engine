@@ -15,14 +15,6 @@
 
 //! SQL syntax, shared plan and scalar models, static schema and type binding, catalog definitions, routine signatures, value expressions, and the FTS query language. The parser uses the imported `PostgreSQL` grammar through `libpg_query`; analysis has no engine or physical execution dependency.
 
-// libtest generates a single descriptor array for the crate's unit tests.
-#![cfg_attr(
-    test,
-    expect(
-        clippy::large_stack_arrays,
-        reason = "the compiler-generated test descriptor array exceeds the stack-array lint threshold"
-    )
-)]
 #![allow(
     clippy::useless_format,
     clippy::manual_let_else,
