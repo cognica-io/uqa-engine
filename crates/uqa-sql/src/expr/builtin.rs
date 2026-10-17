@@ -195,7 +195,9 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "substring" | "substr" | "lpad" | "rpad" if matches!(argument_count, 2 | 3) => Some(true),
         "regexp_count" if matches!(argument_count, 2..=4) => Some(true),
         "regexp_instr" if matches!(argument_count, 2..=7) => Some(true),
-        "regexp_like" | "regexp_match" | "regexp_matches" if matches!(argument_count, 2 | 3) => {
+        "regexp_like" | "regexp_match" | "regexp_matches" | "regexp_split_to_array"
+            if matches!(argument_count, 2 | 3) =>
+        {
             Some(true)
         }
         "regexp_replace" if matches!(argument_count, 3..=6) => Some(true),

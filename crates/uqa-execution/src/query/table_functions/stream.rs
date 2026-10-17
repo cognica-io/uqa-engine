@@ -12,7 +12,7 @@ use super::{
     registered_table_function_row_stream,
     values::{
         generate_series_values, json_array_values, json_each_row_stream, json_object_key_values,
-        regexp_split_values, string_to_table_values, unnest_row_stream,
+        string_to_table_values, unnest_row_stream,
     },
     TableFunctionCall, TableFunctionRows,
 };
@@ -187,7 +187,12 @@ fn build_table_function_value_row_stream_with_row(
                     default_col,
                 );
             }
-            "regexp_split_to_table" => regexp_split_values(evaluated)?,
+            "regexp_split_to_table" => {
+                return super::regular_expressions::regexp_split_to_table_row_stream(
+                    &evaluated,
+                    default_col,
+                );
+            }
             "string_to_table" => string_to_table_values(evaluated)?,
             "json_array_elements"
             | "jsonb_array_elements"

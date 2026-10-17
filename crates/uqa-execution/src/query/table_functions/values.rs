@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Lazy generate-series, regex, string, and JSON value streams.
+//! Lazy generate-series, string, and JSON value streams.
 
 use super::TableFunctionRows;
 use uqa_core::Value;
@@ -120,77 +120,6 @@ pub fn generate_series_integer(value: &Value, label: &str) -> Result<i64, SQLErr
             "generate_series {label} must be an integer"
         ))),
     }
-}
-
-pub struct RegexSplitValues {
-    regex: regex::Regex,
-    source: String,
-    piece_start: usize,
-    search_start: usize,
-    tail_pending: bool,
-    done: bool,
-}
-
-impl Iterator for RegexSplitValues {
-    type Item = Value;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
-        if self.tail_pending {
-            self.done = true;
-            return Some(Value::Str(self.source[self.piece_start..].to_string()));
-        }
-        let Some(found) = self.regex.find_at(&self.source, self.search_start) else {
-            self.done = true;
-            return Some(Value::Str(self.source[self.piece_start..].to_string()));
-        };
-        let piece = self.source[self.piece_start..found.start()].to_string();
-        self.piece_start = found.end();
-        if found.start() == found.end() {
-            if found.end() == self.source.len() {
-                self.tail_pending = true;
-            } else {
-                let advance = self.source[found.end()..]
-                    .chars()
-                    .next()
-                    .map_or(1, char::len_utf8);
-                self.search_start = found.end().saturating_add(advance);
-            }
-        } else {
-            self.search_start = found.end();
-        }
-        Some(Value::Str(piece))
-    }
-}
-
-pub fn regexp_split_values(
-    evaluated: Vec<Value>,
-) -> Result<Box<dyn Iterator<Item = Value> + Send>, SQLError> {
-    if evaluated.len() != 2 {
-        return Err(SQLError::TypeMismatch(
-            "regexp_split_to_table requires 2 args".into(),
-        ));
-    }
-    let source = match &evaluated[0] {
-        Value::Str(value) => value.clone(),
-        _ => return Err(SQLError::TypeMismatch("regexp_split_to_table arg 1".into())),
-    };
-    let pattern = match &evaluated[1] {
-        Value::Str(value) => value,
-        _ => return Err(SQLError::TypeMismatch("regexp_split_to_table arg 2".into())),
-    };
-    let regex = regex::Regex::new(pattern)
-        .map_err(|error| SQLError::TypeMismatch(format!("invalid regex: {error}")))?;
-    Ok(Box::new(RegexSplitValues {
-        regex,
-        source,
-        piece_start: 0,
-        search_start: 0,
-        tail_pending: false,
-        done: false,
-    }))
 }
 
 pub fn string_to_table_values(

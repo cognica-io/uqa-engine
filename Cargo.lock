@@ -3820,7 +3820,6 @@ dependencies = [
  "parking_lot",
  "proptest",
  "rayon",
- "regex",
  "rusqlite",
  "serde",
  "serde_json",

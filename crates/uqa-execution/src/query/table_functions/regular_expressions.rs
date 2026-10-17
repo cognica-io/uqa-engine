@@ -7,22 +7,72 @@
 //! Set-returning regular-expression functions drawn one row at a time from the SQL regular-expression owner.
 
 use super::TableFunctionRows;
-use uqa_core::{memory::ProductionControl, Value};
-use uqa_sql::{expr::RegexMatches, SQLError};
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    Value,
+};
+use uqa_sql::{
+    expr::{RegexMatches, RegexSplit},
+    SQLError,
+};
 
-/// Stream `regexp_matches(string, pattern [, flags])` as one `text[]` column. The cursor owns its input copy and compiled pattern and finds each match only when its row is requested, so one row is resident at a time; a NULL argument yields no rows. Allocation follows ordinary scalar evaluation, because `PostgreSQL`'s `work_mem` bounds sort and hash workspaces rather than function results, and the stream's caller checks cancellation before each row.
+/// Stream `regexp_matches(string, pattern [, flags])` as one `text[]` column.
 pub(super) fn regexp_matches_row_stream(
     evaluated: &[Value],
     column: String,
 ) -> Result<TableFunctionRows, SQLError> {
-    let mut cursor = RegexMatches::new(evaluated, &ProductionControl::uncontrolled())?;
-    Ok(TableFunctionRows::new(
+    let cursor = RegexMatches::new(evaluated, &ProductionControl::uncontrolled())?;
+    Ok(one_column_rows(cursor, column))
+}
+
+/// Stream `regexp_split_to_table(string, pattern [, flags])` as one `text` column.
+pub(super) fn regexp_split_to_table_row_stream(
+    evaluated: &[Value],
+    column: String,
+) -> Result<TableFunctionRows, SQLError> {
+    let cursor = RegexSplit::new(
+        "regexp_split_to_table",
+        evaluated,
+        &ProductionControl::uncontrolled(),
+    )?;
+    Ok(one_column_rows(cursor, column))
+}
+
+/// A SQL-owner cursor that produces one column value per row.
+trait ValueCursor: Send + 'static {
+    fn next_value(
+        &mut self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<Value>>, SQLError>;
+}
+
+impl ValueCursor for RegexMatches {
+    fn next_value(
+        &mut self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<Value>>, SQLError> {
+        self.next_row(control)
+    }
+}
+
+impl ValueCursor for RegexSplit {
+    fn next_value(
+        &mut self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<Value>>, SQLError> {
+        self.next_piece(control)
+    }
+}
+
+/// Rows of one column drawn from `cursor` on demand, so one value is resident at a time; no cursor, for a NULL argument of a strict function, yields no rows. Allocation follows ordinary scalar evaluation, because `PostgreSQL`'s `work_mem` bounds sort and hash workspaces rather than function results, and the stream's caller checks cancellation before each row.
+fn one_column_rows(mut cursor: Option<impl ValueCursor>, column: String) -> TableFunctionRows {
+    TableFunctionRows::new(
         vec![column],
         Box::new(std::iter::from_fn(move || {
-            let matches = cursor.as_mut()?;
-            match matches.next_row(&ProductionControl::uncontrolled()) {
-                Ok(Some(row)) => Some(Ok(crate::PhysicalRow::from_values(vec![
-                    row.into_parts().0,
+            let current = cursor.as_mut()?;
+            match current.next_value(&ProductionControl::uncontrolled()) {
+                Ok(Some(value)) => Some(Ok(crate::PhysicalRow::from_values(vec![
+                    value.into_parts().0,
                 ]))),
                 Ok(None) => {
                     cursor = None;
@@ -34,7 +84,7 @@ pub(super) fn regexp_matches_row_stream(
                 }
             }
         })),
-    ))
+    )
 }
 
 #[cfg(test)]

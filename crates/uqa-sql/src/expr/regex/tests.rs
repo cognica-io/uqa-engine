@@ -8,6 +8,7 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken};
 
 mod match_rows;
+mod split_pieces;
 mod substring_patterns;
 
 fn text(value: &str) -> Value {

@@ -16,8 +16,10 @@ mod matches;
 mod preparation;
 mod query;
 mod replacement;
+mod split;
 mod substring;
 pub use matches::RegexMatches;
+pub use split::RegexSplit;
 pub use substring::check_constant_similar_translation;
 pub(super) use substring::evaluate_dispatched as eval_dispatched_substring;
 
@@ -108,6 +110,7 @@ pub(super) fn evaluate(
 ) -> Option<Result<Produced<Value>>> {
     let evaluate: Kernel = match name {
         "regexp_match" => |_, args, control| query::captures(args, control),
+        "regexp_split_to_array" => |_, args, control| split::array(args, control),
         "regexp_replace" => replacement::evaluate,
         "regexp_count" | "regexp_instr" | "regexp_like" | "regexp_substr" | "similar_to"
         | "regex_match_op" | "regex_imatch_op" => query::evaluate,
@@ -163,6 +166,18 @@ fn flags(value: Option<&Value>, control: &ProductionControl<'_>) -> Result<Produ
         || control.copy_text("").map_err(Into::into),
         |value| super::conversion::value_to_string_with_control(value, control),
     )
+}
+
+/// Where `PostgreSQL`'s search loop (`setup_regexp_matches`, `replace_text_regexp`) looks after `matched`: at its end, or one character later when it is empty, and nowhere once that would pass the end of `input`.
+fn next_search_start(input: &str, matched: regex::Match<'_>) -> Option<usize> {
+    if matched.is_empty() {
+        input[matched.end()..]
+            .chars()
+            .next()
+            .map(|character| matched.end() + character.len_utf8())
+    } else {
+        Some(matched.end())
+    }
 }
 
 fn tail<'a>(

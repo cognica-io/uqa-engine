@@ -266,11 +266,29 @@ fn substring_metadata_and_sql_body_match_postgresql() {
 
 #[test]
 fn regexp_matches_metadata_and_set_estimates_match_postgresql() {
-    let transcript = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/parity/pg18/regexp_matches_rows_oracle.expected.json"
-    ));
-    assert_catalog_metadata(transcript, 2);
+    assert_set_returning_metadata(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/regexp_matches_rows_oracle.expected.json"
+        )),
+        2,
+    );
+}
+
+#[test]
+fn regexp_split_metadata_and_set_estimates_match_postgresql() {
+    assert_set_returning_metadata(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/regexp_split_functions_oracle.expected.json"
+        )),
+        4,
+    );
+}
+
+/// Compare the `catalog` case's identities and the `catalog_set_metadata` case's `proretset`, `prorows` and `proargnames` with the routine catalog.
+fn assert_set_returning_metadata(transcript: &str, expected_count: usize) {
+    assert_catalog_metadata(transcript, expected_count);
     let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
     let rows = reference["cases"]
         .as_array()
@@ -280,7 +298,7 @@ fn regexp_matches_metadata_and_set_estimates_match_postgresql() {
         .unwrap()["results"][0]["rows"]
         .clone();
     let rows = rows.as_array().unwrap();
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), expected_count);
     for row in rows {
         let oid = row[0].as_str().unwrap().parse::<i64>().unwrap();
         let routine = PG18_BUILTIN_ROUTINE_GROUPS

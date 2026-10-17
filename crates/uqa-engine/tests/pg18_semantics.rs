@@ -130,6 +130,8 @@ mod range_rowsets;
 mod range_subtype_distance;
 #[path = "pg18_semantics/regexp_matches.rs"]
 mod regexp_matches;
+#[path = "pg18_semantics/regexp_split.rs"]
+mod regexp_split;
 #[path = "pg18_semantics/reverse_overloads.rs"]
 mod reverse_overloads;
 #[path = "pg18_semantics/review_regressions.rs"]

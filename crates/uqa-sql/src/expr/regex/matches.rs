@@ -6,7 +6,7 @@
 
 //! `regexp_matches`: one capture array per match, advancing as `PostgreSQL`'s `setup_regexp_matches` does.
 
-use super::{compile, flags, query::capture_array, GlobalFlag, LocalRegex};
+use super::{compile, flags, next_search_start, query::capture_array, GlobalFlag, LocalRegex};
 use crate::{
     error::{Result, SQLError},
     expr::conversion::value_to_string_with_control,
@@ -71,16 +71,10 @@ impl RegexMatches {
             SQLError::Internal("regex capture set omitted its mandatory full match".into())
         })?;
         let row = capture_array(&captures, control)?;
-        // The next search starts where this match ended, one character later after an empty match, and stops once it would pass the end of the input.
-        self.next_start = if !self.regex.is_global() {
-            None
-        } else if whole.is_empty() {
-            self.input[whole.end()..]
-                .chars()
-                .next()
-                .map(|character| whole.end() + character.len_utf8())
+        self.next_start = if self.regex.is_global() {
+            next_search_start(&self.input, whole)
         } else {
-            Some(whole.end())
+            None
         };
         Ok(Some(row))
     }

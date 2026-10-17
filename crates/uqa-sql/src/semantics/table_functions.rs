@@ -311,7 +311,12 @@ fn builtin_table_function_overloads(
             };
             vec![overload(vec![ColumnType::AnyArray], 0, element.clone())]
         }
-        "regexp_matches" => {
+        "regexp_matches" | "regexp_split_to_table" => {
+            let return_type = if name == "regexp_matches" {
+                ColumnType::Array(Box::new(ColumnType::Text))
+            } else {
+                ColumnType::Text
+            };
             let named = |argument_names: &[&str]| BuiltinFunctionOverload {
                 variadic: false,
                 name: canonical_name.clone(),
@@ -321,14 +326,14 @@ fn builtin_table_function_overloads(
                     .collect(),
                 argument_types: vec![ColumnType::Text; argument_names.len()],
                 default_arguments: 0,
-                return_type: ColumnType::Array(Box::new(ColumnType::Text)),
+                return_type: return_type.clone(),
             };
             vec![
                 named(&["string", "pattern"]),
                 named(&["string", "pattern", "flags"]),
             ]
         }
-        "regexp_split_to_table" | "string_to_table" => vec![overload(
+        "string_to_table" => vec![overload(
             vec![ColumnType::Text, ColumnType::Text],
             0,
             ColumnType::Text,

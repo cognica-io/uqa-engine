@@ -39,7 +39,10 @@ pub(super) fn eval_core_functions_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
-    if matches!(name, "regexp_match" | "regexp_replace") {
+    if matches!(
+        name,
+        "regexp_match" | "regexp_replace" | "regexp_split_to_array"
+    ) {
         return super::regex::evaluate(name, args, control);
     }
     let evaluate = match name {

@@ -874,7 +874,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "exp" | "log2" | "degrees" | "radians" | "pi" | "st_distance" | "date_part" => {
             inline(ColumnType::DoublePrecision, control)
         }
-        "regexp_match" | "regexp_matches" | "string_to_array" => {
+        "regexp_match" | "regexp_matches" | "regexp_split_to_array" | "string_to_array" => {
             array(Some(&ColumnType::Text), control)
         }
         "array_positions" => array(Some(&ColumnType::Integer), control),

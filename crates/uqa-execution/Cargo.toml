@@ -25,7 +25,6 @@ uqa-fusion = { workspace = true }
 uqa-joins = { workspace = true }
 uqa-ml = { workspace = true }
 parking_lot = { workspace = true }
-regex = { workspace = true }
 libc = { workspace = true }
 ciborium = { workspace = true }
 smallvec = { workspace = true }

@@ -47,6 +47,19 @@ fn named_scalar_inputs_preserve_declaration_order_and_omitted_defaults() {
             ],
         ),
         (
+            "regexp_split_to_array",
+            vec![
+                (None, Value::Str("a,b".into())),
+                named("flags", Value::Str("i".into())),
+                named("pattern", Value::Str(",".into())),
+            ],
+            vec![
+                Value::Str("a,b".into()),
+                Value::Str(",".into()),
+                Value::Str("i".into()),
+            ],
+        ),
+        (
             "make_interval",
             vec![
                 named("secs", Value::Float(1.5)),

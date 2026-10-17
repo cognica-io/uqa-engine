@@ -132,7 +132,7 @@ impl BuiltinRoutineCatalogEntry {
     }
 
     pub const fn returns_set(self) -> bool {
-        matches!(self.oid, 1066..=1069 | 3035 | 1689 | 2763 | 2764)
+        matches!(self.oid, 1066..=1069 | 3035 | 1689 | 2763..=2766)
     }
 
     pub const fn support_oid(self) -> i64 {
@@ -151,7 +151,7 @@ impl BuiltinRoutineCatalogEntry {
     }
 
     pub const fn estimated_rows(self) -> f64 {
-        if matches!(self.oid, 1066..=1069) {
+        if matches!(self.oid, 1066..=1069 | 2765 | 2766) {
             1000.0
         } else if self.oid == 2763 {
             1.0

@@ -69,3 +69,39 @@ fn regexp_matches_reports_flag_errors_before_the_first_row() {
         assert_eq!(error.to_string(), message);
     }
 }
+
+#[test]
+fn regexp_split_to_table_streams_pieces_and_none_for_null_inputs() {
+    let piece = |text_value: &str| crate::PhysicalRow::from_values(vec![text(text_value)]);
+    for (arguments, expected) in [
+        (
+            vec![text(",a,"), text(",")],
+            vec![piece(""), piece("a"), piece("")],
+        ),
+        (
+            vec![text("baaac"), text("a*")],
+            vec![piece("b"), piece("c")],
+        ),
+        (
+            vec![text("aXbxc"), text("x"), text("i")],
+            vec![piece("a"), piece("b"), piece("c")],
+        ),
+        (vec![text(""), text("x")], vec![piece("")]),
+        (vec![Value::Null, text(",")], Vec::new()),
+        (vec![text("a"), text(","), Value::Null], Vec::new()),
+    ] {
+        let output = regexp_split_to_table_row_stream(&arguments, "p".into()).unwrap();
+        assert_eq!(output.columns, ["p"]);
+        let rows = output.rows.collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(rows, expected, "{arguments:?}");
+    }
+    let Err(error) =
+        regexp_split_to_table_row_stream(&[text("abc"), text("b"), text("g")], "p".into())
+    else {
+        panic!("g must be rejected");
+    };
+    assert_eq!(
+        error.to_string(),
+        "regexp_split_to_table() does not support the \"global\" option"
+    );
+}
