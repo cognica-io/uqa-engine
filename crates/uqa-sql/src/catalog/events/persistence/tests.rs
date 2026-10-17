@@ -70,11 +70,11 @@ fn empty_event_envelopes_preserve_legacy_defaults_and_current_json_shape() {
     assert!(triggers.triggers.is_empty());
     assert_eq!(
         serde_json::to_string(&StoredRuleCatalog {
-            format_version: 3,
+            format_version: 4,
             rules: Vec::new()
         })
         .unwrap(),
-        r#"{"format_version":3}"#
+        r#"{"format_version":4}"#
     );
     assert_eq!(serde_json::to_string(&triggers).unwrap(), "{}");
 }
@@ -82,22 +82,22 @@ fn empty_event_envelopes_preserve_legacy_defaults_and_current_json_shape() {
 fn future_rule_format_fails_before_migration_permission_can_change_the_result() {
     for allowed in [false, true] {
         assert_eq!(
-            rule_catalog_requires_migration(4, allowed).unwrap_err(),
-            "rule catalog format 4 is newer than supported format 3"
+            rule_catalog_requires_migration(5, allowed).unwrap_err(),
+            "rule catalog format 5 is newer than supported format 4"
         );
     }
 }
 #[test]
 fn old_rule_formats_require_initial_migration_and_current_format_is_read_only() {
-    for version in [0, 1, 2] {
+    for version in [0, 1, 2, 3] {
         assert_eq!(
             rule_catalog_requires_migration(version, false).unwrap_err(),
             "rule catalog requires an initial-open format migration"
         );
         assert!(rule_catalog_requires_migration(version, true).unwrap());
     }
-    assert!(!rule_catalog_requires_migration(3, false).unwrap());
-    assert!(!rule_catalog_requires_migration(3, true).unwrap());
+    assert!(!rule_catalog_requires_migration(4, false).unwrap());
+    assert!(!rule_catalog_requires_migration(4, true).unwrap());
 }
 #[test]
 fn rule_snapshots_exclude_temporary_relations_and_preserve_missing_relation_entries() {
@@ -112,7 +112,7 @@ fn rule_snapshots_exclude_temporary_relations_and_preserve_missing_relation_entr
         )
     }));
     let snapshot = stored_rules_snapshot(&rules, &relations);
-    assert_eq!(snapshot.format_version, 3);
+    assert_eq!(snapshot.format_version, 4);
     assert_eq!(
         snapshot
             .rules

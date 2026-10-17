@@ -9,7 +9,7 @@
       "--notices"
     ],
     "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "d8efea27cf12592064f836b45b022b298b49a29bec1637145581794b6299269e"
+    "input_sha256": "de1955ed6510dd4ef0e836d6e0885d1177e03df3e79fb5e7acfd2f32c277a5d6"
   },
   "cases": [
     {
@@ -2962,6 +2962,431 @@
           "rows": [
             [
               "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_create_table",
+      "sql": "CREATE TABLE up_t (code text COLLATE \"C\" CHECK (code ~ '^[[:alpha:]]+$'), w text COLLATE \"C\" CHECK (lower(w) = w), d text DEFAULT lower((chr(192) || 'B') COLLATE \"C\"))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_create_index",
+      "sql": "CREATE UNIQUE INDEX up_t_lower ON up_t (lower(w))",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_create_view",
+      "sql": "CREATE VIEW up_v AS SELECT regexp_like(chr(233) COLLATE \"C\", '^[[:alpha:]]$') AS r, chr(233) COLLATE \"C\" ~ '^[[:alpha:]]$' AS m, upper(chr(224) COLLATE \"C\") AS u",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_create_column_view",
+      "sql": "CREATE VIEW up_cols AS SELECT w, lower(w) AS l, w ILIKE chr(224) AS i FROM up_t",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_create_rule_tables",
+      "sql": "CREATE TABLE up_r (x text COLLATE \"C\"); CREATE TABLE up_l (v text)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_create_rule",
+      "sql": "CREATE RULE up_rule AS ON INSERT TO up_r WHERE NEW.x ILIKE (chr(224) || '%') DO ALSO INSERT INTO up_l VALUES (NEW.x)",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_create_trigger_table",
+      "sql": "CREATE TABLE up_g (x text COLLATE \"C\", y text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_create_trigger_function",
+      "sql": "CREATE FUNCTION up_fire() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.y := 'fired'; RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_create_trigger",
+      "sql": "CREATE TRIGGER up_trigger BEFORE INSERT ON up_g FOR EACH ROW WHEN (NEW.x ~ '^[[:alpha:]]+$') EXECUTE FUNCTION up_fire()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_create_domain",
+      "sql": "CREATE DOMAIN up_d AS text CHECK (VALUE COLLATE \"C\" ~ '^[[:alpha:]]+$')",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_check_rejects_regex",
+      "sql": "INSERT INTO up_t (code) VALUES (chr(233))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"up_t\" violates check constraint \"up_t_code_check\"",
+        "detail": "Failing row contains (\u00e9, null, \u00c0b).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "up_check_accepts_lower",
+      "sql": "INSERT INTO up_t (code, w) VALUES ('abc', chr(192))",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_on_conflict",
+      "sql": "INSERT INTO up_t (code, w) VALUES ('abd', chr(192)) ON CONFLICT (lower(w)) DO NOTHING",
+      "command_tags": [
+        "INSERT 0 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_rows",
+      "sql": "SELECT code, w, d FROM up_t ORDER BY code",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "code",
+            "w",
+            "d"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "abc",
+              "\u00c0",
+              "\u00c0b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_view",
+      "sql": "SELECT r, m, u FROM up_v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "m",
+            "u"
+          ],
+          "type_oids": [
+            16,
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "\u00e0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_view_columns",
+      "sql": "SELECT w, l, i FROM up_cols",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "w",
+            "l",
+            "i"
+          ],
+          "type_oids": [
+            25,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "\u00c0",
+              "\u00c0",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_rule_insert",
+      "sql": "INSERT INTO up_r VALUES (chr(192) || 'B'), (chr(224) || 'b')",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_rule_rows",
+      "sql": "SELECT v FROM up_l ORDER BY v COLLATE \"C\"",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\u00e0b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_trigger_insert",
+      "sql": "INSERT INTO up_g (x) VALUES (chr(233)), ('abc')",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_trigger_rows",
+      "sql": "SELECT x, y FROM up_g ORDER BY x COLLATE \"C\"",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "abc",
+              "fired"
+            ],
+            [
+              "\u00e9",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "up_domain_rejects",
+      "sql": "SELECT chr(233)::up_d AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain up_d violates check constraint \"up_d_check\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "up_domain_accepts",
+      "sql": "SELECT 'abc'::up_d AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "abc"
             ]
           ]
         }

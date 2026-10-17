@@ -127,6 +127,17 @@ fn migrate_bound_definitions(
             .map_err(|error| {
                 StorageBackendError::Other(format!("restore view `{view_name}` bindings: {error}"))
             })?;
+        // A query stored by an earlier release records no input collations; derive them as creation does.
+        if routine_binding_migrations.contains(relation) {
+            context
+                .bindings
+                .assign_input_collations(&mut view.query)
+                .map_err(|error| {
+                    StorageBackendError::Other(format!(
+                        "restore view `{view_name}` input collations: {error}"
+                    ))
+                })?;
+        }
         if missing_collations.contains(relation) {
             view.restore_materialized_collations(&schema)
                 .map_err(|error| {

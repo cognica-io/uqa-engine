@@ -39,26 +39,40 @@ impl CallCollations {
         expression: &mut ScalarExpr,
         subqueries: &mut [crate::plan::QueryPlan],
     ) -> Result<(), SQLError> {
-        let mut apply = |node: &mut ScalarExpr| {
-            let identity = NonNull::from(&*node);
-            let ScalarExpr::Func { binding, .. } = node else {
-                return;
-            };
-            if let Some(selected) = self.builtins.remove(&identity) {
-                if binding.is_none() {
-                    *binding = Some(selected);
-                }
-            }
-            if let (Some(selection), Some(binding)) =
-                (self.selections.remove(&identity), binding.as_mut())
-            {
-                binding.input_collation = selection;
-            }
-        };
+        let mut apply = |node: &mut ScalarExpr| self.apply_node(node);
         crate::plan::rewrite_scalar_expression(expression, &mut apply);
         for query in subqueries.iter_mut() {
             query.rewrite_scalar_expressions(&mut apply);
         }
+        self.finish()
+    }
+
+    pub(in crate::binding::preparation) fn apply_query(
+        mut self,
+        query: &mut crate::plan::QueryPlan,
+    ) -> Result<(), SQLError> {
+        query.rewrite_scalar_expressions(&mut |node| self.apply_node(node));
+        self.finish()
+    }
+
+    fn apply_node(&mut self, node: &mut ScalarExpr) {
+        let identity = NonNull::from(&*node);
+        let ScalarExpr::Func { binding, .. } = node else {
+            return;
+        };
+        if let Some(selected) = self.builtins.remove(&identity) {
+            if binding.is_none() {
+                *binding = Some(selected);
+            }
+        }
+        if let (Some(selection), Some(binding)) =
+            (self.selections.remove(&identity), binding.as_mut())
+        {
+            binding.input_collation = selection;
+        }
+    }
+
+    fn finish(&self) -> Result<(), SQLError> {
         if self.selections.is_empty() && self.builtins.is_empty() {
             Ok(())
         } else {

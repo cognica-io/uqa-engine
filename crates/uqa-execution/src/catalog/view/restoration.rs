@@ -182,6 +182,7 @@ pub fn restore_views_from_catalog(
                 context.types,
             )
             .map_err(|error| StorageBackendError::Other(error.to_string()))?
+            || uqa_sql::binding::legacy_collations::query_lacks_input_collation(&view.query)
         {
             routine_binding_migrations.insert(row.relation.clone());
         }

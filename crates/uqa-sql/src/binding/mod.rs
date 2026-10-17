@@ -21,6 +21,7 @@ pub mod composite_rename;
 mod cte_controls;
 mod ctes;
 mod dependencies;
+pub mod legacy_collations;
 pub mod legacy_patterns;
 mod merge_scopes;
 mod ordered_calls;
@@ -37,7 +38,10 @@ mod type_resolution;
 mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
-pub use preparation::{analyze_column_type_transform, infer_prepared_parameter_types};
+pub use preparation::{
+    analyze_column_type_transform, assign_stored_query_input_collations,
+    infer_prepared_parameter_types,
+};
 pub(crate) use preparation::{
     analyze_default_inputs, analyze_routine_body_argument, analyze_routine_body_inputs,
     prepare_routine_body_inputs,

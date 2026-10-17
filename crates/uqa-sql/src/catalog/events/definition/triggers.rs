@@ -496,7 +496,7 @@ impl EventAnalysisContext<'_> {
         Ok(())
     }
 
-    /// A new condition also records each call's input collation; a restored condition keeps the selections it was stored with.
+    /// A new condition also records each call's input collation; a restored condition keeps the selections it was stored with, and one that an earlier release stored without them derives them as creation does.
     fn validate_trigger_condition(
         &self,
         definition: &CreateTrigger,
@@ -524,6 +524,10 @@ impl EventAnalysisContext<'_> {
             )? {
                 crate::semantics::sets::placement::SetPlacement::TriggerWhen.admit(true)?;
             }
+        }
+        if lookup_mode == RelationLookupMode::Dynamic
+            || crate::binding::legacy_collations::expression_lacks_input_collation(condition)
+        {
             self.stored_routines
                 .assign_input_collations(&mut plan, &crate::RowSchema::default())?;
         }

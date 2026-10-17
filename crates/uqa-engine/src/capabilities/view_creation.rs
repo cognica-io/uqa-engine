@@ -88,6 +88,10 @@ impl ViewPlanBinding for Engine {
             uqa_sql::FunctionTypeResolver::resolve_type_name(self, name)
         })
     }
+    fn assign_input_collations(&self, plan: &mut QueryPlan) -> Result<(), SQLError> {
+        let scope = super::query_scope::new_for_catalog_binding(self);
+        uqa_execution::query::binding::assign_query_plan_input_collations(self, plan, &scope)
+    }
 }
 
 impl MaterializedViewAccess for Engine {

@@ -397,6 +397,25 @@ pub(crate) fn assign_stored_input_collations(
         .apply(&mut expression.scalar, &mut expression.subqueries)
 }
 
+/// Record the input collation of each call in a stored query whose routines are already bound for storage, such as a view that an earlier release stored without selections. Nothing else in the query changes.
+pub fn assign_stored_query_input_collations(
+    routines: &dyn RoutineResolution,
+    query: &mut QueryPlan,
+    binding: &BindingContext<'_>,
+) -> Result<(), SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope: &mut SchemaScope::for_analysis(binding)?,
+        parameters: ParameterTypes::fixed(&[]).with_call_collations(),
+        schema_expression: None,
+    };
+    analysis.query(query, None)?;
+    analysis
+        .parameters
+        .take_call_collations()
+        .apply_query(query)
+}
+
 /// The input collation of a call whose binding is selected after statement analysis, such as a table function in `FROM`, derived from its arguments as analysis derives every other call's.
 pub(super) fn call_input_collation(
     scope: &mut SchemaScope,

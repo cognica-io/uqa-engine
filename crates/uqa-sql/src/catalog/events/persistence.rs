@@ -9,7 +9,8 @@ use super::{RuleCatalog, StoredRule, StoredTrigger, TriggerCatalog};
 use crate::ast::RelationPersistence;
 use serde::{Deserialize, Serialize};
 use uqa_core::RelationIdentity;
-pub const RULE_CATALOG_FORMAT_VERSION: u32 = 3;
+/// Format 4 rule conditions record each call's input collation.
+pub const RULE_CATALOG_FORMAT_VERSION: u32 = 4;
 pub trait EventRelationPersistence {
     fn rule_relation_is_temporary(&self, relation: &RelationIdentity) -> bool;
     fn trigger_relation_persistence(

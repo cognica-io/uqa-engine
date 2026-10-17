@@ -6,6 +6,9 @@
 
 use uqa_engine::Engine;
 
+#[path = "collation_case_mapping/legacy.rs"]
+mod legacy;
+
 fn open(provider: usize, path: &std::path::Path) -> Engine {
     match provider {
         0 => Engine::new(),

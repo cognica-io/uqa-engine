@@ -154,6 +154,15 @@ pub fn bind_query_plan_routines_for_storage<S: Clone>(
     )
 }
 
+/// Record each call's input collation in a stored query whose routines are bound.
+pub fn assign_query_plan_input_collations<S: Clone>(
+    engine: &dyn RoutineResolution,
+    plan: &mut QueryPlan,
+    ctes: &CteScope<S>,
+) -> Result<(), SQLError> {
+    uqa_sql::binding::assign_stored_query_input_collations(engine, plan, &binding_context(ctes)?)
+}
+
 pub fn bind_expression_plan_routines_for_storage<S: Clone>(
     engine: &dyn RoutineResolution,
     plan: &mut ExpressionPlan,

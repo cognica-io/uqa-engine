@@ -347,6 +347,9 @@ impl EventAnalysisContext<'_> {
             .stored_routines
             .bind_rule_condition(&mut plan, &schema, event)?;
         self.reject_rule_condition_sets(&plan.scalar, &schema, lookup_mode)?;
+        // A new or restored condition records each call's input collation; a rule catalog stored before conditions recorded them migrates once.
+        self.stored_routines
+            .assign_input_collations(&mut plan, &schema)?;
         if let Some(ty) = ty {
             if !is_boolean_type(&ty) {
                 return Err(SQLError::TypeMismatch(format!(

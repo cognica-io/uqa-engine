@@ -260,6 +260,10 @@ impl ViewPlanBinding for Fixture {
     fn bind_type_identities(&self, _: &mut QueryPlan) -> Result<(), SQLError> {
         panic!("restoration keeps the recorded type identities");
     }
+    fn assign_input_collations(&self, _: &mut QueryPlan) -> Result<(), SQLError> {
+        // The fixture's definitions call no collation-dependent routine.
+        Ok(())
+    }
 }
 impl ViewRestoreSchemas for Fixture {
     fn stored_schema(&self, _: &StoredView) -> Result<RowSchema, SQLError> {

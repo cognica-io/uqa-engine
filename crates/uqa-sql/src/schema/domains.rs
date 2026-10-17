@@ -104,7 +104,7 @@ pub fn prepare_added_not_null(
     Ok(named.not_null.expect("new domain NOT NULL"))
 }
 
-/// Restore predecessor range syntax and composite constructors while retaining stored catalog identities.
+/// Restore predecessor range syntax and composite constructors while retaining stored catalog identities. A default or CHECK that an earlier release stored without input collations derives them.
 pub fn restore_composite_constructors(
     context: &SchemaBindingContext<'_, '_>,
     definition: &mut CreateDomain,
@@ -119,6 +119,7 @@ pub fn restore_composite_constructors(
                 default,
                 context.catalog,
             )?
+            || crate::binding::legacy_collations::expression_lacks_input_collation(default)
         {
             super::defaults::bind_stored_schema_expression(context, default, default.clone())?;
             changed = true;
@@ -136,6 +137,9 @@ pub fn restore_composite_constructors(
                 &check.expression,
                 context.catalog,
             )?
+            || crate::binding::legacy_collations::expression_lacks_input_collation(
+                &check.expression,
+            )
         {
             bind_domain_check(context, &definition.base, &mut check.expression)?;
             changed = true;
