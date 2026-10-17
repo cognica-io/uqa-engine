@@ -358,7 +358,7 @@ def check_maturin_sources() -> None:
 
 
 def archive_members(path: pathlib.Path) -> dict[str, bytes]:
-    if path.suffix == ".whl":
+    if path.suffix in {".whl", ".zip"}:
         try:
             with zipfile.ZipFile(path) as archive:
                 return {
@@ -411,7 +411,7 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: 
         members, AGPL_NOTICE
     ):
         raise RuntimeError(f"{path} omits {AGPL_NOTICE}")
-    if path.name.endswith((".whl", ".tgz", ".tar.gz")):
+    if path.name.endswith((".whl", ".tgz", ".tar.gz", ".zip")):
         for relative, expected in binding_dictionary_payloads().items():
             matches = matching_members(members, relative)
             if not matches or any(payload != expected for _, payload in matches):
@@ -452,7 +452,9 @@ def check_embedded_dictionary(path: pathlib.Path, members: dict[str, bytes], lan
     files = {"nori": NORI_FILES, "kuromoji": KUROMOJI_FILES}[language]
     data_root = ROOT / f"crates/uqa-{language}-data"
     bundle = (data_root / files[0]).read_bytes()
-    binaries = {name: data for name, data in members.items() if name.endswith((".node", ".wasm", ".so", ".pyd"))}
+    binaries = {name: data for name, data in members.items()
+                if name.endswith((".node", ".wasm", ".so", ".pyd"))
+                or pathlib.PurePosixPath(name).name in {"usql", "usql.exe"}}
     if binaries:
         matching = [name for name, data in binaries.items()
                     if bundle in (wasm_data.initialized_data(data) if name.endswith(".wasm") else data)]

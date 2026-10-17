@@ -131,6 +131,13 @@ def validate(run: dict, tag: str, commit: str, repository: str, jobs: list[dict]
     if any(job["conclusion"] != "success" for job in jobs if job["name"] not in deferred and job["name"].startswith(("python /", "javascript packages /", "release benchmarks /"))):
         raise ValueError("an additional release build did not pass")
     required = PACKAGE_ARTIFACTS | {f"release-benchmarks-{tag}-{run['id']}-{run['run_attempt']}"}
+    # Original releases without the CLI remain recoverable. New builds must
+    # retain every CLI archive, including when artifact transport later fails.
+    cli_steps = {"Build and verify usql release archive", "Build the CLI with bundled analyzers and foreign handlers"}
+    if any(step["name"] in cli_steps and step["conclusion"] != "skipped"
+           for job in jobs for step in job.get("steps", [])) or any(
+               artifact["name"].startswith("usql-") for artifact in artifacts):
+        required |= {"usql-" + target for target in TARGETS}
     available = {artifact["name"] for artifact in artifacts if artifact["expired"] is False and artifact["workflow_run"]["head_sha"] == commit and artifact["workflow_run"]["id"] == run["id"]}
     missing = required - available
     rebuild = {"python-wheel-" + item["target"]: item for item in repairable.values()}

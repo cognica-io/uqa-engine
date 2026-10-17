@@ -72,7 +72,9 @@ jobs:
           mkdir -p dist
           if [ -d artifacts ]; then
             find artifacts -type f \
-              \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.tgz' -o -name '*.node' \) \
+              \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.tgz' -o -name '*.node' \
+              -o -name 'usql-*.zip' -o -name 'usql-*.sha256' \
+              -o -name 'install-usql.sh' -o -name 'install-usql.ps1' \) \
               -exec cp {} dist/ \;
           fi
           ls -la dist
@@ -88,7 +90,7 @@ jobs:
           if gh release view "$TAG" --json assets --jq '.assets[].name' > existing-release-assets.txt; then
             while IFS= read -r filename; do
               case "$filename" in
-                *.whl|*.tar.gz|*.tgz|*.node)
+                *.whl|*.tar.gz|*.tgz|*.node|usql-*.zip|usql-*.sha256|install-usql.sh|install-usql.ps1)
                   gh release download "$TAG" --pattern "$filename" --dir dist --clobber
                   ;;
               esac
@@ -120,6 +122,11 @@ jobs:
             node-addon-aarch64-pc-windows-msvc
             wasm-package
           )
+          if [ -f scripts/usql-release.py ]; then
+            for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
+              expected+=("usql-$target")
+            done
+          fi
           missing=()
           for name in "${expected[@]}"; do
             [ -d "artifacts/$name" ] || missing+=("$name")
@@ -139,6 +146,14 @@ jobs:
             exit 1
           fi
 
+      - name: Verify standalone CLI inventory and release identity
+        run: |
+          set -euo pipefail
+          # Older tagged sources predate standalone CLI publication.
+          if [ -f scripts/usql-release.py ]; then
+            python3 scripts/usql-release.py verify --directory dist
+          fi
+
       # The same contract CI enforces on sources, re-checked on the exact
       # archives that are about to be published. Globs are expanded first so a
       # partial matrix does not pass an unmatched pattern to the checker.
@@ -147,7 +162,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          archives=(dist/*.whl dist/*.tar.gz dist/*.tgz)
+          archives=(dist/*.whl dist/*.tar.gz dist/*.tgz dist/usql-*.zip)
           if [ ${#archives[@]} -eq 0 ]; then
             echo "no archives to verify (native addons only)"
             exit 0
@@ -185,6 +200,7 @@ jobs:
           set -euo pipefail
           python3 - "$TAG" <<'PY' > release-notes.md
           import os
+          import pathlib
           import re
           import sys
 
@@ -200,6 +216,9 @@ jobs:
           print()
           print("Python wheels, a Python source distribution, the Node.js root npm package, `@cognica-io` native optional packages, standalone native addons, and the browser WASM package are attached to this release.")
           print()
+          if pathlib.Path("scripts/usql-release.py").is_file():
+              print("Standalone `usql` archives for Linux, macOS and Windows (x86_64 and ARM64), SHA-256 checksums, and `install-usql.sh` / `install-usql.ps1` are also attached. The CLI includes Nori, Kuromoji, Arrow and DuckDB.")
+              print()
           crates_result = os.environ.get("CRATES_IO_RESULT", "unknown")
           if crates_result == "success":
               print(f"crates.io status: Live publication of all public Rust workspace crates at version `{version}` completed by this workflow.")
