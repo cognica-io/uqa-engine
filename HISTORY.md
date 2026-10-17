@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Connect retained declared range input to catalog-aware casts and arrays, preserving endpoint and canonical invocation order, routine identity, lazy binary coercion and controlled value ownership. SQL range declarations and generated constructors remain separate work.
+
 - Let internal SQL equality-key consumers share physical decoding, normalization and output under one memory allowance and both cancellation scopes, while retaining existing exact, hash, spill and reservation bytes.
 
 - Upgrade persistent databases to SQLite record format 65 and redb record format 61 for declared range definitions, shell type identities and transactional descriptions, including packed bit values and their type descriptors. Close all owners, retain a pre-upgrade backup and update every owner together; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).

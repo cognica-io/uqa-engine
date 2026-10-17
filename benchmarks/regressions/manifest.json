@@ -11891,6 +11891,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_cast_selection_keeps_binary_identity_lazy_and_input_effects_separate",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/tests/ranges.rs",
+      "capability": "Declared range cast identity",
+      "workload": "String input, same-type unreadable physical values, a different range identity and a physical domain over the selected range.",
+      "invariant": "Only string input invokes effects; identity and domain relabels preserve lazy owned bytes and release their allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_constants_and_arrays_select_catalog_input_without_native_aliases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/tests/ranges.rs",
+      "capability": "Declared range constant selection",
+      "workload": "Declared ranges, multiranges and arrays are distinguished from native range carriers; NULL and incompatible integer casts.",
+      "invariant": "Catalog constants select their declared input, NULL avoids input, and unrelated types cannot acquire a native alias.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "declared_range_input_matches_postgresql_values_effects_and_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/input.rs",
+      "capability": "Declared range input invocation",
+      "workload": "32 independent PostgreSQL values and diagnostics over integer, text, Unicode, array, enum and domain endpoints and canonical callbacks.",
+      "invariant": "Output, SQLSTATE/detail/hint, endpoint and canonical call counts agree; physical production repeats no support effects and retains one allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "declared_range_casts_retain_identity_and_read_array_members_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/input.rs",
+      "capability": "Declared range repeated casts and arrays",
+      "workload": "Canonical range input followed by identity coercion, wrong-range coercion and an array containing two ranges and NULL.",
+      "invariant": "Identity casts retain the admitted value; every actual non-NULL array member invokes input once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "declared_range_input_retains_one_allowance_and_releases_failed_support_calls",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/input.rs",
+      "capability": "Declared range input resource control",
+      "workload": "Zero allowance, each pre-cancelled owner and cancellation from canonical support.",
+      "invariant": "No endpoint effects precede failed admission; both cancellation owners are honored and all leases release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "declared_range_input_adapters_invoke_selected_sql_routines_without_repeating_input",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/range_input.rs",
+      "capability": "Declared range Engine adapters",
+      "workload": "Actual SQL casts and PL/pgSQL support over a retained catalog definition, callback counts, EXECUTE revocation, routine rename and NULL return.",
+      "invariant": "Adapters preserve the selected routine OID and callback privilege boundary; ordinary routine calls still enforce EXECUTE.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

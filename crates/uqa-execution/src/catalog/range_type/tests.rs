@@ -10,6 +10,7 @@ use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 use uqa_sql::{catalog::range_type::StoredMultirange, ColumnType};
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
+mod input;
 mod projections;
 mod snapshots;
 mod support;

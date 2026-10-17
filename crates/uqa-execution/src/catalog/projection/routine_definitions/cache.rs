@@ -18,6 +18,13 @@ pub(in crate::catalog) struct RoutineDefinitions {
     by_oid: OnceLock<OrderedOidLookup<(String, usize)>>,
 }
 
+impl CatalogReadView {
+    /// Borrow a retained user routine by its catalog identity, sharing the generation's existing OID lookup.
+    pub fn sql_function_by_oid(&self, oid: u32) -> Result<Option<&Arc<SQLUserFunction>>, SQLError> {
+        user_routine_by_oid(self, i64::from(oid))
+    }
+}
+
 pub(super) fn user_routine_by_oid(
     catalog: &CatalogReadView,
     oid: i64,
