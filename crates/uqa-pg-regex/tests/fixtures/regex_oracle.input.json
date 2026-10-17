@@ -1,0 +1,2605 @@
+{
+  "description": "PostgreSQL 18.4 reference for the uqa-pg-regex engine. Each case records its inputs and the SQL whose result the engine reproduces.",
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "name": "alternation prefers the longest branch",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "a|ab",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", 'a|ab', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", 'a|ab', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", 'a|ab', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "longest alternative at the earliest start",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ababab",
+      "pattern": "ab|abab",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ababab' COLLATE \"C\", 'ab|abab', ''), 'spans', ARRAY[regexp_instr('ababab' COLLATE \"C\", 'ab|abab', 1, 1, 0, '', 0), regexp_instr('ababab' COLLATE \"C\", 'ab|abab', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "non-greedy first quantifier makes the whole match shortest",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abc01234xyz",
+      "pattern": "(.*?)(\\d+)(.*)",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abc01234xyz' COLLATE \"C\", '(.*?)(\\d+)(.*)', ''), 'spans', ARRAY[regexp_instr('abc01234xyz' COLLATE \"C\", '(.*?)(\\d+)(.*)', 1, 1, 0, '', 0), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*?)(\\d+)(.*)', 1, 1, 1, '', 0), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*?)(\\d+)(.*)', 1, 1, 0, '', 1), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*?)(\\d+)(.*)', 1, 1, 1, '', 1), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*?)(\\d+)(.*)', 1, 1, 0, '', 2), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*?)(\\d+)(.*)', 1, 1, 1, '', 2), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*?)(\\d+)(.*)', 1, 1, 0, '', 3), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*?)(\\d+)(.*)', 1, 1, 1, '', 3)])::text"
+    },
+    {
+      "name": "greedy first quantifier",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abc01234xyz",
+      "pattern": "(.*)(\\d+)(.*)",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abc01234xyz' COLLATE \"C\", '(.*)(\\d+)(.*)', ''), 'spans', ARRAY[regexp_instr('abc01234xyz' COLLATE \"C\", '(.*)(\\d+)(.*)', 1, 1, 0, '', 0), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*)(\\d+)(.*)', 1, 1, 1, '', 0), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*)(\\d+)(.*)', 1, 1, 0, '', 1), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*)(\\d+)(.*)', 1, 1, 1, '', 1), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*)(\\d+)(.*)', 1, 1, 0, '', 2), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*)(\\d+)(.*)', 1, 1, 1, '', 2), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*)(\\d+)(.*)', 1, 1, 0, '', 3), regexp_instr('abc01234xyz' COLLATE \"C\", '(.*)(\\d+)(.*)', 1, 1, 1, '', 3)])::text"
+    },
+    {
+      "name": "outer quantifier restores greediness",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abc01234xyz",
+      "pattern": "(?:(.*?)(\\d+)(.*)){1,1}",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abc01234xyz' COLLATE \"C\", '(?:(.*?)(\\d+)(.*)){1,1}', ''), 'spans', ARRAY[regexp_instr('abc01234xyz' COLLATE \"C\", '(?:(.*?)(\\d+)(.*)){1,1}', 1, 1, 0, '', 0), regexp_instr('abc01234xyz' COLLATE \"C\", '(?:(.*?)(\\d+)(.*)){1,1}', 1, 1, 1, '', 0), regexp_instr('abc01234xyz' COLLATE \"C\", '(?:(.*?)(\\d+)(.*)){1,1}', 1, 1, 0, '', 1), regexp_instr('abc01234xyz' COLLATE \"C\", '(?:(.*?)(\\d+)(.*)){1,1}', 1, 1, 1, '', 1), regexp_instr('abc01234xyz' COLLATE \"C\", '(?:(.*?)(\\d+)(.*)){1,1}', 1, 1, 0, '', 2), regexp_instr('abc01234xyz' COLLATE \"C\", '(?:(.*?)(\\d+)(.*)){1,1}', 1, 1, 1, '', 2), regexp_instr('abc01234xyz' COLLATE \"C\", '(?:(.*?)(\\d+)(.*)){1,1}', 1, 1, 0, '', 3), regexp_instr('abc01234xyz' COLLATE \"C\", '(?:(.*?)(\\d+)(.*)){1,1}', 1, 1, 1, '', 3), regexp_instr('abc01234xyz' COLLATE \"C\", '(?:(.*?)(\\d+)(.*)){1,1}', 1, 1, 0, '', 4), regexp_instr('abc01234xyz' COLLATE \"C\", '(?:(.*?)(\\d+)(.*)){1,1}', 1, 1, 1, '', 4)])::text"
+    },
+    {
+      "name": "non-greedy prefix selects the fewest digits",
+      "kind": "match",
+      "collation": "C",
+      "subject": "XY1234Z",
+      "pattern": "Y*?([0-9]{1,3})",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('XY1234Z' COLLATE \"C\", 'Y*?([0-9]{1,3})', ''), 'spans', ARRAY[regexp_instr('XY1234Z' COLLATE \"C\", 'Y*?([0-9]{1,3})', 1, 1, 0, '', 0), regexp_instr('XY1234Z' COLLATE \"C\", 'Y*?([0-9]{1,3})', 1, 1, 1, '', 0), regexp_instr('XY1234Z' COLLATE \"C\", 'Y*?([0-9]{1,3})', 1, 1, 0, '', 1), regexp_instr('XY1234Z' COLLATE \"C\", 'Y*?([0-9]{1,3})', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "greedy prefix selects the most digits",
+      "kind": "match",
+      "collation": "C",
+      "subject": "XY1234Z",
+      "pattern": "Y*([0-9]{1,3})",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('XY1234Z' COLLATE \"C\", 'Y*([0-9]{1,3})', ''), 'spans', ARRAY[regexp_instr('XY1234Z' COLLATE \"C\", 'Y*([0-9]{1,3})', 1, 1, 0, '', 0), regexp_instr('XY1234Z' COLLATE \"C\", 'Y*([0-9]{1,3})', 1, 1, 1, '', 0), regexp_instr('XY1234Z' COLLATE \"C\", 'Y*([0-9]{1,3})', 1, 1, 0, '', 1), regexp_instr('XY1234Z' COLLATE \"C\", 'Y*([0-9]{1,3})', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "subexpressions split a greedy alternation",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abcd",
+      "pattern": "(a|ab)(c|bcd)(d*)",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abcd' COLLATE \"C\", '(a|ab)(c|bcd)(d*)', ''), 'spans', ARRAY[regexp_instr('abcd' COLLATE \"C\", '(a|ab)(c|bcd)(d*)', 1, 1, 0, '', 0), regexp_instr('abcd' COLLATE \"C\", '(a|ab)(c|bcd)(d*)', 1, 1, 1, '', 0), regexp_instr('abcd' COLLATE \"C\", '(a|ab)(c|bcd)(d*)', 1, 1, 0, '', 1), regexp_instr('abcd' COLLATE \"C\", '(a|ab)(c|bcd)(d*)', 1, 1, 1, '', 1), regexp_instr('abcd' COLLATE \"C\", '(a|ab)(c|bcd)(d*)', 1, 1, 0, '', 2), regexp_instr('abcd' COLLATE \"C\", '(a|ab)(c|bcd)(d*)', 1, 1, 1, '', 2), regexp_instr('abcd' COLLATE \"C\", '(a|ab)(c|bcd)(d*)', 1, 1, 0, '', 3), regexp_instr('abcd' COLLATE \"C\", '(a|ab)(c|bcd)(d*)', 1, 1, 1, '', 3)])::text"
+    },
+    {
+      "name": "non-greedy whole expression",
+      "kind": "match",
+      "collation": "C",
+      "subject": "aaa",
+      "pattern": "a+?",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('aaa' COLLATE \"C\", 'a+?', ''), 'spans', ARRAY[regexp_instr('aaa' COLLATE \"C\", 'a+?', 1, 1, 0, '', 0), regexp_instr('aaa' COLLATE \"C\", 'a+?', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "non-greedy bounded quantifier",
+      "kind": "match",
+      "collation": "C",
+      "subject": "aaaa",
+      "pattern": "a{2,3}?",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('aaaa' COLLATE \"C\", 'a{2,3}?', ''), 'spans', ARRAY[regexp_instr('aaaa' COLLATE \"C\", 'a{2,3}?', 1, 1, 0, '', 0), regexp_instr('aaaa' COLLATE \"C\", 'a{2,3}?', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "mixed greediness inside groups",
+      "kind": "match",
+      "collation": "C",
+      "subject": "aaa",
+      "pattern": "(a+?)(a*)",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('aaa' COLLATE \"C\", '(a+?)(a*)', ''), 'spans', ARRAY[regexp_instr('aaa' COLLATE \"C\", '(a+?)(a*)', 1, 1, 0, '', 0), regexp_instr('aaa' COLLATE \"C\", '(a+?)(a*)', 1, 1, 1, '', 0), regexp_instr('aaa' COLLATE \"C\", '(a+?)(a*)', 1, 1, 0, '', 1), regexp_instr('aaa' COLLATE \"C\", '(a+?)(a*)', 1, 1, 1, '', 1), regexp_instr('aaa' COLLATE \"C\", '(a+?)(a*)', 1, 1, 0, '', 2), regexp_instr('aaa' COLLATE \"C\", '(a+?)(a*)', 1, 1, 1, '', 2)])::text"
+    },
+    {
+      "name": "SIMILAR TO translation with a non-greedy prefix",
+      "kind": "match",
+      "collation": "C",
+      "subject": "aXbXc",
+      "pattern": "^(?:.*){1,1}?(X.*){1,1}(?:.*)$",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}(?:.*)$', ''), 'spans', ARRAY[regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}(?:.*)$', 1, 1, 0, '', 0), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}(?:.*)$', 1, 1, 1, '', 0), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}(?:.*)$', 1, 1, 0, '', 1), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}(?:.*)$', 1, 1, 1, '', 1), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}(?:.*)$', 1, 1, 0, '', 2), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}(?:.*)$', 1, 1, 1, '', 2), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}(?:.*)$', 1, 1, 0, '', 3), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}(?:.*)$', 1, 1, 1, '', 3)])::text"
+    },
+    {
+      "name": "SIMILAR TO translation anchored at the end",
+      "kind": "match",
+      "collation": "C",
+      "subject": "aXbXc",
+      "pattern": "^(?:.*){1,1}?(X.*){1,1}$",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}$', ''), 'spans', ARRAY[regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}$', 1, 1, 0, '', 0), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}$', 1, 1, 1, '', 0), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}$', 1, 1, 0, '', 1), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}$', 1, 1, 1, '', 1), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}$', 1, 1, 0, '', 2), regexp_instr('aXbXc' COLLATE \"C\", '^(?:.*){1,1}?(X.*){1,1}$', 1, 1, 1, '', 2)])::text"
+    },
+    {
+      "name": "first match of an alternation inside a split",
+      "kind": "match",
+      "collation": "C",
+      "subject": "xabx",
+      "pattern": "a|ab",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('xabx' COLLATE \"C\", 'a|ab', ''), 'spans', ARRAY[regexp_instr('xabx' COLLATE \"C\", 'a|ab', 1, 1, 0, '', 0), regexp_instr('xabx' COLLATE \"C\", 'a|ab', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "unset alternative subexpression",
+      "kind": "match",
+      "collation": "C",
+      "subject": "b",
+      "pattern": "(a)|(b)",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('b' COLLATE \"C\", '(a)|(b)', ''), 'spans', ARRAY[regexp_instr('b' COLLATE \"C\", '(a)|(b)', 1, 1, 0, '', 0), regexp_instr('b' COLLATE \"C\", '(a)|(b)', 1, 1, 1, '', 0), regexp_instr('b' COLLATE \"C\", '(a)|(b)', 1, 1, 0, '', 1), regexp_instr('b' COLLATE \"C\", '(a)|(b)', 1, 1, 1, '', 1), regexp_instr('b' COLLATE \"C\", '(a)|(b)', 1, 1, 0, '', 2), regexp_instr('b' COLLATE \"C\", '(a)|(b)', 1, 1, 1, '', 2)])::text"
+    },
+    {
+      "name": "empty pattern matches at the start",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abc",
+      "pattern": "",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abc' COLLATE \"C\", '', ''), 'spans', ARRAY[regexp_instr('abc' COLLATE \"C\", '', 1, 1, 0, '', 0), regexp_instr('abc' COLLATE \"C\", '', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "empty subexpression",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abc",
+      "pattern": "a()b",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abc' COLLATE \"C\", 'a()b', ''), 'spans', ARRAY[regexp_instr('abc' COLLATE \"C\", 'a()b', 1, 1, 0, '', 0), regexp_instr('abc' COLLATE \"C\", 'a()b', 1, 1, 1, '', 0), regexp_instr('abc' COLLATE \"C\", 'a()b', 1, 1, 0, '', 1), regexp_instr('abc' COLLATE \"C\", 'a()b', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "offsets count code points",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u00e9a\u00e9",
+      "pattern": "a\u00e9",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e9a\u00e9' COLLATE \"C\", 'a\u00e9', ''), 'spans', ARRAY[regexp_instr('\u00e9a\u00e9' COLLATE \"C\", 'a\u00e9', 1, 1, 0, '', 0), regexp_instr('\u00e9a\u00e9' COLLATE \"C\", 'a\u00e9', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "supplementary plane offsets",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\ud83d\ude00a\ud83d\ude00b",
+      "pattern": "a.b",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\ud83d\ude00a\ud83d\ude00b' COLLATE \"C\", 'a.b', ''), 'spans', ARRAY[regexp_instr('\ud83d\ude00a\ud83d\ude00b' COLLATE \"C\", 'a.b', 1, 1, 0, '', 0), regexp_instr('\ud83d\ude00a\ud83d\ude00b' COLLATE \"C\", 'a.b', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "no match",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abc",
+      "pattern": "x",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abc' COLLATE \"C\", 'x', ''), 'spans', ARRAY[regexp_instr('abc' COLLATE \"C\", 'x', 1, 1, 0, '', 0), regexp_instr('abc' COLLATE \"C\", 'x', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "back-reference",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abab",
+      "pattern": "(ab)\\1",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abab' COLLATE \"C\", '(ab)\\1', ''), 'spans', ARRAY[regexp_instr('abab' COLLATE \"C\", '(ab)\\1', 1, 1, 0, '', 0), regexp_instr('abab' COLLATE \"C\", '(ab)\\1', 1, 1, 1, '', 0), regexp_instr('abab' COLLATE \"C\", '(ab)\\1', 1, 1, 0, '', 1), regexp_instr('abab' COLLATE \"C\", '(ab)\\1', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "nested back-reference",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abcabc",
+      "pattern": "(a(b)c)\\1",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abcabc' COLLATE \"C\", '(a(b)c)\\1', ''), 'spans', ARRAY[regexp_instr('abcabc' COLLATE \"C\", '(a(b)c)\\1', 1, 1, 0, '', 0), regexp_instr('abcabc' COLLATE \"C\", '(a(b)c)\\1', 1, 1, 1, '', 0), regexp_instr('abcabc' COLLATE \"C\", '(a(b)c)\\1', 1, 1, 0, '', 1), regexp_instr('abcabc' COLLATE \"C\", '(a(b)c)\\1', 1, 1, 1, '', 1), regexp_instr('abcabc' COLLATE \"C\", '(a(b)c)\\1', 1, 1, 0, '', 2), regexp_instr('abcabc' COLLATE \"C\", '(a(b)c)\\1', 1, 1, 1, '', 2)])::text"
+    },
+    {
+      "name": "back-reference with a bound",
+      "kind": "match",
+      "collation": "C",
+      "subject": "aaaa",
+      "pattern": "(a)\\1{2}",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('aaaa' COLLATE \"C\", '(a)\\1{2}', ''), 'spans', ARRAY[regexp_instr('aaaa' COLLATE \"C\", '(a)\\1{2}', 1, 1, 0, '', 0), regexp_instr('aaaa' COLLATE \"C\", '(a)\\1{2}', 1, 1, 1, '', 0), regexp_instr('aaaa' COLLATE \"C\", '(a)\\1{2}', 1, 1, 0, '', 1), regexp_instr('aaaa' COLLATE \"C\", '(a)\\1{2}', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "case-insensitive back-reference",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abAB",
+      "pattern": "(ab)\\1",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abAB' COLLATE \"C\", '(ab)\\1', 'i'), 'spans', ARRAY[regexp_instr('abAB' COLLATE \"C\", '(ab)\\1', 1, 1, 0, 'i', 0), regexp_instr('abAB' COLLATE \"C\", '(ab)\\1', 1, 1, 1, 'i', 0), regexp_instr('abAB' COLLATE \"C\", '(ab)\\1', 1, 1, 0, 'i', 1), regexp_instr('abAB' COLLATE \"C\", '(ab)\\1', 1, 1, 1, 'i', 1)])::text"
+    },
+    {
+      "name": "back-reference requires the same text",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abac",
+      "pattern": "(ab)\\1",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abac' COLLATE \"C\", '(ab)\\1', ''), 'spans', ARRAY[regexp_instr('abac' COLLATE \"C\", '(ab)\\1', 1, 1, 0, '', 0), regexp_instr('abac' COLLATE \"C\", '(ab)\\1', 1, 1, 1, '', 0), regexp_instr('abac' COLLATE \"C\", '(ab)\\1', 1, 1, 0, '', 1), regexp_instr('abac' COLLATE \"C\", '(ab)\\1', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "back-reference to a missing subexpression",
+      "kind": "match",
+      "collation": "C",
+      "subject": "aa",
+      "pattern": "(a)\\2",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('aa' COLLATE \"C\", '(a)\\2', ''), 'spans', ARRAY[regexp_instr('aa' COLLATE \"C\", '(a)\\2', 1, 1, 0, '', 0), regexp_instr('aa' COLLATE \"C\", '(a)\\2', 1, 1, 1, '', 0), regexp_instr('aa' COLLATE \"C\", '(a)\\2', 1, 1, 0, '', 1), regexp_instr('aa' COLLATE \"C\", '(a)\\2', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "positive lookahead",
+      "kind": "match",
+      "collation": "C",
+      "subject": "foobar",
+      "pattern": "foo(?=bar)",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('foobar' COLLATE \"C\", 'foo(?=bar)', ''), 'spans', ARRAY[regexp_instr('foobar' COLLATE \"C\", 'foo(?=bar)', 1, 1, 0, '', 0), regexp_instr('foobar' COLLATE \"C\", 'foo(?=bar)', 1, 1, 1, '', 0), regexp_instr('foobar' COLLATE \"C\", 'foo(?=bar)', 1, 1, 0, '', 1), regexp_instr('foobar' COLLATE \"C\", 'foo(?=bar)', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "negative lookahead",
+      "kind": "match",
+      "collation": "C",
+      "subject": "foobaz",
+      "pattern": "foo(?!bar)",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('foobaz' COLLATE \"C\", 'foo(?!bar)', ''), 'spans', ARRAY[regexp_instr('foobaz' COLLATE \"C\", 'foo(?!bar)', 1, 1, 0, '', 0), regexp_instr('foobaz' COLLATE \"C\", 'foo(?!bar)', 1, 1, 1, '', 0), regexp_instr('foobaz' COLLATE \"C\", 'foo(?!bar)', 1, 1, 0, '', 1), regexp_instr('foobaz' COLLATE \"C\", 'foo(?!bar)', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "positive lookbehind",
+      "kind": "match",
+      "collation": "C",
+      "subject": "xfoobar",
+      "pattern": "(?<=x)foo",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('xfoobar' COLLATE \"C\", '(?<=x)foo', ''), 'spans', ARRAY[regexp_instr('xfoobar' COLLATE \"C\", '(?<=x)foo', 1, 1, 0, '', 0), regexp_instr('xfoobar' COLLATE \"C\", '(?<=x)foo', 1, 1, 1, '', 0), regexp_instr('xfoobar' COLLATE \"C\", '(?<=x)foo', 1, 1, 0, '', 1), regexp_instr('xfoobar' COLLATE \"C\", '(?<=x)foo', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "negative lookbehind",
+      "kind": "match",
+      "collation": "C",
+      "subject": "yfoo",
+      "pattern": "(?<!x)foo",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('yfoo' COLLATE \"C\", '(?<!x)foo', ''), 'spans', ARRAY[regexp_instr('yfoo' COLLATE \"C\", '(?<!x)foo', 1, 1, 0, '', 0), regexp_instr('yfoo' COLLATE \"C\", '(?<!x)foo', 1, 1, 1, '', 0), regexp_instr('yfoo' COLLATE \"C\", '(?<!x)foo', 1, 1, 0, '', 1), regexp_instr('yfoo' COLLATE \"C\", '(?<!x)foo', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "parentheses inside lookahead do not capture",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "a(?=(b))",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", 'a(?=(b))', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", 'a(?=(b))', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", 'a(?=(b))', 1, 1, 1, '', 0), regexp_instr('ab' COLLATE \"C\", 'a(?=(b))', 1, 1, 0, '', 1), regexp_instr('ab' COLLATE \"C\", 'a(?=(b))', 1, 1, 1, '', 1), regexp_instr('ab' COLLATE \"C\", 'a(?=(b))', 1, 1, 0, '', 2), regexp_instr('ab' COLLATE \"C\", 'a(?=(b))', 1, 1, 1, '', 2)])::text"
+    },
+    {
+      "name": "lookbehind sees text before the search start",
+      "kind": "match",
+      "collation": "C",
+      "subject": "xfoo",
+      "pattern": "(?<=x)foo",
+      "flags": "",
+      "start": 2,
+      "sql": "SELECT json_build_object('groups', regexp_match('xfoo' COLLATE \"C\", '(?<=x)foo', ''), 'spans', ARRAY[regexp_instr('xfoo' COLLATE \"C\", '(?<=x)foo', 2, 1, 0, '', 0), regexp_instr('xfoo' COLLATE \"C\", '(?<=x)foo', 2, 1, 1, '', 0), regexp_instr('xfoo' COLLATE \"C\", '(?<=x)foo', 2, 1, 0, '', 1), regexp_instr('xfoo' COLLATE \"C\", '(?<=x)foo', 2, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "caret anchors at the input start, not the search start",
+      "kind": "match",
+      "collation": "C",
+      "subject": "aab",
+      "pattern": "^a",
+      "flags": "",
+      "start": 2,
+      "sql": "SELECT json_build_object('groups', regexp_match('aab' COLLATE \"C\", '^a', ''), 'spans', ARRAY[regexp_instr('aab' COLLATE \"C\", '^a', 2, 1, 0, '', 0), regexp_instr('aab' COLLATE \"C\", '^a', 2, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "search start skips earlier matches",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abcabc",
+      "pattern": "b",
+      "flags": "",
+      "start": 3,
+      "sql": "SELECT json_build_object('groups', regexp_match('abcabc' COLLATE \"C\", 'b', ''), 'spans', ARRAY[regexp_instr('abcabc' COLLATE \"C\", 'b', 3, 1, 0, '', 0), regexp_instr('abcabc' COLLATE \"C\", 'b', 3, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "empty match at the end of the input",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abc",
+      "pattern": "$",
+      "flags": "",
+      "start": 4,
+      "sql": "SELECT json_build_object('groups', regexp_match('abc' COLLATE \"C\", '$', ''), 'spans', ARRAY[regexp_instr('abc' COLLATE \"C\", '$', 4, 1, 0, '', 0), regexp_instr('abc' COLLATE \"C\", '$', 4, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "search start beyond the input",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abc",
+      "pattern": "c",
+      "flags": "",
+      "start": 5,
+      "sql": "SELECT json_build_object('groups', regexp_match('abc' COLLATE \"C\", 'c', ''), 'spans', ARRAY[regexp_instr('abc' COLLATE \"C\", 'c', 5, 1, 0, '', 0), regexp_instr('abc' COLLATE \"C\", 'c', 5, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "word boundary",
+      "kind": "match",
+      "collation": "C",
+      "subject": "hello world",
+      "pattern": "\\yw\\w*",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('hello world' COLLATE \"C\", '\\yw\\w*', ''), 'spans', ARRAY[regexp_instr('hello world' COLLATE \"C\", '\\yw\\w*', 1, 1, 0, '', 0), regexp_instr('hello world' COLLATE \"C\", '\\yw\\w*', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "end of word",
+      "kind": "match",
+      "collation": "C",
+      "subject": "hello world",
+      "pattern": "o\\M",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('hello world' COLLATE \"C\", 'o\\M', ''), 'spans', ARRAY[regexp_instr('hello world' COLLATE \"C\", 'o\\M', 1, 1, 0, '', 0), regexp_instr('hello world' COLLATE \"C\", 'o\\M', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "start of word",
+      "kind": "match",
+      "collation": "C",
+      "subject": "hello world",
+      "pattern": "\\mw",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('hello world' COLLATE \"C\", '\\mw', ''), 'spans', ARRAY[regexp_instr('hello world' COLLATE \"C\", '\\mw', 1, 1, 0, '', 0), regexp_instr('hello world' COLLATE \"C\", '\\mw', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "not a word boundary",
+      "kind": "match",
+      "collation": "C",
+      "subject": "hello world",
+      "pattern": "l\\Yl",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('hello world' COLLATE \"C\", 'l\\Yl', ''), 'spans', ARRAY[regexp_instr('hello world' COLLATE \"C\", 'l\\Yl', 1, 1, 0, '', 0), regexp_instr('hello world' COLLATE \"C\", 'l\\Yl', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "start of string escape",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab\nab",
+      "pattern": "\\Aab",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab\nab' COLLATE \"C\", '\\Aab', ''), 'spans', ARRAY[regexp_instr('ab\nab' COLLATE \"C\", '\\Aab', 1, 1, 0, '', 0), regexp_instr('ab\nab' COLLATE \"C\", '\\Aab', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "end of string escape",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab\nab",
+      "pattern": "ab\\Z",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab\nab' COLLATE \"C\", 'ab\\Z', ''), 'spans', ARRAY[regexp_instr('ab\nab' COLLATE \"C\", 'ab\\Z', 1, 1, 0, '', 0), regexp_instr('ab\nab' COLLATE \"C\", 'ab\\Z', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "literal director",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a.b",
+      "pattern": "***=.",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a.b' COLLATE \"C\", '***=.', ''), 'spans', ARRAY[regexp_instr('a.b' COLLATE \"C\", '***=.', 1, 1, 0, '', 0), regexp_instr('a.b' COLLATE \"C\", '***=.', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "ARE director with an embedded option",
+      "kind": "match",
+      "collation": "C",
+      "subject": "AbC",
+      "pattern": "***:(?i)abc",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('AbC' COLLATE \"C\", '***:(?i)abc', ''), 'spans', ARRAY[regexp_instr('AbC' COLLATE \"C\", '***:(?i)abc', 1, 1, 0, '', 0), regexp_instr('AbC' COLLATE \"C\", '***:(?i)abc', 1, 1, 1, '', 0), regexp_instr('AbC' COLLATE \"C\", '***:(?i)abc', 1, 1, 0, '', 1), regexp_instr('AbC' COLLATE \"C\", '***:(?i)abc', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "embedded case-insensitive option",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ABC",
+      "pattern": "(?i)b",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ABC' COLLATE \"C\", '(?i)b', ''), 'spans', ARRAY[regexp_instr('ABC' COLLATE \"C\", '(?i)b', 1, 1, 0, '', 0), regexp_instr('ABC' COLLATE \"C\", '(?i)b', 1, 1, 1, '', 0), regexp_instr('ABC' COLLATE \"C\", '(?i)b', 1, 1, 0, '', 1), regexp_instr('ABC' COLLATE \"C\", '(?i)b', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "embedded expanded option",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abc",
+      "pattern": "(?x) a b c",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abc' COLLATE \"C\", '(?x) a b c', ''), 'spans', ARRAY[regexp_instr('abc' COLLATE \"C\", '(?x) a b c', 1, 1, 0, '', 0), regexp_instr('abc' COLLATE \"C\", '(?x) a b c', 1, 1, 1, '', 0), regexp_instr('abc' COLLATE \"C\", '(?x) a b c', 1, 1, 0, '', 1), regexp_instr('abc' COLLATE \"C\", '(?x) a b c', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "embedded quoted option",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a.b",
+      "pattern": "(?q).",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a.b' COLLATE \"C\", '(?q).', ''), 'spans', ARRAY[regexp_instr('a.b' COLLATE \"C\", '(?q).', 1, 1, 0, '', 0), regexp_instr('a.b' COLLATE \"C\", '(?q).', 1, 1, 1, '', 0), regexp_instr('a.b' COLLATE \"C\", '(?q).', 1, 1, 0, '', 1), regexp_instr('a.b' COLLATE \"C\", '(?q).', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "embedded newline option",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a\nb",
+      "pattern": "(?n)^b",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\nb' COLLATE \"C\", '(?n)^b', ''), 'spans', ARRAY[regexp_instr('a\nb' COLLATE \"C\", '(?n)^b', 1, 1, 0, '', 0), regexp_instr('a\nb' COLLATE \"C\", '(?n)^b', 1, 1, 1, '', 0), regexp_instr('a\nb' COLLATE \"C\", '(?n)^b', 1, 1, 0, '', 1), regexp_instr('a\nb' COLLATE \"C\", '(?n)^b', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "invalid embedded option",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a",
+      "pattern": "(?z)a",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a' COLLATE \"C\", '(?z)a', ''), 'spans', ARRAY[regexp_instr('a' COLLATE \"C\", '(?z)a', 1, 1, 0, '', 0), regexp_instr('a' COLLATE \"C\", '(?z)a', 1, 1, 1, '', 0), regexp_instr('a' COLLATE \"C\", '(?z)a', 1, 1, 0, '', 1), regexp_instr('a' COLLATE \"C\", '(?z)a', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "director under basic flags",
+      "kind": "match",
+      "collation": "C",
+      "subject": "aa",
+      "pattern": "***:a+",
+      "flags": "b",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('aa' COLLATE \"C\", '***:a+', 'b'), 'spans', ARRAY[regexp_instr('aa' COLLATE \"C\", '***:a+', 1, 1, 0, 'b', 0), regexp_instr('aa' COLLATE \"C\", '***:a+', 1, 1, 1, 'b', 0)])::text"
+    },
+    {
+      "name": "expanded flag ignores white space",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abc",
+      "pattern": "a b c",
+      "flags": "x",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abc' COLLATE \"C\", 'a b c', 'x'), 'spans', ARRAY[regexp_instr('abc' COLLATE \"C\", 'a b c', 1, 1, 0, 'x', 0), regexp_instr('abc' COLLATE \"C\", 'a b c', 1, 1, 1, 'x', 0)])::text"
+    },
+    {
+      "name": "expanded flag comments",
+      "kind": "match",
+      "collation": "C",
+      "subject": "abc",
+      "pattern": "a b # comment\nc",
+      "flags": "x",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('abc' COLLATE \"C\", 'a b # comment\nc', 'x'), 'spans', ARRAY[regexp_instr('abc' COLLATE \"C\", 'a b # comment\nc', 1, 1, 0, 'x', 0), regexp_instr('abc' COLLATE \"C\", 'a b # comment\nc', 1, 1, 1, 'x', 0)])::text"
+    },
+    {
+      "name": "tight flag keeps white space",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a b",
+      "pattern": "a b",
+      "flags": "xt",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a b' COLLATE \"C\", 'a b', 'xt'), 'spans', ARRAY[regexp_instr('a b' COLLATE \"C\", 'a b', 1, 1, 0, 'xt', 0), regexp_instr('a b' COLLATE \"C\", 'a b', 1, 1, 1, 'xt', 0)])::text"
+    },
+    {
+      "name": "quote flag",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a.b",
+      "pattern": ".",
+      "flags": "q",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a.b' COLLATE \"C\", '.', 'q'), 'spans', ARRAY[regexp_instr('a.b' COLLATE \"C\", '.', 1, 1, 0, 'q', 0), regexp_instr('a.b' COLLATE \"C\", '.', 1, 1, 1, 'q', 0)])::text"
+    },
+    {
+      "name": "quote flag rejects expanded syntax",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a.b",
+      "pattern": ".",
+      "flags": "qx",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a.b' COLLATE \"C\", '.', 'qx'), 'spans', ARRAY[regexp_instr('a.b' COLLATE \"C\", '.', 1, 1, 0, 'qx', 0), regexp_instr('a.b' COLLATE \"C\", '.', 1, 1, 1, 'qx', 0)])::text"
+    },
+    {
+      "name": "extended flag",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "a|ab",
+      "flags": "e",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", 'a|ab', 'e'), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", 'a|ab', 1, 1, 0, 'e', 0), regexp_instr('ab' COLLATE \"C\", 'a|ab', 1, 1, 1, 'e', 0)])::text"
+    },
+    {
+      "name": "extended flag escape",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a1d",
+      "pattern": "\\d",
+      "flags": "e",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a1d' COLLATE \"C\", '\\d', 'e'), 'spans', ARRAY[regexp_instr('a1d' COLLATE \"C\", '\\d', 1, 1, 0, 'e', 0), regexp_instr('a1d' COLLATE \"C\", '\\d', 1, 1, 1, 'e', 0)])::text"
+    },
+    {
+      "name": "basic flag grouping",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "a\\(b\\)",
+      "flags": "b",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", 'a\\(b\\)', 'b'), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", 'a\\(b\\)', 1, 1, 0, 'b', 0), regexp_instr('ab' COLLATE \"C\", 'a\\(b\\)', 1, 1, 1, 'b', 0), regexp_instr('ab' COLLATE \"C\", 'a\\(b\\)', 1, 1, 0, 'b', 1), regexp_instr('ab' COLLATE \"C\", 'a\\(b\\)', 1, 1, 1, 'b', 1)])::text"
+    },
+    {
+      "name": "basic flag literal plus",
+      "kind": "match",
+      "collation": "C",
+      "subject": "aa+",
+      "pattern": "a+",
+      "flags": "b",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('aa+' COLLATE \"C\", 'a+', 'b'), 'spans', ARRAY[regexp_instr('aa+' COLLATE \"C\", 'a+', 1, 1, 0, 'b', 0), regexp_instr('aa+' COLLATE \"C\", 'a+', 1, 1, 1, 'b', 0)])::text"
+    },
+    {
+      "name": "newline-sensitive dot",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a\nb",
+      "pattern": "a.b",
+      "flags": "n",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\nb' COLLATE \"C\", 'a.b', 'n'), 'spans', ARRAY[regexp_instr('a\nb' COLLATE \"C\", 'a.b', 1, 1, 0, 'n', 0), regexp_instr('a\nb' COLLATE \"C\", 'a.b', 1, 1, 1, 'n', 0)])::text"
+    },
+    {
+      "name": "newline-sensitive anchors",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a\nb",
+      "pattern": "^b",
+      "flags": "n",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\nb' COLLATE \"C\", '^b', 'n'), 'spans', ARRAY[regexp_instr('a\nb' COLLATE \"C\", '^b', 1, 1, 0, 'n', 0), regexp_instr('a\nb' COLLATE \"C\", '^b', 1, 1, 1, 'n', 0)])::text"
+    },
+    {
+      "name": "partial newline-sensitive anchors",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a\nb",
+      "pattern": "^b",
+      "flags": "p",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\nb' COLLATE \"C\", '^b', 'p'), 'spans', ARRAY[regexp_instr('a\nb' COLLATE \"C\", '^b', 1, 1, 0, 'p', 0), regexp_instr('a\nb' COLLATE \"C\", '^b', 1, 1, 1, 'p', 0)])::text"
+    },
+    {
+      "name": "partial newline-sensitive dot",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a\nb",
+      "pattern": "a.b",
+      "flags": "p",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\nb' COLLATE \"C\", 'a.b', 'p'), 'spans', ARRAY[regexp_instr('a\nb' COLLATE \"C\", 'a.b', 1, 1, 0, 'p', 0), regexp_instr('a\nb' COLLATE \"C\", 'a.b', 1, 1, 1, 'p', 0)])::text"
+    },
+    {
+      "name": "inverse partial newline-sensitive anchors",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a\nb",
+      "pattern": "^b",
+      "flags": "w",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\nb' COLLATE \"C\", '^b', 'w'), 'spans', ARRAY[regexp_instr('a\nb' COLLATE \"C\", '^b', 1, 1, 0, 'w', 0), regexp_instr('a\nb' COLLATE \"C\", '^b', 1, 1, 1, 'w', 0)])::text"
+    },
+    {
+      "name": "inverse partial newline-sensitive dot",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a\nb",
+      "pattern": "a.b",
+      "flags": "w",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\nb' COLLATE \"C\", 'a.b', 'w'), 'spans', ARRAY[regexp_instr('a\nb' COLLATE \"C\", 'a.b', 1, 1, 0, 'w', 0), regexp_instr('a\nb' COLLATE \"C\", 'a.b', 1, 1, 1, 'w', 0)])::text"
+    },
+    {
+      "name": "newline-sensitive negated bracket",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a\nb",
+      "pattern": "a[^x]b",
+      "flags": "n",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\nb' COLLATE \"C\", 'a[^x]b', 'n'), 'spans', ARRAY[regexp_instr('a\nb' COLLATE \"C\", 'a[^x]b', 1, 1, 0, 'n', 0), regexp_instr('a\nb' COLLATE \"C\", 'a[^x]b', 1, 1, 1, 'n', 0)])::text"
+    },
+    {
+      "name": "later flag overrides case-insensitivity",
+      "kind": "match",
+      "collation": "C",
+      "subject": "A",
+      "pattern": "a",
+      "flags": "ic",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('A' COLLATE \"C\", 'a', 'ic'), 'spans', ARRAY[regexp_instr('A' COLLATE \"C\", 'a', 1, 1, 0, 'ic', 0), regexp_instr('A' COLLATE \"C\", 'a', 1, 1, 1, 'ic', 0)])::text"
+    },
+    {
+      "name": "named collating element",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a-b",
+      "pattern": "[[.hyphen.]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a-b' COLLATE \"C\", '[[.hyphen.]]', ''), 'spans', ARRAY[regexp_instr('a-b' COLLATE \"C\", '[[.hyphen.]]', 1, 1, 0, '', 0), regexp_instr('a-b' COLLATE \"C\", '[[.hyphen.]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "equivalence class",
+      "kind": "match",
+      "collation": "C",
+      "subject": "xa",
+      "pattern": "[[=a=]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('xa' COLLATE \"C\", '[[=a=]]', ''), 'spans', ARRAY[regexp_instr('xa' COLLATE \"C\", '[[=a=]]', 1, 1, 0, '', 0), regexp_instr('xa' COLLATE \"C\", '[[=a=]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "invalid character class",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a",
+      "pattern": "[[:foo:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a' COLLATE \"C\", '[[:foo:]]', ''), 'spans', ARRAY[regexp_instr('a' COLLATE \"C\", '[[:foo:]]', 1, 1, 0, '', 0), regexp_instr('a' COLLATE \"C\", '[[:foo:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "invalid collating element",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a",
+      "pattern": "[[.foo.]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a' COLLATE \"C\", '[[.foo.]]', ''), 'spans', ARRAY[regexp_instr('a' COLLATE \"C\", '[[.foo.]]', 1, 1, 0, '', 0), regexp_instr('a' COLLATE \"C\", '[[.foo.]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "invalid character range",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a",
+      "pattern": "[z-a]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a' COLLATE \"C\", '[z-a]', ''), 'spans', ARRAY[regexp_instr('a' COLLATE \"C\", '[z-a]', 1, 1, 0, '', 0), regexp_instr('a' COLLATE \"C\", '[z-a]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "class in a range",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a",
+      "pattern": "[[:alpha:]-z]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a' COLLATE \"C\", '[[:alpha:]-z]', ''), 'spans', ARRAY[regexp_instr('a' COLLATE \"C\", '[[:alpha:]-z]', 1, 1, 0, '', 0), regexp_instr('a' COLLATE \"C\", '[[:alpha:]-z]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "unbalanced opening parenthesis",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "(",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", '(', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", '(', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", '(', 1, 1, 1, '', 0), regexp_instr('ab' COLLATE \"C\", '(', 1, 1, 0, '', 1), regexp_instr('ab' COLLATE \"C\", '(', 1, 1, 1, '', 1)])::text"
+    },
+    {
+      "name": "unbalanced closing parenthesis",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": ")",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", ')', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", ')', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", ')', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "reversed repetition bounds",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "a{2,1}",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", 'a{2,1}', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", 'a{2,1}', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", 'a{2,1}', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "unbalanced bracket",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "[a",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", '[a', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", '[a', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", '[a', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "trailing backslash",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "\\",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", '\\', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", '\\', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", '\\', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "quantifier without operand",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "*",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", '*', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", '*', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", '*', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "repeated quantifier",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "a**",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", 'a**', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", 'a**', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", 'a**', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "possessive quantifier",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "a++",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", 'a++', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", 'a++', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", 'a++', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "unbalanced brace",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "a{1",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", 'a{1', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", 'a{1', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", 'a{1', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "repetition count above the limit",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "a{256}",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", 'a{256}', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", 'a{256}', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", 'a{256}', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "unknown escape",
+      "kind": "match",
+      "collation": "C",
+      "subject": "ab",
+      "pattern": "\\k",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('ab' COLLATE \"C\", '\\k', ''), 'spans', ARRAY[regexp_instr('ab' COLLATE \"C\", '\\k', 1, 1, 0, '', 0), regexp_instr('ab' COLLATE \"C\", '\\k', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "expression too complex",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a",
+      "pattern": "((((a{1,100}){1,100}){1,100}){1,100})",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a' COLLATE \"C\", '((((a{1,100}){1,100}){1,100}){1,100})', ''), 'spans', ARRAY[regexp_instr('a' COLLATE \"C\", '((((a{1,100}){1,100}){1,100}){1,100})', 1, 1, 0, '', 0), regexp_instr('a' COLLATE \"C\", '((((a{1,100}){1,100}){1,100}){1,100})', 1, 1, 1, '', 0), regexp_instr('a' COLLATE \"C\", '((((a{1,100}){1,100}){1,100}){1,100})', 1, 1, 0, '', 1), regexp_instr('a' COLLATE \"C\", '((((a{1,100}){1,100}){1,100}){1,100})', 1, 1, 1, '', 1), regexp_instr('a' COLLATE \"C\", '((((a{1,100}){1,100}){1,100}){1,100})', 1, 1, 0, '', 2), regexp_instr('a' COLLATE \"C\", '((((a{1,100}){1,100}){1,100}){1,100})', 1, 1, 1, '', 2), regexp_instr('a' COLLATE \"C\", '((((a{1,100}){1,100}){1,100}){1,100})', 1, 1, 0, '', 3), regexp_instr('a' COLLATE \"C\", '((((a{1,100}){1,100}){1,100}){1,100})', 1, 1, 1, '', 3), regexp_instr('a' COLLATE \"C\", '((((a{1,100}){1,100}){1,100}){1,100})', 1, 1, 0, '', 4), regexp_instr('a' COLLATE \"C\", '((((a{1,100}){1,100}){1,100}){1,100})', 1, 1, 1, '', 4)])::text"
+    },
+    {
+      "name": "alpha and digit classes under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u00e91",
+      "pattern": "[[:alpha:]][[:digit:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e91' COLLATE \"C\", '[[:alpha:]][[:digit:]]', ''), 'spans', ARRAY[regexp_instr('\u00e91' COLLATE \"C\", '[[:alpha:]][[:digit:]]', 1, 1, 0, '', 0), regexp_instr('\u00e91' COLLATE \"C\", '[[:alpha:]][[:digit:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "non-ASCII decimal digit under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "x\u0663",
+      "pattern": "[[:digit:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('x\u0663' COLLATE \"C\", '[[:digit:]]', ''), 'spans', ARRAY[regexp_instr('x\u0663' COLLATE \"C\", '[[:digit:]]', 1, 1, 0, '', 0), regexp_instr('x\u0663' COLLATE \"C\", '[[:digit:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "digit escape under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "x\u0663",
+      "pattern": "\\d",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('x\u0663' COLLATE \"C\", '\\d', ''), 'spans', ARRAY[regexp_instr('x\u0663' COLLATE \"C\", '\\d', 1, 1, 0, '', 0), regexp_instr('x\u0663' COLLATE \"C\", '\\d', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "word escape under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "-\u00e9",
+      "pattern": "\\w",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('-\u00e9' COLLATE \"C\", '\\w', ''), 'spans', ARRAY[regexp_instr('-\u00e9' COLLATE \"C\", '\\w', 1, 1, 0, '', 0), regexp_instr('-\u00e9' COLLATE \"C\", '\\w', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "uppercase class under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a\u00c9",
+      "pattern": "[[:upper:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00c9' COLLATE \"C\", '[[:upper:]]', ''), 'spans', ARRAY[regexp_instr('a\u00c9' COLLATE \"C\", '[[:upper:]]', 1, 1, 0, '', 0), regexp_instr('a\u00c9' COLLATE \"C\", '[[:upper:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "punctuation class with a currency sign under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a$",
+      "pattern": "[[:punct:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a$' COLLATE \"C\", '[[:punct:]]', ''), 'spans', ARRAY[regexp_instr('a$' COLLATE \"C\", '[[:punct:]]', 1, 1, 0, '', 0), regexp_instr('a$' COLLATE \"C\", '[[:punct:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "space class with a no-break space under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a\u00a0",
+      "pattern": "[[:space:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00a0' COLLATE \"C\", '[[:space:]]', ''), 'spans', ARRAY[regexp_instr('a\u00a0' COLLATE \"C\", '[[:space:]]', 1, 1, 0, '', 0), regexp_instr('a\u00a0' COLLATE \"C\", '[[:space:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "letter number under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "-\u216b",
+      "pattern": "[[:alpha:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('-\u216b' COLLATE \"C\", '[[:alpha:]]', ''), 'spans', ARRAY[regexp_instr('-\u216b' COLLATE \"C\", '[[:alpha:]]', 1, 1, 0, '', 0), regexp_instr('-\u216b' COLLATE \"C\", '[[:alpha:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "end of word before a non-ASCII letter under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "a\u00e9",
+      "pattern": "a\\M",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00e9' COLLATE \"C\", 'a\\M', ''), 'spans', ARRAY[regexp_instr('a\u00e9' COLLATE \"C\", 'a\\M', 1, 1, 0, '', 0), regexp_instr('a\u00e9' COLLATE \"C\", 'a\\M', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "bracket range of non-ASCII letters under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u00c4\u00e9",
+      "pattern": "[\u00e0-\u00ff]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4\u00e9' COLLATE \"C\", '[\u00e0-\u00ff]', ''), 'spans', ARRAY[regexp_instr('\u00c4\u00e9' COLLATE \"C\", '[\u00e0-\u00ff]', 1, 1, 0, '', 0), regexp_instr('\u00c4\u00e9' COLLATE \"C\", '[\u00e0-\u00ff]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "complemented class under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u00e9a",
+      "pattern": "[^[:alpha:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e9a' COLLATE \"C\", '[^[:alpha:]]', ''), 'spans', ARRAY[regexp_instr('\u00e9a' COLLATE \"C\", '[^[:alpha:]]', 1, 1, 0, '', 0), regexp_instr('\u00e9a' COLLATE \"C\", '[^[:alpha:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "case-insensitive non-ASCII letter under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u00c9",
+      "pattern": "\u00e9",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c9' COLLATE \"C\", '\u00e9', 'i'), 'spans', ARRAY[regexp_instr('\u00c9' COLLATE \"C\", '\u00e9', 1, 1, 0, 'i', 0), regexp_instr('\u00c9' COLLATE \"C\", '\u00e9', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "titlecase digraph does not fold to itself under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u01c5",
+      "pattern": "\u01c5",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u01c5' COLLATE \"C\", '\u01c5', 'i'), 'spans', ARRAY[regexp_instr('\u01c5' COLLATE \"C\", '\u01c5', 1, 1, 0, 'i', 0), regexp_instr('\u01c5' COLLATE \"C\", '\u01c5', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "titlecase digraph folds to its lowercase under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u01c6",
+      "pattern": "\u01c5",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u01c6' COLLATE \"C\", '\u01c5', 'i'), 'spans', ARRAY[regexp_instr('\u01c6' COLLATE \"C\", '\u01c5', 1, 1, 0, 'i', 0), regexp_instr('\u01c6' COLLATE \"C\", '\u01c5', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "sharp s pattern under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u1e9e",
+      "pattern": "\u00df",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u1e9e' COLLATE \"C\", '\u00df', 'i'), 'spans', ARRAY[regexp_instr('\u1e9e' COLLATE \"C\", '\u00df', 1, 1, 0, 'i', 0), regexp_instr('\u1e9e' COLLATE \"C\", '\u00df', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "capital sharp s pattern under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u00df",
+      "pattern": "\u1e9e",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00df' COLLATE \"C\", '\u1e9e', 'i'), 'spans', ARRAY[regexp_instr('\u00df' COLLATE \"C\", '\u1e9e', 1, 1, 0, 'i', 0), regexp_instr('\u00df' COLLATE \"C\", '\u1e9e', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "long s pattern and small s under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "s",
+      "pattern": "\u017f",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('s' COLLATE \"C\", '\u017f', 'i'), 'spans', ARRAY[regexp_instr('s' COLLATE \"C\", '\u017f', 1, 1, 0, 'i', 0), regexp_instr('s' COLLATE \"C\", '\u017f', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "long s pattern and capital S under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "S",
+      "pattern": "\u017f",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('S' COLLATE \"C\", '\u017f', 'i'), 'spans', ARRAY[regexp_instr('S' COLLATE \"C\", '\u017f', 1, 1, 0, 'i', 0), regexp_instr('S' COLLATE \"C\", '\u017f', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Kelvin sign pattern and small k under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "k",
+      "pattern": "\u212a",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('k' COLLATE \"C\", '\u212a', 'i'), 'spans', ARRAY[regexp_instr('k' COLLATE \"C\", '\u212a', 1, 1, 0, 'i', 0), regexp_instr('k' COLLATE \"C\", '\u212a', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Kelvin sign pattern and capital K under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "K",
+      "pattern": "\u212a",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('K' COLLATE \"C\", '\u212a', 'i'), 'spans', ARRAY[regexp_instr('K' COLLATE \"C\", '\u212a', 1, 1, 0, 'i', 0), regexp_instr('K' COLLATE \"C\", '\u212a', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "dotted capital I pattern under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "i",
+      "pattern": "\u0130",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('i' COLLATE \"C\", '\u0130', 'i'), 'spans', ARRAY[regexp_instr('i' COLLATE \"C\", '\u0130', 1, 1, 0, 'i', 0), regexp_instr('i' COLLATE \"C\", '\u0130', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "final sigma pattern under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u03a3\u03c3",
+      "pattern": "\u03c2",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u03a3\u03c3' COLLATE \"C\", '\u03c2', 'i'), 'spans', ARRAY[regexp_instr('\u03a3\u03c3' COLLATE \"C\", '\u03c2', 1, 1, 0, 'i', 0), regexp_instr('\u03a3\u03c3' COLLATE \"C\", '\u03c2', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive range under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u00c4",
+      "pattern": "[\u00e0-\u00e5]",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4' COLLATE \"C\", '[\u00e0-\u00e5]', 'i'), 'spans', ARRAY[regexp_instr('\u00c4' COLLATE \"C\", '[\u00e0-\u00e5]', 1, 1, 0, 'i', 0), regexp_instr('\u00c4' COLLATE \"C\", '[\u00e0-\u00e5]', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive lowercase class under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u00c4",
+      "pattern": "[[:lower:]]",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4' COLLATE \"C\", '[[:lower:]]', 'i'), 'spans', ARRAY[regexp_instr('\u00c4' COLLATE \"C\", '[[:lower:]]', 1, 1, 0, 'i', 0), regexp_instr('\u00c4' COLLATE \"C\", '[[:lower:]]', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive back-reference under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u00e9\u00c9",
+      "pattern": "(\u00e9)\\1",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e9\u00c9' COLLATE \"C\", '(\u00e9)\\1', 'i'), 'spans', ARRAY[regexp_instr('\u00e9\u00c9' COLLATE \"C\", '(\u00e9)\\1', 1, 1, 0, 'i', 0), regexp_instr('\u00e9\u00c9' COLLATE \"C\", '(\u00e9)\\1', 1, 1, 1, 'i', 0), regexp_instr('\u00e9\u00c9' COLLATE \"C\", '(\u00e9)\\1', 1, 1, 0, 'i', 1), regexp_instr('\u00e9\u00c9' COLLATE \"C\", '(\u00e9)\\1', 1, 1, 1, 'i', 1)])::text"
+    },
+    {
+      "name": "supplementary plane case mapping under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\ud801\udc28",
+      "pattern": "\ud801\udc00",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\ud801\udc28' COLLATE \"C\", '\ud801\udc00', 'i'), 'spans', ARRAY[regexp_instr('\ud801\udc28' COLLATE \"C\", '\ud801\udc00', 1, 1, 0, 'i', 0), regexp_instr('\ud801\udc28' COLLATE \"C\", '\ud801\udc00', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Cherokee case mapping under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\uab70",
+      "pattern": "\u13a0",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\uab70' COLLATE \"C\", '\u13a0', 'i'), 'spans', ARRAY[regexp_instr('\uab70' COLLATE \"C\", '\u13a0', 1, 1, 0, 'i', 0), regexp_instr('\uab70' COLLATE \"C\", '\u13a0', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Georgian Mtavruli case mapping under C",
+      "kind": "match",
+      "collation": "C",
+      "subject": "\u10d0",
+      "pattern": "\u1c90",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u10d0' COLLATE \"C\", '\u1c90', 'i'), 'spans', ARRAY[regexp_instr('\u10d0' COLLATE \"C\", '\u1c90', 1, 1, 0, 'i', 0), regexp_instr('\u10d0' COLLATE \"C\", '\u1c90', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "alpha and digit classes under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u00e91",
+      "pattern": "[[:alpha:]][[:digit:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e91' COLLATE \"pg_c_utf8\", '[[:alpha:]][[:digit:]]', ''), 'spans', ARRAY[regexp_instr('\u00e91' COLLATE \"pg_c_utf8\", '[[:alpha:]][[:digit:]]', 1, 1, 0, '', 0), regexp_instr('\u00e91' COLLATE \"pg_c_utf8\", '[[:alpha:]][[:digit:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "non-ASCII decimal digit under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "x\u0663",
+      "pattern": "[[:digit:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('x\u0663' COLLATE \"pg_c_utf8\", '[[:digit:]]', ''), 'spans', ARRAY[regexp_instr('x\u0663' COLLATE \"pg_c_utf8\", '[[:digit:]]', 1, 1, 0, '', 0), regexp_instr('x\u0663' COLLATE \"pg_c_utf8\", '[[:digit:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "digit escape under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "x\u0663",
+      "pattern": "\\d",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('x\u0663' COLLATE \"pg_c_utf8\", '\\d', ''), 'spans', ARRAY[regexp_instr('x\u0663' COLLATE \"pg_c_utf8\", '\\d', 1, 1, 0, '', 0), regexp_instr('x\u0663' COLLATE \"pg_c_utf8\", '\\d', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "word escape under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "-\u00e9",
+      "pattern": "\\w",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('-\u00e9' COLLATE \"pg_c_utf8\", '\\w', ''), 'spans', ARRAY[regexp_instr('-\u00e9' COLLATE \"pg_c_utf8\", '\\w', 1, 1, 0, '', 0), regexp_instr('-\u00e9' COLLATE \"pg_c_utf8\", '\\w', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "uppercase class under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "a\u00c9",
+      "pattern": "[[:upper:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00c9' COLLATE \"pg_c_utf8\", '[[:upper:]]', ''), 'spans', ARRAY[regexp_instr('a\u00c9' COLLATE \"pg_c_utf8\", '[[:upper:]]', 1, 1, 0, '', 0), regexp_instr('a\u00c9' COLLATE \"pg_c_utf8\", '[[:upper:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "punctuation class with a currency sign under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "a$",
+      "pattern": "[[:punct:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a$' COLLATE \"pg_c_utf8\", '[[:punct:]]', ''), 'spans', ARRAY[regexp_instr('a$' COLLATE \"pg_c_utf8\", '[[:punct:]]', 1, 1, 0, '', 0), regexp_instr('a$' COLLATE \"pg_c_utf8\", '[[:punct:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "space class with a no-break space under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "a\u00a0",
+      "pattern": "[[:space:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00a0' COLLATE \"pg_c_utf8\", '[[:space:]]', ''), 'spans', ARRAY[regexp_instr('a\u00a0' COLLATE \"pg_c_utf8\", '[[:space:]]', 1, 1, 0, '', 0), regexp_instr('a\u00a0' COLLATE \"pg_c_utf8\", '[[:space:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "letter number under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "-\u216b",
+      "pattern": "[[:alpha:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('-\u216b' COLLATE \"pg_c_utf8\", '[[:alpha:]]', ''), 'spans', ARRAY[regexp_instr('-\u216b' COLLATE \"pg_c_utf8\", '[[:alpha:]]', 1, 1, 0, '', 0), regexp_instr('-\u216b' COLLATE \"pg_c_utf8\", '[[:alpha:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "end of word before a non-ASCII letter under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "a\u00e9",
+      "pattern": "a\\M",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00e9' COLLATE \"pg_c_utf8\", 'a\\M', ''), 'spans', ARRAY[regexp_instr('a\u00e9' COLLATE \"pg_c_utf8\", 'a\\M', 1, 1, 0, '', 0), regexp_instr('a\u00e9' COLLATE \"pg_c_utf8\", 'a\\M', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "bracket range of non-ASCII letters under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u00c4\u00e9",
+      "pattern": "[\u00e0-\u00ff]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4\u00e9' COLLATE \"pg_c_utf8\", '[\u00e0-\u00ff]', ''), 'spans', ARRAY[regexp_instr('\u00c4\u00e9' COLLATE \"pg_c_utf8\", '[\u00e0-\u00ff]', 1, 1, 0, '', 0), regexp_instr('\u00c4\u00e9' COLLATE \"pg_c_utf8\", '[\u00e0-\u00ff]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "complemented class under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u00e9a",
+      "pattern": "[^[:alpha:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e9a' COLLATE \"pg_c_utf8\", '[^[:alpha:]]', ''), 'spans', ARRAY[regexp_instr('\u00e9a' COLLATE \"pg_c_utf8\", '[^[:alpha:]]', 1, 1, 0, '', 0), regexp_instr('\u00e9a' COLLATE \"pg_c_utf8\", '[^[:alpha:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "case-insensitive non-ASCII letter under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u00c9",
+      "pattern": "\u00e9",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c9' COLLATE \"pg_c_utf8\", '\u00e9', 'i'), 'spans', ARRAY[regexp_instr('\u00c9' COLLATE \"pg_c_utf8\", '\u00e9', 1, 1, 0, 'i', 0), regexp_instr('\u00c9' COLLATE \"pg_c_utf8\", '\u00e9', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "titlecase digraph does not fold to itself under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u01c5",
+      "pattern": "\u01c5",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u01c5' COLLATE \"pg_c_utf8\", '\u01c5', 'i'), 'spans', ARRAY[regexp_instr('\u01c5' COLLATE \"pg_c_utf8\", '\u01c5', 1, 1, 0, 'i', 0), regexp_instr('\u01c5' COLLATE \"pg_c_utf8\", '\u01c5', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "titlecase digraph folds to its lowercase under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u01c6",
+      "pattern": "\u01c5",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u01c6' COLLATE \"pg_c_utf8\", '\u01c5', 'i'), 'spans', ARRAY[regexp_instr('\u01c6' COLLATE \"pg_c_utf8\", '\u01c5', 1, 1, 0, 'i', 0), regexp_instr('\u01c6' COLLATE \"pg_c_utf8\", '\u01c5', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "sharp s pattern under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u1e9e",
+      "pattern": "\u00df",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u1e9e' COLLATE \"pg_c_utf8\", '\u00df', 'i'), 'spans', ARRAY[regexp_instr('\u1e9e' COLLATE \"pg_c_utf8\", '\u00df', 1, 1, 0, 'i', 0), regexp_instr('\u1e9e' COLLATE \"pg_c_utf8\", '\u00df', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "capital sharp s pattern under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u00df",
+      "pattern": "\u1e9e",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00df' COLLATE \"pg_c_utf8\", '\u1e9e', 'i'), 'spans', ARRAY[regexp_instr('\u00df' COLLATE \"pg_c_utf8\", '\u1e9e', 1, 1, 0, 'i', 0), regexp_instr('\u00df' COLLATE \"pg_c_utf8\", '\u1e9e', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "long s pattern and small s under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "s",
+      "pattern": "\u017f",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('s' COLLATE \"pg_c_utf8\", '\u017f', 'i'), 'spans', ARRAY[regexp_instr('s' COLLATE \"pg_c_utf8\", '\u017f', 1, 1, 0, 'i', 0), regexp_instr('s' COLLATE \"pg_c_utf8\", '\u017f', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "long s pattern and capital S under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "S",
+      "pattern": "\u017f",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('S' COLLATE \"pg_c_utf8\", '\u017f', 'i'), 'spans', ARRAY[regexp_instr('S' COLLATE \"pg_c_utf8\", '\u017f', 1, 1, 0, 'i', 0), regexp_instr('S' COLLATE \"pg_c_utf8\", '\u017f', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Kelvin sign pattern and small k under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "k",
+      "pattern": "\u212a",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('k' COLLATE \"pg_c_utf8\", '\u212a', 'i'), 'spans', ARRAY[regexp_instr('k' COLLATE \"pg_c_utf8\", '\u212a', 1, 1, 0, 'i', 0), regexp_instr('k' COLLATE \"pg_c_utf8\", '\u212a', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Kelvin sign pattern and capital K under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "K",
+      "pattern": "\u212a",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('K' COLLATE \"pg_c_utf8\", '\u212a', 'i'), 'spans', ARRAY[regexp_instr('K' COLLATE \"pg_c_utf8\", '\u212a', 1, 1, 0, 'i', 0), regexp_instr('K' COLLATE \"pg_c_utf8\", '\u212a', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "dotted capital I pattern under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "i",
+      "pattern": "\u0130",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('i' COLLATE \"pg_c_utf8\", '\u0130', 'i'), 'spans', ARRAY[regexp_instr('i' COLLATE \"pg_c_utf8\", '\u0130', 1, 1, 0, 'i', 0), regexp_instr('i' COLLATE \"pg_c_utf8\", '\u0130', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "final sigma pattern under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u03a3\u03c3",
+      "pattern": "\u03c2",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u03a3\u03c3' COLLATE \"pg_c_utf8\", '\u03c2', 'i'), 'spans', ARRAY[regexp_instr('\u03a3\u03c3' COLLATE \"pg_c_utf8\", '\u03c2', 1, 1, 0, 'i', 0), regexp_instr('\u03a3\u03c3' COLLATE \"pg_c_utf8\", '\u03c2', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive range under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u00c4",
+      "pattern": "[\u00e0-\u00e5]",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4' COLLATE \"pg_c_utf8\", '[\u00e0-\u00e5]', 'i'), 'spans', ARRAY[regexp_instr('\u00c4' COLLATE \"pg_c_utf8\", '[\u00e0-\u00e5]', 1, 1, 0, 'i', 0), regexp_instr('\u00c4' COLLATE \"pg_c_utf8\", '[\u00e0-\u00e5]', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive lowercase class under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u00c4",
+      "pattern": "[[:lower:]]",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4' COLLATE \"pg_c_utf8\", '[[:lower:]]', 'i'), 'spans', ARRAY[regexp_instr('\u00c4' COLLATE \"pg_c_utf8\", '[[:lower:]]', 1, 1, 0, 'i', 0), regexp_instr('\u00c4' COLLATE \"pg_c_utf8\", '[[:lower:]]', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive back-reference under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u00e9\u00c9",
+      "pattern": "(\u00e9)\\1",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e9\u00c9' COLLATE \"pg_c_utf8\", '(\u00e9)\\1', 'i'), 'spans', ARRAY[regexp_instr('\u00e9\u00c9' COLLATE \"pg_c_utf8\", '(\u00e9)\\1', 1, 1, 0, 'i', 0), regexp_instr('\u00e9\u00c9' COLLATE \"pg_c_utf8\", '(\u00e9)\\1', 1, 1, 1, 'i', 0), regexp_instr('\u00e9\u00c9' COLLATE \"pg_c_utf8\", '(\u00e9)\\1', 1, 1, 0, 'i', 1), regexp_instr('\u00e9\u00c9' COLLATE \"pg_c_utf8\", '(\u00e9)\\1', 1, 1, 1, 'i', 1)])::text"
+    },
+    {
+      "name": "supplementary plane case mapping under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\ud801\udc28",
+      "pattern": "\ud801\udc00",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\ud801\udc28' COLLATE \"pg_c_utf8\", '\ud801\udc00', 'i'), 'spans', ARRAY[regexp_instr('\ud801\udc28' COLLATE \"pg_c_utf8\", '\ud801\udc00', 1, 1, 0, 'i', 0), regexp_instr('\ud801\udc28' COLLATE \"pg_c_utf8\", '\ud801\udc00', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Cherokee case mapping under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\uab70",
+      "pattern": "\u13a0",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\uab70' COLLATE \"pg_c_utf8\", '\u13a0', 'i'), 'spans', ARRAY[regexp_instr('\uab70' COLLATE \"pg_c_utf8\", '\u13a0', 1, 1, 0, 'i', 0), regexp_instr('\uab70' COLLATE \"pg_c_utf8\", '\u13a0', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Georgian Mtavruli case mapping under pg_c_utf8",
+      "kind": "match",
+      "collation": "pg_c_utf8",
+      "subject": "\u10d0",
+      "pattern": "\u1c90",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u10d0' COLLATE \"pg_c_utf8\", '\u1c90', 'i'), 'spans', ARRAY[regexp_instr('\u10d0' COLLATE \"pg_c_utf8\", '\u1c90', 1, 1, 0, 'i', 0), regexp_instr('\u10d0' COLLATE \"pg_c_utf8\", '\u1c90', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "alpha and digit classes under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u00e91",
+      "pattern": "[[:alpha:]][[:digit:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e91' COLLATE \"pg_unicode_fast\", '[[:alpha:]][[:digit:]]', ''), 'spans', ARRAY[regexp_instr('\u00e91' COLLATE \"pg_unicode_fast\", '[[:alpha:]][[:digit:]]', 1, 1, 0, '', 0), regexp_instr('\u00e91' COLLATE \"pg_unicode_fast\", '[[:alpha:]][[:digit:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "non-ASCII decimal digit under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "x\u0663",
+      "pattern": "[[:digit:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('x\u0663' COLLATE \"pg_unicode_fast\", '[[:digit:]]', ''), 'spans', ARRAY[regexp_instr('x\u0663' COLLATE \"pg_unicode_fast\", '[[:digit:]]', 1, 1, 0, '', 0), regexp_instr('x\u0663' COLLATE \"pg_unicode_fast\", '[[:digit:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "digit escape under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "x\u0663",
+      "pattern": "\\d",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('x\u0663' COLLATE \"pg_unicode_fast\", '\\d', ''), 'spans', ARRAY[regexp_instr('x\u0663' COLLATE \"pg_unicode_fast\", '\\d', 1, 1, 0, '', 0), regexp_instr('x\u0663' COLLATE \"pg_unicode_fast\", '\\d', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "word escape under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "-\u00e9",
+      "pattern": "\\w",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('-\u00e9' COLLATE \"pg_unicode_fast\", '\\w', ''), 'spans', ARRAY[regexp_instr('-\u00e9' COLLATE \"pg_unicode_fast\", '\\w', 1, 1, 0, '', 0), regexp_instr('-\u00e9' COLLATE \"pg_unicode_fast\", '\\w', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "uppercase class under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "a\u00c9",
+      "pattern": "[[:upper:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00c9' COLLATE \"pg_unicode_fast\", '[[:upper:]]', ''), 'spans', ARRAY[regexp_instr('a\u00c9' COLLATE \"pg_unicode_fast\", '[[:upper:]]', 1, 1, 0, '', 0), regexp_instr('a\u00c9' COLLATE \"pg_unicode_fast\", '[[:upper:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "punctuation class with a currency sign under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "a$",
+      "pattern": "[[:punct:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a$' COLLATE \"pg_unicode_fast\", '[[:punct:]]', ''), 'spans', ARRAY[regexp_instr('a$' COLLATE \"pg_unicode_fast\", '[[:punct:]]', 1, 1, 0, '', 0), regexp_instr('a$' COLLATE \"pg_unicode_fast\", '[[:punct:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "space class with a no-break space under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "a\u00a0",
+      "pattern": "[[:space:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00a0' COLLATE \"pg_unicode_fast\", '[[:space:]]', ''), 'spans', ARRAY[regexp_instr('a\u00a0' COLLATE \"pg_unicode_fast\", '[[:space:]]', 1, 1, 0, '', 0), regexp_instr('a\u00a0' COLLATE \"pg_unicode_fast\", '[[:space:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "letter number under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "-\u216b",
+      "pattern": "[[:alpha:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('-\u216b' COLLATE \"pg_unicode_fast\", '[[:alpha:]]', ''), 'spans', ARRAY[regexp_instr('-\u216b' COLLATE \"pg_unicode_fast\", '[[:alpha:]]', 1, 1, 0, '', 0), regexp_instr('-\u216b' COLLATE \"pg_unicode_fast\", '[[:alpha:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "end of word before a non-ASCII letter under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "a\u00e9",
+      "pattern": "a\\M",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00e9' COLLATE \"pg_unicode_fast\", 'a\\M', ''), 'spans', ARRAY[regexp_instr('a\u00e9' COLLATE \"pg_unicode_fast\", 'a\\M', 1, 1, 0, '', 0), regexp_instr('a\u00e9' COLLATE \"pg_unicode_fast\", 'a\\M', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "bracket range of non-ASCII letters under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u00c4\u00e9",
+      "pattern": "[\u00e0-\u00ff]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4\u00e9' COLLATE \"pg_unicode_fast\", '[\u00e0-\u00ff]', ''), 'spans', ARRAY[regexp_instr('\u00c4\u00e9' COLLATE \"pg_unicode_fast\", '[\u00e0-\u00ff]', 1, 1, 0, '', 0), regexp_instr('\u00c4\u00e9' COLLATE \"pg_unicode_fast\", '[\u00e0-\u00ff]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "complemented class under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u00e9a",
+      "pattern": "[^[:alpha:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e9a' COLLATE \"pg_unicode_fast\", '[^[:alpha:]]', ''), 'spans', ARRAY[regexp_instr('\u00e9a' COLLATE \"pg_unicode_fast\", '[^[:alpha:]]', 1, 1, 0, '', 0), regexp_instr('\u00e9a' COLLATE \"pg_unicode_fast\", '[^[:alpha:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "case-insensitive non-ASCII letter under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u00c9",
+      "pattern": "\u00e9",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c9' COLLATE \"pg_unicode_fast\", '\u00e9', 'i'), 'spans', ARRAY[regexp_instr('\u00c9' COLLATE \"pg_unicode_fast\", '\u00e9', 1, 1, 0, 'i', 0), regexp_instr('\u00c9' COLLATE \"pg_unicode_fast\", '\u00e9', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "titlecase digraph does not fold to itself under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u01c5",
+      "pattern": "\u01c5",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u01c5' COLLATE \"pg_unicode_fast\", '\u01c5', 'i'), 'spans', ARRAY[regexp_instr('\u01c5' COLLATE \"pg_unicode_fast\", '\u01c5', 1, 1, 0, 'i', 0), regexp_instr('\u01c5' COLLATE \"pg_unicode_fast\", '\u01c5', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "titlecase digraph folds to its lowercase under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u01c6",
+      "pattern": "\u01c5",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u01c6' COLLATE \"pg_unicode_fast\", '\u01c5', 'i'), 'spans', ARRAY[regexp_instr('\u01c6' COLLATE \"pg_unicode_fast\", '\u01c5', 1, 1, 0, 'i', 0), regexp_instr('\u01c6' COLLATE \"pg_unicode_fast\", '\u01c5', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "sharp s pattern under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u1e9e",
+      "pattern": "\u00df",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u1e9e' COLLATE \"pg_unicode_fast\", '\u00df', 'i'), 'spans', ARRAY[regexp_instr('\u1e9e' COLLATE \"pg_unicode_fast\", '\u00df', 1, 1, 0, 'i', 0), regexp_instr('\u1e9e' COLLATE \"pg_unicode_fast\", '\u00df', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "capital sharp s pattern under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u00df",
+      "pattern": "\u1e9e",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00df' COLLATE \"pg_unicode_fast\", '\u1e9e', 'i'), 'spans', ARRAY[regexp_instr('\u00df' COLLATE \"pg_unicode_fast\", '\u1e9e', 1, 1, 0, 'i', 0), regexp_instr('\u00df' COLLATE \"pg_unicode_fast\", '\u1e9e', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "long s pattern and small s under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "s",
+      "pattern": "\u017f",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('s' COLLATE \"pg_unicode_fast\", '\u017f', 'i'), 'spans', ARRAY[regexp_instr('s' COLLATE \"pg_unicode_fast\", '\u017f', 1, 1, 0, 'i', 0), regexp_instr('s' COLLATE \"pg_unicode_fast\", '\u017f', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "long s pattern and capital S under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "S",
+      "pattern": "\u017f",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('S' COLLATE \"pg_unicode_fast\", '\u017f', 'i'), 'spans', ARRAY[regexp_instr('S' COLLATE \"pg_unicode_fast\", '\u017f', 1, 1, 0, 'i', 0), regexp_instr('S' COLLATE \"pg_unicode_fast\", '\u017f', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Kelvin sign pattern and small k under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "k",
+      "pattern": "\u212a",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('k' COLLATE \"pg_unicode_fast\", '\u212a', 'i'), 'spans', ARRAY[regexp_instr('k' COLLATE \"pg_unicode_fast\", '\u212a', 1, 1, 0, 'i', 0), regexp_instr('k' COLLATE \"pg_unicode_fast\", '\u212a', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Kelvin sign pattern and capital K under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "K",
+      "pattern": "\u212a",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('K' COLLATE \"pg_unicode_fast\", '\u212a', 'i'), 'spans', ARRAY[regexp_instr('K' COLLATE \"pg_unicode_fast\", '\u212a', 1, 1, 0, 'i', 0), regexp_instr('K' COLLATE \"pg_unicode_fast\", '\u212a', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "dotted capital I pattern under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "i",
+      "pattern": "\u0130",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('i' COLLATE \"pg_unicode_fast\", '\u0130', 'i'), 'spans', ARRAY[regexp_instr('i' COLLATE \"pg_unicode_fast\", '\u0130', 1, 1, 0, 'i', 0), regexp_instr('i' COLLATE \"pg_unicode_fast\", '\u0130', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "final sigma pattern under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u03a3\u03c3",
+      "pattern": "\u03c2",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u03a3\u03c3' COLLATE \"pg_unicode_fast\", '\u03c2', 'i'), 'spans', ARRAY[regexp_instr('\u03a3\u03c3' COLLATE \"pg_unicode_fast\", '\u03c2', 1, 1, 0, 'i', 0), regexp_instr('\u03a3\u03c3' COLLATE \"pg_unicode_fast\", '\u03c2', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive range under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u00c4",
+      "pattern": "[\u00e0-\u00e5]",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4' COLLATE \"pg_unicode_fast\", '[\u00e0-\u00e5]', 'i'), 'spans', ARRAY[regexp_instr('\u00c4' COLLATE \"pg_unicode_fast\", '[\u00e0-\u00e5]', 1, 1, 0, 'i', 0), regexp_instr('\u00c4' COLLATE \"pg_unicode_fast\", '[\u00e0-\u00e5]', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive lowercase class under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u00c4",
+      "pattern": "[[:lower:]]",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4' COLLATE \"pg_unicode_fast\", '[[:lower:]]', 'i'), 'spans', ARRAY[regexp_instr('\u00c4' COLLATE \"pg_unicode_fast\", '[[:lower:]]', 1, 1, 0, 'i', 0), regexp_instr('\u00c4' COLLATE \"pg_unicode_fast\", '[[:lower:]]', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive back-reference under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u00e9\u00c9",
+      "pattern": "(\u00e9)\\1",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e9\u00c9' COLLATE \"pg_unicode_fast\", '(\u00e9)\\1', 'i'), 'spans', ARRAY[regexp_instr('\u00e9\u00c9' COLLATE \"pg_unicode_fast\", '(\u00e9)\\1', 1, 1, 0, 'i', 0), regexp_instr('\u00e9\u00c9' COLLATE \"pg_unicode_fast\", '(\u00e9)\\1', 1, 1, 1, 'i', 0), regexp_instr('\u00e9\u00c9' COLLATE \"pg_unicode_fast\", '(\u00e9)\\1', 1, 1, 0, 'i', 1), regexp_instr('\u00e9\u00c9' COLLATE \"pg_unicode_fast\", '(\u00e9)\\1', 1, 1, 1, 'i', 1)])::text"
+    },
+    {
+      "name": "supplementary plane case mapping under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\ud801\udc28",
+      "pattern": "\ud801\udc00",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\ud801\udc28' COLLATE \"pg_unicode_fast\", '\ud801\udc00', 'i'), 'spans', ARRAY[regexp_instr('\ud801\udc28' COLLATE \"pg_unicode_fast\", '\ud801\udc00', 1, 1, 0, 'i', 0), regexp_instr('\ud801\udc28' COLLATE \"pg_unicode_fast\", '\ud801\udc00', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Cherokee case mapping under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\uab70",
+      "pattern": "\u13a0",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\uab70' COLLATE \"pg_unicode_fast\", '\u13a0', 'i'), 'spans', ARRAY[regexp_instr('\uab70' COLLATE \"pg_unicode_fast\", '\u13a0', 1, 1, 0, 'i', 0), regexp_instr('\uab70' COLLATE \"pg_unicode_fast\", '\u13a0', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Georgian Mtavruli case mapping under pg_unicode_fast",
+      "kind": "match",
+      "collation": "pg_unicode_fast",
+      "subject": "\u10d0",
+      "pattern": "\u1c90",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u10d0' COLLATE \"pg_unicode_fast\", '\u1c90', 'i'), 'spans', ARRAY[regexp_instr('\u10d0' COLLATE \"pg_unicode_fast\", '\u1c90', 1, 1, 0, 'i', 0), regexp_instr('\u10d0' COLLATE \"pg_unicode_fast\", '\u1c90', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "alpha and digit classes under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u00e91",
+      "pattern": "[[:alpha:]][[:digit:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e91' COLLATE \"unicode\", '[[:alpha:]][[:digit:]]', ''), 'spans', ARRAY[regexp_instr('\u00e91' COLLATE \"unicode\", '[[:alpha:]][[:digit:]]', 1, 1, 0, '', 0), regexp_instr('\u00e91' COLLATE \"unicode\", '[[:alpha:]][[:digit:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "non-ASCII decimal digit under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "x\u0663",
+      "pattern": "[[:digit:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('x\u0663' COLLATE \"unicode\", '[[:digit:]]', ''), 'spans', ARRAY[regexp_instr('x\u0663' COLLATE \"unicode\", '[[:digit:]]', 1, 1, 0, '', 0), regexp_instr('x\u0663' COLLATE \"unicode\", '[[:digit:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "digit escape under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "x\u0663",
+      "pattern": "\\d",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('x\u0663' COLLATE \"unicode\", '\\d', ''), 'spans', ARRAY[regexp_instr('x\u0663' COLLATE \"unicode\", '\\d', 1, 1, 0, '', 0), regexp_instr('x\u0663' COLLATE \"unicode\", '\\d', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "word escape under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "-\u00e9",
+      "pattern": "\\w",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('-\u00e9' COLLATE \"unicode\", '\\w', ''), 'spans', ARRAY[regexp_instr('-\u00e9' COLLATE \"unicode\", '\\w', 1, 1, 0, '', 0), regexp_instr('-\u00e9' COLLATE \"unicode\", '\\w', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "uppercase class under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "a\u00c9",
+      "pattern": "[[:upper:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00c9' COLLATE \"unicode\", '[[:upper:]]', ''), 'spans', ARRAY[regexp_instr('a\u00c9' COLLATE \"unicode\", '[[:upper:]]', 1, 1, 0, '', 0), regexp_instr('a\u00c9' COLLATE \"unicode\", '[[:upper:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "punctuation class with a currency sign under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "a$",
+      "pattern": "[[:punct:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a$' COLLATE \"unicode\", '[[:punct:]]', ''), 'spans', ARRAY[regexp_instr('a$' COLLATE \"unicode\", '[[:punct:]]', 1, 1, 0, '', 0), regexp_instr('a$' COLLATE \"unicode\", '[[:punct:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "space class with a no-break space under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "a\u00a0",
+      "pattern": "[[:space:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00a0' COLLATE \"unicode\", '[[:space:]]', ''), 'spans', ARRAY[regexp_instr('a\u00a0' COLLATE \"unicode\", '[[:space:]]', 1, 1, 0, '', 0), regexp_instr('a\u00a0' COLLATE \"unicode\", '[[:space:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "letter number under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "-\u216b",
+      "pattern": "[[:alpha:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('-\u216b' COLLATE \"unicode\", '[[:alpha:]]', ''), 'spans', ARRAY[regexp_instr('-\u216b' COLLATE \"unicode\", '[[:alpha:]]', 1, 1, 0, '', 0), regexp_instr('-\u216b' COLLATE \"unicode\", '[[:alpha:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "end of word before a non-ASCII letter under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "a\u00e9",
+      "pattern": "a\\M",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('a\u00e9' COLLATE \"unicode\", 'a\\M', ''), 'spans', ARRAY[regexp_instr('a\u00e9' COLLATE \"unicode\", 'a\\M', 1, 1, 0, '', 0), regexp_instr('a\u00e9' COLLATE \"unicode\", 'a\\M', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "bracket range of non-ASCII letters under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u00c4\u00e9",
+      "pattern": "[\u00e0-\u00ff]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4\u00e9' COLLATE \"unicode\", '[\u00e0-\u00ff]', ''), 'spans', ARRAY[regexp_instr('\u00c4\u00e9' COLLATE \"unicode\", '[\u00e0-\u00ff]', 1, 1, 0, '', 0), regexp_instr('\u00c4\u00e9' COLLATE \"unicode\", '[\u00e0-\u00ff]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "complemented class under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u00e9a",
+      "pattern": "[^[:alpha:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e9a' COLLATE \"unicode\", '[^[:alpha:]]', ''), 'spans', ARRAY[regexp_instr('\u00e9a' COLLATE \"unicode\", '[^[:alpha:]]', 1, 1, 0, '', 0), regexp_instr('\u00e9a' COLLATE \"unicode\", '[^[:alpha:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "case-insensitive non-ASCII letter under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u00c9",
+      "pattern": "\u00e9",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c9' COLLATE \"unicode\", '\u00e9', 'i'), 'spans', ARRAY[regexp_instr('\u00c9' COLLATE \"unicode\", '\u00e9', 1, 1, 0, 'i', 0), regexp_instr('\u00c9' COLLATE \"unicode\", '\u00e9', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "titlecase digraph does not fold to itself under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u01c5",
+      "pattern": "\u01c5",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u01c5' COLLATE \"unicode\", '\u01c5', 'i'), 'spans', ARRAY[regexp_instr('\u01c5' COLLATE \"unicode\", '\u01c5', 1, 1, 0, 'i', 0), regexp_instr('\u01c5' COLLATE \"unicode\", '\u01c5', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "titlecase digraph folds to its lowercase under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u01c6",
+      "pattern": "\u01c5",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u01c6' COLLATE \"unicode\", '\u01c5', 'i'), 'spans', ARRAY[regexp_instr('\u01c6' COLLATE \"unicode\", '\u01c5', 1, 1, 0, 'i', 0), regexp_instr('\u01c6' COLLATE \"unicode\", '\u01c5', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "sharp s pattern under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u1e9e",
+      "pattern": "\u00df",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u1e9e' COLLATE \"unicode\", '\u00df', 'i'), 'spans', ARRAY[regexp_instr('\u1e9e' COLLATE \"unicode\", '\u00df', 1, 1, 0, 'i', 0), regexp_instr('\u1e9e' COLLATE \"unicode\", '\u00df', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "capital sharp s pattern under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u00df",
+      "pattern": "\u1e9e",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00df' COLLATE \"unicode\", '\u1e9e', 'i'), 'spans', ARRAY[regexp_instr('\u00df' COLLATE \"unicode\", '\u1e9e', 1, 1, 0, 'i', 0), regexp_instr('\u00df' COLLATE \"unicode\", '\u1e9e', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "long s pattern and small s under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "s",
+      "pattern": "\u017f",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('s' COLLATE \"unicode\", '\u017f', 'i'), 'spans', ARRAY[regexp_instr('s' COLLATE \"unicode\", '\u017f', 1, 1, 0, 'i', 0), regexp_instr('s' COLLATE \"unicode\", '\u017f', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "long s pattern and capital S under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "S",
+      "pattern": "\u017f",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('S' COLLATE \"unicode\", '\u017f', 'i'), 'spans', ARRAY[regexp_instr('S' COLLATE \"unicode\", '\u017f', 1, 1, 0, 'i', 0), regexp_instr('S' COLLATE \"unicode\", '\u017f', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Kelvin sign pattern and small k under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "k",
+      "pattern": "\u212a",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('k' COLLATE \"unicode\", '\u212a', 'i'), 'spans', ARRAY[regexp_instr('k' COLLATE \"unicode\", '\u212a', 1, 1, 0, 'i', 0), regexp_instr('k' COLLATE \"unicode\", '\u212a', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Kelvin sign pattern and capital K under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "K",
+      "pattern": "\u212a",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('K' COLLATE \"unicode\", '\u212a', 'i'), 'spans', ARRAY[regexp_instr('K' COLLATE \"unicode\", '\u212a', 1, 1, 0, 'i', 0), regexp_instr('K' COLLATE \"unicode\", '\u212a', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "dotted capital I pattern under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "i",
+      "pattern": "\u0130",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('i' COLLATE \"unicode\", '\u0130', 'i'), 'spans', ARRAY[regexp_instr('i' COLLATE \"unicode\", '\u0130', 1, 1, 0, 'i', 0), regexp_instr('i' COLLATE \"unicode\", '\u0130', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "final sigma pattern under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u03a3\u03c3",
+      "pattern": "\u03c2",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u03a3\u03c3' COLLATE \"unicode\", '\u03c2', 'i'), 'spans', ARRAY[regexp_instr('\u03a3\u03c3' COLLATE \"unicode\", '\u03c2', 1, 1, 0, 'i', 0), regexp_instr('\u03a3\u03c3' COLLATE \"unicode\", '\u03c2', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive range under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u00c4",
+      "pattern": "[\u00e0-\u00e5]",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4' COLLATE \"unicode\", '[\u00e0-\u00e5]', 'i'), 'spans', ARRAY[regexp_instr('\u00c4' COLLATE \"unicode\", '[\u00e0-\u00e5]', 1, 1, 0, 'i', 0), regexp_instr('\u00c4' COLLATE \"unicode\", '[\u00e0-\u00e5]', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive lowercase class under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u00c4",
+      "pattern": "[[:lower:]]",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c4' COLLATE \"unicode\", '[[:lower:]]', 'i'), 'spans', ARRAY[regexp_instr('\u00c4' COLLATE \"unicode\", '[[:lower:]]', 1, 1, 0, 'i', 0), regexp_instr('\u00c4' COLLATE \"unicode\", '[[:lower:]]', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "case-insensitive back-reference under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u00e9\u00c9",
+      "pattern": "(\u00e9)\\1",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e9\u00c9' COLLATE \"unicode\", '(\u00e9)\\1', 'i'), 'spans', ARRAY[regexp_instr('\u00e9\u00c9' COLLATE \"unicode\", '(\u00e9)\\1', 1, 1, 0, 'i', 0), regexp_instr('\u00e9\u00c9' COLLATE \"unicode\", '(\u00e9)\\1', 1, 1, 1, 'i', 0), regexp_instr('\u00e9\u00c9' COLLATE \"unicode\", '(\u00e9)\\1', 1, 1, 0, 'i', 1), regexp_instr('\u00e9\u00c9' COLLATE \"unicode\", '(\u00e9)\\1', 1, 1, 1, 'i', 1)])::text"
+    },
+    {
+      "name": "supplementary plane case mapping under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\ud801\udc28",
+      "pattern": "\ud801\udc00",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\ud801\udc28' COLLATE \"unicode\", '\ud801\udc00', 'i'), 'spans', ARRAY[regexp_instr('\ud801\udc28' COLLATE \"unicode\", '\ud801\udc00', 1, 1, 0, 'i', 0), regexp_instr('\ud801\udc28' COLLATE \"unicode\", '\ud801\udc00', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Cherokee case mapping under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\uab70",
+      "pattern": "\u13a0",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\uab70' COLLATE \"unicode\", '\u13a0', 'i'), 'spans', ARRAY[regexp_instr('\uab70' COLLATE \"unicode\", '\u13a0', 1, 1, 0, 'i', 0), regexp_instr('\uab70' COLLATE \"unicode\", '\u13a0', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "Georgian Mtavruli case mapping under unicode",
+      "kind": "match",
+      "collation": "unicode",
+      "subject": "\u10d0",
+      "pattern": "\u1c90",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u10d0' COLLATE \"unicode\", '\u1c90', 'i'), 'spans', ARRAY[regexp_instr('\u10d0' COLLATE \"unicode\", '\u1c90', 1, 1, 0, 'i', 0), regexp_instr('\u10d0' COLLATE \"unicode\", '\u1c90', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "alpha class under POSIX",
+      "kind": "match",
+      "collation": "POSIX",
+      "subject": "\u00e9a",
+      "pattern": "[[:alpha:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e9a' COLLATE \"POSIX\", '[[:alpha:]]', ''), 'spans', ARRAY[regexp_instr('\u00e9a' COLLATE \"POSIX\", '[[:alpha:]]', 1, 1, 0, '', 0), regexp_instr('\u00e9a' COLLATE \"POSIX\", '[[:alpha:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "case-insensitive non-ASCII letter under POSIX",
+      "kind": "match",
+      "collation": "POSIX",
+      "subject": "\u00c9",
+      "pattern": "\u00e9",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c9' COLLATE \"POSIX\", '\u00e9', 'i'), 'spans', ARRAY[regexp_instr('\u00c9' COLLATE \"POSIX\", '\u00e9', 1, 1, 0, 'i', 0), regexp_instr('\u00c9' COLLATE \"POSIX\", '\u00e9', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "alpha class under ucs_basic",
+      "kind": "match",
+      "collation": "ucs_basic",
+      "subject": "\u00e9a",
+      "pattern": "[[:alpha:]]",
+      "flags": "",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00e9a' COLLATE \"ucs_basic\", '[[:alpha:]]', ''), 'spans', ARRAY[regexp_instr('\u00e9a' COLLATE \"ucs_basic\", '[[:alpha:]]', 1, 1, 0, '', 0), regexp_instr('\u00e9a' COLLATE \"ucs_basic\", '[[:alpha:]]', 1, 1, 1, '', 0)])::text"
+    },
+    {
+      "name": "case-insensitive non-ASCII letter under ucs_basic",
+      "kind": "match",
+      "collation": "ucs_basic",
+      "subject": "\u00c9",
+      "pattern": "\u00e9",
+      "flags": "i",
+      "start": 1,
+      "sql": "SELECT json_build_object('groups', regexp_match('\u00c9' COLLATE \"ucs_basic\", '\u00e9', 'i'), 'spans', ARRAY[regexp_instr('\u00c9' COLLATE \"ucs_basic\", '\u00e9', 1, 1, 0, 'i', 0), regexp_instr('\u00c9' COLLATE \"ucs_basic\", '\u00e9', 1, 1, 1, 'i', 0)])::text"
+    },
+    {
+      "name": "match operator",
+      "kind": "operator",
+      "collation": "C",
+      "subject": "foobar",
+      "operator": "~",
+      "pattern": "o+b",
+      "sql": "SELECT 'foobar' COLLATE \"C\" ~ 'o+b'"
+    },
+    {
+      "name": "case-insensitive match operator",
+      "kind": "operator",
+      "collation": "C",
+      "subject": "FOO",
+      "operator": "~*",
+      "pattern": "foo",
+      "sql": "SELECT 'FOO' COLLATE \"C\" ~* 'foo'"
+    },
+    {
+      "name": "negated match operator",
+      "kind": "operator",
+      "collation": "C",
+      "subject": "foo",
+      "operator": "!~",
+      "pattern": "x",
+      "sql": "SELECT 'foo' COLLATE \"C\" !~ 'x'"
+    },
+    {
+      "name": "negated case-insensitive match operator",
+      "kind": "operator",
+      "collation": "C",
+      "subject": "FOO",
+      "operator": "!~*",
+      "pattern": "foo",
+      "sql": "SELECT 'FOO' COLLATE \"C\" !~* 'foo'"
+    },
+    {
+      "name": "case-insensitive match operator under ICU",
+      "kind": "operator",
+      "collation": "unicode",
+      "subject": "\u00c9",
+      "operator": "~*",
+      "pattern": "\u00e9",
+      "sql": "SELECT '\u00c9' COLLATE \"unicode\" ~* '\u00e9'"
+    },
+    {
+      "name": "case-insensitive match operator under C",
+      "kind": "operator",
+      "collation": "C",
+      "subject": "\u00c9",
+      "operator": "~*",
+      "pattern": "\u00e9",
+      "sql": "SELECT '\u00c9' COLLATE \"C\" ~* '\u00e9'"
+    },
+    {
+      "name": "collation the parser could not resolve",
+      "kind": "collation",
+      "oid": 0,
+      "deterministic": true,
+      "ctype": "c",
+      "sql": "SELECT x ~ y FROM (VALUES ('a' COLLATE \"C\")) AS t(x), (VALUES ('a' COLLATE \"POSIX\")) AS s(y)"
+    },
+    {
+      "name": "nondeterministic collation definition",
+      "kind": "setup",
+      "sql": "CREATE COLLATION regex_nondeterministic (provider = icu, locale = 'und-u-ks-level2', deterministic = false)"
+    },
+    {
+      "name": "nondeterministic collation",
+      "kind": "collation",
+      "oid": 16384,
+      "deterministic": false,
+      "ctype": "icu",
+      "sql": "SELECT 'a' COLLATE regex_nondeterministic ~ 'a'"
+    },
+    {
+      "name": "alnum class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:alnum:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:alnum:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "alpha class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:alpha:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:alpha:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "digit class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:digit:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:digit:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "graph class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:graph:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:graph:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "lower class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:lower:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:lower:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "print class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:print:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:print:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "punct class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:punct:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:punct:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "space class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:space:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:space:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "upper class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:upper:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:upper:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "word class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:word:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:word:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "case-insensitive lower class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:lower:]]",
+      "flags": "i",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:lower:]]', 'i')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "case-insensitive upper class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:upper:]]",
+      "flags": "i",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:upper:]]', 'i')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "alnum class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:alnum:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:alnum:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "alpha class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:alpha:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:alpha:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "digit class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:digit:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:digit:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "graph class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:graph:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:graph:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "lower class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:lower:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:lower:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "print class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:print:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:print:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "punct class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:punct:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:punct:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "space class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:space:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:space:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "upper class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:upper:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:upper:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "word class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:word:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:word:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "case-insensitive lower class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:lower:]]",
+      "flags": "i",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:lower:]]', 'i')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "case-insensitive upper class members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "[[:upper:]]",
+      "flags": "i",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '[[:upper:]]', 'i')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "alnum class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:alnum:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:alnum:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "alpha class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:alpha:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:alpha:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "digit class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:digit:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:digit:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "graph class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:graph:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:graph:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "lower class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:lower:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:lower:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "print class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:print:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:print:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "punct class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:punct:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:punct:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "space class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:space:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:space:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "upper class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:upper:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:upper:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "word class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:word:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:word:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "case-insensitive lower class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:lower:]]",
+      "flags": "i",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:lower:]]', 'i')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "case-insensitive upper class members under pg_unicode_fast",
+      "kind": "members",
+      "collation": "pg_unicode_fast",
+      "pattern": "[[:upper:]]",
+      "flags": "i",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_unicode_fast\", '[[:upper:]]', 'i')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "alnum class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:alnum:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:alnum:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "alpha class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:alpha:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:alpha:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "digit class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:digit:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:digit:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "graph class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:graph:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:graph:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "lower class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:lower:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:lower:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "print class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:print:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:print:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "punct class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:punct:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:punct:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "space class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:space:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:space:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "upper class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:upper:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:upper:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "word class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:word:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:word:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "case-insensitive lower class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:lower:]]",
+      "flags": "i",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:lower:]]', 'i')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "case-insensitive upper class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:upper:]]",
+      "flags": "i",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:upper:]]', 'i')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "ascii class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:ascii:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:ascii:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "blank class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:blank:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:blank:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "cntrl class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:cntrl:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:cntrl:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "xdigit class members under C",
+      "kind": "members",
+      "collation": "C",
+      "pattern": "[[:xdigit:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"C\", '[[:xdigit:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "ascii class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:ascii:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:ascii:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "blank class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:blank:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:blank:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "cntrl class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:cntrl:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:cntrl:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "xdigit class members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "[[:xdigit:]]",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '[[:xdigit:]]', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "\\w members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "\\w",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '\\w', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "\\d members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "\\d",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '\\d', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "\\s members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "\\s",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '\\s', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "\\W members under pg_c_utf8",
+      "kind": "members",
+      "collation": "pg_c_utf8",
+      "pattern": "\\W",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"pg_c_utf8\", '\\W', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "\\w members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "\\w",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '\\w', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "\\d members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "\\d",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '\\d', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "\\s members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "\\s",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '\\s', '')) AS members GROUP BY run) AS runs"
+    },
+    {
+      "name": "\\W members under unicode",
+      "kind": "members",
+      "collation": "unicode",
+      "pattern": "\\W",
+      "flags": "",
+      "sql": "SELECT string_agg(to_hex(lo) || '-' || to_hex(hi), ',' ORDER BY lo) FROM (SELECT min(cp) AS lo, max(cp) AS hi FROM (SELECT cp, cp - row_number() OVER (ORDER BY cp) AS run FROM generate_series(1, 1114111) AS cp WHERE (cp < 55296 OR cp > 57343) AND regexp_like(chr(cp) COLLATE \"unicode\", '\\W', '')) AS members GROUP BY run) AS runs"
+    }
+  ]
+}

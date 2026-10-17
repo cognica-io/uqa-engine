@@ -9701,6 +9701,32 @@
     {
       "package": "uqa-pg-regex",
       "kind": "test",
+      "test": "matches_spans_and_diagnostics_equal_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/oracle.rs",
+      "capability": "PostgreSQL regular expression matching",
+      "workload": "207 independently captured PostgreSQL 18.4 statements covering match selection, subexpression spans, back-references, lookaround, constraint escapes, directors, flags, collations and invalid-pattern diagnostics.",
+      "invariant": "Compilation and matching return PostgreSQL's spans, captured substrings, operator results and invalid-pattern messages."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "class_members_over_every_code_point_equal_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/oracle.rs",
+      "capability": "PostgreSQL regular expression character classes",
+      "workload": "64 class and escape patterns evaluated over every Unicode scalar value under the C, builtin and ICU collation strategies.",
+      "invariant": "Every class member and non-member equals the independent PostgreSQL 18.4 result."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
       "test": "compiled_state_is_charged_and_dropping_releases_every_byte",
       "cases": 1,
       "case_names": [

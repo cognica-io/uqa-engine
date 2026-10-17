@@ -4,12 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Resource hooks with fault injection.
+//! Resource hooks with fault injection, and `PostgreSQL`'s SQL-level option parsing.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use uqa_pg_regex::RegexResources;
+use uqa_pg_regex::{
+    CompileFlags, RegexCollation, RegexResources, REG_ADVANCED, REG_EXPANDED, REG_EXTENDED,
+    REG_ICASE, REG_NEWLINE, REG_NLANCH, REG_NLSTOP, REG_QUOTE,
+};
 
 /// Resource hooks that account every byte and can refuse, cancel or limit at a chosen point.
 #[derive(Debug, Default)]
@@ -109,4 +112,61 @@ impl RegexResources for SharedBudget {
 
 pub fn code_points(text: &str) -> Vec<u32> {
     text.chars().map(u32::from).collect()
+}
+
+pub fn text(code_points: &[u32]) -> String {
+    code_points
+        .iter()
+        .map(|code| char::from_u32(*code).expect("subjects hold Unicode scalar values"))
+        .collect()
+}
+
+/// `PostgreSQL`'s `parse_re_flags` in `src/backend/utils/adt/regexp.c` for the options the reference uses; `g` is not part of the compile flags.
+pub fn parse_re_flags(options: &str) -> CompileFlags {
+    let mut flags = REG_ADVANCED;
+    for option in options.chars() {
+        match option {
+            'b' => flags &= !(REG_ADVANCED | REG_EXTENDED | REG_QUOTE),
+            'c' => flags &= !REG_ICASE,
+            'e' => {
+                // REG_ADVANCED includes REG_EXTENDED, so PostgreSQL 18.4's second step clears the bit the first one set and "e" compiles basic expressions; the reference records that behavior.
+                flags |= REG_EXTENDED;
+                flags &= !(REG_ADVANCED | REG_QUOTE);
+            }
+            'i' => flags |= REG_ICASE,
+            'm' | 'n' => flags |= REG_NEWLINE,
+            'p' => {
+                flags |= REG_NLSTOP;
+                flags &= !REG_NLANCH;
+            }
+            'q' => {
+                flags |= REG_QUOTE;
+                flags &= !(REG_ADVANCED | REG_EXTENDED);
+            }
+            's' => flags &= !REG_NEWLINE,
+            't' => flags &= !REG_EXPANDED,
+            'w' => {
+                flags &= !REG_NLSTOP;
+                flags |= REG_NLANCH;
+            }
+            'x' => flags |= REG_EXPANDED,
+            other => panic!("the reference uses no option {other:?}"),
+        }
+    }
+    flags
+}
+
+/// The collation named in a reference case, resolved through its catalog OID.
+pub fn collation(name: &str) -> RegexCollation {
+    let oid = match name {
+        "C" => 950,
+        "POSIX" => 951,
+        "ucs_basic" => 962,
+        "pg_c_utf8" => 811,
+        "pg_unicode_fast" => 6411,
+        "unicode" => 963,
+        "default" => 100,
+        other => panic!("the reference uses no collation {other:?}"),
+    };
+    RegexCollation::from_oid(oid).expect("predefined collations resolve")
 }

@@ -8,6 +8,8 @@
 
 #[path = "collations.rs"]
 mod collations;
+#[path = "oracle.rs"]
+mod oracle;
 #[path = "resources.rs"]
 mod resources;
 #[path = "support.rs"]

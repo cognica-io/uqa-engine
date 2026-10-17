@@ -14,7 +14,7 @@ Character classes, case-insensitive matching and word boundaries follow PostgreS
 
 ## Verification
 
-Fault-injection tests refuse each allocation and cancel at each interrupt check of representative compilations and executions, and every test checks that dropping an expression releases every reserved byte.
+The crate's tests compare compilation, match selection, subexpression spans, diagnostics and collation selection with an independent PostgreSQL 18.4 server, recorded in `tests/fixtures/regex_oracle.expected.json`, including the members of every character class over all code points under the C, builtin and ICU strategies. Fault-injection tests refuse each allocation and cancel at each interrupt check of representative compilations and executions.
 
 ## Updating the import
 
