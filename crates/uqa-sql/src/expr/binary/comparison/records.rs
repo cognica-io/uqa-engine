@@ -33,7 +33,7 @@ pub(super) fn compare<T>(
     control: &ProductionControl<'_>,
     support: Option<ComparisonSupport>,
     equal: T,
-    mut compare: impl FnMut(&Value, &Value, Option<u32>) -> Result<Option<T>, SQLError>,
+    mut compare: impl FnMut(&Value, &Value, Option<u32>, u32) -> Result<Option<T>, SQLError>,
 ) -> Result<T, SQLError> {
     let left = SQLRecordFields::new(left, catalog)?;
     let right = SQLRecordFields::new(right, catalog)?;
@@ -70,11 +70,82 @@ pub(super) fn compare<T>(
                 }
             }
         }
-        if let Some(result) = compare(left_value, right_value, left_oid.or(right_oid))? {
+        let left_collation = field_collation(&left, index, left_oid);
+        let right_collation = field_collation(&right, index, right_oid);
+        let collation = if left_collation == right_collation {
+            left_collation
+        } else {
+            0
+        };
+        if let Some(result) = compare(left_value, right_value, left_oid.or(right_oid), collation)? {
             return Ok(result);
         }
         index += 1;
     }
+}
+
+pub(super) fn compare_typed(
+    left: &Value,
+    right: &Value,
+    catalog: Option<&dyn SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+    purpose: super::EnumKeyOrder,
+) -> Result<std::cmp::Ordering, SQLError> {
+    use std::cmp::Ordering;
+    compare(
+        left,
+        right,
+        catalog,
+        control,
+        Some(match purpose {
+            super::EnumKeyOrder::Declaration => ComparisonSupport::Ordering,
+            super::EnumKeyOrder::Identity => ComparisonSupport::Equality,
+        }),
+        Ordering::Equal,
+        |left, right, oid, collation| {
+            let order = match super::compare_declared_range(left, right, oid, control, catalog)? {
+                Some(order) => order,
+                None => super::compare_typed_values_for_purpose(
+                    left, right, control, catalog, purpose, collation,
+                )?,
+            };
+            Ok((!order.is_eq()).then_some(order))
+        },
+    )
+}
+
+pub(super) fn equal_typed(
+    left: &Value,
+    right: &Value,
+    catalog: Option<&dyn SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+    typed: bool,
+) -> Result<bool, SQLError> {
+    compare(
+        left,
+        right,
+        catalog,
+        control,
+        Some(ComparisonSupport::Equality),
+        true,
+        |left, right, oid, collation| {
+            let equal = match super::compare_declared_range(left, right, oid, control, catalog)? {
+                Some(order) => order.is_eq(),
+                None => super::equal_values(left, right, control, catalog, typed, collation)?,
+            };
+            Ok((!equal).then_some(false))
+        },
+    )
+}
+
+fn field_collation(record: &SQLRecordFields<'_>, index: usize, oid: Option<u32>) -> u32 {
+    record.field_collation_oid(index).unwrap_or_else(|| {
+        oid.and_then(crate::catalog::type_metadata::builtin_scalar_type)
+            .map_or(super::collations::DEFAULT, |ty| {
+                u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(ty))
+                    .expect("builtin type collation identity")
+            })
+    })
 }
 
 #[cfg(test)]

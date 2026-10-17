@@ -12,7 +12,7 @@ use uqa_core::memory::{Produced, ProductionControl};
 
 mod btree;
 mod comparison;
-pub use btree::{with_btree_input, BTreeInput};
+pub use btree::{compare_btree_inputs_with_catalog_and_control, with_btree_input, BTreeInput};
 mod selected;
 pub use selected::{
     compare_selected_grouping_values_with_catalog, compare_selected_values_with_catalog,
@@ -25,8 +25,9 @@ mod production_tests;
 pub(super) use comparison::eval_comparison_op;
 pub use comparison::{
     compare_grouping_values_with_enum_catalog, compare_nullable_with_control,
-    compare_record_images_with_catalog, compare_typed_values_with_control,
-    compare_typed_values_with_enum_catalog, compare_with_control,
+    compare_record_images_with_catalog, compare_typed_values_with_catalog_and_collation,
+    compare_typed_values_with_control, compare_typed_values_with_enum_catalog,
+    compare_with_control, equal_typed_values_with_catalog_and_collation,
     equal_typed_values_with_enum_catalog, eval_comparison_truth,
     eval_comparison_truth_with_control, eval_comparison_truth_with_deferred_state,
     eval_comparison_truth_with_engine, eval_comparison_truth_with_enum_catalog,

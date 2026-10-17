@@ -5,7 +5,6 @@
 //
 
 use super::*;
-use std::cmp::Ordering;
 use uqa_core::{memory::MemoryBudget, CancellationToken, DatumValue};
 
 fn binding<'a>(ty: &'a ColumnType, name: &str) -> operator_classes::BoundBTreeOperatorClass<'a> {
@@ -31,34 +30,6 @@ fn physical(hex: &str, ty: &ColumnType) -> Value {
     ))
 }
 
-fn compare_inputs(
-    left: BTreeInput<'_>,
-    right: BTreeInput<'_>,
-    control: &ProductionControl<'_>,
-) -> Result<Ordering, SQLError> {
-    match (left, right) {
-        (BTreeInput::Value(left, ty), BTreeInput::Value(right, _)) => {
-            super::super::compare_selected_values_with_catalog(
-                left,
-                right,
-                Some(ty),
-                control,
-                None,
-                None,
-            )
-        }
-        (BTreeInput::Array(left), BTreeInput::Array(right)) => {
-            left.cmp_by_with_control(right, control, |left, right, control| {
-                super::super::compare_typed_values_with_control(left, right, control)
-            })
-        }
-        (BTreeInput::RecordImage(left), BTreeInput::RecordImage(right)) => {
-            super::super::compare_record_images_with_catalog(left, right, None, control)
-        }
-        _ => panic!("one selected input domain"),
-    }
-}
-
 #[test]
 fn selected_btree_input_observation_matches_postgresql_binary_interpretation() {
     let reference: serde_json::Value =
@@ -78,11 +49,14 @@ fn selected_btree_input_observation_matches_postgresql_binary_interpretation() {
             .map(|field| physical(case[field].as_str().unwrap(), &ty));
         for left in [&values[0], &physical[0]] {
             for right in [&values[1], &physical[1]] {
-                let actual = with_btree_input(binding, left, None, &control, |left| {
-                    with_btree_input(binding, right, None, &control, |right| {
-                        compare_inputs(left, right, &control)
-                    })
-                })
+                let actual = compare_btree_inputs_with_catalog_and_control(
+                    binding,
+                    left,
+                    right,
+                    crate::catalog::collations::C_COLLATION_OID,
+                    None,
+                    &control,
+                )
                 .unwrap();
                 assert_eq!(actual, case["order"].as_i64().unwrap().cmp(&0), "{case}");
                 assert_eq!(memory.used(), 0);
@@ -192,3 +166,61 @@ fn selected_btree_input_observation_borrows_vectors_and_preserves_leases() {
         }
     }
 }
+
+#[test]
+fn selected_pattern_support_ignores_collation_and_keeps_postgresql_byte_order() {
+    let reference: serde_json::Value = serde_json::from_str(include_str!("patterns.json")).unwrap();
+    let memory = MemoryBudget::new(65536);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let mut observations = 0;
+    for case in reference["cases"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let ty =
+            ColumnType::from_sql_name(case["selected"]["input_name"].as_str().unwrap()).unwrap();
+        let binding = binding(&ty, case["selected"]["opcname"].as_str().unwrap());
+        let values = case["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|sql| {
+                let crate::Statement::Select(query) =
+                    crate::compile(&format!("SELECT {}", sql.as_str().unwrap()))
+                        .unwrap()
+                        .remove(0)
+                else {
+                    panic!("reference scalar")
+                };
+                crate::expr::eval(
+                    &query.projections[0].expr,
+                    &crate::expr::EvalContext::new(None, &[]),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let collation = case["collation"].as_str().map_or(100, |name| {
+            crate::catalog::collations::builtin_collation_oid(name)
+                .map_or(u32::MAX, |oid| oid as u32)
+        });
+        for (i, left) in values.iter().enumerate() {
+            for (j, right) in values.iter().enumerate() {
+                let expected = case["orders"][i * values.len() + j]
+                    .as_i64()
+                    .unwrap()
+                    .cmp(&0);
+                for collation in [collation, 0] {
+                    let actual = compare_btree_inputs_with_catalog_and_control(
+                        binding, left, right, collation, None, &control,
+                    )
+                    .unwrap();
+                    assert_eq!(actual, expected, "{name}: {i}/{j}");
+                    assert_eq!(memory.used(), 0);
+                }
+                observations += 1;
+            }
+        }
+    }
+    assert_eq!(observations, 375);
+}
+
+mod native;

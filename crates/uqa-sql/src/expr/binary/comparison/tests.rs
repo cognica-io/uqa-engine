@@ -386,3 +386,5 @@ fn comparison_resource_errors_are_not_converted_to_false_or_unknown() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+mod record_collations;

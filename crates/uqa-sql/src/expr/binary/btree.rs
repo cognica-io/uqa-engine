@@ -46,7 +46,7 @@ pub fn with_btree_input<R>(
     if matches!(value, Value::Null) {
         return observe(BTreeInput::Value(value, source));
     }
-    if class.comparison_oid == 3187 {
+    if class.comparison_kind() == operator_classes::BuiltinBTreeComparison::RecordImage {
         return observe(BTreeInput::RecordImage(value));
     }
     if type_metadata::routine_pseudo_type_name(i64::from(class.input_type_oid)) == Some("anyarray")
@@ -76,6 +76,64 @@ pub fn with_btree_input<R>(
         }
     }
     observe(BTreeInput::Value(value, target))
+}
+
+/// Invoke the selected native B-tree comparison over admitted inputs. This shares scalar, array and record owners; it does not execute input, domain checks or range canonicalization. Pattern support explicitly ignores the invoking collation, while ordinary record fields retain their own descriptors.
+pub fn compare_btree_inputs_with_catalog_and_control(
+    binding: operator_classes::BoundBTreeOperatorClass<'_>,
+    left: &Value,
+    right: &Value,
+    collation: u32,
+    catalog: Option<&dyn SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<std::cmp::Ordering, SQLError> {
+    control.check()?;
+    match (matches!(left, Value::Null), matches!(right, Value::Null)) {
+        (true, true) => return Ok(std::cmp::Ordering::Equal),
+        (true, false) => return Ok(std::cmp::Ordering::Greater),
+        (false, true) => return Ok(std::cmp::Ordering::Less),
+        (false, false) => {}
+    }
+    let collation =
+        if binding.class().comparison_kind() == operator_classes::BuiltinBTreeComparison::Pattern {
+            crate::catalog::collations::C_COLLATION_OID
+        } else {
+            collation
+        };
+    with_btree_input(binding, left, catalog, control, |left| {
+        with_btree_input(binding, right, catalog, control, |right| {
+            match (left, right) {
+                (BTreeInput::Value(left, ty), BTreeInput::Value(right, _)) => {
+                    if let Some(order) = super::selected::selected_range_order(
+                        left,
+                        right,
+                        Some(ty),
+                        control,
+                        catalog,
+                    )? {
+                        return Ok(order);
+                    }
+                    super::compare_typed_values_with_catalog_and_collation(
+                        left, right, collation, control, catalog,
+                    )
+                }
+                (BTreeInput::Array(left), BTreeInput::Array(right)) => {
+                    super::comparison::compare_arrays(
+                        left,
+                        right,
+                        control,
+                        catalog,
+                        super::comparison::EnumKeyOrder::Declaration,
+                        collation,
+                    )
+                }
+                (BTreeInput::RecordImage(left), BTreeInput::RecordImage(right)) => {
+                    super::compare_record_images_with_catalog(left, right, catalog, control)
+                }
+                _ => Err(invalid()),
+            }
+        })
+    })
 }
 
 fn with_array<R>(
