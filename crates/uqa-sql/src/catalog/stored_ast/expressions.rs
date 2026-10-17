@@ -59,3 +59,34 @@ pub fn visit_stored_statement_projections(
     }
     .bind_statement(statement)
 }
+
+/// Whether two stored expressions define the same expression apart from the input collations their calls record. A definition stored before calls recorded them records none; an explicit COLLATE remains a node of its own, and the same call over one relation derives the same selection.
+#[must_use]
+pub fn same_stored_expression(left: &Expr, right: &Expr) -> bool {
+    left == right
+        || matches!(
+            (without_input_collations(left), without_input_collations(right)),
+            (Ok(left), Ok(right)) if left == right
+        )
+}
+
+fn without_input_collations(expression: &Expr) -> Result<Expr, SQLError> {
+    let mut expression = expression.clone();
+    StoredAstVisitor {
+        source: None,
+        merge: None,
+        expression: None,
+        projection: None,
+        ty: None,
+        relation: &mut |_: &mut String| Ok(()),
+        routine:
+            &mut |_: &mut String, binding: Option<&mut Option<crate::ast::FunctionBinding>>| {
+                if let Some(Some(binding)) = binding {
+                    binding.input_collation = None;
+                }
+                Ok(())
+            },
+    }
+    .bind_expr(&mut expression, &BTreeSet::new())?;
+    Ok(expression)
+}

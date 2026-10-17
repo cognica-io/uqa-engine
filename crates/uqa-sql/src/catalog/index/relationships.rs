@@ -7,7 +7,7 @@
 //! Constraint ownership and index partition ancestry are independent catalog edges.
 
 use super::IndexDefinition;
-use crate::ast::{ColumnDef, IndexKey, TableKeyConstraint, TableKeyConstraintKind};
+use crate::ast::{ColumnDef, Expr, IndexKey, TableKeyConstraint, TableKeyConstraintKind};
 use crate::schema::constraint_metadata::{ConstraintMetadataError, ConstraintMetadataResult};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -99,11 +99,14 @@ pub fn can_attach_index(
         .constraint_kind
         .is_none_or(|kind| child.constraint_kind == Some(kind))
         && parent.method.eq_ignore_ascii_case(child.method)
-        && parent.keys == child.keys
+        && same_index_keys(parent.keys, child.keys)
         && parent.definition.unique == child.definition.unique
         && parent.definition.nulls_not_distinct == child.definition.nulls_not_distinct
         && parent.definition.included_columns == child.definition.included_columns
-        && parent.definition.predicate == child.definition.predicate
+        && same_index_predicate(
+            parent.definition.predicate.as_deref(),
+            child.definition.predicate.as_deref(),
+        )
         && (0..parent.keys.len()).all(|position| {
             parent
                 .definition
@@ -118,6 +121,31 @@ pub fn can_attach_index(
                     .copied()
                     .unwrap_or_default()
         })
+}
+
+/// Whether two key lists index the same columns and expressions, apart from the input collations their calls record.
+#[must_use]
+pub fn same_index_keys(left: &[IndexKey], right: &[IndexKey]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|pair| match pair {
+            (IndexKey::Column(left), IndexKey::Column(right)) => left == right,
+            (IndexKey::Expression(left), IndexKey::Expression(right)) => {
+                crate::catalog::stored_ast::same_stored_expression(left, right)
+            }
+            _ => false,
+        })
+}
+
+/// Whether two partial-index predicates are the same, apart from the input collations their calls record.
+#[must_use]
+pub fn same_index_predicate(left: Option<&Expr>, right: Option<&Expr>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => {
+            crate::catalog::stored_ast::same_stored_expression(left, right)
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]

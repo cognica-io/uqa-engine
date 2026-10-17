@@ -169,6 +169,14 @@ fn inference_identity(mut expression: Expr) -> Expr {
         if let Expr::Cast { implicit, .. } = node {
             *implicit = false;
         }
+        // An explicit COLLATE remains a node of its own, and the same call over one relation derives the same input collation, so the recorded selection is not identity. A key stored before calls recorded it still matches.
+        if let Expr::Func {
+            binding: Some(binding),
+            ..
+        } = node
+        {
+            binding.input_collation = None;
+        }
     });
     expression
 }
