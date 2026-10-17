@@ -14,7 +14,7 @@ use std::io::Read;
 
 use crate::lexer::{tokenize_sql, TokenKind};
 use crate::printing::{DisplayTable, PrintOptions};
-use crate::variables::{meta_arguments, parse_boolean, Variables};
+use crate::variables::{parse_boolean, Variables};
 
 #[derive(Default)]
 pub(super) enum ResultTarget {
@@ -240,8 +240,7 @@ impl Session {
             self.copy_file(argument, out)?;
             return Ok(Some(PromptLineOutcome::Continue));
         }
-        let argument = self.shell.variables.expand(argument);
-        let args = meta_arguments(&argument)?;
+        let args = crate::arguments::parse(argument, &self.shell.variables)?;
         if self.variable_command(name, &args, out)? {
             return Ok(Some(PromptLineOutcome::Continue));
         }

@@ -21,6 +21,13 @@ SELECT :value + 1 AS answer \gset r_
 \set 변수 42
 \set 😀 7
 SELECT :변수, :😀;
+\set spaced 'two words'
+\set copied :spaced
+\echo :copied
+\echo :'spaced'
+\echo :"spaced"
+\echo 'it''s'
+\echo 'it\'s'
 \set AUTOCOMMIT off
 CREATE TEMP TABLE client_txn(value int);
 INSERT INTO client_txn VALUES (1);

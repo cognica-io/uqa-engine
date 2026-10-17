@@ -388,11 +388,20 @@ impl Completer for UsqlHelper {
                 .is_some_and(|command| {
                     matches!(
                         command,
-                        "\\i" | "\\ir" | "\\run" | "\\o" | "\\w" | "\\s" | "\\e" | "\\open"
+                        "\\i"
+                            | "\\ir"
+                            | "\\run"
+                            | "\\o"
+                            | "\\w"
+                            | "\\s"
+                            | "\\e"
+                            | "\\open"
+                            | "\\connect"
+                            | "\\c"
                     )
                 })
         {
-            return self.filename.complete(line, pos, ctx);
+            return self.complete_filename(line, pos, ctx);
         }
         if in_literal {
             return Ok((pos, Vec::new()));
@@ -450,6 +459,31 @@ impl Completer for UsqlHelper {
 }
 
 impl UsqlHelper {
+    fn complete_filename(
+        &self,
+        line: &str,
+        pos: usize,
+        ctx: &Context<'_>,
+    ) -> RustylineResult<(usize, Vec<Pair>)> {
+        let (start, mut candidates) = self.filename.complete(line, pos, ctx)?;
+        let quoted = start > 0 && matches!(line.as_bytes()[start - 1], b'\'' | b'"');
+        let single = quoted && line.as_bytes()[start - 1] == b'\'';
+        for candidate in &mut candidates {
+            let raw = if single {
+                candidate.replacement.clone()
+            } else if cfg!(unix) {
+                rustyline::completion::unescape(&candidate.replacement, Some('\\')).into_owned()
+            } else {
+                candidate.replacement.trim_start_matches('"').to_owned()
+            };
+            let escaped = raw.replace('\\', "\\\\").replace('\'', "''");
+            let close = !raw.ends_with(std::path::MAIN_SEPARATOR) && !line[pos..].starts_with('\'');
+            candidate.replacement = format!("'{escaped}{}", if close { "'" } else { "" });
+            candidate.display = crate::printing::terminal_text(&candidate.display);
+        }
+        Ok((start - usize::from(quoted), candidates))
+    }
+
     pub(super) fn backslash_argument_completions(&self, line: &str) -> Option<(usize, Vec<Pair>)> {
         let trimmed_start = line.len() - line.trim_start().len();
         let text = &line[trimmed_start..];

@@ -84,6 +84,7 @@ impl<W: Write> Write for TrackedWriter<W> {
         }
     }
 }
+mod arguments;
 mod completion;
 mod diagnostics;
 mod display;

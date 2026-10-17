@@ -117,7 +117,6 @@ impl Variables {
                 frame.matched = active;
             }
             "elif" => {
-                let value = self.expand(argument);
                 let frame = self
                     .conditions
                     .last_mut()
@@ -126,7 +125,10 @@ impl Variables {
                     return Err("invalid shell command argument".to_owned());
                 }
                 frame.active = false;
-                frame.active = frame.parent && !frame.matched && boolean_argument(&value)?;
+                let evaluate = frame.parent && !frame.matched;
+                let active = evaluate && self.boolean_argument(argument)?;
+                let frame = self.conditions.last_mut().expect("existing conditional");
+                frame.active = active;
                 frame.matched |= frame.active;
             }
             "else" => {
@@ -202,16 +204,12 @@ impl Variables {
     }
 
     fn boolean_argument(&self, argument: &str) -> Result<bool, String> {
-        boolean_argument(&self.expand(argument))
+        let values = crate::arguments::parse(argument, self)?;
+        if values.len() != 1 {
+            return Err("invalid shell command argument".to_owned());
+        }
+        parse_boolean(&values[0])
     }
-}
-
-fn boolean_argument(argument: &str) -> Result<bool, String> {
-    let values = meta_arguments(argument)?;
-    if values.len() != 1 {
-        return Err("invalid shell command argument".to_owned());
-    }
-    parse_boolean(&values[0])
 }
 
 impl std::fmt::Debug for Variables {
@@ -249,8 +247,8 @@ fn valid_key(value: &str) -> bool {
     !value.is_empty() && value.chars().all(crate::lexer::variable_character)
 }
 
-/// Meta-command argument quoting is lexical only; it never executes substitutions or a shell.
-pub(crate) fn meta_arguments(source: &str) -> Result<Vec<String>, String> {
+/// Editor and pager command quoting is lexical only; it never executes substitutions or a shell.
+pub(crate) fn command_arguments(source: &str) -> Result<Vec<String>, String> {
     let mut result = Vec::new();
     let mut value = String::new();
     let mut quote = None;
@@ -364,10 +362,10 @@ mod tests {
     #[test]
     fn quoted_empty_arguments_and_spaces_are_preserved_without_evaluation() {
         assert_eq!(
-            meta_arguments("a 'b c' \"\" '$(whoami)' \"x\\\"y\"").unwrap(),
+            command_arguments("a 'b c' \"\" '$(whoami)' \"x\\\"y\"").unwrap(),
             ["a", "b c", "", "$(whoami)", "x\"y"]
         );
-        assert!(meta_arguments("'unfinished").is_err());
+        assert!(command_arguments("'unfinished").is_err());
     }
 
     #[test]

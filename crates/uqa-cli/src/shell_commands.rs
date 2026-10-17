@@ -10,7 +10,7 @@ use super::{
     contains_input_terminator, io, IsTerminal, OpenOptions, Path, PathBuf, Session, Write,
 };
 use crate::shell::{no_args, single_arg};
-use crate::variables::meta_arguments;
+use crate::variables::command_arguments;
 use std::io::Read;
 
 impl Session {
@@ -266,7 +266,7 @@ impl Session {
 }
 
 fn process_command(source: &str) -> Result<std::process::Command, String> {
-    let args = meta_arguments(source)?;
+    let args = command_arguments(source)?;
     let program = args.first().ok_or("empty process command")?;
     let mut command = std::process::Command::new(program);
     command.args(&args[1..]);

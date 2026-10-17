@@ -75,6 +75,24 @@ fn completion_displays_controls_without_changing_the_inserted_identifier() {
 }
 
 #[test]
+fn filename_completion_inserts_psql_quotes_for_spaces_and_apostrophes() {
+    let mut session = session();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("script name's.sql");
+    std::fs::write(&path, "SELECT 42 AS completed_file;\n").unwrap();
+    let prefix = format!("\\i {}/scr", directory.path().display());
+    let helper = session.repl_helper().unwrap();
+    let history = MemHistory::new();
+    let context = Context::new(&history);
+    let (start, candidates) = helper.complete(&prefix, prefix.len(), &context).unwrap();
+    assert_eq!(candidates.len(), 1);
+    let completed = format!("{}{}", &prefix[..start], candidates[0].replacement);
+    let (output, failed) = script(&mut session, &completed);
+    assert!(!failed, "{completed}: {output}");
+    assert!(output.contains("completed_file"), "{output}");
+}
+
+#[test]
 fn timing_and_expanded_arguments_are_settings_not_toggles() {
     let mut session = session();
     let (output, failed) = script(
@@ -115,6 +133,29 @@ SELECT 7 \gx
     assert!(output.contains("42"));
     assert!(output.contains("RECORD 1"));
     assert!(!output.contains("nonexistent"));
+}
+
+#[test]
+fn meta_variable_values_are_atomic_and_keep_their_requested_sql_quoting() {
+    let mut session = session();
+    let (output, failed) = script(
+        &mut session,
+        r#"\set value 'two words'
+\set copied :value
+\echo :copied
+\echo :'value'
+\echo :"value"
+\echo 'it''s'
+\echo 'it\'s'
+CREATE TABLE "two words"(id int);
+\dt :"value"
+"#,
+    );
+    assert!(!failed, "{output}");
+    assert_eq!(session.shell.variables.get("copied"), Some("two words"));
+    assert!(output.starts_with("two words\n'two words'\n"), "{output}");
+    assert!(output.contains("\"two words\"\nit's\nit's\n"), "{output}");
+    assert!(output.contains("table_name"), "{output}");
 }
 
 #[test]

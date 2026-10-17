@@ -132,7 +132,7 @@ Catalog patterns support `*`, `?`, regular expressions, schema qualification and
 
 ## Variables, scripts and files
 
-Shell variables expand as `:name` for raw SQL, `:'name'` for a quoted SQL literal, `:"name"` for a quoted identifier and `:{?name}` for an existence Boolean. Quoted SQL strings, identifiers, dollar bodies and comments do not expand variables. `\gset` validates the complete returned row before changing variables, preserves positional columns and rejects a result with zero or multiple rows.
+Shell variables expand as `:name` for raw SQL, `:'name'` for a quoted SQL literal, `:"name"` for a quoted identifier and `:{?name}` for an existence Boolean. Quoted SQL strings, identifiers, dollar bodies and comments do not expand variables. In meta commands, substituted values stay within one argument: `\set copied :value` preserves spaces, while `\echo :'value'` retains the requested SQL literal quotes. Single-quoted meta arguments accept doubled apostrophes and backslash escapes; double quotes remain part of ordinary meta arguments. `\gset` validates the complete returned row before changing variables, preserves positional columns and rejects a result with zero or multiple rows.
 
 ```text
 \set item 41

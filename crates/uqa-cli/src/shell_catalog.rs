@@ -20,6 +20,11 @@ impl Session {
         let Some((query, schema, name)) = catalog_query(command) else {
             return Ok(false);
         };
+        let arguments = crate::arguments::parse(argument, &self.shell.variables)?;
+        if arguments.len() > 1 {
+            return Err("expected one catalog pattern".into());
+        }
+        let argument = arguments.first().map_or("", String::as_str);
         let mut query = query.to_owned();
         let mut predicates = Vec::new();
         let mut params = Vec::new();
@@ -169,9 +174,6 @@ fn name_pattern(source: &str) -> Result<(Option<String>, String), String> {
         if !quoted && c == '.' {
             parts.push(String::new());
             continue;
-        }
-        if !quoted && c.is_whitespace() {
-            return Err("expected one catalog pattern".into());
         }
         let part = parts.last_mut().unwrap();
         if quoted {
