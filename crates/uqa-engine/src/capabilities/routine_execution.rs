@@ -139,12 +139,15 @@ impl RoutineStatements for Engine {
         entry: &uqa_sql::prepared::entry::PreparedStatementPlan,
         params: &[SQLParam],
     ) -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError> {
-        let _temporal_input = uqa_sql::expr::TemporalInputContext {
-            transaction_clock_micros: Some(self.transaction_timestamp_micros()),
-            interval_style: self.session.interval_style(),
-            date_order: uqa_sql::semantics::parameters::datestyle::date_order(
-                &self.session.setting("DateStyle"),
-            ),
+        let _statement_thread = uqa_execution::statement::thread_context::StatementThreadContext {
+            temporal_input: uqa_sql::expr::TemporalInputContext {
+                transaction_clock_micros: Some(self.transaction_timestamp_micros()),
+                interval_style: self.session.interval_style(),
+                date_order: uqa_sql::semantics::parameters::datestyle::date_order(
+                    &self.session.setting("DateStyle"),
+                ),
+            },
+            cancellation: Some(self.runtime.cancellation.clone()),
         }
         .enter();
         uqa_planner::statement_planning::prepared::selection::select_analyzed_entry(

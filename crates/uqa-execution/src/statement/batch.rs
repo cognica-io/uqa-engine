@@ -83,7 +83,10 @@ fn consume_result<S: Clone + Send + Sync + 'static>(
     consumer: &mut ResultConsumer<'_>,
 ) -> Result<(), SQLError> {
     if let Some(consume) = consumer {
-        let _temporal_input = super::context::temporal_input_scope(context.statements);
+        let _statement_thread = super::context::statement_thread_scope(
+            context.statements,
+            context.runtime.cancellation,
+        );
         consume(result)
             .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
     }
@@ -107,7 +110,8 @@ fn execute_with_context<S: Clone + Send + Sync + 'static>(
             error.into(),
         ));
     }
-    let _temporal_input = super::context::temporal_input_scope(context.statements);
+    let _statement_thread =
+        super::context::statement_thread_scope(context.statements, context.runtime.cancellation);
     // Diagnostics spell user-defined types as the statement's search path finds them.
     let display = context
         .statements
@@ -237,7 +241,10 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 ));
             }
             // An earlier command can have completed or chained the transaction while the message clock stays fixed.
-            let _temporal_input = super::context::temporal_input_scope(context.statements);
+            let _statement_thread = super::context::statement_thread_scope(
+                context.statements,
+                context.runtime.cancellation,
+            );
             // An earlier statement of the message may have changed the search path.
             if let (Some(display), Some(path)) = (
                 display.filter(|_| statement_index > 0),
@@ -701,7 +708,8 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     if !simple_query_batch {
         return execution;
     }
-    let _temporal_input = super::context::temporal_input_scope(context.statements);
+    let _statement_thread =
+        super::context::statement_thread_scope(context.statements, context.runtime.cancellation);
     match execution {
         Ok(result) if implicit_segment_open => {
             context

@@ -124,9 +124,10 @@ impl crate::query::consumer::QueryRowConsumer for SessionPortalRowConsumer {
     }
 }
 
+/// Stream `query` to the portal's requests under the session's `thread_context`, which the worker enters once its first step arrives.
 pub fn run<S: Clone + Send + Sync + 'static>(
     queries: &dyn StatementQueryContexts<S>,
-    temporal_input: uqa_sql::expr::TemporalInputContext,
+    thread_context: &crate::statement::thread_context::StatementThreadContext,
     query: &QueryPlan,
     params: &[SQLParam],
     directional: bool,
@@ -152,7 +153,7 @@ pub fn run<S: Clone + Send + Sync + 'static>(
             }
         }
     };
-    let _temporal_input = temporal_input.enter();
+    let _statement_thread = thread_context.enter();
     let consumer = std::rc::Rc::new(SessionPortalRowConsumer {
         diagnostics: QueryDiagnostics::request_scope(diagnostics),
         requests: request_rx,

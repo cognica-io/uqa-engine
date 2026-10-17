@@ -169,6 +169,7 @@ impl Engine {
             aggregates: self,
             planning: self,
             statements: self,
+            cancellation: &self.runtime.cancellation,
         }
     }
 }

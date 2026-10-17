@@ -59,6 +59,7 @@ impl Engine {
             date_order: Some(uqa_sql::semantics::parameters::datestyle::date_order(
                 &self.session.setting("DateStyle"),
             )),
+            cancellation: &self.runtime.cancellation,
             clock: uqa_sql::expr::clock_timestamp_micros,
         }
     }

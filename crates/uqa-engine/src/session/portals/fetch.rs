@@ -37,8 +37,11 @@ fn realize_pending_command(
         state.data = pending;
         return Ok(());
     };
-    let execution =
-        uqa_execution::statement::compiled::execute_optimized_command(engine, &command, &params);
+    let execution = uqa_execution::statement::compiled::execute_optimized_command(
+        &engine.compiled_statement_context(),
+        &command,
+        &params,
+    );
     match execution {
         Ok(mut result) => {
             if null_returning_values {

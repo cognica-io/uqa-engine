@@ -14,6 +14,8 @@ use uqa_sql::plan::CtePlanBody;
 struct Inputs {
     classified: RefCell<Vec<String>>,
     planned: RefCell<Vec<UnifiedPlan>>,
+    cancellation: uqa_core::CancellationToken,
+    planning_cancellation: RefCell<Vec<Result<(), uqa_core::QueryCancelled>>>,
 }
 
 impl Inputs {
@@ -22,6 +24,7 @@ impl Inputs {
             aggregates: self,
             planning: self,
             statements: self,
+            cancellation: &self.cancellation,
         }
     }
 }
@@ -40,6 +43,11 @@ impl ExecutablePlanOptimizer for Inputs {
         params: &[SQLParam],
     ) -> Result<UnifiedPlan, SQLError> {
         assert!(matches!(params, [SQLParam::Scalar(Value::Int(7))]));
+        assert!(uqa_sql::expr::statement_cancellation()
+            .is_some_and(|current| current.shares_signal(&self.cancellation)));
+        self.planning_cancellation
+            .borrow_mut()
+            .push(uqa_sql::expr::check_statement_cancellation());
         self.planned.borrow_mut().push(plan);
         Err(SQLError::TypeMismatch("planning rejected the input".into()))
     }
@@ -140,4 +148,26 @@ fn existing_plan_keeps_bound_relations_without_reclassifying_aggregates() {
     assert!(inputs.classified.borrow().is_empty());
     let plans = inputs.planned.borrow();
     assert!(matches!(&plans[..], [UnifiedPlan::Query(query)] if query.relations_bound));
+}
+
+#[test]
+fn planning_observes_the_statement_cancellation_and_restores_the_caller_scope() {
+    let inputs = Inputs::default();
+    inputs
+        .cancellation
+        .cancel_with(uqa_core::CancellationReason::StatementTimeout);
+    assert!(uqa_sql::expr::statement_cancellation().is_none());
+    assert_planning_error(execute(
+        &inputs.context(),
+        statement("SELECT $1 FROM public.items"),
+        &[SQLParam::scalar(Value::Int(7))],
+    ));
+    assert_eq!(
+        *inputs.planning_cancellation.borrow(),
+        [Err(uqa_core::QueryCancelled::new(
+            uqa_core::CancellationReason::StatementTimeout
+        ))]
+    );
+    assert!(uqa_sql::expr::statement_cancellation().is_none());
+    assert_eq!(uqa_sql::expr::check_statement_cancellation(), Ok(()));
 }
