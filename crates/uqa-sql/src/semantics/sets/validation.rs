@@ -72,7 +72,15 @@ pub fn function_may_return_set(
     }
     let identity = name.to_ascii_lowercase();
     let builtin = crate::semantics::builtin_function_dispatch_name(&identity);
-    if builtin_returns_set(&builtin) || engine.has_registered_table_function(&identity) {
+    let builtin_returns_set =
+        builtin_returns_set(&builtin) || engine.has_registered_table_function(&identity);
+    // An unbound call of a set-returning built-in's name returns a set unless overload resolution selects a SQL routine of that name.
+    if builtin_returns_set
+        && (binding.is_some()
+            || engine
+                .lookup_visible_sql_functions_for_analysis(name)?
+                .is_none())
+    {
         return Ok(true);
     }
     let (argument_names, argument_types, explicit_variadic) =
@@ -80,7 +88,7 @@ pub fn function_may_return_set(
     let Some(overloads) = engine.lookup_visible_sql_functions_for_analysis(name)? else {
         return Ok(false);
     };
-    if !crate::is_fixed_builtin(name) {
+    if !builtin_returns_set && !crate::is_fixed_builtin(name) {
         let mut setness = overloads
             .iter()
             .filter(|function| !function.def.is_procedure)
@@ -100,7 +108,7 @@ pub fn function_may_return_set(
         Some(resolver),
     )? {
         if resolved.selected.binding.builtin {
-            return Ok(false);
+            return Ok(builtin_returns_set);
         }
         let function = engine.resolve_static_sql_function(
             name,
@@ -118,7 +126,10 @@ pub fn function_may_return_set(
         &argument_types,
         explicit_variadic,
     ) {
-        Ok(function) => Ok(function.is_some_and(|function| function.def.returns_set())),
+        Ok(Some(function)) => Ok(function.def.returns_set()),
+        Ok(None) => Ok(builtin_returns_set),
+        // No SQL routine of a set-returning built-in's name accepts the arguments, so the built-in does.
+        Err(error) if builtin_returns_set && error.sqlstate() == Some("42883") => Ok(true),
         Err(error) if binding.is_none() && error.sqlstate() == Some("42883") => {
             match crate::type_resolution::builtin_function_type_with_resolver(
                 &builtin,

@@ -18,34 +18,36 @@ pub fn function_may_return_set_statically(
     {
         return false;
     }
+    // A call bound to a SQL routine returns a set exactly when that routine does, whatever built-in shares its name.
+    if let Some(binding) = binding.filter(|binding| !binding.builtin) {
+        return catalog
+            .lookup_bound_sql_functions_by_binding(binding)
+            .is_some_and(|overloads| {
+                overloads.iter().any(|function| {
+                    !function.def.is_procedure
+                        && crate::routines::routine_signature_types(&function.def)
+                            == binding.argument_types
+                        && function.def.returns_set()
+                })
+            });
+    }
     let identity = name.to_ascii_lowercase();
     let builtin = crate::semantics::builtin_function_dispatch_name(&identity);
     if builtin_returns_set(&builtin) || catalog.has_registered_table_function(&identity) {
         return true;
     }
-    if binding.is_some_and(|binding| binding.builtin) {
+    if binding.is_some() {
         return false;
     }
-    let overloads = match binding {
-        Some(binding) => catalog.lookup_bound_sql_functions_by_binding(binding),
-        None => catalog
-            .lookup_visible_sql_functions_for_analysis(name)
-            .ok()
-            .flatten(),
-    };
-    let Some(overloads) = overloads else {
-        return false;
-    };
-    if let Some(binding) = binding {
-        return overloads.iter().any(|function| {
-            !function.def.is_procedure
-                && crate::routines::routine_signature_types(&function.def) == binding.argument_types
-                && function.def.returns_set()
-        });
-    }
-    overloads
-        .iter()
-        .any(|function| !function.def.is_procedure && function.def.returns_set())
+    catalog
+        .lookup_visible_sql_functions_for_analysis(name)
+        .ok()
+        .flatten()
+        .is_some_and(|overloads| {
+            overloads
+                .iter()
+                .any(|function| !function.def.is_procedure && function.def.returns_set())
+        })
 }
 
 /// Whether a call of a built-in routine returns a set: a call bound to a built-in, or an unbound call that no SQL routine resolved. Scalar evaluation reports such a call with `PostgreSQL`'s executor diagnostic instead of evaluating it.

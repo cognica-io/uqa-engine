@@ -9,7 +9,7 @@
       "--notices"
     ],
     "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "43d5d36ff32a36024e664ca902de9894f008e36bbea8f601c921da49b5375ff7"
+    "input_sha256": "3bef3591c7b515e5fcb6165d60905da2972a5cbcca21041d499baf1ef22975a3"
   },
   "cases": [
     {
@@ -4676,6 +4676,239 @@
           "type_oids": [],
           "rows": []
         },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_overload_series",
+      "sql": "CREATE FUNCTION generate_series(text) RETURNS int LANGUAGE sql AS 'SELECT 42'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_where",
+      "sql": "SELECT 1 AS r WHERE generate_series('x') > 0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_case",
+      "sql": "SELECT CASE WHEN true THEN generate_series('x') END AS r",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_values",
+      "sql": "SELECT * FROM (VALUES (generate_series('x')), (1)) AS v(a)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_execute",
+      "sql": "EXECUTE p(ARRAY[generate_series('x')::text])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{42}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_call",
+      "sql": "CALL pr(ARRAY[generate_series('x')::text])",
+      "command_tags": [
+        "CALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_from_argument",
+      "sql": "SELECT * FROM generate_series(1, generate_series('x') - 40)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "generate_series"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_builtin_where",
+      "sql": "SELECT 1 AS r WHERE generate_series(1, 2) > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_overload_unnest",
+      "sql": "CREATE FUNCTION unnest(text) RETURNS text LANGUAGE sql AS 'SELECT $1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_unnest_where",
+      "sql": "SELECT 1 AS r WHERE unnest('x') = 'x'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "cleanup_overloads",
+      "sql": "DROP FUNCTION generate_series(text); DROP FUNCTION unnest(text)",
+      "command_tags": [
+        "DROP FUNCTION",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
         {
           "columns": [],
           "type_oids": [],
