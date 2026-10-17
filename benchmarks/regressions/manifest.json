@@ -11631,6 +11631,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "inline_production_scratch_admits_growth_and_releases_its_capacity",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/small_vec/tests.rs",
+      "capability": "Inline admitted scratch",
+      "workload": "Five u32 values cross a four-element inline capacity, followed by a middle insertion and removal.",
+      "invariant": "Inline storage is free, every spilled capacity remains charged, the sequence is preserved, and dropping scratch releases its lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "consumed_prefixes_are_not_shifted_and_are_compacted_before_growth",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/small_vec/tests.rs",
+      "capability": "Inline admitted scratch",
+      "workload": "Consume six of eight inline u32 values, prepend into consumed space, append after physical capacity fills, and exhaust the buffer in ordinary and zero-allowance modes.",
+      "invariant": "Prefix consumption advances the pointer without moving the suffix; one compaction reuses the inline capacity and preserves all remaining values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "scratch_refuses_growth_and_both_cancel_scopes_without_leaking",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/small_vec/tests.rs",
+      "capability": "Inline admitted scratch",
+      "workload": "Refuse a third value in a two-element zero-allowance buffer and exercise append, insert, remove and prefix consumption with either owner cancelled.",
+      "invariant": "Typed errors preserve entry-cancelled scratch, no refused heap capacity is charged, and every reservation is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_unicode_preserves_postgresql_normalization_mode",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/collation/tests.rs",
+      "capability": "Controlled PostgreSQL Unicode comparison",
+      "workload": "Compare a followed by acute/dot-below against a-ring under the independent PostgreSQL built-in versus explicit normalization-on/off reference.",
+      "invariant": "The selected built-in keeps PostgreSQL normalization-off ordering instead of substituting the complete-string ICU4X API result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_unicode_matches_postgresql_root_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/collation/tests.rs",
+      "capability": "Controlled PostgreSQL Unicode comparison",
+      "workload": "All 7,921 pairs over 89 independent PostgreSQL 18.4/ICU 76.1 root strings, including non-FCD inputs, scripts, expansions, ignored characters and supplementary scalars.",
+      "invariant": "Every ordering sign matches the captured deterministic root result and each comparison releases all scratch reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unicode_comparison_admits_scratch_and_releases_every_lease",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/collation/tests.rs",
+      "capability": "Controlled PostgreSQL Unicode comparison",
+      "workload": "Two strings with 1,024 combining scalars under a 256KiB allowance, zero-allowance inline and identical-byte inputs, refused growth and both entry-cancelled owners.",
+      "invariant": "Independent long-input order is preserved; successful, refused and cancelled paths release scratch; identical-byte and short inline paths charge no heap.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unicode_decomposition_observes_both_cancellation_scopes_during_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/collation/tests.rs",
+      "capability": "Controlled PostgreSQL Unicode comparison",
+      "workload": "An iterator cancels either owner after the 64th scalar in a 2,049-scalar input while decomposition is producing collation elements.",
+      "invariant": "Cancellation returns SQLSTATE 57014 without reading a 65th scalar, and all previously charged scratch is released.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

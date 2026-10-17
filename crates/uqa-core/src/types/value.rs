@@ -13,7 +13,9 @@ use super::{
 };
 
 pub(super) mod comparison_control;
-pub use comparison_control::fixed_char_comparison_text_with_control;
+pub use comparison_control::{
+    compare_bytes as compare_bytes_with_control, fixed_char_comparison_text_with_control,
+};
 mod copying;
 mod decoding;
 mod identity;

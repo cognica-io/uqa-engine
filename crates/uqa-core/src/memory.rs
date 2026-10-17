@@ -30,7 +30,9 @@ pub use map::{
     BudgetedSharedMapSnapshot, OwnedMap, OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter,
     OwnedSetIter, PreparedMapEntry,
 };
-pub use production::{Produced, ProductionControl, ProductionString, ProductionVec};
+pub use production::{
+    Produced, ProductionControl, ProductionSmallVec, ProductionString, ProductionVec,
+};
 pub use small_vec::BudgetedSmallVec;
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;

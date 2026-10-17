@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add a SQL-owned deterministic Unicode comparison primitive with admitted scratch and cancellation, preserving PostgreSQL's root collation options and byte tie-breaking for selected comparison consumers.
+
 - Support transactional shell type declarations and completion as enums, domains or composite types while preserving OIDs, ownership, PostgreSQL diagnostics, savepoints and provider reopening.
 
 - Store type and domain descriptions through `COMMENT`, `obj_description` and `pg_description`, preserving identity through type completion and lifecycle changes and removing descriptions of dropped types and their generated arrays.

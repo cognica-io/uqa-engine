@@ -83,7 +83,8 @@ pub use temporal::{
     TemporalTimeZone, TemporalValue,
 };
 pub use value::{
-    fixed_char_comparison_text_with_control, JsonValueDecoder, Value, ValueRetentionError,
+    compare_bytes_with_control, fixed_char_comparison_text_with_control, JsonValueDecoder, Value,
+    ValueRetentionError,
 };
 
 #[cfg(test)]

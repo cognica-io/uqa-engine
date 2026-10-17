@@ -23,6 +23,12 @@ chrono = { workspace = true }
 crc32fast = { workspace = true }
 getrandom = { workspace = true }
 icu_casemap = { workspace = true }
+icu_collator = { workspace = true }
+icu_collections = { workspace = true }
+icu_normalizer = { workspace = true }
+icu_properties = { workspace = true }
+icu_provider = { workspace = true }
+zerovec = { workspace = true }
 writeable = { workspace = true }
 libm = { workspace = true }
 lz4_flex = { workspace = true }
