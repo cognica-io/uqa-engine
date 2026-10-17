@@ -130,7 +130,7 @@ struct Failure {
 
 /// `RE_compile_and_cache`'s report of a compilation failure.
 fn compile_failure(error: RegexError) -> Failure {
-    assert!(matches!(error, RegexError::Engine(_)), "{error:?}");
+    assert!(matches!(error, RegexError::Code(_)), "{error:?}");
     Failure {
         sqlstate: error.sqlstate().unwrap().into(),
         message: format!("invalid regular expression: {}", error.message()),
@@ -139,7 +139,7 @@ fn compile_failure(error: RegexError) -> Failure {
 
 /// `RE_wchar_execute`'s report of an execution failure.
 fn execution_failure(error: RegexError) -> Failure {
-    assert!(matches!(error, RegexError::Engine(_)), "{error:?}");
+    assert!(matches!(error, RegexError::Code(_)), "{error:?}");
     Failure {
         sqlstate: error.sqlstate().unwrap().into(),
         message: format!("regular expression failed: {}", error.message()),

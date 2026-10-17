@@ -72,7 +72,7 @@ fn recursion_beyond_the_frame_budget_reports_regular_expression_too_complex() {
     ];
     for (name, pattern, subject) in shapes {
         let error = compile_and_match(&pattern, &subject).expect_err(name);
-        assert_eq!(error, RegexError::Engine(REG_ETOOBIG), "{name}");
+        assert_eq!(error, RegexError::Code(REG_ETOOBIG), "{name}");
         assert_eq!(error.message(), "regular expression is too complex");
         assert_ordinary_operations_work();
     }
@@ -165,7 +165,7 @@ fn a_match_inside_a_deep_operation_shares_the_frame_budget() {
     );
     assert!(outer.is_ok(), "{:?}", outer.as_ref().err());
     drop(outer);
-    assert_eq!(hooks.outcome, Some(Err(RegexError::Engine(REG_ETOOBIG))));
+    assert_eq!(hooks.outcome, Some(Err(RegexError::Code(REG_ETOOBIG))));
     let mut spans = vec![MatchSpan::UNSET; 281];
     assert_eq!(hooks.inner.exec(&code_points("a"), 0, &mut spans), Ok(true));
     drop(hooks);

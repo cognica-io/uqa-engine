@@ -54,7 +54,7 @@ impl<'r> Regex<'r> {
     ///
     /// Like `RE_compile_and_cache`, the wrapper converts the pattern into a buffer of one code point slot per pattern byte plus one and gives the compiled expression its own memory context, both in memory charged to `resources`. Their requests fail as `palloc` and context creation fail in `PostgreSQL`: a pattern of 268,435,455 bytes or more with [`RegexError::InvalidAllocationSize`] before anything is allocated, and a refused reservation with [`RegexError::OutOfMemory`].
     ///
-    /// The engine's own failures return [`RegexError::Engine`], which `PostgreSQL` reports as `invalid regular expression: <explanation>`, including `REG_ESPACE` when `resources` refuse an engine allocation and `REG_ETOOBIG` beyond [`crate::MAX_STACK_DEPTH`] or a lower limit of `resources`; [`RegexError::Cancelled`] when `resources` request cancellation; and [`RegexError::InvalidAllocationSize`] or [`RegexError::InvalidAllocationProduct`] when the engine requests an invalid size.
+    /// The engine's own failures return [`RegexError::Code`], which `PostgreSQL` reports as `invalid regular expression: <explanation>`, including `REG_ESPACE` when `resources` refuse an engine allocation and `REG_ETOOBIG` beyond [`crate::MAX_STACK_DEPTH`] or a lower limit of `resources`; [`RegexError::Cancelled`] when `resources` request cancellation; and [`RegexError::InvalidAllocationSize`] or [`RegexError::InvalidAllocationProduct`] when the engine requests an invalid size.
     pub fn compile(
         pattern: &str,
         flags: CompileFlags,
@@ -98,7 +98,7 @@ impl<'r> Regex<'r> {
             }
             None => {
                 context.release(resources);
-                Err(RegexError::Engine(REG_ETOOBIG))
+                Err(RegexError::Code(REG_ETOOBIG))
             }
         }
     }
@@ -117,7 +117,7 @@ impl<'r> Regex<'r> {
 
     /// Search `input` from `search_start` with `pg_regexec`, writing one span per slot of `matches`: slot 0 is the whole match and slot `n` subexpression `n`.
     ///
-    /// Returns `Ok(true)` on a match and `Ok(false)` without one, with every slot unset. A `search_start` beyond the input finds no match, and `^` and lookbehind constraints see the input before `search_start`, as in `pg_regexec`. Engine failures return [`RegexError::Engine`]; `PostgreSQL` reports them as `regular expression failed: <explanation>`. An input longer than the engine's `long` offsets can represent fails with `REG_INVARG`.
+    /// Returns `Ok(true)` on a match and `Ok(false)` without one, with every slot unset. A `search_start` beyond the input finds no match, and `^` and lookbehind constraints see the input before `search_start`, as in `pg_regexec`. Engine failures return [`RegexError::Code`]; `PostgreSQL` reports them as `regular expression failed: <explanation>`. An input longer than the engine's `long` offsets can represent fails with `REG_INVARG`.
     pub fn exec(
         &mut self,
         input: &[u32],
@@ -125,7 +125,7 @@ impl<'r> Regex<'r> {
         matches: &mut [MatchSpan],
     ) -> Result<bool, RegexError> {
         if c_long::try_from(input.len()).is_err() {
-            return Err(RegexError::Engine(REG_INVARG));
+            return Err(RegexError::Code(REG_INVARG));
         }
         let expression = self.expression;
         let resources = &mut *self.resources;
@@ -142,9 +142,9 @@ impl<'r> Regex<'r> {
         let result = match outcome {
             Some(Ok(REG_OKAY)) => return Ok(true),
             Some(Ok(REG_NOMATCH)) => Ok(false),
-            Some(Ok(code)) => Err(Stop::Error(RegexError::Engine(code))),
+            Some(Ok(code)) => Err(Stop::Error(RegexError::Code(code))),
             Some(Err(stop)) => Err(stop),
-            None => Err(Stop::Error(RegexError::Engine(REG_ETOOBIG))),
+            None => Err(Stop::Error(RegexError::Code(REG_ETOOBIG))),
         };
         matches.fill(MatchSpan::UNSET);
         result.map_err(Stop::resume)
@@ -233,7 +233,7 @@ fn compile_into(
     // SAFETY: the buffer is a live chunk of this context and the engine no longer refers to it.
     unsafe { MemoryContext::free(buffer, resources) };
     if code != REG_OKAY {
-        return Attempt::Finished(Err(Stop::Error(RegexError::Engine(code))));
+        return Attempt::Finished(Err(Stop::Error(RegexError::Code(code))));
     }
     Attempt::Finished(Ok(
         NonNull::new(result).expect("pg_regcomp success provides the compiled expression")

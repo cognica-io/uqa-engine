@@ -88,11 +88,11 @@ impl PartialEq<&str> for ErrorMessage {
 
 /// A failed collation selection, compilation or execution, with the error `PostgreSQL` 18.4 raises in the same situation.
 ///
-/// `PostgreSQL` reports [`RegexError::Engine`] from `pg_regcomp` as SQLSTATE `2201B` with `invalid regular expression: <explanation>`, and from `pg_regexec` as `2201B` with `regular expression failed: <explanation>`; see `RE_compile_and_cache` and `RE_wchar_execute` in `src/backend/utils/adt/regexp.c`. The other variants carry their own SQLSTATE and complete message, available through [`RegexError::sqlstate`], [`RegexError::message`] and [`RegexError::hint`].
+/// `PostgreSQL` reports [`RegexError::Code`] from `pg_regcomp` as SQLSTATE `2201B` with `invalid regular expression: <explanation>`, and from `pg_regexec` as `2201B` with `regular expression failed: <explanation>`; see `RE_compile_and_cache` and `RE_wchar_execute` in `src/backend/utils/adt/regexp.c`. The other variants carry their own SQLSTATE and complete message, available through [`RegexError::sqlstate`], [`RegexError::message`] and [`RegexError::hint`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RegexError {
     /// The engine returned this `REG_*` code; [`RegexError::message`] is `pg_regerror`'s explanation of it.
-    Engine(i32),
+    Code(i32),
     /// [`crate::RegexResources::cancel_requested`] stopped the operation. `PostgreSQL` 18 has no `REG_CANCEL` code: its engine checks interrupts with `CHECK_FOR_INTERRUPTS()`, which raises the canceled statement's own error, so the caller reports its cancellation error.
     Cancelled,
     /// The parser could not resolve the input collation (`42P22`).
@@ -115,7 +115,7 @@ impl RegexError {
     /// The `REG_*` code of an engine error.
     pub fn code(&self) -> Option<i32> {
         match self {
-            Self::Engine(code) => Some(*code),
+            Self::Code(code) => Some(*code),
             _ => None,
         }
     }
@@ -123,7 +123,7 @@ impl RegexError {
     /// The SQLSTATE `PostgreSQL` reports; `None` for [`RegexError::Cancelled`], whose error belongs to the caller.
     pub fn sqlstate(&self) -> Option<&'static str> {
         Some(match self {
-            Self::Engine(_) => "2201B",
+            Self::Code(_) => "2201B",
             Self::Cancelled => return None,
             Self::IndeterminateCollation => "42P22",
             Self::NondeterministicCollation => "0A000",
@@ -138,7 +138,7 @@ impl RegexError {
     /// The message text: `pg_regerror`'s explanation for an engine error, the complete message otherwise, and empty for [`RegexError::Cancelled`].
     pub fn message(&self) -> ErrorMessage {
         match *self {
-            Self::Engine(code) => explanation(code),
+            Self::Code(code) => explanation(code),
             Self::Cancelled => ErrorMessage::formatted(format_args!("")),
             Self::IndeterminateCollation => ErrorMessage::formatted(format_args!(
                 "could not determine which collation to use for regular expression"
