@@ -173,6 +173,7 @@ cp "$ASSET_SOURCE/${url##*/}" "$destination"
         self.assertIn("--features arrow,duckdb", action)
         self.assertIn("--profile release-stripped", action)
         self.assertIn("usql-release.py smoke", action)
+        self.assertIn("shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}", action)
         self.assertIn("CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static", action)
         self.assertIn("CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static", action)
         self.assertNotIn("--no-default-features", action)

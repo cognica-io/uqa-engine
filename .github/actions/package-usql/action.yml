@@ -8,7 +8,8 @@ runs:
   using: composite
   steps:
     - name: Build the CLI with bundled analyzers and foreign handlers
-      shell: bash
+      # Git Bash's incomplete Perl shadows the native Windows build tools.
+      shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
       env:
         CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
         CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
