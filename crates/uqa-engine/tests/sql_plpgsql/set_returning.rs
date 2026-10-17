@@ -465,66 +465,62 @@ fn membership_set_context_matches_postgresql() {
     );
 }
 
+/// Each construct that cannot accept a set reports `PostgreSQL`'s SQLSTATE, message and HINT, as the captured transcript records them.
 #[test]
 fn select_list_set_functions_reject_pg18_forbidden_contexts() {
-    let eng = engine();
-    for (sql, expected) in [
-        (
-            "SELECT CASE WHEN true THEN generate_series(1, 2) END",
-            "set-returning functions are not allowed in CASE",
-        ),
-        (
-            "SELECT coalesce(generate_series(1, 2), 0)",
-            "set-returning functions are not allowed in COALESCE",
-        ),
-        (
-            "SELECT sum(generate_series(1, 2))",
-            "aggregate function calls cannot contain set-returning function calls",
-        ),
-        (
-            "SELECT lag(generate_series(1, 2)) OVER ()",
-            "window function calls cannot contain set-returning function calls",
-        ),
-        (
-            "SELECT NOT (generate_series(0, 1)::boolean)",
-            "argument of NOT must not return a set",
-        ),
-        (
-            "SELECT 1 IN (generate_series(1, 2))",
-            "argument of IN must not return a set",
-        ),
-        (
-            "SELECT 1 WHERE generate_series(1, 2) > 0",
-            "set-returning functions are not allowed in WHERE",
-        ),
-        (
-            "SELECT 1 HAVING generate_series(1, 2) > 0",
-            "set-returning functions are not allowed in HAVING",
-        ),
-        (
-            "SELECT 1 LIMIT generate_series(1, 2)",
-            "set-returning functions are not allowed in LIMIT",
-        ),
-        (
-            "SELECT 1 OFFSET generate_series(1, 2)",
-            "set-returning functions are not allowed in OFFSET",
-        ),
-        (
-            "SELECT 1 FROM (VALUES (1)) AS t(x) JOIN (VALUES (1)) AS u(y) ON generate_series(1, 2) > 0",
-            "set-returning functions are not allowed in JOIN conditions",
-        ),
-        (
-            "VALUES (generate_series(1, 2))",
-            "set-returning functions are not allowed in VALUES",
-        ),
-        (
-            "SELECT * FROM generate_series(1, generate_series(1, 2))",
-            "set-returning functions must appear at top level of FROM",
-        ),
-    ] {
-        let error = exec_err(&eng, sql);
-        assert!(error.to_string().contains(expected), "got: {error}");
-    }
+    let mut reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/parity/pg18/set_returning_contexts_oracle.expected.json"
+    ))
+    .unwrap();
+    reference["cases"].as_array_mut().unwrap().retain(|case| {
+        matches!(
+            case["id"].as_str().unwrap(),
+            "setup_t"
+                | "setup_u"
+                | "case_then"
+                | "case_base"
+                | "case_else"
+                | "case_when_condition"
+                | "case_simple_when"
+                | "coalesce"
+                | "coalesce_types_first"
+                | "aggregate_argument"
+                | "aggregate_order"
+                | "aggregate_inner_case"
+                | "aggregate_filter"
+                | "aggregate_filter_first"
+                | "window_argument"
+                | "window_filter"
+                | "window_frame"
+                | "not_operand"
+                | "and_operand"
+                | "or_operand"
+                | "between_operand"
+                | "between_bound"
+                | "not_between"
+                | "between_symmetric"
+                | "in_single_item"
+                | "in_subquery"
+                | "any_subquery"
+                | "row_comparison"
+                | "boolean_test"
+                | "where"
+                | "where_folded"
+                | "where_inner_case"
+                | "having"
+                | "limit"
+                | "offset"
+                | "join_on"
+                | "values_query"
+                | "values_from"
+                | "from_nested"
+                | "rows_from_nested"
+                | "lateral_nested"
+                | "for_update"
+        )
+    });
+    assert_eq!(reference["cases"].as_array().unwrap().len(), 42);
+    crate::pg18_oracle::verify(&engine(), &reference.to_string());
 }
 
 // ---------------------------------------------------------------------

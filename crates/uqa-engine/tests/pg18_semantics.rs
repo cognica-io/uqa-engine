@@ -142,6 +142,8 @@ mod regular_expression_identities;
 mod reverse_overloads;
 #[path = "pg18_semantics/review_regressions.rs"]
 mod review_regressions;
+#[path = "pg18_semantics/set_returning_contexts.rs"]
+mod set_returning_contexts;
 #[path = "pg18_semantics/sql_value_clock.rs"]
 mod sql_value_clock;
 #[path = "pg18_semantics/string_binary_lengths.rs"]
