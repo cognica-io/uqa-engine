@@ -242,20 +242,23 @@ fn eval_function_call_inner(
         )));
     }
 
+    let returns_set = crate::semantics::sets::validation::builtin_returns_set(lower);
     if call_args.iter().any(|(name, _)| name.is_some()) {
-        if let Some(positional) = builtin_named_args(
-            lower,
-            &call_args,
-            &uqa_core::memory::ProductionControl::uncontrolled(),
-        )? {
-            return eval_scalar_function_with_context(lower, &positional, ctx, collation);
+        if !returns_set {
+            if let Some(positional) = builtin_named_args(
+                lower,
+                &call_args,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )? {
+                return eval_scalar_function_with_context(lower, &positional, ctx, collation);
+            }
         }
         if let Some(engine) = ctx.engine.filter(|_| allow_dynamic_dispatch) {
             if let Some(result) = engine.call_user_function(lower, &call_args) {
                 return result;
             }
         }
-        return Err(unknown_function_error(lower, &call_args));
+        return Err(unresolved_call_error(lower, &call_args, returns_set));
     }
 
     // Sequence functions use engine-owned session state and therefore precede pure built-in dispatch.
@@ -300,8 +303,21 @@ fn eval_function_call_inner(
                     return result;
                 }
             }
-            Err(unknown_function_error(lower, &call_args))
+            Err(unresolved_call_error(lower, &call_args, returns_set))
         }
         other => other,
+    }
+}
+
+/// A call no scalar routine evaluated. A set-returning built-in exists but cannot produce the one value a scalar expression needs.
+fn unresolved_call_error(
+    name: &str,
+    call_args: &[(Option<String>, Value)],
+    returns_set: bool,
+) -> SQLError {
+    if returns_set {
+        crate::semantics::sets::placement::set_valued_call_error()
+    } else {
+        unknown_function_error(name, call_args)
     }
 }

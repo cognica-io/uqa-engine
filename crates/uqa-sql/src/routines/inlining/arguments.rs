@@ -93,6 +93,13 @@ pub(super) fn prepare(
             if !plan.subqueries.is_empty() {
                 return Ok(None);
             }
+            // A default stored with a set-returning call by an earlier release stays the routine's own argument, which reports the executor's diagnostic when evaluated; substituted into the caller, the call would expand the caller's target list instead.
+            if crate::semantics::sets::static_setness::expression_may_return_set_statically(
+                context.routines,
+                &plan.scalar,
+            ) {
+                return Ok(None);
+            }
             // default_type records the assigned declaration type, not proof that the retained expression already has that type.
             let source = crate::type_resolution::scalar_type_with_resolver(
                 &plan.scalar,

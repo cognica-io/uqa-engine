@@ -23,6 +23,7 @@ mod row_type_arrays;
 mod schema_publication;
 mod schemas;
 mod sequences;
+mod set_returning_definitions;
 mod table_alteration;
 mod table_alteration_locks;
 mod table_authorization;

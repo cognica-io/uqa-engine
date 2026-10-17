@@ -218,6 +218,15 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                     .expect("ordinary array access"),
                 );
             }
+            // A set-returning built-in cannot produce the one value this expression needs; `PostgreSQL` rejects it before evaluating its arguments.
+            if let Some(binding) = binding.as_ref().filter(|binding| binding.builtin) {
+                if crate::semantics::sets::static_setness::builtin_call_returns_set(
+                    name,
+                    Some(binding),
+                ) {
+                    return Err(crate::semantics::sets::placement::set_valued_call_error());
+                }
+            }
             let call_args = evaluate_call_args(args, ctx)?;
             if let Some(binding) = binding {
                 if binding.builtin {
