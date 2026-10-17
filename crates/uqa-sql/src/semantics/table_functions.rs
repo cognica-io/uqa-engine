@@ -9,10 +9,16 @@
 use crate::ast::{
     ColumnType, FunctionBinding, FunctionParamMode, FunctionReturns, RoutineInvocationBinding,
 };
-use crate::routines::{routine_returns_anonymous_record, RoutineResolution, SQLUserFunction};
+use crate::routines::{RoutineResolution, SQLUserFunction};
 use crate::type_resolution::{BuiltinFunctionOverload, FunctionTypeResolver};
 use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
 use std::sync::Arc;
+
+mod column_definitions;
+pub use column_definitions::{
+    validate_table_function_column_definition, ColumnDefinitionRequest,
+    SETOF_COLUMN_DEFINITION_PREFIX,
+};
 
 pub struct ResolvedUserTableFunction {
     pub function: Arc<SQLUserFunction>,
@@ -94,69 +100,6 @@ pub fn user_function_composite_result(
         return Ok(None);
     };
     crate::expr::composites::descriptor(routines.composite_types(), reference.oid).map(Some)
-}
-
-fn validate_user_table_function_column_definition(
-    function: &SQLUserFunction,
-    declared_types: &[String],
-) -> Result<(), SQLError> {
-    let returns_anonymous_record = routine_returns_anonymous_record(&function.def);
-    if declared_types.is_empty() {
-        if returns_anonymous_record {
-            return Err(SQLError::Routine {
-                sqlstate: "42601".into(),
-                message: "a column definition list is required for functions returning \"record\""
-                    .into(),
-            });
-        }
-        return Ok(());
-    }
-    if returns_anonymous_record {
-        return Ok(());
-    }
-    if function.def.output_params().len() > 1 {
-        return Err(redundant_out_column_definition_error());
-    }
-    Err(SQLError::Routine {
-        sqlstate: "42601".into(),
-        message: "a column definition list is only allowed for functions returning \"record\""
-            .into(),
-    })
-}
-
-pub fn validate_table_function_column_definition(
-    name: &str,
-    binding: Option<&FunctionBinding>,
-    user_function: Option<&SQLUserFunction>,
-    declared_types: &[String],
-) -> Result<(), SQLError> {
-    if let Some(function) = user_function {
-        return validate_user_table_function_column_definition(function, declared_types);
-    }
-    if declared_types.is_empty() || binding.is_some_and(|binding| !binding.builtin) {
-        return Ok(());
-    }
-    let builtin = crate::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase());
-    if matches!(
-        builtin.as_str(),
-        "json_each"
-            | "jsonb_each"
-            | "json_each_text"
-            | "jsonb_each_text"
-            | "pg_get_sequence_data"
-            | "pg_sequence_parameters"
-            | "aclexplode"
-    ) {
-        return Err(redundant_out_column_definition_error());
-    }
-    Ok(())
-}
-
-fn redundant_out_column_definition_error() -> SQLError {
-    SQLError::Routine {
-        sqlstate: "42601".into(),
-        message: "a column definition list is redundant for a function with OUT parameters".into(),
-    }
 }
 
 pub fn resolve_user_table_function(

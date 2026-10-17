@@ -297,13 +297,18 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 .flatten()
                 .collect::<Vec<_>>();
             let (alias, column_aliases) = compile_alias(rf.alias.as_ref())?;
+            let mut functions = functions;
+            if !rf.coldeflist.is_empty() {
+                validate_shared_column_definitions(rf, &functions)?;
+            }
             if rf.is_rowsfrom || functions.len() > 1 {
-                if !rf.coldeflist.is_empty() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42601".into(),
-                        message: "a column definition list cannot be applied to a function group"
-                            .into(),
-                    });
+                if let [function] = functions.as_mut_slice() {
+                    // The only function of ROWS FROM takes the list written after it.
+                    let coldefs = compile_column_definitions(&rf.coldeflist)?;
+                    if !coldefs.is_empty() {
+                        (function.column_aliases, function.column_types) =
+                            coldefs.into_iter().unzip();
+                    }
                 }
                 return Ok(FromClause::FunctionGroup {
                     functions,
@@ -346,6 +351,48 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
     }
 }
 
+/// A column definition list written after the functions of a FROM item belongs to its only function, as `transformRangeFunction` requires: that function cannot have a list of its own, and the item cannot add an ordinality column.
+fn validate_shared_column_definitions(
+    range: &pg_query::protobuf::RangeFunction,
+    functions: &[TableFunction],
+) -> Result<()> {
+    let syntax_error = |message: &str, hint: Option<&str>| SQLError::Diagnostic {
+        sqlstate: "42601".into(),
+        message: message.into(),
+        detail: None,
+        hint: hint.map(Into::into),
+    };
+    if functions
+        .iter()
+        .any(|function| !function.column_types.is_empty())
+    {
+        return Err(syntax_error(
+            "multiple column definition lists are not allowed for the same function",
+            None,
+        ));
+    }
+    if functions.len() != 1 {
+        return Err(if range.is_rowsfrom {
+            syntax_error(
+                "ROWS FROM() with multiple functions cannot have a column definition list",
+                Some("Put a separate column definition list for each function inside ROWS FROM()."),
+            )
+        } else {
+            syntax_error(
+                "UNNEST() with multiple arguments cannot have a column definition list",
+                Some("Use separate UNNEST() calls inside ROWS FROM(), and attach a column definition list to each one."),
+            )
+        });
+    }
+    if range.ordinality {
+        return Err(syntax_error(
+            "WITH ORDINALITY cannot be used with a column definition list",
+            Some("Put the column definition list inside ROWS FROM()."),
+        ));
+    }
+    Ok(())
+}
+
 pub(in crate::compiler) fn right_is_lateral(node: &Node) -> bool {
     match node.node.as_ref() {
         Some(NodeEnum::RangeSubselect(rs)) => rs.lateral,
@@ -372,7 +419,8 @@ pub(in crate::compiler) fn compile_alias(
 /// Column definition list entries as `(name, lowercased type name)`.
 /// The type name is the last component of the `TypeName` path
 /// (`pg_catalog.int4` -> `int4`, `agtype` -> `agtype`); empty when the
-/// definition omitted a type.
+/// definition omitted a type. A column declared SETOF keeps that marker, which
+/// the function's result class rejects when the list is checked.
 pub(in crate::compiler) fn compile_column_definitions(
     nodes: &[Node],
 ) -> Result<Vec<(String, String)>> {
@@ -396,7 +444,10 @@ pub(in crate::compiler) fn compile_column_definitions(
                                 })?
                                 .to_ascii_lowercase();
                             if type_name == "interval" {
-                                return Ok((col.colname.clone(), column_type.sql_name()));
+                                return Ok((
+                                    col.colname.clone(),
+                                    declared_column_type(type_node, column_type.sql_name()),
+                                ));
                             }
                             if !type_node.typmods.is_empty() {
                                 let rendered = column_type.sql_name();
@@ -434,11 +485,22 @@ pub(in crate::compiler) fn compile_column_definitions(
                         }
                         Err(error) => return Err(error),
                     };
-                Ok((col.colname.clone(), type_name))
+                Ok((col.colname.clone(), declared_column_type(type_node, type_name)))
             }
             other => Err(SQLError::Unsupported(format!(
                 "function column definition: {other:?}"
             ))),
         })
         .collect()
+}
+
+fn declared_column_type(type_node: &pg_query::protobuf::TypeName, type_name: String) -> String {
+    if type_node.setof {
+        format!(
+            "{}{type_name}",
+            crate::semantics::SETOF_COLUMN_DEFINITION_PREFIX
+        )
+    } else {
+        type_name
+    }
 }

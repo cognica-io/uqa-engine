@@ -337,7 +337,10 @@ fn execute_resolved_table_function(
         record_target.as_deref(),
     )?;
     if let Some((columns, types)) = record_definition {
-        if !uqa_sql::routines::routine_returns_anonymous_record(&function.def) {
+        // A polymorphic result that this call resolves to `record` is an anonymous record too.
+        if !uqa_sql::routines::routine_returns_anonymous_record(
+            specialized.as_ref().unwrap_or(&function.def),
+        ) {
             return Err(SQLError::Internal(format!(
                 "non-anonymous routine `{}` reached record-definition shaping",
                 function.def.name

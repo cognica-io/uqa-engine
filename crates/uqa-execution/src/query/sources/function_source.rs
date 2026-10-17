@@ -171,10 +171,21 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
         hook.as_ref(),
     )?;
     validate_table_function_column_definition(
-        source.name,
-        source.binding,
-        resolved.as_ref().map(|resolved| resolved.function.as_ref()),
-        source.column_types,
+        context.relational.catalog,
+        uqa_sql::semantics::ColumnDefinitionRequest {
+            name: source.name,
+            binding: source.binding,
+            user_function: resolved.as_ref().map(|resolved| resolved.function.as_ref()),
+            user_invocation: resolved
+                .as_ref()
+                .and_then(|resolved| resolved.binding.invocation.as_deref()),
+            args: source.args,
+            declared_types: source.column_types,
+            column_names: source.column_aliases,
+        },
+        &input_schema,
+        params,
+        hook.as_ref(),
     )?;
     let call = TableFunctionCall {
         name: source.name,

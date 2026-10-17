@@ -4,8 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{builtin_table_function_overloads, upgrade_legacy_table_function_binding};
+use super::{
+    builtin_table_function_overloads, upgrade_legacy_table_function_binding,
+    validate_table_function_column_definition, ColumnDefinitionRequest,
+};
 use crate::ast::{ColumnType, FunctionBinding};
+use crate::{RowSchema, SQLError, ScalarExpr};
 
 fn legacy_binding(kind: &str) -> FunctionBinding {
     FunctionBinding {
@@ -146,4 +150,77 @@ fn regular_expression_set_functions_share_the_scalar_catalog_signatures() {
             ]
         );
     }
+}
+
+struct NoRoutines;
+
+impl crate::FunctionTypeResolver for NoRoutines {
+    fn resolve_function_type(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+        _: &[Option<String>],
+        _: &[Option<ColumnType>],
+        _: bool,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+}
+
+impl crate::routines::RoutineResolution for NoRoutines {}
+
+fn column_definition(name: &str, args: &[ScalarExpr], declared: &[&str]) -> Result<(), SQLError> {
+    let declared_types = declared.iter().map(ToString::to_string).collect::<Vec<_>>();
+    let column_names = (1..=declared.len())
+        .map(|position| format!("c{position}"))
+        .collect::<Vec<_>>();
+    validate_table_function_column_definition(
+        &NoRoutines,
+        ColumnDefinitionRequest {
+            name,
+            binding: None,
+            user_function: None,
+            user_invocation: None,
+            args,
+            declared_types: &declared_types,
+            column_names: &column_names,
+        },
+        &RowSchema::default(),
+        &[],
+        &NoRoutines,
+    )
+}
+
+#[test]
+fn built_in_results_decide_column_definition_lists() {
+    let integers = [ScalarExpr::Array(vec![ScalarExpr::Literal(
+        uqa_core::Value::Int(1),
+    )])];
+    for (name, args) in [
+        ("generate_series", &[][..]),
+        ("regexp_matches", &[][..]),
+        ("regexp_split_to_table", &[][..]),
+        ("pg_catalog.unnest", &integers[..]),
+        ("string_to_table", &[][..]),
+        ("json_array_elements", &[][..]),
+    ] {
+        let error = column_definition(name, args, &["int4"]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42601"), "{name}");
+        assert_eq!(
+            error.to_string(),
+            "a column definition list is only allowed for functions returning \"record\"",
+            "{name}"
+        );
+        column_definition(name, args, &[]).unwrap();
+    }
+    for name in ["json_each", "jsonb_each_text", "aclexplode"] {
+        assert_eq!(
+            column_definition(name, &[], &["text"])
+                .unwrap_err()
+                .to_string(),
+            "a column definition list is redundant for a function with OUT parameters"
+        );
+    }
+    // UQA extensions and host-registered functions describe their own results.
+    column_definition("cypher", &[], &["agtype"]).unwrap();
 }

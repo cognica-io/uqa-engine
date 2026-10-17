@@ -575,12 +575,23 @@ impl SchemaScope {
                     )?
                 };
                 validate_table_function_column_definition(
-                    name,
-                    binding.as_ref(),
-                    user_function
-                        .as_ref()
-                        .map(|resolved| resolved.function.as_ref()),
-                    column_types,
+                    routines,
+                    crate::semantics::ColumnDefinitionRequest {
+                        name,
+                        binding: binding.as_ref(),
+                        user_function: user_function
+                            .as_ref()
+                            .map(|resolved| resolved.function.as_ref()),
+                        user_invocation: user_function
+                            .as_ref()
+                            .and_then(|resolved| resolved.binding.invocation.as_deref()),
+                        args,
+                        declared_types: column_types,
+                        column_names: column_aliases,
+                    },
+                    &input,
+                    params,
+                    &type_resolver,
                 )?;
                 if let Some(function) = &user_function {
                     self.record_routine_dependency(&function.binding);
