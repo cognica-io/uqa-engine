@@ -10,6 +10,14 @@ use std::{path::Path, sync::Arc};
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};
 
+#[test]
+fn legacy_vector_catalog_array_casts_match_postgresql() {
+    crate::pg18_oracle::verify(
+        &Engine::new(),
+        include_str!("sql_legacy_vectors/catalog-array-postgresql.json"),
+    );
+}
+
 fn open(provider: usize, path: &Path) -> Engine {
     match provider {
         0 => Engine::open(path).unwrap(),

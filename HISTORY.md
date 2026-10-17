@@ -28,6 +28,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve catalog-vector casts to OID-alias and domain arrays, including zero-based bounds, empty dimensions, NULL and checked integer-to-OID conversion.
+
 - Preserve PostgreSQL unsigned Julian DATE output when an owned retained composite field is reinterpreted after a same-width type change.
 
 - Accept and format the full PostgreSQL finite date range without depending on the timestamp library's narrower calendar range, and reject out-of-range canonical date successors with the PostgreSQL diagnostic.
