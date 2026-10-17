@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add the `uqa-pg-regex` crate, which builds PostgreSQL 18.4's Advanced Regular Expression engine from unchanged, checksummed PostgreSQL sources behind a safe Rust API with admitted memory, cancellation hooks, PostgreSQL's 2 MB stack budget on any thread and a call-frame bound in WebAssembly. It is distributed under the PostgreSQL, Spencer and Tcl licenses, whose notices ship with the Python, Node.js and browser WASM packages.
+
 - Extend the Rust `usql` shell with query-buffer commands, variables and conditionals, script includes, native file COPY, printing formats, pager/editor integration, query cancellation and idle LISTEN notifications.
 
 - Build standalone `usql` release archives for Linux, macOS and Windows on x86_64 and ARM64, with bundled Nori, Kuromoji, Arrow and DuckDB, SHA-256 checksums, user-directory installers and `cargo binstall` installation without compilation.
@@ -24,6 +26,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Evaluate regular expressions, case mapping, `LIKE` and `ILIKE` in stored definitions with PostgreSQL's semantics after upgrading: rows and index keys written earlier are not revalidated, calls stored before this release run under the database default collation until their definitions are recreated, and stored defaults, generated columns, index expressions, trigger and rule conditions, partition keys and parameter defaults that call `regexp_matches` report PostgreSQL's set-valued function error when evaluated; see [Upgrading](docs/manual/reference/10-upgrading.md#development-source).
+
 - Connect retained declared range input to catalog-aware casts and arrays, preserving endpoint and canonical invocation order, routine identity, lazy binary coercion and controlled value ownership. SQL range declarations and generated constructors remain separate work.
 
 - Let internal SQL equality-key consumers share physical decoding, normalization and output under one memory allowance and both cancellation scopes, while retaining existing exact, hash, spill and reservation bytes.
@@ -32,7 +36,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Evaluate `~`, `~*`, `!~`, `!~*`, `SIMILAR TO`, the `regexp_*` functions and the pattern forms of `substring` with PostgreSQL 18.4's own regular expression engine instead of translating patterns for the Rust `regex` crate. Match selection, back-references, lookahead and lookbehind constraints, word-boundary and class escapes, embedded options and directors, every flag including the basic syntax that `e` selects, character classes and case-insensitive matching under each input collation, `regexp_replace` escapes and PostgreSQL's error messages now agree with PostgreSQL 18. A compilation or search may use PostgreSQL's 2 MB stack budget and reports `regular expression is too complex` beyond it, its working memory is charged to the statement's allowance, and cancellation and `statement_timeout` interrupt it.
+
 - Return `regexp_matches` as PostgreSQL's set-returning function in `FROM`, `LATERAL`, `ROWS FROM`, `WITH ORDINALITY` and select lists, with one `text[]` row per match under `g`, PostgreSQL's advancement after empty matches, no rows for no match or a NULL argument, named arguments and its `pg_proc` identities, instead of one row holding the first match or NULL. `regexp_match`, `regexp_like`, `regexp_count`, `regexp_instr` and `regexp_substr` now validate every flag before rejecting `g` with PostgreSQL's global-option message, and `regexp_match` accepts its named arguments.
+
+- Draw `regexp_split_to_table` pieces from the SQL regular-expression owner, so it accepts flags, rejects `g` with PostgreSQL's diagnostic and skips the degenerate empty matches PostgreSQL ignores, and add `regexp_split_to_array`, with named arguments and the `pg_proc` identities of both functions.
+
+- Search the whole input from the start position in `regexp_count`, `regexp_instr`, `regexp_substr` and `regexp_replace`, advancing past each match as PostgreSQL does, so they find an empty match after a non-empty one and anchors see the text before the start. A pattern without subexpressions selects its whole match as subexpression 1, `regexp_replace` reports an invalid pattern before searching, and its four-argument text form gives PostgreSQL's hint for flags that begin with a digit.
+
+- Resolve the regular-expression functions through their PostgreSQL 18 catalog signatures, so incompatible arguments report `42883` with PostgreSQL's signature, untyped parameters and named arguments follow the declared types and names, and CHECK constraints, defaults, generated columns, expression and partial indexes, domain constraints, `regprocedure` input and EXECUTE privileges accept the 23 scalar overloads on every provider. `information_schema.routines` derives result types and visibility as PostgreSQL does, reporting `ARRAY` for array results.
+
+- Apply each call's input collation to `lower`, `upper`, `initcap`, `casefold`, `LIKE`, `ILIKE` and regular expressions as PostgreSQL 18 does: `C`, `POSIX` and `ucs_basic` map and classify ASCII letters only, `pg_c_utf8` uses simple Unicode mappings, `pg_unicode_fast` and the database default use full mappings with PostgreSQL's final-sigma rule, and `unicode` uses ICU root mappings and word boundaries, instead of applying root Unicode mappings under every collation and starting `initcap` words only after whitespace. Explicit `COLLATE` clauses and column collations select the provider in queries, DML, views, rules, defaults, CHECK constraints, generated columns, index expressions, trigger conditions, routine bodies and prepared statements and persist across reopening, conflicting implicit collations report `42P22` with PostgreSQL's message and hint, and `initcap` gains its `pg_proc` identity.
+
+- Follow PostgreSQL 18 for set-returning functions: report `0A000` for calls in UPDATE, RETURNING, DML WHERE, ON CONFLICT, MERGE, trigger WHEN, rule WHERE, EXECUTE and CALL, add the LATERAL hint for CASE, COALESCE, aggregate and window arguments and `42804` for Boolean operands and row comparisons, expand a single `INSERT ... VALUES` row, check column definition lists by result class, start functions in FROM only at their first row while checking EXECUTE at scan start, and report `22023` for a zero `generate_series` step.
 
 - Apply `WHERE` predicates to `VALUES` lists in `FROM` and to the right relation of `LATERAL` joins and table functions, which previously returned every row once the planner placed the predicate on that source. This covers lists alone, joined with each other, tables and functions, and inside aggregates, subqueries, CTEs, set operations, views, SQL routines, prepared statements and `INSERT ... SELECT`. Unqualified columns of an unaliased `VALUES` list or subquery are no longer attributed to the only named relation beside it, which reported `42703` or ignored the predicate. A relation's own name in `WHERE` is its whole-row value, so `v = ROW(...)`, `v IS NULL`, `row_to_json(v)` and `(v).x` on `VALUES` lists, derived tables and aliased tables no longer read a missing column, and a predicate on an outer relation no longer filters a different relation of the same name inside a parenthesized join alias.
 
