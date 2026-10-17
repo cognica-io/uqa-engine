@@ -57,6 +57,7 @@ class ForeignHandlerScopeTests(unittest.TestCase):
             "crates/uqa-analysis/src/nori.rs", "crates/uqa-scoring/src/bm25.rs",
             "crates/uqa-storage-redb/src/lib.rs", "crates/uqa-graph/src/lib.rs",
             "docs/plans/0018-extension-progress.md", "HISTORY.md", "README.md",
+            "scripts/fdw_ci.py", "scripts/tests/test_fdw_ci.py",
         ):
             with self.subTest(path=path):
                 self.assertFalse(affected(path))
@@ -107,6 +108,37 @@ class ForeignHandlerHistoryTests(unittest.TestCase):
         event = {"action": "ready_for_review", "pull_request": {
             "draft": True, "base": {"sha": self.base}}}
         self.assertFalse(select(self.root, event, "pull_request", revision)["required"])
+
+    def test_event_only_changes_do_not_repeat_unchanged_feature_commands(self):
+        path = ".github/workflows/fdw-features.yml"
+        workflow = "name: Foreign handlers\non:\n  pull_request:\n\npermissions:\n  contents: read\nenv:\n  CARGO_INCREMENTAL: '0'\njobs:\n  features:\n    run: cargo test -p uqa-fdw\n"
+        base = self.commit(path, workflow)
+        ready = workflow.replace("  pull_request:\n", "  pull_request:\n    types: [ready_for_review]\n")
+        revision = self.commit(path, ready)
+        self.assertFalse(self.pr(base, revision)["required"])
+        revision = self.commit("scripts/fdw_ci.py", "selector policy\n")
+        self.assertFalse(self.pr(base, revision)["required"])
+        revision = self.commit("crates/uqa-fdw/src/lib.rs", "product correction\n")
+        self.assertEqual(self.pr(base, revision)["paths"], ["crates/uqa-fdw/src/lib.rs"])
+
+    def test_commands_environment_and_unreadable_workflows_still_require_validation(self):
+        path = ".github/workflows/fdw-features.yml"
+        workflow = "name: Foreign handlers\non:\n  pull_request:\npermissions:\n  contents: read\nenv:\n  CARGO_INCREMENTAL: '0'\njobs:\n  features:\n    run: cargo test -p uqa-fdw\n"
+        base = self.commit(path, workflow)
+        for changed in (workflow.replace("cargo test", "cargo clippy"),
+                        workflow.replace("CARGO_INCREMENTAL: '0'", "CARGO_INCREMENTAL: '1'"),
+                        workflow.replace("on:", "'on':"), ""):
+            with self.subTest(changed=changed):
+                revision = self.commit(path, changed)
+                self.assertTrue(self.pr(base, revision)["required"])
+
+    def test_actual_readiness_change_keeps_the_previous_matrix_definition(self):
+        root = Path(__file__).resolve().parents[2]
+        current = (root / ".github/workflows/fdw-features.yml").read_text()
+        previous = current.replace("    types: [ready_for_review]\n", "")
+        base = self.commit(".github/workflows/fdw-features.yml", previous)
+        revision = self.commit(".github/workflows/fdw-features.yml", current)
+        self.assertFalse(self.pr(base, revision)["required"])
 
     def test_pull_request_retains_earlier_product_change_after_documentation_commit(self):
         product = self.commit("crates/uqa-fdw/src/lib.rs", "corrected\n")

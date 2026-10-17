@@ -38,8 +38,7 @@ INPUTS = (
     "crates/uqa-engine/tests/catalog/sql_rules/relation_dependencies.rs",
     "tests/parity/pg18/*foreign*",
     ".github/workflows/fdw-features.yml", ".github/scripts/free-linux-runner-disk.sh",
-    "scripts/check-fdw-feature-isolation.py", "scripts/fdw_ci.py",
-    "scripts/tests/test_fdw_ci.py",
+    "scripts/check-fdw-feature-isolation.py",
 )
 PLATFORMS = ["ubuntu-24.04", "macos-14"]
 CONFIGURATIONS = ["memory", "arrow", "duckdb"]
@@ -65,6 +64,26 @@ def fingerprint(root: Path, revision: str) -> str:
 
 def affected(path: str) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in INPUTS)
+
+
+def execution_definition(contents: bytes) -> bytes:
+    """Ignore only the event declaration; preserve every execution and evidence setting."""
+    before, separator, remaining = contents.partition(b"\non:\n")
+    if not separator:
+        raise ValueError("workflow event declaration is unavailable")
+    following = re.search(rb"(?m)^[A-Za-z_][A-Za-z0-9_-]*:", remaining)
+    if following is None:
+        raise ValueError("workflow execution definition is unavailable")
+    return before + b"\n" + remaining[following.start():]
+
+
+def only_events_changed(root: Path, base: str, revision: str, path: str) -> bool:
+    try:
+        before = execution_definition(git(root, "show", f"{base}:{path}"))
+        after = execution_definition(git(root, "show", f"{revision}:{path}"))
+        return before == after
+    except (subprocess.CalledProcessError, ValueError):
+        return False
 
 
 def select(root: Path, event: dict, event_name: str, revision: str, *, fetch=False) -> dict:
@@ -95,7 +114,9 @@ def select(root: Path, event: dict, event_name: str, revision: str, *, fetch=Fal
     except subprocess.CalledProcessError:
         return result
     paths = [path.decode("utf-8", errors="surrogateescape") for path in raw.split(b"\0") if path]
-    selected = sorted(path for path in paths if affected(path))
+    selected = sorted(path for path in paths if affected(path)
+                      and not (path == ".github/workflows/fdw-features.yml"
+                               and only_events_changed(root, base, revision, path)))
     result.update(required=bool(selected), paths=selected,
                   reason="Foreign-handler inputs changed." if selected else "No foreign-handler input changed.")
     return result
