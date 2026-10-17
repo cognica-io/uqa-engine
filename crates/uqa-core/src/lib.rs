@@ -39,9 +39,9 @@ pub use ranked_view::RankedView;
 pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
 pub use relation_identity::RelationIdentity;
 pub use types::{
-    fixed_char_comparison_text_with_control, jsonb_equality_key, jsonb_equality_key_with_control,
-    write_jsonb_comparison_key, write_jsonb_equality_key, ArrayAssignmentError,
-    ArrayTraversalError, ArrayValue, BitStringValue, BudgetedArrayElements,
+    compare_bytes_with_control, fixed_char_comparison_text_with_control, jsonb_equality_key,
+    jsonb_equality_key_with_control, write_jsonb_comparison_key, write_jsonb_equality_key,
+    ArrayAssignmentError, ArrayTraversalError, ArrayValue, BitStringValue, BudgetedArrayElements,
     ControlledArrayElements, DatumValue, DecimalValue, DiskANNIndexStats, DiskANNQueryStats, DocId,
     Edge, EdgeId, EnumLabelKey, EnumLabelKeyError, EnumLabelKeyParseError, EnumValue, FieldName,
     GeneralizedPayload, GeneralizedPostingEntry, IndexStats, JsonValueDecoder, JsonbKeyError,

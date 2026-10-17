@@ -9,8 +9,10 @@
 use super::{Budgeted, MemoryBudget, MemoryReservation};
 use crate::{CancellationToken, Value, ValueRetentionError};
 
+mod small_vec;
 mod string;
 mod vec;
+pub use small_vec::ProductionSmallVec;
 pub use string::ProductionString;
 pub use vec::ProductionVec;
 

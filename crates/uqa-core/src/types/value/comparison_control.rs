@@ -150,7 +150,8 @@ fn compare_float_decimal(
     DecimalValue::from_f64_exact_with_control(float, control)?.cmp_with_control(decimal, control)
 }
 
-pub(crate) fn compare_bytes(
+/// Compare borrowed byte strings with cancellation checkpoints between bounded chunks.
+pub fn compare_bytes(
     left: &[u8],
     right: &[u8],
     control: &ProductionControl<'_>,

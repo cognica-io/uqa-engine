@@ -11631,6 +11631,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "inline_production_scratch_admits_growth_and_releases_its_capacity",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/small_vec/tests.rs",
+      "capability": "Inline admitted scratch",
+      "workload": "Five u32 values cross a four-element inline capacity, followed by a middle insertion and removal.",
+      "invariant": "Inline storage is free, every spilled capacity remains charged, the sequence is preserved, and dropping scratch releases its lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "consumed_prefixes_are_not_shifted_and_are_compacted_before_growth",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/small_vec/tests.rs",
+      "capability": "Inline admitted scratch",
+      "workload": "Consume six of eight inline u32 values, prepend into consumed space, append after physical capacity fills, and exhaust the buffer in ordinary and zero-allowance modes.",
+      "invariant": "Prefix consumption advances the pointer without moving the suffix; one compaction reuses the inline capacity and preserves all remaining values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "scratch_refuses_growth_and_both_cancel_scopes_without_leaking",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/small_vec/tests.rs",
+      "capability": "Inline admitted scratch",
+      "workload": "Refuse a third value in a two-element zero-allowance buffer and exercise append, insert, remove and prefix consumption with either owner cancelled.",
+      "invariant": "Typed errors preserve entry-cancelled scratch, no refused heap capacity is charged, and every reservation is released.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
