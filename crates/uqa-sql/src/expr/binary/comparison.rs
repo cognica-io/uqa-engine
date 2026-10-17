@@ -886,20 +886,10 @@ fn compare_fixed_text(
     right: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Ordering> {
-    fn trim<'a>(text: &'a str, control: &ProductionControl<'_>) -> Result<&'a [u8]> {
-        let mut bytes = text.as_bytes();
-        let mut checked = 0;
-        while bytes.last() == Some(&b' ') {
-            if checked % 4096 == 0 {
-                control.check()?;
-            }
-            bytes = &bytes[..bytes.len() - 1];
-            checked += 1;
-        }
-        Ok(bytes)
-    }
-    let left = trim(left, control)?;
-    let right = trim(right, control)?;
+    let left = uqa_core::fixed_char_comparison_text_with_control(left, control)?;
+    let right = uqa_core::fixed_char_comparison_text_with_control(right, control)?;
+    let left = left.as_bytes();
+    let right = right.as_bytes();
     for (left, right) in left.chunks(4096).zip(right.chunks(4096)) {
         control.check()?;
         let ordering = left.cmp(right);

@@ -82,7 +82,9 @@ pub use temporal::{
     TemporalDateOrder, TemporalInfinity, TemporalInputError, TemporalIntervalStyle,
     TemporalTimeZone, TemporalValue,
 };
-pub use value::{JsonValueDecoder, Value, ValueRetentionError};
+pub use value::{
+    fixed_char_comparison_text_with_control, JsonValueDecoder, Value, ValueRetentionError,
+};
 
 #[cfg(test)]
 mod tests;

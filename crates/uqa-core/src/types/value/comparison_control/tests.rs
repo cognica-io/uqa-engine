@@ -8,6 +8,43 @@ use super::*;
 use crate::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn fixed_character_comparison_text_borrows_only_the_unpadded_prefix() {
+    let memory = MemoryBudget::new(0);
+    let cancellation = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &cancellation, &cancellation);
+    for (input, expected) in [
+        ("", ""),
+        ("   ", ""),
+        (" abc  ", " abc"),
+        ("日本語  ", "日本語"),
+        ("x\t ", "x\t"),
+        ("x\u{a0} ", "x\u{a0}"),
+    ] {
+        let text = fixed_char_comparison_text_with_control(input, &control).unwrap();
+        assert_eq!(text, expected);
+        assert_eq!(text.as_ptr(), input.as_ptr());
+        assert_eq!(memory.used(), 0);
+    }
+    for original_cancelled in [false, true] {
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if original_cancelled {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        let control = ProductionControl::new(&memory, &original, &invoking);
+        for input in ["", "x", "   "] {
+            assert!(matches!(
+                fixed_char_comparison_text_with_control(input, &control),
+                Err(ValueRetentionError::Cancelled(_))
+            ));
+        }
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
 fn controlled_comparison_preserves_native_numeric_jsonb_and_container_order() {
     let array = |values| Value::Array(ArrayValue::with_lower_bounds(values, vec![-2]).unwrap());
     let values = vec![

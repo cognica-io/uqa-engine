@@ -54,6 +54,17 @@ pub(in crate::expr) fn array_shape(
     arrays::ArrayShape::read(payload.bytes())
 }
 
+/// A polymorphic array operation selects the physical array header even when its declared input is an atomic catalog vector. Vector-specific output and scalar comparison checks belong to those operations, not this array observation.
+pub(in crate::expr) fn read_array_input_with_catalog_and_control(
+    datum: &DatumValue,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    control.check()?;
+    let payload = payload(datum, control)?;
+    arrays::read(payload.bytes(), catalog, control)
+}
+
 #[cfg(test)]
 mod tests;
 

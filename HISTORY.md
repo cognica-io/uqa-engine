@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Check cancellation while removing fixed-character padding for equality keys, sharing the same borrowed normalization used by SQL comparisons without changing successful key bytes.
+
 - Read retained `int2vector` and `oidvector` composite fields through the shared SQL Datum codec, preserving stored and prepared values across domain rebinding and persistent reopening. Match PostgreSQL vector-header diagnostics while retaining bounded reads, memory ownership and cancellation.
 
 - Preserve range and multirange equality through DISTINCT, grouping, scalar and multi-argument aggregate DISTINCT, MODE, joins, set operations, recursive UNION, IN/EXISTS, FETCH WITH TIES and window peers. Retain selected types in recursive SEARCH/CYCLE keys so numeric bounds compare by their SQL values across memory, spill and cached/streamed consumers. Keep one selected type domain across physical-row insertion and value lookup in reusable SQL sets. Release retained LIMIT scan state on close, including child cleanup errors.

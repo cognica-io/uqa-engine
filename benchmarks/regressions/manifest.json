@@ -9656,7 +9656,7 @@
       ],
       "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
       "capability": "Bit statement and provider retention",
-      "workload": "31 independently captured PostgreSQL statements including three observations after actual persistent reopening on four providers.",
+      "workload": "36 independently captured PostgreSQL statements including three observations after actual persistent reopening on four providers.",
       "invariant": "Types, modifiers, values, diagnostics, arrays/records, index uniqueness and rollback remain unchanged after provider serialization."
     },
     {
@@ -11436,6 +11436,110 @@
       "capability": "Retained SQL vector fields",
       "workload": "Observe stored and prepared composite vectors before and after domain rebinding on four providers, then reopen each persistent provider.",
       "invariant": "Match eight independently captured PostgreSQL observations and retain the same stored vector fields after persistent reopening."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_btree_inputs_match_postgresql_range_declarations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/operator_classes/btree/binding/tests.rs",
+      "capability": "Selected B-tree input binding",
+      "workload": "36 independently captured PostgreSQL selected range subtype/class declarations, including domains, aliases, arrays, records, enums and binary-compatible non-default inputs.",
+      "invariant": "All 23 accepted bindings and thirteen exact errors match PostgreSQL; binding retains the original class/type references and releases every cast lookup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_btree_binding_preserves_modifiers_and_owns_only_cast_lookup_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/operator_classes/btree/binding/tests.rs",
+      "capability": "Selected B-tree input binding",
+      "workload": "Modified text/bit types, domain binary inputs, zero-byte direct/generic binding, exhausted cast lookup and both cancellation owners.",
+      "invariant": "No declared type or class is rewritten, direct/generic binding allocates nothing, failures release scratch and either owner cancels binding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "fixed_character_comparison_text_borrows_only_the_unpadded_prefix",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/comparison_control/tests.rs",
+      "capability": "Controlled character comparison text",
+      "workload": "ASCII padding, empty values, multibyte text and non-space whitespace under zero scratch allowance; either original or invoking cancellation.",
+      "invariant": "Only trailing U+0020 is removed, the result borrows the input, no workspace is allocated and either cancellation is preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fixed_character_key_normalization_observes_cancellation_before_padding_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/production_tests.rs",
+      "capability": "Bounded fixed-character equality-key normalization",
+      "workload": "An output sink cancels either owner at the character tag before a 16 KiB trailing-space scan.",
+      "invariant": "Cancellation returns 57014 before any subsequent length or payload write, without scratch allocation; successful key bytes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_btree_input_observation_matches_postgresql_binary_interpretation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/btree/tests.rs",
+      "capability": "Selected native B-tree input interpretation",
+      "workload": "Seven independent PostgreSQL selected-support comparisons, fourteen captured physical Datums and every logical/physical pairing.",
+      "invariant": "The selected class, including binary-compatible non-default classes and vector-versus-array order, preserves PostgreSQL observations and releases decoding scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_btree_input_observation_borrows_vectors_and_preserves_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/btree/tests.rs",
+      "capability": "Controlled selected input observation",
+      "workload": "Borrowed catalog-vector arrays, unsigned integer interpretation, admitted character copies, consumer failures and cancellation before/inside callbacks.",
+      "invariant": "Zero-copy paths require no memory; required copies share the caller allowance and release it after success/error; both cancellation owners propagate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_btree_input_keys_preserve_postgresql_classes_through_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/btree/tests.rs",
+      "capability": "Selected native input equality keys",
+      "workload": "Seven PostgreSQL comparison classes and fourteen physical inputs through exact keys, in-memory membership and one-byte forced spill.",
+      "invariant": "Physical and logical inputs have identical keys, key equality agrees with selected comparison equality and memory/spill partitions coincide.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_btree_input_keys_share_array_and_record_image_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/btree/tests.rs",
+      "capability": "Controlled selected input key ownership",
+      "workload": "Borrowed vector-array framing, scale-distinct record images, exhausted allowances and independently cancelled owners.",
+      "invariant": "Keys reuse existing array/image bytes, retain only their output lease and release all temporary/partial output on 53200 or 57014.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

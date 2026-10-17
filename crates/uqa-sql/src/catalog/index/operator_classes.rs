@@ -11,7 +11,7 @@ use crate::{ColumnType, SQLError};
 mod btree;
 pub use btree::{
     builtin_btree_operator_class, builtin_btree_operator_classes, default_btree_operator_class,
-    BuiltinBTreeOperatorClass,
+    BoundBTreeOperatorClass, BuiltinBTreeOperatorClass,
 };
 
 /// Resolve default B-tree capability using the shared class identities. Domains use their base class; generic arrays and records do not require a scalar class for every element or field. UQA vectors and tensors retain their native ordering capability.

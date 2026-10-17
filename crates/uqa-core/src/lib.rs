@@ -39,16 +39,17 @@ pub use ranked_view::RankedView;
 pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
 pub use relation_identity::RelationIdentity;
 pub use types::{
-    jsonb_equality_key, jsonb_equality_key_with_control, write_jsonb_comparison_key,
-    write_jsonb_equality_key, ArrayAssignmentError, ArrayTraversalError, ArrayValue,
-    BitStringValue, BudgetedArrayElements, ControlledArrayElements, DatumValue, DecimalValue,
-    DiskANNIndexStats, DiskANNQueryStats, DocId, Edge, EdgeId, EnumLabelKey, EnumLabelKeyError,
-    EnumLabelKeyParseError, EnumValue, FieldName, GeneralizedPayload, GeneralizedPostingEntry,
-    IndexStats, JsonValueDecoder, JsonbKeyError, LegacyVectorKind, LegacyVectorValue, PathExpr,
-    PathSegment, Payload, PostingEntry, RecordFieldType, RecordValue, RowValue, TemporalDateOrder,
-    TemporalInfinity, TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
-    TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value, ValueRetentionError,
-    VectorGeneration, VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
+    fixed_char_comparison_text_with_control, jsonb_equality_key, jsonb_equality_key_with_control,
+    write_jsonb_comparison_key, write_jsonb_equality_key, ArrayAssignmentError,
+    ArrayTraversalError, ArrayValue, BitStringValue, BudgetedArrayElements,
+    ControlledArrayElements, DatumValue, DecimalValue, DiskANNIndexStats, DiskANNQueryStats, DocId,
+    Edge, EdgeId, EnumLabelKey, EnumLabelKeyError, EnumLabelKeyParseError, EnumValue, FieldName,
+    GeneralizedPayload, GeneralizedPostingEntry, IndexStats, JsonValueDecoder, JsonbKeyError,
+    LegacyVectorKind, LegacyVectorValue, PathExpr, PathSegment, Payload, PostingEntry,
+    RecordFieldType, RecordValue, RowValue, TemporalDateOrder, TemporalInfinity,
+    TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue, TokenOccurrence,
+    TokenOccurrenceError, TokenOffsets, Value, ValueRetentionError, VectorGeneration,
+    VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
     MAX_ENUM_LABEL_KEY_BYTES,
 };
 
