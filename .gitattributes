@@ -32,6 +32,10 @@ crates/uqa-pg-query/src/node_mut.rs linguist-generated
 crates/uqa-pg-query/src/node_ref.rs linguist-generated
 crates/uqa-pg-query/src/node_structs.rs linguist-generated
 
+# Imported PostgreSQL 18.4 regular expression engine. Keep upstream bytes on
+# every checkout; SHA256SUMS verifies this tree.
+crates/uqa-pg-regex/postgres/** -text -whitespace linguist-vendored
+
 # Imported morphology dictionaries and notices retain their exact upstream contents.
 # The resource manifest verifies their hashes across platforms.
 crates/uqa-nori-data/data/nori.uqan binary
