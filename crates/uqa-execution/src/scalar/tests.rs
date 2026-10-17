@@ -110,6 +110,7 @@ fn set_returning_built_ins_fail_before_scalar_arguments_are_evaluated() {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     };
     let failing = ScalarExpr::Binary {
         op: BinaryOp::Divide,

@@ -44,6 +44,7 @@ fn builtin(name: &str) -> FunctionBinding {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     }
 }
 

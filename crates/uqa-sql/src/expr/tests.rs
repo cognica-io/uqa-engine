@@ -74,6 +74,7 @@ fn set_returning_built_ins_report_the_executor_diagnostic_in_scalar_evaluation()
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     };
     // A bound call is rejected before its arguments are evaluated, as the executor rejects it when it initializes the expression.
     let failing_argument = Expr::Binary {
