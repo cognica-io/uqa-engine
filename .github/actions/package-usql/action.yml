@@ -1,0 +1,33 @@
+name: Package and verify usql
+description: Build the native CLI and exercise the installed release archive
+inputs:
+  target:
+    required: true
+    description: Native Rust target triple
+runs:
+  using: composite
+  steps:
+    - name: Build the CLI with bundled analyzers and foreign handlers
+      # Git Bash's incomplete Perl shadows the native Windows build tools.
+      shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+      env:
+        CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+        CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+      run: cargo build --locked -p uqa-cli --bin usql --profile release-stripped --features arrow,duckdb --target '${{ inputs.target }}'
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Package the executable, licenses and pinned installers
+      shell: bash
+      run: python scripts/usql-release.py package --target '${{ inputs.target }}' --directory dist/usql
+    - uses: cargo-bins/cargo-binstall@3be4ad2b146f3302f92e5956c54fedbb6ae8cccc # v1.25.3
+      with:
+        version: 1.25.3
+    - name: Install and exercise the exact release archive
+      shell: bash
+      run: python scripts/usql-release.py smoke --target '${{ inputs.target }}' --directory dist/usql --binstall cargo-binstall
+    - uses: actions/upload-artifact@v4
+      with:
+        name: usql-${{ inputs.target }}
+        path: dist/usql/*
+        if-no-files-found: error

@@ -57,6 +57,8 @@ jobs:
   javascript:
     name: javascript packages
     uses: ./.github/workflows/javascript-packages.yml
+    with:
+      include_cli: true
 
   benchmarks:
     name: release benchmarks

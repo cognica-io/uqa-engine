@@ -3,6 +3,11 @@ name: JavaScript Packages
 # Shared by release publication and the read-only manual package build.
 on:
   workflow_call:
+    inputs:
+      include_cli:
+        description: Also build standalone usql release assets using the native compilation cache
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -68,6 +73,12 @@ jobs:
       - name: Build native addon with native Nori and Kuromoji
         working-directory: crates/uqa-node
         run: npx napi build --platform --no-js --profile release-stripped --features nori,kuromoji --target ${{ matrix.target }}
+
+      - name: Build and verify usql release archive
+        if: inputs.include_cli
+        uses: ./.github/actions/package-usql
+        with:
+          target: ${{ matrix.target }}
 
       - name: Test the addon
         working-directory: crates/uqa-node

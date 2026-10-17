@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Build standalone `usql` release archives for Linux, macOS and Windows on x86_64 and ARM64, with bundled Nori, Kuromoji, Arrow and DuckDB, SHA-256 checksums, user-directory installers and `cargo binstall` installation without compilation.
+
 - Support PostgreSQL's six native range subtype-distance functions, preserving floating conversion order, temporal infinity values and numeric range diagnostics.
 
 - Add a SQL-owned deterministic Unicode comparison primitive with admitted scratch and cancellation, preserving PostgreSQL's root collation options and byte tie-breaking for selected comparison consumers.

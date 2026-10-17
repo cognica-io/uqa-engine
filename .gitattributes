@@ -16,6 +16,13 @@ LICENSING.md                        text eol=lf
 UQA-FOSS-EXCEPTION-1.0.txt          text eol=lf
 UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt text eol=lf
 
+# Shared CLI assets must retain identical bytes on every release runner.
+scripts/install-usql.sh text eol=lf
+scripts/install-usql.ps1 text eol=lf
+scripts/usql-release/licenses/*.txt -text -whitespace linguist-vendored
+scripts/fixtures/usql-release/rows.arrow binary
+crates/uqa-sql/THIRD-PARTY/POSTGRESQL-SORT-NOTICE.txt text eol=lf
+
 # Imported PostgreSQL 18 parser snapshot. Preserve upstream bytes exactly;
 # SHA256SUMS, rather than Git's whitespace heuristic, verifies this tree.
 crates/uqa-pg-query/libpg_query/** -whitespace linguist-vendored

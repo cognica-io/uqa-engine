@@ -40,6 +40,20 @@ def fixture():
 
 
 class RecoverySourceTest(unittest.TestCase):
+    def test_cli_enabled_release_requires_all_six_unexpired_original_archives(self):
+        run, jobs, artifacts = fixture()
+        jobs[0]["steps"] = [{"name": "Build and verify usql release archive", "conclusion": "success"}]
+        with self.assertRaisesRegex(ValueError, "missing"):
+            RECOVERY.validate(run, TAG, COMMIT, REPOSITORY, jobs, artifacts)
+        cli = [{"name": "usql-" + target, "expired": False, "workflow_run": {"id": 123, "head_sha": COMMIT}}
+               for target in RECOVERY.TARGETS]
+        RECOVERY.validate(run, TAG, COMMIT, REPOSITORY, jobs, artifacts + cli)
+        for index in range(len(cli)):
+            changed = copy.deepcopy(cli)
+            changed[index]["expired"] = True
+            with self.assertRaisesRegex(ValueError, "missing"):
+                RECOVERY.validate(run, TAG, COMMIT, REPOSITORY, jobs, artifacts + changed)
+
     def test_only_complete_successful_original_builds_qualify(self):
         run, jobs, artifacts = fixture()
         RECOVERY.validate(run, TAG, COMMIT, REPOSITORY, jobs, artifacts)

@@ -1,0 +1,69 @@
+name: usql release checks
+
+on:
+  pull_request:
+    types: [ready_for_review]
+    paths:
+      - .gitattributes
+      - .github/actions/package-usql/**
+      - .github/workflows/usql-release-checks.yml
+      - .github/workflows/javascript-packages.yml
+      - .github/workflows/release.yml
+      - .github/workflows/release-assets.yml
+      - scripts/usql-release.py
+      - scripts/usql-release/**
+      - scripts/install-usql.*
+      - scripts/fixtures/usql-release/**
+      - scripts/tests/test_usql_release.py
+      - scripts/check-release-licenses.py
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cli:
+    name: Install usql (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Free Linux runner disk
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+      - name: Check packaging and installer failures
+        run: python -m unittest discover -s scripts/tests -p test_usql_release.py
+      - uses: ./.github/actions/package-usql
+        with:
+          target: ${{ matrix.target }}
