@@ -83,44 +83,78 @@ Key precedence is `--key`, then `--key-file`, then `UQA_KEY`. Interactive sessio
 
 Command-line secrets can be visible to process inspection and shell history. Prefer a protected key file or a deployment-specific secret injection mechanism.
 
-## Input and output behavior
+## Editing and output (development source)
 
-- End SQL statements with `;`.
-- Multiline statements remain buffered until they are complete.
-- `\timing` toggles elapsed time reporting.
-- `\x` toggles expanded row display.
-- `\o path` appends query output to a file; bare `\o` restores standard output.
-- `\run path.sql` executes a SQL file in the current session.
-- `\history` prints history and `\history clear` clears it.
+The Rust shell accepts multiline SQL, PostgreSQL dollar and escape strings, quoted identifiers and nested comments. Highlighting and bracket matching use the complete query buffer; parentheses inside quoted text never block Enter. Tab completion reads the live catalog and accepts unqualified, schema-qualified and quoted relation names, columns, variables, settings and paths. It does not insert SQL keywords into strings or comments. `NO_COLOR` disables color; `\set HIGHLIGHT off` disables it for the current session.
+
+`\timing [on|off]` and `\x [on|off|auto]` accept explicit settings; omitting the argument toggles the setting. Expanded `auto` uses `\pset columns` as its width threshold. `\pset` lists the current printing settings. `\pset format aligned`, `unaligned`, `csv`, `html` or `json` selects a renderer; `\a` and `\H` toggle unaligned and HTML output. `\t [on|off]` controls tuples-only output, `\f separator` changes the unaligned separator, and `\C title` sets a table title. Other settings include `expanded`, `null`, `footer`, `border`, `columns`, `fieldsep`, `recordsep`, `fieldsep_zero`, `recordsep_zero`, `csv_fieldsep` and `pager`.
+
+SQL owns typed text output, including booleans, arrays, enums, retained composites and catalog identity types. Rendering preserves column order and duplicate labels. Aligned output uses Unicode display widths and escapes control characters; terminal CSV also neutralizes terminal controls. File CSV and unaligned output preserve data bytes according to the selected format. JSON contains ordered `columns` and positional `rows`; each non-NULL cell is SQL text and NULL is JSON `null`, preserving exact decimal and integer spelling. Like psql CSV, the default NULL marker and an empty string both produce an empty CSV field; use native COPY when a stream must distinguish them according to COPY's quoting rules.
+
+`\o [file]` opens a fresh output file or restores standard output. `\g [file]` and `\gx [file]` optionally redirect only that submission. An interactive terminal uses `PSQL_PAGER`, then `PAGER`, when `\pset pager on` needs another screen; `always` forces the pager and `off` disables it. Pager and editor commands accept quoted executable arguments and are launched directly, without a shell.
 
 ## Backslash commands
 
 | Command | Action |
 | --- | --- |
 | `\q`, `\quit`, `\exit` | Exit |
-| `\help`, `\?`, `\h` | Show command help |
-| `\open path` | Open a persistent database, with format detection |
+| `\help`, `\?` | Show client-command help |
+| `\h [command]` | Show SQL syntax help and the canonical manual link |
+| `\open path`, `\connect [path]`, `\c [path]` | Open or reconnect to an embedded database; `:memory:` selects a fresh memory database |
 | `\new` | Replace the current engine with a fresh in-memory engine |
 | `\reset` | Reopen the current database and reset session state |
-| `\where` | Print the current database location |
-| `\timing` | Toggle timing output |
-| `\expanded`, `\x` | Toggle expanded display |
-| `\o [path]` | Redirect output or restore standard output |
-| `\dt` | List local and foreign tables |
-| `\d table` | Describe a local or foreign table |
-| `\di` | List indexes |
-| `\stats [table]` | Show optimizer statistics |
-| `\ds` | List sequences |
-| `\dg` | List named graphs |
-| `\dfs` | List foreign servers |
-| `\dft` | List foreign tables |
-| `\da` | List custom engine-catalog text analyzers |
-| `\run file` | Execute a SQL file |
+| `\where`, `\conninfo` | Print the current database location or connection information |
+| `\timing [on|off]` | Configure timing output |
+| `\expanded [on|off|auto]`, `\x [on|off|auto]` | Configure expanded display |
+| `\pset [option [value]]` | Inspect or change printing settings |
+| `\a`, `\H`, `\t`, `\f`, `\C` | Output format, tuples, separator and title shortcuts |
+| `\o [path]` | Redirect query output or restore standard output |
+| `\p`, `\r` | Print or clear the pending query buffer |
+| `\g [path]`, `\gx [path]` | Submit the pending query, or repeat the previous query when the buffer is empty |
+| `\gset [prefix]` | Store exactly one returned row in shell variables; SQL NULL unsets a variable |
+| `\set [name [value ...]]`, `\unset name` | List, set or remove shell variables |
+| `\if`, `\elif`, `\else`, `\endif` | Conditional script execution |
+| `\echo`, `\qecho` | Print arguments to standard output or query output; `-n` omits the newline |
+| `\dt [pattern]`, `\d [pattern]` | List tables or describe matching relations; bare `\d` lists relations |
+| `\di`, `\dv`, `\dn`, `\df`, `\da` | List indexes, views, schemas, routines or aggregates; each accepts a pattern |
+| `\du`, `\dg`, `\l`, `\dx`, `\dp`, `\z` | Inspect roles, databases, extensions or privileges; each accepts a pattern |
+| `\ds [sequence]`, `\stats table` | Inspect sequences or optimizer statistics |
+| `\graphs`, `\analyzers` | List UQA named graphs or custom analyzers |
+| `\dfs`, `\dft` | List foreign servers or foreign tables |
+| `\i file`, `\ir file`, `\run file` | Execute a script; `\ir` resolves relative to its including script |
+| `\e [file [line]]`, `\w file` | Edit or write the query buffer |
+| `\history [clear]`, `\s [file]` | Show, clear or save command history |
+| `\copy ...` | Stream a table or query to/from a local file using native COPY text/CSV |
+| `\watch [seconds] [i=seconds] [c=count] [m=rows]` | Repeat the current query until interrupted, the count is reached or fewer than the minimum rows are returned |
 | `\migrate-python-db source destination` | Migrate a legacy Python database |
 
-Aliases shown by `\help` are accepted in addition to this compact list.
+Catalog patterns support `*`, `?`, regular expressions, schema qualification and case-preserving double quotes. `\dg` lists roles and `\da` lists aggregates; use `\graphs` and `\analyzers` for the previous UQA operations. `\dS` includes system relations. The existing UQA `\dF` alias remains equivalent to `\dft`. `\analyzers` lists custom persistent names; `SELECT * FROM list_analyzers()` also includes built-ins. See [text analyzers](06-text-analyzers.md) for analyzer configuration and field binding.
 
-`\da` uses `Engine::list_named_analyzers` and therefore lists custom persistent names, not the four built-ins. Use `SELECT * FROM list_analyzers()` to see the combined built-in and custom SQL-visible set. Analyzer creation, JSON configuration, field binding, and diagnostics are covered in [Text analyzer pipelines](06-text-analyzers.md).
+## Variables, scripts and files
+
+Shell variables expand as `:name` for raw SQL, `:'name'` for a quoted SQL literal, `:"name"` for a quoted identifier and `:{?name}` for an existence Boolean. Quoted SQL strings, identifiers, dollar bodies and comments do not expand variables. `\gset` validates the complete returned row before changing variables, preserves positional columns and rejects a result with zero or multiple rows.
+
+```text
+\set item 41
+SELECT :item + 1 AS answer
+\gset result_
+\if :{?result_answer}
+SELECT :'result_answer' AS answer \g
+\endif
+```
+
+`\set ON_ERROR_STOP on` stops script processing at the first error. `\set AUTOCOMMIT off` opens an explicit transaction before an ordinary SQL command; use `COMMIT` or `ROLLBACK` to finish it. Included files share the same Engine session and variables. Includes are limited to 32 active files, reject cycles and require balanced conditional blocks within a file; conditionals are limited to 64 levels and pending SQL to 16 MiB. Script errors include their file and line. A final SQL statement without a semicolon executes at EOF, as in psql.
+
+`\e` uses `PSQL_EDITOR`, then `EDITOR`, then `VISUAL`, with `vi` on Unix or `notepad` on Windows as the fallback. Without a filename it creates a private temporary file and removes it after use. History uses `UQA_HISTORY` when set, otherwise `~/.cognica/uqa/.usql_history`; `HISTCONTROL` accepts `none`, `ignorespace`, `ignoredups` and `ignoreboth`, and `HISTSIZE` bounds retained entries.
+
+Client file COPY keeps SQL parsing and text/CSV encoding in Engine. Failed exports preserve an existing destination file; imports retain native COPY transaction semantics. COPY filenames are literal client paths and do not undergo shell-variable substitution or command execution:
+
+```text
+\copy items TO 'items.csv' WITH (FORMAT CSV, HEADER)
+\copy items FROM 'items.csv' WITH (FORMAT CSV, HEADER)
+```
+
+Ctrl-C clears pending input or cancels an executing SQL command. Cancellation leaves PostgreSQL transaction recovery rules intact: an aborted explicit transaction requires rollback. LISTEN notifications use the current session's bounded inbox and are shown while the editor is idle as well as after commands; no idle notification polling runs without committed subscriptions. Reconnection keeps client printing settings and variables but replaces the SQL session.
 
 ## Script execution and transactions
 
