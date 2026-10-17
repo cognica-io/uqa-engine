@@ -3990,6 +3990,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uqa-pg-regex"
+version = "0.5.4"
+dependencies = [
+ "cc",
+ "icu_casemap",
+ "icu_properties",
+ "serde_json",
+]
+
+[[package]]
 name = "uqa-pg-server"
 version = "0.5.4"
 dependencies = [

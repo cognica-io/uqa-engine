@@ -9699,6 +9699,97 @@
       "invariant": "Deterministic frame isolation preserves every generated tag, payload type and unrelated message and rejects an unexpected generator shape."
     },
     {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "compiled_state_is_charged_and_dropping_releases_every_byte",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression memory",
+      "workload": "One compiled expression with lookbehind, classes, bounds, a back-reference and lookahead, executed once.",
+      "invariant": "Compiled state is fully charged, execution memory is returned when matching ends, and dropping the expression releases every reserved byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "every_refused_compile_reservation_reports_out_of_memory_without_leaking",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression memory",
+      "workload": "Each reservation of a representative compilation refused in turn.",
+      "invariant": "Every refusal reports REG_ESPACE and leaves no reserved byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "every_refused_execution_reservation_reports_out_of_memory_and_keeps_the_expression",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression memory",
+      "workload": "Each reservation of a matching run with 21 subexpressions, a back-reference and lookbehind refused in turn.",
+      "invariant": "Every refusal reports REG_ESPACE, returns all execution memory and leaves the compiled expression usable with unchanged results."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "a_byte_limit_fails_compilation_with_out_of_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "A nested bounded repetition that expands beyond a 256 KiB allowance.",
+      "invariant": "Compilation stops with REG_ESPACE without exceeding the allowance and releases every reserved byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "compilation_stops_at_every_interrupt_check",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression cancellation",
+      "workload": "Cancellation requested at each interrupt check of a representative compilation.",
+      "invariant": "Every request stops compilation with a cancellation and leaves no reserved byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "execution_stops_at_every_interrupt_check_and_keeps_the_expression",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression cancellation",
+      "workload": "Cancellation requested at each interrupt check of a matching run with back-references and lookbehind.",
+      "invariant": "Every request stops matching with a cancellation, returns all execution memory and keeps the compiled expression usable."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "a_deep_stack_reports_regular_expression_too_complex",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "Two hundred nested subexpressions compiled and matched under stack limits below their measured depths.",
+      "invariant": "Both compilation and matching fail with REG_ETOOBIG instead of exceeding the caller's stack limit."
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "default_btree_classes_match_independent_pg18_key_declarations",

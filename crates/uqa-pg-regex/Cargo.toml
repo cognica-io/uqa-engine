@@ -1,0 +1,43 @@
+[package]
+name = "uqa-pg-regex"
+# Keep integration sources in one linked harness; CI verifies every source is registered.
+autotests = false
+description = "PostgreSQL 18.4 Advanced Regular Expression engine with admitted memory for UQA Engine"
+version.workspace = true
+edition.workspace = true
+# The crate keeps the licenses of its imported PostgreSQL sources; see LICENSE and UPSTREAM.md.
+license = "PostgreSQL AND Spencer-99 AND TCL"
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/uqa-pg-regex"
+readme = "README.md"
+rust-version.workspace = true
+include = [
+    "README.md",
+    "UPSTREAM.md",
+    "LICENSE",
+    "SHA256SUMS",
+    "build.rs",
+    "src/**/*.rs",
+    "postgres/**/*",
+    "shim/**/*",
+    "tests/**/*",
+]
+
+[dependencies]
+icu_casemap = { workspace = true }
+icu_properties = { workspace = true }
+
+[build-dependencies]
+cc = "1.2"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[lints]
+workspace = true

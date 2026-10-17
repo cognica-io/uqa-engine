@@ -34,16 +34,23 @@ LEGAL_FILES = (
     "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
 )
 AGPL_NOTICE = "LICENSE-NOTICE.md"
-MIT_PARSER_FILES = (
-    "LICENSE",
-    "LIBPG_QUERY-LICENSE",
-)
+# Imported crates that keep their upstream licenses instead of the AGPL legal files, with the license files each must ship.
+SEPARATELY_LICENSED_CRATES = {
+    "uqa-pg-query": (
+        "LICENSE",
+        "LIBPG_QUERY-LICENSE",
+    ),
+    "uqa-pg-regex": (
+        "LICENSE",
+        "postgres/COPYRIGHT",
+        "postgres/src/backend/regex/COPYRIGHT",
+    ),
+}
 NPM_PACKAGES = (
     ROOT / "crates" / "uqa-node",
     ROOT / "crates" / "uqa-wasm" / "js",
 )
 BINDING_PACKAGES = (*NPM_PACKAGES, ROOT / "python" / "uqa")
-MIT_PARSER_CRATE = "uqa-pg-query"
 SQL_SORT_NOTICE = "THIRD-PARTY/POSTGRESQL-SORT-NOTICE.txt"
 PROJECT_TABLE = re.compile(
     r"^\[project\][ \t]*(?:#.*)?$(.*?)(?=^\[[^\n]+\][ \t]*(?:#.*)?$|\Z)",
@@ -293,17 +300,17 @@ def check_cargo_sources(payloads: dict[str, bytes]) -> None:
         if not is_publishable(package):
             continue
         crate_root = pathlib.Path(str(package["manifest_path"])).parent
-        if name == MIT_PARSER_CRATE:
-            for relative in MIT_PARSER_FILES:
+        if name in SEPARATELY_LICENSED_CRATES:
+            for relative in SEPARATELY_LICENSED_CRATES[name]:
                 path = crate_root / relative
                 try:
                     path.read_bytes()
                 except OSError as error:
                     raise RuntimeError(f"cannot read {path}: {error}") from error
             agpl_license = payloads["LICENSE"]
-            parser_license = (crate_root / "LICENSE").read_bytes()
-            if parser_license == agpl_license:
-                raise RuntimeError(f"{crate_root / 'LICENSE'} must remain the MIT wrapper license")
+            crate_license = (crate_root / "LICENSE").read_bytes()
+            if crate_license == agpl_license:
+                raise RuntimeError(f"{crate_root / 'LICENSE'} must remain the crate's own upstream-compatible license")
             continue
         for relative, expected in payloads.items():
             path = crate_root / relative
@@ -393,8 +400,10 @@ def matching_members(members: dict[str, bytes], relative: str) -> list[tuple[str
 
 def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: bool = False, require_kuromoji: bool = False) -> None:
     members = archive_members(path)
-    if path.name.startswith(f"{MIT_PARSER_CRATE}-") and path.name.endswith(".crate"):
-        for relative in MIT_PARSER_FILES:
+    for crate, license_files in SEPARATELY_LICENSED_CRATES.items():
+        if not (path.name.startswith(f"{crate}-") and path.name.endswith(".crate")):
+            continue
+        for relative in license_files:
             if not matching_members(members, relative):
                 raise RuntimeError(f"{path} omits {relative}")
         if matching_members(members, "LICENSING.md"):

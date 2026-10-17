@@ -31,7 +31,8 @@ LEGAL_FILES = (
     "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
     "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
 )
-SKIP_PACKAGES = {"uqa-pg-query"}
+# Imported crates keep their upstream licenses instead of the AGPL legal files.
+SKIP_PACKAGES = set(licenses.SEPARATELY_LICENSED_CRATES)
 USER_FACING = {"uqa", "uqa-engine", "uqa-client", "uqa-cli", "uqa-api"}
 CRATE_ROLES = {
     "uqa-nori-data": "the pinned portable Nori dictionary and its provenance",

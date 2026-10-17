@@ -97,6 +97,7 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-graph` | Named graph stores, Cypher, RPQ automata, graph algebra, centrality, temporal traversal, and graph indexes |
 | `uqa-joins` | Relational and cross-paradigm join algorithms |
 | `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin used through the `pg_query` library name |
+| `uqa-pg-regex` | Imported PostgreSQL 18.4 regular expression engine with admitted allocations, cancellation, stack limits, and collation-specific character classes and case folding |
 | `uqa-sql` | Parser frontend, AST, scalar and statement IR, lowering, catalog definitions, name and type binding, routine signature and stored-definition binding, overload ranking, replacement and privilege rules, role declarations and dependency analysis, prepared parameter inference, Cypher call and result-column rules, SQL validation, and value expressions |
 | `uqa-execution` | SQL batch and cursor scheduling, portal declaration and directional streaming, unified statement execution, physical rows and buffers, runtime scalar evaluation, batches, materialization, spill structures, distinctness, sorting, grouping, windows, joins, routine definition, invocation, scoped caller-state restoration, role lifecycle and privilege execution, table-function streams and result rows, and SQL Cypher invocation |
 | `uqa-planner` | Cardinality, cost, statement statistics, prepared-plan estimates, rewrite-rule input pruning, DPccp join ordering, unified-plan optimization, and physical access selection |

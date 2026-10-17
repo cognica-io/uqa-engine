@@ -130,6 +130,8 @@ while IFS= read -r path; do
     rust-toolchain* | \
     .cargo/* | \
     crates/uqa-pg-query/libpg_query/* | \
+    crates/uqa-pg-regex/postgres/* | \
+    crates/uqa-pg-regex/shim/* | \
     examples/rust/* | \
     benchmarks/* | \
     crates/uqa-analysis/benches/nori/* | \

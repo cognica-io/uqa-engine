@@ -3,7 +3,7 @@
   "dependency_budgets": {
     "uqa": 2,
     "uqa-engine": 14,
-    "uqa-sql": 2,
+    "uqa-sql": 3,
     "uqa-planner": 3
   },
   "runtime_workspace_dependencies": {
@@ -128,6 +128,7 @@
       "uqa-storage"
     ],
     "uqa-pg-query": [],
+    "uqa-pg-regex": [],
     "uqa-pg-server": [
       "uqa-core",
       "uqa-engine",
@@ -181,9 +182,11 @@
   "transitive_dependency_boundaries": {
     "uqa-core": [],
     "uqa-pg-query": [],
+    "uqa-pg-regex": [],
     "uqa-sql": [
       "uqa-core",
-      "uqa-pg-query"
+      "uqa-pg-query",
+      "uqa-pg-regex"
     ],
     "uqa-execution": [
       "uqa-analysis",
@@ -197,6 +200,7 @@
       "uqa-nori-data",
       "uqa-operators",
       "uqa-pg-query",
+      "uqa-pg-regex",
       "uqa-scoring",
       "uqa-sql",
       "uqa-storage"
@@ -215,6 +219,7 @@
       "uqa-nori-data",
       "uqa-operators",
       "uqa-pg-query",
+      "uqa-pg-regex",
       "uqa-scoring",
       "uqa-sql",
       "uqa-storage"
