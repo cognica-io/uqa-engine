@@ -7,13 +7,13 @@
 use super::*;
 use crate::ast::FunctionDispatch;
 
-const VALUES_SQL: &str = "SELECT substring(x from p) FROM (VALUES ('Thomas', '...$'), ('foobar', 'o(.)b'), ('Thomas', 'z')) v(x, p)";
-const NULL_POSIX_SQL: &str = "SELECT substring(NULL from '...$'), substring('Thomas' from NULL)";
-const NULL_SIMILAR_SQL: &str = "SELECT substring('Thomas' similar 'T%' escape NULL), substring('Thomas' similar NULL escape '#')";
-
 /// The independent `PostgreSQL` 18.4 transcript that Engine also replays on every storage provider.
 fn reference() -> serde_json::Value {
-    serde_json::from_str(include_str!("substring-postgresql.json")).unwrap()
+    serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/substring_pattern_forms_oracle.expected.json"
+    )))
+    .unwrap()
 }
 
 /// Evaluate through the dispatched entry point that scalar execution uses.
@@ -30,10 +30,10 @@ fn evaluate(
     eval_dispatched_substring(dispatch, args, control).expect("substring pattern dispatch")
 }
 
-/// Compare one direct evaluation with the cell or diagnostic `PostgreSQL` recorded for `sql`.
+/// Compare one direct evaluation with the cell or diagnostic `PostgreSQL` recorded for case `id`.
 fn assert_reference(
     reference: &serde_json::Value,
-    sql: &str,
+    id: &str,
     (row, column): (usize, usize),
     similar: bool,
     args: &[Value],
@@ -43,30 +43,26 @@ fn assert_reference(
         .as_array()
         .unwrap()
         .iter()
-        .find(|case| case["sql"] == sql)
-        .unwrap_or_else(|| panic!("{sql} is missing from the PostgreSQL reference"));
+        .find(|case| case["id"] == id)
+        .unwrap_or_else(|| panic!("{id} is missing from the PostgreSQL reference"));
     let actual = evaluate(similar, args, control);
     if case["error"].is_null() {
         let expected = match &case["results"][0]["rows"][row][column] {
             serde_json::Value::Null => Value::Null,
             serde_json::Value::String(value) => text(value),
-            other => panic!("{sql}: unexpected reference cell {other}"),
+            other => panic!("{id}: unexpected reference cell {other}"),
         };
-        let actual = actual.unwrap_or_else(|error| panic!("{sql}: {error}"));
-        assert_eq!(*actual, expected, "{sql}");
+        let actual = actual.unwrap_or_else(|error| panic!("{id}: {error}"));
+        assert_eq!(*actual, expected, "{id}");
     } else {
-        let error = actual.err().unwrap_or_else(|| panic!("{sql} must fail"));
-        assert_eq!(
-            error.sqlstate(),
-            case["error"]["sqlstate"].as_str(),
-            "{sql}"
-        );
+        let error = actual.err().unwrap_or_else(|| panic!("{id} must fail"));
+        assert_eq!(error.sqlstate(), case["error"]["sqlstate"].as_str(), "{id}");
         assert_eq!(
             error.to_string(),
             case["error"]["message"].as_str().unwrap(),
-            "{sql}"
+            "{id}"
         );
-        assert_eq!(error.hint(), case["error"]["hint"].as_str(), "{sql}");
+        assert_eq!(error.hint(), case["error"]["hint"].as_str(), "{id}");
     }
 }
 
@@ -88,164 +84,152 @@ fn substring_pattern_forms_match_the_postgresql_reference() {
     }
     let reference = reference();
     let posix = |input: &str, pattern: &str| vec![text(input), text(pattern)];
-    let sql_pattern =
+    let sql_form =
         |input: &str, pattern: &str, escape: &str| vec![text(input), text(pattern), text(escape)];
-    for (sql, cell, similar, args) in [
+    let null = || Value::Null;
+    for (id, cell, similar, args) in [
+        ("posix_suffix", (0, 0), false, posix("Thomas", "...$")),
+        ("posix_whole_match", (0, 0), false, posix("foobar", "o.b")),
+        ("posix_first_group", (0, 0), false, posix("foobar", "o(.)b")),
         (
-            "SELECT substring('Thomas' from '...$')",
-            (0, 0),
-            false,
-            posix("Thomas", "...$"),
-        ),
-        (
-            "SELECT substring('foobar' from 'o.b')",
-            (0, 0),
-            false,
-            posix("foobar", "o.b"),
-        ),
-        (
-            "SELECT substring('foobar' from 'o(.)b')",
-            (0, 0),
-            false,
-            posix("foobar", "o(.)b"),
-        ),
-        (
-            "SELECT substring('Thomas' from '(h)(o)')",
+            "posix_first_of_groups",
             (0, 0),
             false,
             posix("Thomas", "(h)(o)"),
         ),
         (
-            "SELECT substring('Thomas' from '(?:h)o')",
+            "posix_non_capturing",
             (0, 0),
             false,
             posix("Thomas", "(?:h)o"),
         ),
         (
-            "SELECT substring('Thomas' from 'h(x)?o')",
+            "posix_unmatched_group",
             (0, 0),
             false,
             posix("Thomas", "h(x)?o"),
         ),
+        ("posix_no_match", (0, 0), false, posix("Thomas", "z")),
+        ("posix_numeric_pattern", (0, 0), false, posix("Thomas", "2")),
+        ("posix_numeric_match", (0, 0), false, posix("Thomas2", "2")),
+        ("posix_empty_match", (0, 0), false, posix("abc", "x*")),
         (
-            "SELECT substring('Thomas' from 'z')",
-            (0, 0),
-            false,
-            posix("Thomas", "z"),
-        ),
-        (
-            "SELECT substring('Thomas' from '2')",
-            (0, 0),
-            false,
-            posix("Thomas", "2"),
-        ),
-        (
-            "SELECT substring('Thomas2' from '2')",
-            (0, 0),
-            false,
-            posix("Thomas2", "2"),
-        ),
-        (
-            "SELECT substring('abc' from 'x*')",
-            (0, 0),
-            false,
-            posix("abc", "x*"),
-        ),
-        (
-            "SELECT substring('ABC' from '(?i)b')",
+            "posix_embedded_options",
             (0, 0),
             false,
             posix("ABC", "(?i)b"),
         ),
         (
-            "SELECT substring('a' || chr(233) || 'b' from chr(233) || '(.)')",
+            "posix_multibyte",
             (0, 0),
             false,
             posix("a\u{e9}b", "\u{e9}(.)"),
         ),
+        ("posix_nulls", (0, 0), false, vec![null(), text("...$")]),
+        ("posix_nulls", (0, 1), false, vec![text("Thomas"), null()]),
+        ("posix_rows", (1, 0), false, posix("foobar", "o(.)b")),
+        ("posix_rows", (2, 0), false, posix("Thomas", "z")),
+        // The regular-expression form is strict, so an invalid pattern is never compiled for a NULL input.
         (
-            NULL_POSIX_SQL,
+            "posix_null_input_invalid_pattern",
             (0, 0),
             false,
-            vec![Value::Null, text("...$")],
+            vec![null(), text("(")],
         ),
         (
-            NULL_POSIX_SQL,
-            (0, 1),
-            false,
-            vec![text("Thomas"), Value::Null],
-        ),
-        (VALUES_SQL, (1, 0), false, posix("foobar", "o(.)b")),
-        (VALUES_SQL, (2, 0), false, posix("Thomas", "z")),
-        (
-            r#"SELECT substring('Thomas' similar '%#"o_a#"_' escape '#')"#,
+            "similar_syntax",
             (0, 0),
             true,
-            sql_pattern("Thomas", r#"%#"o_a#"_"#, "#"),
+            sql_form("Thomas", r#"%#"o_a#"_"#, "#"),
         ),
         (
-            r#"SELECT substring('Thomas' similar '%#"o_b#"_' escape '#')"#,
+            "similar_no_match",
             (0, 0),
             true,
-            sql_pattern("Thomas", r#"%#"o_b#"_"#, "#"),
+            sql_form("Thomas", r#"%#"o_b#"_"#, "#"),
         ),
         (
-            r#"SELECT substring('Thomas' similar '#"T%' escape '#')"#,
+            "similar_one_separator",
             (0, 0),
             true,
-            sql_pattern("Thomas", r#"#"T%"#, "#"),
+            sql_form("Thomas", r#"#"T%"#, "#"),
         ),
         (
-            "SELECT substring('Thomas' similar 'T%' escape '#')",
+            "similar_no_separator",
             (0, 0),
             true,
-            sql_pattern("Thomas", "T%", "#"),
+            sql_form("Thomas", "T%", "#"),
         ),
         (
-            "SELECT substring('Thomas' similar 'x%' escape '#')",
+            "similar_no_whole_match",
             (0, 0),
             true,
-            sql_pattern("Thomas", "x%", "#"),
+            sql_form("Thomas", "x%", "#"),
         ),
         (
-            "SELECT substring('Thomas' from '2' for '3')",
+            "similar_unknown_literals",
             (0, 0),
             true,
-            sql_pattern("Thomas", "2", "3"),
+            sql_form("Thomas", "2", "3"),
         ),
         (
-            "SELECT substring('a#b' similar 'a#b' escape '')",
+            "similar_empty_escape",
             (0, 0),
             true,
-            sql_pattern("a#b", "a#b", ""),
+            sql_form("a#b", "a#b", ""),
         ),
         (
-            NULL_SIMILAR_SQL,
+            "similar_nulls",
             (0, 0),
             true,
-            vec![text("Thomas"), text("T%"), Value::Null],
+            vec![text("Thomas"), text("T%"), null()],
         ),
         (
-            NULL_SIMILAR_SQL,
+            "similar_nulls",
             (0, 1),
             true,
-            vec![text("Thomas"), Value::Null, text("#")],
+            vec![text("Thomas"), null(), text("#")],
         ),
         (
-            r#"SELECT substring('Thomas' similar '#"T#"o#"%' escape '#')"#,
-            (0, 0),
+            "similar_rows",
+            (1, 0),
             true,
-            sql_pattern("Thomas", r#"#"T#"o#"%"#, "#"),
+            sql_form("abc", r#"a#"b#"c"#, "#"),
         ),
         (
-            "SELECT substring('Thomas' similar '%' escape '##')",
+            "similar_three_separators",
             (0, 0),
             true,
-            sql_pattern("Thomas", "%", "##"),
+            sql_form("Thomas", r#"#"T#"o#"%"#, "#"),
+        ),
+        (
+            "similar_long_escape",
+            (0, 0),
+            true,
+            sql_form("Thomas", "%", "##"),
+        ),
+        // A row's NULL input still runs the translation of the inlined body; only a NULL pattern or escape skips it.
+        (
+            "similar_null_input_row_escape",
+            (0, 0),
+            true,
+            vec![null(), text("%"), text("##")],
+        ),
+        (
+            "similar_null_input_row_separators",
+            (0, 0),
+            true,
+            vec![null(), text(r#"#"a#"b#"c#""#), text("#")],
+        ),
+        (
+            "similar_null_pattern_row",
+            (0, 0),
+            true,
+            vec![text("a"), null(), text("##")],
         ),
     ] {
-        assert_reference(&reference, sql, cell, similar, &args, &control);
-        assert_eq!(budget.used(), 0, "{sql} retains no evaluation state");
+        assert_reference(&reference, id, cell, similar, &args, &control);
+        assert_eq!(budget.used(), 0, "{id} retains no evaluation state");
     }
 }
 
@@ -314,4 +298,30 @@ fn substring_pattern_forms_observe_both_cancellation_scopes() {
         drop(held);
         assert_eq!(budget.used(), 0);
     }
+}
+
+#[test]
+fn constant_similar_translation_reports_postgresql_planning_errors() {
+    let reference = reference();
+    let case = |id: &str| {
+        reference["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    let control = ProductionControl::uncontrolled();
+    let error = check_constant_similar_translation(&[text("%"), text("##")], &control).unwrap_err();
+    let expected = case("similar_planning_error");
+    assert_eq!(error.sqlstate(), expected["error"]["sqlstate"].as_str());
+    assert_eq!(
+        error.to_string(),
+        expected["error"]["message"].as_str().unwrap()
+    );
+    assert_eq!(error.hint(), expected["error"]["hint"].as_str());
+    // A NULL operand leaves the strict translation unevaluated, as PostgreSQL folds it to NULL.
+    check_constant_similar_translation(&[Value::Null, text("##")], &control).unwrap();
+    check_constant_similar_translation(&[text("%"), text("#")], &control).unwrap();
 }

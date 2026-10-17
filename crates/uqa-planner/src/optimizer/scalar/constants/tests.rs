@@ -8,6 +8,7 @@ use super::*;
 
 mod catalog_types;
 mod collations;
+mod similar_substring;
 
 #[test]
 fn constant_folding_retains_selected_collation_metadata() {

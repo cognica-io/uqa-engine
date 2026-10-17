@@ -451,6 +451,12 @@ fn requires_cast(
     })
 }
 
+/// The executor operation a built-in binding selects: its recorded dispatch, or the one its resolved argument types select. Prepared and stored bindings leave that selection to execution binding.
+#[must_use]
+pub fn selected_builtin_dispatch(binding: &FunctionBinding) -> Option<FunctionDispatch> {
+    binding.dispatch.or_else(|| runtime_dispatch(binding))
+}
+
 pub(crate) fn runtime_dispatch(binding: &FunctionBinding) -> Option<FunctionDispatch> {
     if matches!(
         binding.dispatch,

@@ -218,6 +218,52 @@ fn extraction_metadata_and_sql_wrapper_match_postgresql() {
     }
 }
 
+#[test]
+fn substring_metadata_and_sql_body_match_postgresql() {
+    let transcript = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/substring_pattern_forms_oracle.expected.json"
+    ));
+    assert_catalog_metadata(transcript, 10);
+    let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    let rows = |id: &str| {
+        reference["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"] == id)
+            .unwrap()["results"][0]["rows"]
+            .clone()
+    };
+    let entry = |oid: i64| {
+        PG18_BUILTIN_ROUTINE_GROUPS
+            .iter()
+            .flat_map(|group| group.iter())
+            .find(|entry| entry.oid == oid)
+            .copied()
+            .unwrap()
+    };
+    assert_eq!(
+        entry(2074).sql_body().as_deref(),
+        rows("catalog_body")[0][0].as_str()
+    );
+    let languages = rows("catalog_languages");
+    for (row, oid) in languages.as_array().unwrap().iter().zip([2073, 2074]) {
+        let routine = entry(oid);
+        assert_eq!(row[0], serde_json::json!(oid.to_string()));
+        assert_eq!(
+            row[1],
+            serde_json::json!(uqa_sql::catalog::languages::language_name(
+                u32::try_from(routine.language()).unwrap()
+            ))
+        );
+        assert_eq!(
+            row[2],
+            serde_json::json!(boolean_text(routine.sql_body().is_some()))
+        );
+    }
+}
+
 fn assert_catalog_metadata(transcript: &str, expected_count: usize) {
     let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
     let catalog = reference["cases"]

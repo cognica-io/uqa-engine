@@ -58,7 +58,7 @@ pub fn native_foreign_handlers() -> impl Iterator<Item = BuiltinRoutineCatalogEn
 impl BuiltinRoutineCatalogEntry {
     pub const fn language(self) -> i64 {
         match self.oid {
-            1215 | 1348 | 1384 | 1810 | 1811 | 3935 | 3936 => SQL_LANGUAGE as i64,
+            1215 | 1348 | 1384 | 1810 | 1811 | 2074 | 3935 | 3936 => SQL_LANGUAGE as i64,
             _ => INTERNAL_LANGUAGE as i64,
         }
     }
@@ -68,6 +68,7 @@ impl BuiltinRoutineCatalogEntry {
             1215 => return Some(comments::BODY_1215.into()),
             1348 => return Some(comments::BODY_1348.into()),
             1384 => return Some(temporal::DATE_PART_DATE_SQL_BODY.into()),
+            2074 => return Some(substrings::SIMILAR_SUBSTRING_SQL_BODY.into()),
             1810 => (720, 17, 0),
             1811 => (1374, 25, 100),
             3935 => return Some(sleep_bodies::PG_SLEEP_FOR_SQL_BODY.into()),
@@ -229,6 +230,7 @@ mod sequences;
 mod series;
 mod shells;
 mod sleep_bodies;
+mod substrings;
 mod support;
 mod temporal;
 mod text;
@@ -279,6 +281,7 @@ pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     support::ROUTINES,
     pattern::ROUTINES,
     text::ROUTINES,
+    substrings::ROUTINES,
     scalar::ROUTINES,
     aggregate_windows::ROUTINES,
     clock_and_case::ROUTINES,

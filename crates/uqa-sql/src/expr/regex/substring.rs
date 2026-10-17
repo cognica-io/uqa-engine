@@ -42,22 +42,51 @@ fn evaluate(
             "substring pattern form received the wrong operand count".into(),
         ));
     }
-    // Both PostgreSQL forms are strict.
-    if arguments.iter().any(|value| matches!(value, Value::Null)) {
-        return plain(Value::Null, control);
-    }
-    let input = value_to_string_with_control(&arguments[0], control)?;
     if !similar {
+        // `textregexsubstr` is strict.
+        if arguments.iter().any(|value| matches!(value, Value::Null)) {
+            return plain(Value::Null, control);
+        }
+        let input = value_to_string_with_control(&arguments[0], control)?;
         let pattern = value_to_string_with_control(&arguments[1], control)?;
         return extract(&input, &pattern, control);
     }
-    let escaped = crate::expr::pattern::escape(true, &arguments[1..], control)?;
+    // The planner folds a constant NULL argument of this strict form before execution. At run time PostgreSQL evaluates its inlined body, `textregexsubstr($1, similar_to_escape($2, $3))`: a NULL pattern or escape yields NULL, the translation runs and can fail even for a NULL input, and only the extraction is skipped for that input.
+    let Some(escaped) = translate(&arguments[1..], control)? else {
+        return plain(Value::Null, control);
+    };
     let Value::Str(pattern) = &*escaped else {
         return Err(SQLError::Internal(
             "similar_to_escape produced a non-text pattern".into(),
         ));
     };
+    if matches!(arguments[0], Value::Null) {
+        return plain(Value::Null, control);
+    }
+    let input = value_to_string_with_control(&arguments[0], control)?;
     extract(&input, pattern, control)
+}
+
+/// Translate the SQL form's constant pattern and escape while planning. `PostgreSQL` inlines `substring(text, text, text)` and folds a constant `similar_to_escape` call, so its errors surface even when no row is read; the call itself is unchanged.
+pub fn check_constant_similar_translation(
+    pattern_and_escape: &[Value],
+    control: &ProductionControl<'_>,
+) -> Result<()> {
+    translate(pattern_and_escape, control).map(drop)
+}
+
+/// `similar_to_escape(pattern, escape)`, or `None` when either strict operand is NULL.
+fn translate(
+    pattern_and_escape: &[Value],
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>> {
+    if pattern_and_escape
+        .iter()
+        .any(|value| matches!(value, Value::Null))
+    {
+        return Ok(None);
+    }
+    crate::expr::pattern::escape(true, pattern_and_escape, control).map(Some)
 }
 
 /// `textregexsubstr`: the first parenthesized subexpression when the pattern has one, otherwise the whole match. No match, or a first subexpression that did not participate in the match, yields NULL.

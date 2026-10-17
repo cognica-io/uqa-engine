@@ -16,6 +16,7 @@ mod preparation;
 mod query;
 mod replacement;
 mod substring;
+pub use substring::check_constant_similar_translation;
 pub(super) use substring::evaluate_dispatched as eval_dispatched_substring;
 
 #[derive(Clone, Copy, Debug)]

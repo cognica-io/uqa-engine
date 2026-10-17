@@ -28,7 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Evaluate the POSIX and SQL regular-expression forms of `substring`, including `SIMILAR ... ESCAPE` and `FROM ... FOR` with text arguments, by their resolved PostgreSQL signature instead of reporting `42804` or returning a positional slice for a pattern that parses as an integer.
+- Evaluate the POSIX and SQL regular-expression forms of `substring`, including `SIMILAR ... ESCAPE` and `FROM ... FOR` with text arguments, by their resolved PostgreSQL signature instead of reporting `42804` or returning a positional slice for a pattern that parses as an integer, with PostgreSQL's NULL handling and planning-time translation errors for the SQL form. The `substring` and `substr` overloads now have PostgreSQL's catalog identities, so CHECK constraints, defaults, `regprocedure` input and routine privileges accept them instead of reporting an internal error.
 
 - Preserve catalog-vector casts to OID-alias and domain arrays, including zero-based bounds, empty dimensions, NULL and checked integer-to-OID conversion.
 

@@ -1,7 +1,19 @@
 {
   "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "reference": "PostgreSQL 18.4 in a disposable Docker database",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "786ef8fa33381dc06181c634eeff8223627b724b512dfa989c146adaccedf546"
+  },
   "cases": [
     {
+      "id": "version",
       "sql": "SELECT version()",
       "command_tags": [
         "SELECT 1"
@@ -25,6 +37,7 @@
       "notices": []
     },
     {
+      "id": "posix_suffix",
       "sql": "SELECT substring('Thomas' from '...$')",
       "command_tags": [
         "SELECT 1"
@@ -48,6 +61,7 @@
       "notices": []
     },
     {
+      "id": "posix_function_call",
       "sql": "SELECT substring('Thomas', '...$')",
       "command_tags": [
         "SELECT 1"
@@ -71,6 +85,7 @@
       "notices": []
     },
     {
+      "id": "posix_whole_match",
       "sql": "SELECT substring('foobar' from 'o.b')",
       "command_tags": [
         "SELECT 1"
@@ -94,6 +109,7 @@
       "notices": []
     },
     {
+      "id": "posix_first_group",
       "sql": "SELECT substring('foobar' from 'o(.)b')",
       "command_tags": [
         "SELECT 1"
@@ -117,6 +133,7 @@
       "notices": []
     },
     {
+      "id": "posix_first_of_groups",
       "sql": "SELECT substring('Thomas' from '(h)(o)')",
       "command_tags": [
         "SELECT 1"
@@ -140,6 +157,7 @@
       "notices": []
     },
     {
+      "id": "posix_non_capturing",
       "sql": "SELECT substring('Thomas' from '(?:h)o')",
       "command_tags": [
         "SELECT 1"
@@ -163,6 +181,7 @@
       "notices": []
     },
     {
+      "id": "posix_unmatched_group",
       "sql": "SELECT substring('Thomas' from 'h(x)?o')",
       "command_tags": [
         "SELECT 1"
@@ -186,6 +205,7 @@
       "notices": []
     },
     {
+      "id": "posix_no_match",
       "sql": "SELECT substring('Thomas' from 'z')",
       "command_tags": [
         "SELECT 1"
@@ -209,6 +229,7 @@
       "notices": []
     },
     {
+      "id": "posix_numeric_pattern",
       "sql": "SELECT substring('Thomas' from '2')",
       "command_tags": [
         "SELECT 1"
@@ -232,6 +253,7 @@
       "notices": []
     },
     {
+      "id": "posix_numeric_match",
       "sql": "SELECT substring('Thomas2' from '2')",
       "command_tags": [
         "SELECT 1"
@@ -255,6 +277,7 @@
       "notices": []
     },
     {
+      "id": "posix_empty_match",
       "sql": "SELECT substring('abc' from 'x*')",
       "command_tags": [
         "SELECT 1"
@@ -278,6 +301,7 @@
       "notices": []
     },
     {
+      "id": "posix_embedded_options",
       "sql": "SELECT substring('ABC' from '(?i)b')",
       "command_tags": [
         "SELECT 1"
@@ -301,6 +325,7 @@
       "notices": []
     },
     {
+      "id": "posix_multibyte",
       "sql": "SELECT substring('a' || chr(233) || 'b' from chr(233) || '(.)')",
       "command_tags": [
         "SELECT 1"
@@ -324,6 +349,7 @@
       "notices": []
     },
     {
+      "id": "posix_varchar",
       "sql": "SELECT substring('Thomas'::varchar from 'om')",
       "command_tags": [
         "SELECT 1"
@@ -347,6 +373,7 @@
       "notices": []
     },
     {
+      "id": "posix_bpchar",
       "sql": "SELECT substring('Thomas'::char(8) from '.$')",
       "command_tags": [
         "SELECT 1"
@@ -370,6 +397,7 @@
       "notices": []
     },
     {
+      "id": "posix_nulls",
       "sql": "SELECT substring(NULL from '...$'), substring('Thomas' from NULL)",
       "command_tags": [
         "SELECT 1"
@@ -396,6 +424,7 @@
       "notices": []
     },
     {
+      "id": "posix_rows",
       "sql": "SELECT substring(x from p) FROM (VALUES ('Thomas', '...$'), ('foobar', 'o(.)b'), ('Thomas', 'z')) v(x, p)",
       "command_tags": [
         "SELECT 3"
@@ -425,6 +454,34 @@
       "notices": []
     },
     {
+      "id": "posix_null_input_invalid_pattern",
+      "sql": "SELECT substring(x from p) FROM (VALUES (NULL::text, '('), ('a', 'a')) v(x, p)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substring"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ],
+            [
+              "a"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "similar_syntax",
       "sql": "SELECT substring('Thomas' similar '%#\"o_a#\"_' escape '#')",
       "command_tags": [
         "SELECT 1"
@@ -448,6 +505,7 @@
       "notices": []
     },
     {
+      "id": "similar_from_for",
       "sql": "SELECT substring('Thomas' from '%#\"o_a#\"_' for '#')",
       "command_tags": [
         "SELECT 1"
@@ -471,6 +529,7 @@
       "notices": []
     },
     {
+      "id": "similar_function_call",
       "sql": "SELECT substring('Thomas', '%#\"o_a#\"_', '#')",
       "command_tags": [
         "SELECT 1"
@@ -494,6 +553,7 @@
       "notices": []
     },
     {
+      "id": "similar_no_match",
       "sql": "SELECT substring('Thomas' similar '%#\"o_b#\"_' escape '#')",
       "command_tags": [
         "SELECT 1"
@@ -517,6 +577,7 @@
       "notices": []
     },
     {
+      "id": "similar_one_separator",
       "sql": "SELECT substring('Thomas' similar '#\"T%' escape '#')",
       "command_tags": [
         "SELECT 1"
@@ -540,6 +601,7 @@
       "notices": []
     },
     {
+      "id": "similar_no_separator",
       "sql": "SELECT substring('Thomas' similar 'T%' escape '#')",
       "command_tags": [
         "SELECT 1"
@@ -563,6 +625,7 @@
       "notices": []
     },
     {
+      "id": "similar_no_whole_match",
       "sql": "SELECT substring('Thomas' similar 'x%' escape '#')",
       "command_tags": [
         "SELECT 1"
@@ -586,6 +649,7 @@
       "notices": []
     },
     {
+      "id": "similar_unknown_literals",
       "sql": "SELECT substring('Thomas' from '2' for '3')",
       "command_tags": [
         "SELECT 1"
@@ -609,6 +673,7 @@
       "notices": []
     },
     {
+      "id": "similar_empty_escape",
       "sql": "SELECT substring('a#b' similar 'a#b' escape '')",
       "command_tags": [
         "SELECT 1"
@@ -632,6 +697,7 @@
       "notices": []
     },
     {
+      "id": "similar_nulls",
       "sql": "SELECT substring('Thomas' similar 'T%' escape NULL), substring('Thomas' similar NULL escape '#')",
       "command_tags": [
         "SELECT 1"
@@ -658,6 +724,7 @@
       "notices": []
     },
     {
+      "id": "similar_rows",
       "sql": "SELECT substring(x similar p escape e) FROM (VALUES ('Thomas', '%#\"o_a#\"_', '#'), ('abc', 'a#\"b#\"c', '#')) v(x, p, e)",
       "command_tags": [
         "SELECT 2"
@@ -684,6 +751,7 @@
       "notices": []
     },
     {
+      "id": "similar_three_separators",
       "sql": "SELECT substring('Thomas' similar '#\"T#\"o#\"%' escape '#')",
       "command_tags": [],
       "error": {
@@ -696,6 +764,7 @@
       "notices": []
     },
     {
+      "id": "similar_long_escape",
       "sql": "SELECT substring('Thomas' similar '%' escape '##')",
       "command_tags": [],
       "error": {
@@ -708,7 +777,32 @@
       "notices": []
     },
     {
-      "sql": "SELECT substring(x similar '%' escape e) FROM (VALUES ('Thomas', '##'), ('x', '#')) v(x, e)",
+      "id": "similar_null_input_constant",
+      "sql": "SELECT substring(NULL similar '%' escape '##')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substring"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "similar_null_input_row_escape",
+      "sql": "SELECT substring(x similar p escape e) FROM (VALUES (NULL::text, '%', '##'), ('a', '%', '#')) v(x, p, e)",
       "command_tags": [],
       "error": {
         "sqlstate": "22025",
@@ -720,6 +814,118 @@
       "notices": []
     },
     {
+      "id": "similar_null_input_row_separators",
+      "sql": "SELECT substring(x similar p escape e) FROM (VALUES (NULL::text, '#\"a#\"b#\"c#\"', '#'), ('a', '%', '#')) v(x, p, e)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2200C",
+        "message": "SQL regular expression may not contain more than two escape-double-quote separators",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "similar_null_pattern_row",
+      "sql": "SELECT substring(x similar p escape e) FROM (VALUES ('a', NULL, '##'), ('b', '%', '#')) v(x, p, e)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substring"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ],
+            [
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "similar_constant_escape_rows",
+      "sql": "SELECT substring(x similar '%' escape '##') FROM (VALUES (NULL::text), ('a')) v(x)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22025",
+        "message": "invalid escape string",
+        "detail": null,
+        "hint": "Escape string must be empty or one character."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_empty",
+      "sql": "CREATE TABLE substring_empty (x text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "similar_planning_error",
+      "sql": "SELECT substring(x similar '%' escape '##') FROM substring_empty",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22025",
+        "message": "invalid escape string",
+        "detail": null,
+        "hint": "Escape string must be empty or one character."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "similar_deferred_view",
+      "sql": "CREATE VIEW substring_deferred AS SELECT substring(x similar '%' escape '##') AS s FROM substring_empty",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "similar_deferred_view_error",
+      "sql": "SELECT * FROM substring_deferred",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22025",
+        "message": "invalid escape string",
+        "detail": null,
+        "hint": "Escape string must be empty or one character."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "positional",
       "sql": "SELECT substring('Thomas' from 2), substring('Thomas' from 2 for 3), substring('Thomas', 2, 3), substring('Thomas' for 3)",
       "command_tags": [
         "SELECT 1"
@@ -752,6 +958,7 @@
       "notices": []
     },
     {
+      "id": "positional_unknown_count",
       "sql": "SELECT substring('Thomas' from 2 for '3')",
       "command_tags": [
         "SELECT 1"
@@ -775,6 +982,7 @@
       "notices": []
     },
     {
+      "id": "positional_bytea",
       "sql": "SELECT substring('\\x010203'::bytea from 2 for 1)",
       "command_tags": [
         "SELECT 1"
@@ -798,6 +1006,7 @@
       "notices": []
     },
     {
+      "id": "prepare_typed",
       "sql": "PREPARE substring_pattern(text, text) AS SELECT substring($1 from $2)",
       "command_tags": [
         "PREPARE"
@@ -813,6 +1022,7 @@
       "notices": []
     },
     {
+      "id": "execute_typed",
       "sql": "EXECUTE substring_pattern('Thomas', '...$')",
       "command_tags": [
         "SELECT 1"
@@ -836,6 +1046,7 @@
       "notices": []
     },
     {
+      "id": "execute_typed_numeric_pattern",
       "sql": "EXECUTE substring_pattern('Thomas', '2')",
       "command_tags": [
         "SELECT 1"
@@ -859,6 +1070,7 @@
       "notices": []
     },
     {
+      "id": "deallocate_typed",
       "sql": "DEALLOCATE substring_pattern",
       "command_tags": [
         "DEALLOCATE"
@@ -874,6 +1086,7 @@
       "notices": []
     },
     {
+      "id": "prepare_untyped",
       "sql": "PREPARE substring_untyped AS SELECT substring($1 from $2)",
       "command_tags": [
         "PREPARE"
@@ -889,6 +1102,7 @@
       "notices": []
     },
     {
+      "id": "execute_untyped",
       "sql": "EXECUTE substring_untyped('Thomas', '2')",
       "command_tags": [
         "SELECT 1"
@@ -912,6 +1126,7 @@
       "notices": []
     },
     {
+      "id": "deallocate_untyped",
       "sql": "DEALLOCATE substring_untyped",
       "command_tags": [
         "DEALLOCATE"
@@ -927,6 +1142,7 @@
       "notices": []
     },
     {
+      "id": "prepare_similar",
       "sql": "PREPARE substring_similar AS SELECT substring($1 similar $2 escape $3)",
       "command_tags": [
         "PREPARE"
@@ -942,6 +1158,7 @@
       "notices": []
     },
     {
+      "id": "execute_similar",
       "sql": "EXECUTE substring_similar('Thomas', '%#\"o_a#\"_', '#')",
       "command_tags": [
         "SELECT 1"
@@ -965,6 +1182,7 @@
       "notices": []
     },
     {
+      "id": "deallocate_similar",
       "sql": "DEALLOCATE substring_similar",
       "command_tags": [
         "DEALLOCATE"
@@ -980,6 +1198,285 @@
       "notices": []
     },
     {
+      "id": "catalog",
+      "sql": "SELECT oid,proname,prokind,proisstrict,provolatile,proparallel,proleakproof,prorettype,proargtypes::text AS argument_types,prosrc FROM pg_proc WHERE oid IN (877,883,936,937,2012,2013,2073,2074,2085,2086) ORDER BY oid",
+      "command_tags": [
+        "SELECT 10"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "proname",
+            "prokind",
+            "proisstrict",
+            "provolatile",
+            "proparallel",
+            "proleakproof",
+            "prorettype",
+            "argument_types",
+            "prosrc"
+          ],
+          "type_oids": [
+            26,
+            19,
+            18,
+            16,
+            18,
+            18,
+            16,
+            26,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "877",
+              "substr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 23 23",
+              "text_substr"
+            ],
+            [
+              "883",
+              "substr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 23",
+              "text_substr_no_len"
+            ],
+            [
+              "936",
+              "substring",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 23 23",
+              "text_substr"
+            ],
+            [
+              "937",
+              "substring",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 23",
+              "text_substr_no_len"
+            ],
+            [
+              "2012",
+              "substring",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "17",
+              "17 23 23",
+              "bytea_substr"
+            ],
+            [
+              "2013",
+              "substring",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "17",
+              "17 23",
+              "bytea_substr_no_len"
+            ],
+            [
+              "2073",
+              "substring",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25",
+              "textregexsubstr"
+            ],
+            [
+              "2074",
+              "substring",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 25",
+              ""
+            ],
+            [
+              "2085",
+              "substr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "17",
+              "17 23 23",
+              "bytea_substr"
+            ],
+            [
+              "2086",
+              "substr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "17",
+              "17 23",
+              "bytea_substr_no_len"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "catalog_identities",
+      "sql": "SELECT 'substring(text,text)'::regprocedure AS posix, 'substring(text,text,text)'::regprocedure AS sql_pattern, to_regprocedure('substring(text,integer)')::oid AS positional, 'substr(bytea,integer)'::regprocedure AS binary_prefix",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "posix",
+            "sql_pattern",
+            "positional",
+            "binary_prefix"
+          ],
+          "type_oids": [
+            2202,
+            2202,
+            26,
+            2202
+          ],
+          "rows": [
+            [
+              "\"substring\"(text,text)",
+              "\"substring\"(text,text,text)",
+              "937",
+              "substr(bytea,integer)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "catalog_languages",
+      "sql": "SELECT p.oid, l.lanname, p.prosqlbody IS NOT NULL AS has_body FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang WHERE p.oid IN (2073, 2074) ORDER BY p.oid",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "lanname",
+            "has_body"
+          ],
+          "type_oids": [
+            26,
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "2073",
+              "internal",
+              "f"
+            ],
+            [
+              "2074",
+              "sql",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "catalog_body",
+      "sql": "SELECT prosqlbody FROM pg_proc WHERE oid = 2074",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "prosqlbody"
+          ],
+          "type_oids": [
+            194
+          ],
+          "rows": [
+            [
+              "{QUERY :commandType 1 :querySource 0 :canSetTag true :utilityStmt <> :resultRelation 0 :hasAggs false :hasWindowFuncs false :hasTargetSRFs false :hasSubLinks false :hasDistinctOn false :hasRecursive false :hasModifyingCTE false :hasForUpdate false :hasRowSecurity false :hasGroupRTE false :isReturn true :cteList <> :rtable <> :rteperminfos <> :jointree {FROMEXPR :fromlist <> :quals <>} :mergeActionList <> :mergeTargetRelation 0 :mergeJoinCondition <> :targetList ({TARGETENTRY :expr {FUNCEXPR :funcid 2073 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({PARAM :paramkind 0 :paramid 1 :paramtype 25 :paramtypmod -1 :paramcollid 100 :location -1} {FUNCEXPR :funcid 1986 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({PARAM :paramkind 0 :paramid 2 :paramtype 25 :paramtypmod -1 :paramcollid 100 :location -1} {PARAM :paramkind 0 :paramid 3 :paramtype 25 :paramtypmod -1 :paramcollid 100 :location -1}) :location -1}) :location -1} :resno 1 :resname <> :ressortgroupref 0 :resorigtbl 0 :resorigcol 0 :resjunk false}) :override 0 :onConflict <> :returningOldAlias <> :returningNewAlias <> :returningList <> :groupClause <> :groupDistinct false :groupingSets <> :havingQual <> :windowClause <> :distinctClause <> :sortClause <> :limitOffset <> :limitCount <> :limitOption 0 :rowMarks <> :setOperations <> :constraintDeps <> :withCheckOptions <> :stmt_location -1 :stmt_len -1}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "catalog_privilege",
+      "sql": "SELECT has_function_privilege('substring(text,text,text)', 'EXECUTE') AS similar_execute, has_function_privilege('substring(text,text)', 'EXECUTE') AS posix_execute",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "similar_execute",
+            "posix_execute"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_view",
       "sql": "CREATE VIEW substring_patterns AS SELECT substring(x from '...$') AS posix, substring(x from '2') AS posix_literal, substring(x similar '%#\"o_a#\"_' escape '#') AS sql_pattern, substring(x from 2 for 3) AS positional FROM (VALUES ('Thomas'::text)) t(x)",
       "command_tags": [
         "CREATE VIEW"
@@ -995,6 +1492,7 @@
       "notices": []
     },
     {
+      "id": "view_rows",
       "sql": "SELECT * FROM substring_patterns",
       "command_tags": [
         "SELECT 1"
@@ -1024,6 +1522,148 @@
           ]
         }
       ],
+      "notices": []
+    },
+    {
+      "id": "setup_checks",
+      "sql": "CREATE TABLE substring_checks (x text CHECK (substring(x from '...$') IS DISTINCT FROM 'zzz'), y text CHECK (substring(y similar '%#\"o_a#\"_' escape '#') IS DISTINCT FROM 'oma'))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "checks_accept",
+      "sql": "INSERT INTO substring_checks VALUES ('Thomas', 'Tomato'), (NULL, NULL)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "checks_reject_posix",
+      "sql": "INSERT INTO substring_checks VALUES ('abzzz', 'x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"substring_checks\" violates check constraint \"substring_checks_x_check\"",
+        "detail": "Failing row contains (abzzz, x).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "checks_reject_similar",
+      "sql": "INSERT INTO substring_checks VALUES ('x', 'Thomas')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"substring_checks\" violates check constraint \"substring_checks_y_check\"",
+        "detail": "Failing row contains (x, Thomas).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "checks_definition",
+      "sql": "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'substring_checks'::regclass AND conname = 'substring_checks_x_check'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CHECK ((\"substring\"(x, '...$'::text) IS DISTINCT FROM 'zzz'::text))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "checks_rows",
+      "sql": "SELECT * FROM substring_checks ORDER BY x NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "Thomas",
+              "Tomato"
+            ],
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_deferred_check",
+      "sql": "CREATE TABLE substring_deferred_check (x text CHECK (substring(x similar '%' escape '##') IS NULL))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "deferred_check_error",
+      "sql": "INSERT INTO substring_deferred_check VALUES (NULL)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22025",
+        "message": "invalid escape string",
+        "detail": null,
+        "hint": "Escape string must be empty or one character."
+      },
+      "results": [],
       "notices": []
     }
   ]

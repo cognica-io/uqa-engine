@@ -100,7 +100,8 @@ pub use equality::{
 #[doc(hidden)]
 pub use fixed_builtin::{
     fixed_builtin_return_type, fixed_builtin_return_type_with_control,
-    is_function as is_fixed_builtin, resolve_fixed_builtin_call, ResolvedFixedBuiltinCall,
+    is_function as is_fixed_builtin, resolve_fixed_builtin_call, selected_builtin_dispatch,
+    ResolvedFixedBuiltinCall,
 };
 pub use functions::{
     builtin_function_argument_targets, builtin_function_type, builtin_function_type_with_resolver,

@@ -290,6 +290,18 @@ fn optimize_scalar(
             }
         }
     }
+    constants::check_inlined_similar_substring(
+        &optimized,
+        config.builtin_permissions.as_deref(),
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.types),
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.routines as &dyn uqa_sql::FunctionTypeResolver),
+    )?;
     let optimized = constants::fold_composite_constructor(
         constants::retain_record_result(optimized, row_syntax),
         config
