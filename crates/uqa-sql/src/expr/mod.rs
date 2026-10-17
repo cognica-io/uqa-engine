@@ -85,6 +85,7 @@ mod scalar_range;
 mod scalar_temporal;
 mod session_settings;
 mod session_sleep;
+mod statement_cancellation;
 mod temporal_input;
 mod value_catalog;
 pub mod variadic_any;
@@ -143,6 +144,9 @@ use scalar_dispatch::eval_scalar_function;
 pub(crate) use scalar_helpers::{append_sql_literal, quote_ident_with_control};
 use scalar_helpers::{point_xy, typeof_value};
 pub use scalar_helpers::{quote_ident, CompiledLikePattern};
+pub use statement_cancellation::{
+    check_statement_cancellation, statement_cancellation, StatementCancellationScope,
+};
 pub use temporal_input::{
     temporal_date_order, temporal_interval_style, DateOrderScope, IntervalStyleScope,
     TemporalInputContext, TemporalInputScope,
