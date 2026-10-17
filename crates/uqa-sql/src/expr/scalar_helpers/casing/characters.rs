@@ -6,6 +6,7 @@
 
 //! Unicode character properties and per-character case mappings shared by the builtin and ICU case-mapping providers.
 
+use super::output::MappedOutput;
 use icu_casemap::{
     options::{LeadingAdjustment, TitlecaseOptions, TrailingCase},
     CaseMapper, CaseMapperBorrowed,
@@ -15,11 +16,7 @@ use icu_properties::{
     props::{Alphabetic, CaseIgnorable, Cased, GeneralCategory, GeneralCategoryGroup},
     CodePointMapData, CodePointMapDataBorrowed, CodePointSetData, CodePointSetDataBorrowed,
 };
-use uqa_core::{
-    memory::{ProductionControl, ProductionString},
-    ValueRetentionError,
-};
-use writeable::Writeable;
+use uqa_core::{memory::ProductionControl, ValueRetentionError};
 
 const CAPITAL_SIGMA: char = '\u{03A3}';
 const SMALL_SIGMA: char = '\u{03C3}';
@@ -110,40 +107,80 @@ impl UnicodeCharacters {
         offset: usize,
         character: char,
         kind: CaseKind,
-        output: &mut ProductionString<'_>,
+        output: &mut MappedOutput<'_, '_>,
         control: &ProductionControl<'_>,
     ) -> Result<(), ValueRetentionError> {
         if character == CAPITAL_SIGMA && kind == CaseKind::Lower {
-            let after = offset + CAPITAL_SIGMA.len_utf8();
-            let final_form = match self.sigma {
-                FinalSigmaRule::Builtin => {
-                    self.builtin_final_sigma(text, offset, after, control)?
-                }
-                FinalSigmaRule::Icu => self.icu_final_sigma(text, offset, after, control)?,
-            };
-            return output.push(if final_form { FINAL_SIGMA } else { SMALL_SIGMA });
+            return output.push(self.lowercase_sigma(text, offset, control)?);
         }
         let source = &text[offset..offset + character.len_utf8()];
         let root = LanguageIdentifier::UNKNOWN;
-        let mut mapped = MappedCharacter::default();
-        let written = match kind {
-            CaseKind::Lower => self.mapper.lowercase(source, &root).write_to(&mut mapped),
-            CaseKind::Upper => self.mapper.uppercase(source, &root).write_to(&mut mapped),
-            CaseKind::Fold => self.mapper.fold(source).write_to(&mut mapped),
+        match kind {
+            CaseKind::Lower => output.write(&self.mapper.lowercase(source, &root)),
+            CaseKind::Upper => output.write(&self.mapper.uppercase(source, &root)),
+            CaseKind::Fold => output.write(&self.mapper.fold(source)),
             CaseKind::Title => {
                 let mut options = TitlecaseOptions::default();
                 options.leading_adjustment = Some(LeadingAdjustment::None);
                 options.trailing_case = Some(TrailingCase::Unchanged);
-                self.mapper
-                    .titlecase_segment_with_only_case_data(source, &root, options)
-                    .write_to(&mut mapped)
+                output.write(
+                    &self
+                        .mapper
+                        .titlecase_segment_with_only_case_data(source, &root, options),
+                )
             }
+        }
+    }
+
+    /// Write the full lowercase, uppercase or case folding of `text[start..end]`. These mappings are context-free in the root locale except for a capital sigma's lowercase, so the run maps as whole strings between capital sigmas and each sigma reads the whole text.
+    pub(super) fn push_full_run(
+        self,
+        text: &str,
+        start: usize,
+        end: usize,
+        kind: CaseKind,
+        output: &mut MappedOutput<'_, '_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), ValueRetentionError> {
+        let root = LanguageIdentifier::UNKNOWN;
+        let run = &text[start..end];
+        match kind {
+            CaseKind::Upper => return output.write(&self.mapper.uppercase(run, &root)),
+            CaseKind::Fold => return output.write(&self.mapper.fold(run)),
+            CaseKind::Title => unreachable!("titlecase maps one word start at a time"),
+            CaseKind::Lower => {}
+        }
+        let mut segment = start;
+        for (offset, character) in run.char_indices() {
+            if character != CAPITAL_SIGMA {
+                continue;
+            }
+            let sigma = start + offset;
+            if sigma > segment {
+                output.write(&self.mapper.lowercase(&text[segment..sigma], &root))?;
+            }
+            output.push(self.lowercase_sigma(text, sigma, control)?)?;
+            segment = sigma + CAPITAL_SIGMA.len_utf8();
+        }
+        if segment < end {
+            output.write(&self.mapper.lowercase(&text[segment..end], &root))?;
+        }
+        Ok(())
+    }
+
+    /// The lowercase of the capital sigma at `offset`, as this provider decides `Final_Sigma`.
+    fn lowercase_sigma(
+        self,
+        text: &str,
+        offset: usize,
+        control: &ProductionControl<'_>,
+    ) -> Result<char, ValueRetentionError> {
+        let after = offset + CAPITAL_SIGMA.len_utf8();
+        let final_form = match self.sigma {
+            FinalSigmaRule::Builtin => self.builtin_final_sigma(text, offset, after, control)?,
+            FinalSigmaRule::Icu => self.icu_final_sigma(text, offset, after, control)?,
         };
-        assert!(
-            written.is_ok(),
-            "a full case mapping expands one character to at most three"
-        );
-        output.push_str(mapped.as_str())
+        Ok(if final_form { FINAL_SIGMA } else { SMALL_SIGMA })
     }
 
     /// `check_final_sigma` in `src/common/unicode_case.c`. Its backward scan returns false only on an uncased, non-ignorable character, so a run of ignorable characters back to the start still passes.
@@ -157,8 +194,8 @@ impl UnicodeCharacters {
         if offset == 0 {
             return Ok(false);
         }
-        for character in text[..offset].chars().rev() {
-            control.check()?;
+        for (scanned, character) in text[..offset].chars().rev().enumerate() {
+            checkpoint(scanned, control)?;
             if self.case_ignorable.contains(character) {
                 continue;
             }
@@ -181,8 +218,8 @@ impl UnicodeCharacters {
         if !self.not_followed_by_cased(&text[after..], control)? {
             return Ok(false);
         }
-        for character in text[..offset].chars().rev() {
-            control.check()?;
+        for (scanned, character) in text[..offset].chars().rev().enumerate() {
+            checkpoint(scanned, control)?;
             if self.case_ignorable.contains(character) {
                 continue;
             }
@@ -196,8 +233,8 @@ impl UnicodeCharacters {
         following: &str,
         control: &ProductionControl<'_>,
     ) -> Result<bool, ValueRetentionError> {
-        for character in following.chars() {
-            control.check()?;
+        for (scanned, character) in following.chars().enumerate() {
+            checkpoint(scanned, control)?;
             if self.case_ignorable.contains(character) {
                 continue;
             }
@@ -207,28 +244,10 @@ impl UnicodeCharacters {
     }
 }
 
-/// The full mapping of one character on the stack. `SpecialCasing.txt` and `CaseFolding.txt` expand a character to at most three characters, so twelve UTF-8 bytes suffice.
-#[derive(Default)]
-struct MappedCharacter {
-    bytes: [u8; 16],
-    length: usize,
-}
-
-impl MappedCharacter {
-    fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.bytes[..self.length]).expect("mapped characters are UTF-8")
+/// Observe both cancellation scopes once per bounded run of a context scan.
+fn checkpoint(scanned: usize, control: &ProductionControl<'_>) -> Result<(), ValueRetentionError> {
+    if scanned.is_multiple_of(1024) {
+        control.check()?;
     }
-}
-
-impl std::fmt::Write for MappedCharacter {
-    fn write_str(&mut self, text: &str) -> std::fmt::Result {
-        let end = self.length + text.len();
-        let destination = self
-            .bytes
-            .get_mut(self.length..end)
-            .ok_or(std::fmt::Error)?;
-        destination.copy_from_slice(text.as_bytes());
-        self.length = end;
-        Ok(())
-    }
+    Ok(())
 }

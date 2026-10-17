@@ -186,3 +186,47 @@ fn mappings_admit_their_entire_output_and_observe_both_cancellations() {
         }
     }
 }
+
+/// ASCII runs, whole non-ASCII runs and bounded chunks map exactly as each character does on its own, and a capital sigma still reads its context across a chunk boundary.
+#[test]
+fn runs_and_chunks_map_like_single_characters() {
+    let mixed = "Stra\u{df}e \u{c9}cole i\u{307}x \u{1c6}A \u{1e9e}z \u{130}K\u{212a} 12-ab_CD \u{fb01}\u{434}\u{416} "
+        .repeat(200);
+    for oid in [950, 811, 6411, 963] {
+        let mapping = CaseMapping::select(oid, "test").unwrap();
+        for function in ["lower", "upper", "casefold"] {
+            let expected = mixed
+                .chars()
+                .map(|character| apply(mapping, function, &character.to_string()))
+                .collect::<String>();
+            assert_eq!(
+                apply(mapping, function, &mixed),
+                expected,
+                "{function} {oid}"
+            );
+        }
+    }
+    let ascii = "A".repeat(4095);
+    for (oid, text, lowered) in [
+        (
+            6411,
+            format!("{ascii}\u{3a3} "),
+            format!("{}\u{3c2} ", "a".repeat(4095)),
+        ),
+        (
+            6411,
+            format!("{ascii}\u{3a3}a"),
+            format!("{}\u{3c3}a", "a".repeat(4095)),
+        ),
+        (
+            963,
+            format!("{ascii}\u{3a3} "),
+            format!("{}\u{3c2} ", "a".repeat(4095)),
+        ),
+        (963, format!("'\u{3a3}"), "'\u{3c3}".to_owned()),
+        (6411, format!("'\u{3a3}"), "'\u{3c2}".to_owned()),
+    ] {
+        let mapping = CaseMapping::select(oid, "test").unwrap();
+        assert_eq!(apply(mapping, "lower", &text), lowered, "{oid}");
+    }
+}

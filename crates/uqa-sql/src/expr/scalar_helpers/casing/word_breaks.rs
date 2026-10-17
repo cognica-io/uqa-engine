@@ -49,7 +49,32 @@ struct Character {
     kana_kanji: bool,
 }
 
+/// Characters classified between cancellation checks.
+const BATCH: usize = 256;
+
 impl Character {
+    const UNCLASSIFIED: Self = Self {
+        class: Class::Other,
+        pictographic: false,
+        hangul_syllable: false,
+        kana_kanji: false,
+    };
+
+    /// The classification of `character`; ASCII characters read a table built once from the same properties.
+    fn of(character: char) -> Self {
+        static ASCII: std::sync::OnceLock<[Character; 128]> = std::sync::OnceLock::new();
+        if !character.is_ascii() {
+            return Self::new(character);
+        }
+        ASCII.get_or_init(|| {
+            std::array::from_fn(|code| {
+                Self::new(char::from(
+                    u8::try_from(code).expect("an ASCII code point fits in a byte"),
+                ))
+            })
+        })[usize::from(u8::try_from(character).expect("ASCII character"))]
+    }
+
     fn new(character: char) -> Self {
         let word_break = CodePointMapData::<Property>::new().get(character);
         let script = CodePointMapData::<Script>::new().get(character);
@@ -128,15 +153,24 @@ pub(super) fn boundaries(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<usize>>, ValueRetentionError> {
     let mut characters = ProductionVec::new(*control);
+    let mut pending = [Character::UNCLASSIFIED; BATCH];
+    let mut length = 0;
     for character in text.chars() {
-        control.check()?;
-        characters.push_copy(Character::new(character))?;
+        pending[length] = Character::of(character);
+        length += 1;
+        if length == BATCH {
+            characters.extend_from_slice(&pending)?;
+            length = 0;
+        }
     }
+    characters.extend_from_slice(&pending[..length])?;
     let mut offsets = ProductionVec::new(*control);
     offsets.push_copy(0)?;
     let mut offset = 0;
     for (index, character) in text.chars().enumerate() {
-        control.check()?;
+        if index.is_multiple_of(BATCH) {
+            control.check()?;
+        }
         if index > 0 && !joins(&characters, index) {
             offsets.push_copy(offset)?;
         }
