@@ -1,0 +1,2972 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "reference": "PostgreSQL 18.4 in a disposable Docker database",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "d8efea27cf12592064f836b45b022b298b49a29bec1637145581794b6299269e"
+  },
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lower_c",
+      "sql": "SELECT lower(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"C\") AS lowered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130i\u0131i \u01c4\u01c5\u01c6x \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "upper_c",
+      "sql": "SELECT upper(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"C\") AS uppered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "uppered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "HELLO WORLD \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130I\u0131I \u01c4\u01c5\u01c6X \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_c",
+      "sql": "SELECT initcap(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"C\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "Hello World \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130I\u0131I \u01c4\u01c5\u01c6X \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "casefold_c",
+      "sql": "SELECT casefold(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"C\") AS folded",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "folded"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130i\u0131i \u01c4\u01c5\u01c6x \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lower_posix",
+      "sql": "SELECT lower(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"POSIX\") AS lowered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130i\u0131i \u01c4\u01c5\u01c6x \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "upper_posix",
+      "sql": "SELECT upper(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"POSIX\") AS uppered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "uppered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "HELLO WORLD \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130I\u0131I \u01c4\u01c5\u01c6X \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_posix",
+      "sql": "SELECT initcap(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"POSIX\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "Hello World \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130I\u0131I \u01c4\u01c5\u01c6X \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "casefold_posix",
+      "sql": "SELECT casefold(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"POSIX\") AS folded",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "folded"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130i\u0131i \u01c4\u01c5\u01c6x \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lower_ucs_basic",
+      "sql": "SELECT lower(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"ucs_basic\") AS lowered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130i\u0131i \u01c4\u01c5\u01c6x \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "upper_ucs_basic",
+      "sql": "SELECT upper(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"ucs_basic\") AS uppered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "uppered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "HELLO WORLD \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130I\u0131I \u01c4\u01c5\u01c6X \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_ucs_basic",
+      "sql": "SELECT initcap(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"ucs_basic\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "Hello World \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130I\u0131I \u01c4\u01c5\u01c6X \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "casefold_ucs_basic",
+      "sql": "SELECT casefold(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"ucs_basic\") AS folded",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "folded"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00c9\u00e9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130i\u0131i \u01c4\u01c5\u01c6x \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lower_pg_c_utf8",
+      "sql": "SELECT lower(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"pg_c_utf8\") AS lowered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00e9\u00e9 \u03c3\u03bf\u03c3 \u00df\u00df ii\u0131i \u01c6\u01c6\u01c6x \ufb01 k \u0436\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "upper_pg_c_utf8",
+      "sql": "SELECT upper(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"pg_c_utf8\") AS uppered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "uppered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "HELLO WORLD \u00c9\u00c9 \u03a3\u039f\u03a3 \u00df\u1e9e \u0130III \u01c4\u01c4\u01c4X \ufb01 \u212a \u0416\u0416"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_pg_c_utf8",
+      "sql": "SELECT initcap(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"pg_c_utf8\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "Hello World \u00c9\u00e9 \u03a3\u03bf\u03c3 \u00df\u00df \u0130i\u0131i \u01c4\u01c6\u01c6x \ufb01 \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "casefold_pg_c_utf8",
+      "sql": "SELECT casefold(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"pg_c_utf8\") AS folded",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "folded"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00e9\u00e9 \u03c3\u03bf\u03c3 \u00df\u00df \u0130i\u0131i \u01c6\u01c6\u01c6x \ufb01 k \u0436\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lower_pg_unicode_fast",
+      "sql": "SELECT lower(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"pg_unicode_fast\") AS lowered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00e9\u00e9 \u03c3\u03bf\u03c2 \u00df\u00df i\u0307i\u0131i \u01c6\u01c6\u01c6x \ufb01 k \u0436\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "upper_pg_unicode_fast",
+      "sql": "SELECT upper(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"pg_unicode_fast\") AS uppered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "uppered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "HELLO WORLD \u00c9\u00c9 \u03a3\u039f\u03a3 SS\u1e9e \u0130III \u01c4\u01c4\u01c4X FI \u212a \u0416\u0416"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_pg_unicode_fast",
+      "sql": "SELECT initcap(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"pg_unicode_fast\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "Hello World \u00c9\u00e9 \u03a3\u03bf\u03c2 Ss\u00df \u0130i\u0131i \u01c5\u01c6\u01c6x Fi \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "casefold_pg_unicode_fast",
+      "sql": "SELECT casefold(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"pg_unicode_fast\") AS folded",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "folded"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00e9\u00e9 \u03c3\u03bf\u03c3 ssss i\u0307i\u0131i \u01c6\u01c6\u01c6x fi k \u0436\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lower_unicode",
+      "sql": "SELECT lower(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"unicode\") AS lowered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00e9\u00e9 \u03c3\u03bf\u03c2 \u00df\u00df i\u0307i\u0131i \u01c6\u01c6\u01c6x \ufb01 k \u0436\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "upper_unicode",
+      "sql": "SELECT upper(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"unicode\") AS uppered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "uppered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "HELLO WORLD \u00c9\u00c9 \u03a3\u039f\u03a3 SS\u1e9e \u0130III \u01c4\u01c4\u01c4X FI \u212a \u0416\u0416"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_unicode",
+      "sql": "SELECT initcap(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"unicode\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "Hello World \u00c9\u00e9 \u03a3\u03bf\u03c2 Ss\u00df \u0130i\u0131i \u01c5\u01c6\u01c6x Fi \u212a \u0416\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "casefold_unicode",
+      "sql": "SELECT casefold(('hELLO wORLD ' || chr(201) || chr(233) || ' ' || chr(931) || chr(927) || chr(931) || ' ' || chr(223) || chr(7838) || ' ' || chr(304) || chr(73) || chr(305) || chr(105) || ' ' || chr(452) || chr(453) || chr(454) || 'x ' || chr(64257) || ' ' || chr(8490) || ' ' || chr(1046) || chr(1078)) COLLATE \"unicode\") AS folded",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "folded"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello world \u00e9\u00e9 \u03c3\u03bf\u03c3 ssss i\u0307i\u0131i \u01c6\u01c6\u01c6x fi k \u0436\u0436"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "final_sigma_pg_c_utf8",
+      "sql": "SELECT lower((chr(931) || ' ' || chr(927) || chr(931) || ' ' || chr(927) || chr(931) || chr(913) || ' ' || chr(39) || chr(931) || ' ' || chr(927) || chr(769) || chr(931) || ' ' || chr(927) || chr(931) || chr(94) || chr(913)) COLLATE \"pg_c_utf8\") AS lowered, initcap((chr(931) || ' ' || chr(927) || chr(931) || ' ' || chr(927) || chr(931) || chr(913) || ' ' || chr(39) || chr(931) || ' ' || chr(927) || chr(769) || chr(931) || ' ' || chr(927) || chr(931) || chr(94) || chr(913)) COLLATE \"pg_c_utf8\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered",
+            "titled"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\u03c3 \u03bf\u03c3 \u03bf\u03c3\u03b1 '\u03c3 \u03bf\u0301\u03c3 \u03bf\u03c3^\u03b1",
+              "\u03a3 \u039f\u03c3 \u039f\u03c3\u03b1 '\u03a3 \u039f\u0301\u03a3 \u039f\u03c3^\u0391"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "final_sigma_pg_unicode_fast",
+      "sql": "SELECT lower((chr(931) || ' ' || chr(927) || chr(931) || ' ' || chr(927) || chr(931) || chr(913) || ' ' || chr(39) || chr(931) || ' ' || chr(927) || chr(769) || chr(931) || ' ' || chr(927) || chr(931) || chr(94) || chr(913)) COLLATE \"pg_unicode_fast\") AS lowered, initcap((chr(931) || ' ' || chr(927) || chr(931) || ' ' || chr(927) || chr(931) || chr(913) || ' ' || chr(39) || chr(931) || ' ' || chr(927) || chr(769) || chr(931) || ' ' || chr(927) || chr(931) || chr(94) || chr(913)) COLLATE \"pg_unicode_fast\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered",
+            "titled"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\u03c3 \u03bf\u03c2 \u03bf\u03c3\u03b1 '\u03c3 \u03bf\u0301\u03c2 \u03bf\u03c3^\u03b1",
+              "\u03a3 \u039f\u03c2 \u039f\u03c3\u03b1 '\u03a3 \u039f\u0301\u03a3 \u039f\u03c3^\u0391"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "final_sigma_unicode",
+      "sql": "SELECT lower((chr(931) || ' ' || chr(927) || chr(931) || ' ' || chr(927) || chr(931) || chr(913) || ' ' || chr(39) || chr(931) || ' ' || chr(927) || chr(769) || chr(931) || ' ' || chr(927) || chr(931) || chr(94) || chr(913)) COLLATE \"unicode\") AS lowered, initcap((chr(931) || ' ' || chr(927) || chr(931) || ' ' || chr(927) || chr(931) || chr(913) || ' ' || chr(39) || chr(931) || ' ' || chr(927) || chr(769) || chr(931) || ' ' || chr(927) || chr(931) || chr(94) || chr(913)) COLLATE \"unicode\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered",
+            "titled"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\u03c3 \u03bf\u03c2 \u03bf\u03c3\u03b1 '\u03c3 \u03bf\u0301\u03c2 \u03bf\u03c3^\u03b1",
+              "\u03a3 \u039f\u03c2 \u039f\u03c3\u03b1 '\u03a3 \u039f\u0301\u03c2 \u039f\u03c3^\u0391"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_words_c",
+      "sql": "SELECT initcap(('o''neil a:b a.b 3abc x_y foo-bar ' || chr(3652) || chr(3607) || 'abc ' || chr(54620) || 'abc ' || chr(26085) || 'abc ' || chr(1632) || 'a') COLLATE \"C\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "O'Neil A:B A.B 3abc X_Y Foo-Bar \u0e44\u0e17Abc \ud55cAbc \u65e5Abc \u0660A"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_words_posix",
+      "sql": "SELECT initcap(('o''neil a:b a.b 3abc x_y foo-bar ' || chr(3652) || chr(3607) || 'abc ' || chr(54620) || 'abc ' || chr(26085) || 'abc ' || chr(1632) || 'a') COLLATE \"POSIX\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "O'Neil A:B A.B 3abc X_Y Foo-Bar \u0e44\u0e17Abc \ud55cAbc \u65e5Abc \u0660A"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_words_ucs_basic",
+      "sql": "SELECT initcap(('o''neil a:b a.b 3abc x_y foo-bar ' || chr(3652) || chr(3607) || 'abc ' || chr(54620) || 'abc ' || chr(26085) || 'abc ' || chr(1632) || 'a') COLLATE \"ucs_basic\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "O'Neil A:B A.B 3abc X_Y Foo-Bar \u0e44\u0e17Abc \ud55cAbc \u65e5Abc \u0660A"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_words_pg_c_utf8",
+      "sql": "SELECT initcap(('o''neil a:b a.b 3abc x_y foo-bar ' || chr(3652) || chr(3607) || 'abc ' || chr(54620) || 'abc ' || chr(26085) || 'abc ' || chr(1632) || 'a') COLLATE \"pg_c_utf8\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "O'Neil A:B A.B 3abc X_Y Foo-Bar \u0e44\u0e17abc \ud55cabc \u65e5abc \u0660A"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_words_pg_unicode_fast",
+      "sql": "SELECT initcap(('o''neil a:b a.b 3abc x_y foo-bar ' || chr(3652) || chr(3607) || 'abc ' || chr(54620) || 'abc ' || chr(26085) || 'abc ' || chr(1632) || 'a') COLLATE \"pg_unicode_fast\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "O'Neil A:B A.B 3abc X_Y Foo-Bar \u0e44\u0e17abc \ud55cabc \u65e5abc \u0660a"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "initcap_words_unicode",
+      "sql": "SELECT initcap(('o''neil a:b a.b 3abc x_y foo-bar ' || chr(3652) || chr(3607) || 'abc ' || chr(54620) || 'abc ' || chr(26085) || 'abc ' || chr(1632) || 'a') COLLATE \"unicode\") AS titled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "titled"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "O'neil A:B A.b 3abc X_y Foo-Bar \u0e44\u0e17abc \ud55cAbc \u65e5Abc \u0660a"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "ilike_c",
+      "sql": "SELECT chr(201) ILIKE chr(233) COLLATE \"C\" AS latin, chr(223) ILIKE 'ss' COLLATE \"C\" AS sharp, chr(304) ILIKE '_' COLLATE \"C\" AS dotted, (chr(927) || chr(931)) ILIKE (chr(959) || chr(963)) COLLATE \"C\" AS sigma, 'ABC' ILIKE 'a_c' COLLATE \"C\" AS ascii, 'abc' NOT ILIKE 'A%' COLLATE \"C\" AS negated",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "latin",
+            "sharp",
+            "dotted",
+            "sigma",
+            "ascii",
+            "negated"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "t",
+              "f",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "ilike_posix",
+      "sql": "SELECT chr(201) ILIKE chr(233) COLLATE \"POSIX\" AS latin, chr(223) ILIKE 'ss' COLLATE \"POSIX\" AS sharp, chr(304) ILIKE '_' COLLATE \"POSIX\" AS dotted, (chr(927) || chr(931)) ILIKE (chr(959) || chr(963)) COLLATE \"POSIX\" AS sigma, 'ABC' ILIKE 'a_c' COLLATE \"POSIX\" AS ascii, 'abc' NOT ILIKE 'A%' COLLATE \"POSIX\" AS negated",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "latin",
+            "sharp",
+            "dotted",
+            "sigma",
+            "ascii",
+            "negated"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "t",
+              "f",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "ilike_ucs_basic",
+      "sql": "SELECT chr(201) ILIKE chr(233) COLLATE \"ucs_basic\" AS latin, chr(223) ILIKE 'ss' COLLATE \"ucs_basic\" AS sharp, chr(304) ILIKE '_' COLLATE \"ucs_basic\" AS dotted, (chr(927) || chr(931)) ILIKE (chr(959) || chr(963)) COLLATE \"ucs_basic\" AS sigma, 'ABC' ILIKE 'a_c' COLLATE \"ucs_basic\" AS ascii, 'abc' NOT ILIKE 'A%' COLLATE \"ucs_basic\" AS negated",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "latin",
+            "sharp",
+            "dotted",
+            "sigma",
+            "ascii",
+            "negated"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "t",
+              "f",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "ilike_pg_c_utf8",
+      "sql": "SELECT chr(201) ILIKE chr(233) COLLATE \"pg_c_utf8\" AS latin, chr(223) ILIKE 'ss' COLLATE \"pg_c_utf8\" AS sharp, chr(304) ILIKE '_' COLLATE \"pg_c_utf8\" AS dotted, (chr(927) || chr(931)) ILIKE (chr(959) || chr(963)) COLLATE \"pg_c_utf8\" AS sigma, 'ABC' ILIKE 'a_c' COLLATE \"pg_c_utf8\" AS ascii, 'abc' NOT ILIKE 'A%' COLLATE \"pg_c_utf8\" AS negated",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "latin",
+            "sharp",
+            "dotted",
+            "sigma",
+            "ascii",
+            "negated"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f",
+              "t",
+              "t",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "ilike_pg_unicode_fast",
+      "sql": "SELECT chr(201) ILIKE chr(233) COLLATE \"pg_unicode_fast\" AS latin, chr(223) ILIKE 'ss' COLLATE \"pg_unicode_fast\" AS sharp, chr(304) ILIKE '_' COLLATE \"pg_unicode_fast\" AS dotted, (chr(927) || chr(931)) ILIKE (chr(959) || chr(963)) COLLATE \"pg_unicode_fast\" AS sigma, 'ABC' ILIKE 'a_c' COLLATE \"pg_unicode_fast\" AS ascii, 'abc' NOT ILIKE 'A%' COLLATE \"pg_unicode_fast\" AS negated",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "latin",
+            "sharp",
+            "dotted",
+            "sigma",
+            "ascii",
+            "negated"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f",
+              "f",
+              "f",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "ilike_unicode",
+      "sql": "SELECT chr(201) ILIKE chr(233) COLLATE \"unicode\" AS latin, chr(223) ILIKE 'ss' COLLATE \"unicode\" AS sharp, chr(304) ILIKE '_' COLLATE \"unicode\" AS dotted, (chr(927) || chr(931)) ILIKE (chr(959) || chr(963)) COLLATE \"unicode\" AS sigma, 'ABC' ILIKE 'a_c' COLLATE \"unicode\" AS ascii, 'abc' NOT ILIKE 'A%' COLLATE \"unicode\" AS negated",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "latin",
+            "sharp",
+            "dotted",
+            "sigma",
+            "ascii",
+            "negated"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f",
+              "f",
+              "f",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "ilike_pattern_context",
+      "sql": "SELECT (chr(913) || chr(931) || chr(913)) ILIKE (chr(913) || chr(931) || '%') COLLATE \"pg_unicode_fast\" AS fast, (chr(913) || chr(931) || chr(913)) ILIKE (chr(913) || chr(931) || '%') COLLATE \"pg_c_utf8\" AS simple",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "fast",
+            "simple"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "ilike_escape",
+      "sql": "SELECT 'A_B' ILIKE 'a!_b' ESCAPE '!' COLLATE \"C\" AS escaped, (chr(201) || '%') ILIKE (chr(233) || '#%') ESCAPE '#' COLLATE \"pg_unicode_fast\" AS latin",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "escaped",
+            "latin"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_cased",
+      "sql": "CREATE TABLE cased (id int, c text COLLATE \"C\", p text COLLATE \"POSIX\", s text COLLATE \"pg_c_utf8\", f text COLLATE \"pg_unicode_fast\", u text COLLATE \"unicode\")",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_cased",
+      "sql": "INSERT INTO cased SELECT 1, v, v, v, v, v FROM (SELECT (chr(201) || chr(223) || ' ' || chr(931) || chr(931) || ' ' || chr(454) || 'x') AS v) AS source",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_cased_ascii",
+      "sql": "INSERT INTO cased VALUES (2, 'MiXeD case', 'MiXeD case', 'MiXeD case', 'MiXeD case', 'MiXeD case')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "columns_lower",
+      "sql": "SELECT id, lower(c) AS c, lower(p) AS p, lower(s) AS s, lower(f) AS f, lower(u) AS u FROM cased ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "c",
+            "p",
+            "s",
+            "f",
+            "u"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\u00c9\u00df \u03a3\u03a3 \u01c6x",
+              "\u00c9\u00df \u03a3\u03a3 \u01c6x",
+              "\u00e9\u00df \u03c3\u03c3 \u01c6x",
+              "\u00e9\u00df \u03c3\u03c2 \u01c6x",
+              "\u00e9\u00df \u03c3\u03c2 \u01c6x"
+            ],
+            [
+              "2",
+              "mixed case",
+              "mixed case",
+              "mixed case",
+              "mixed case",
+              "mixed case"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "columns_upper",
+      "sql": "SELECT id, upper(c) AS c, upper(s) AS s, upper(f) AS f, upper(u) AS u FROM cased ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "c",
+            "s",
+            "f",
+            "u"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\u00c9\u00df \u03a3\u03a3 \u01c6X",
+              "\u00c9\u00df \u03a3\u03a3 \u01c4X",
+              "\u00c9SS \u03a3\u03a3 \u01c4X",
+              "\u00c9SS \u03a3\u03a3 \u01c4X"
+            ],
+            [
+              "2",
+              "MIXED CASE",
+              "MIXED CASE",
+              "MIXED CASE",
+              "MIXED CASE"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "columns_initcap",
+      "sql": "SELECT id, initcap(c) AS c, initcap(s) AS s, initcap(f) AS f, initcap(u) AS u FROM cased ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "c",
+            "s",
+            "f",
+            "u"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\u00c9\u00df \u03a3\u03a3 \u01c6X",
+              "\u00c9\u00df \u03a3\u03c3 \u01c4x",
+              "\u00c9\u00df \u03a3\u03c2 \u01c5x",
+              "\u00c9\u00df \u03a3\u03c2 \u01c5x"
+            ],
+            [
+              "2",
+              "Mixed Case",
+              "Mixed Case",
+              "Mixed Case",
+              "Mixed Case"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "columns_casefold",
+      "sql": "SELECT id, casefold(c) AS c, casefold(s) AS s, casefold(f) AS f, casefold(u) AS u FROM cased ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "c",
+            "s",
+            "f",
+            "u"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\u00c9\u00df \u03a3\u03a3 \u01c6x",
+              "\u00e9\u00df \u03c3\u03c3 \u01c6x",
+              "\u00e9ss \u03c3\u03c3 \u01c6x",
+              "\u00e9ss \u03c3\u03c3 \u01c6x"
+            ],
+            [
+              "2",
+              "mixed case",
+              "mixed case",
+              "mixed case",
+              "mixed case"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "columns_ilike",
+      "sql": "SELECT id, c ILIKE ('%' || chr(233) || '%') AS c, s ILIKE ('%' || chr(233) || '%') AS s, f ILIKE '%SS%' AS f, u ILIKE '%ss%' AS u FROM cased ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "c",
+            "s",
+            "f",
+            "u"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f",
+              "t",
+              "f",
+              "f"
+            ],
+            [
+              "2",
+              "f",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "columns_where_ilike",
+      "sql": "SELECT id FROM cased WHERE c ILIKE 'mixed%' AND s NOT ILIKE ('%' || chr(223) || '%') ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "column_override",
+      "sql": "SELECT id, lower(c COLLATE \"pg_unicode_fast\") AS c, upper(f COLLATE \"C\") AS f FROM cased ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "c",
+            "f"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\u00e9\u00df \u03c3\u03c2 \u01c6x",
+              "\u00c9\u00df \u03a3\u03a3 \u01c6X"
+            ],
+            [
+              "2",
+              "mixed case",
+              "MIXED CASE"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "column_default_literal",
+      "sql": "SELECT id, lower(c || 'X') AS c FROM cased ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "c"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\u00c9\u00df \u03a3\u03a3 \u01c6xx"
+            ],
+            [
+              "2",
+              "mixed casex"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "conflict_lower",
+      "sql": "SELECT lower(c || s) FROM cased",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for lower() function",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_upper",
+      "sql": "SELECT upper(c || s) FROM cased",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for upper() function",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_initcap",
+      "sql": "SELECT initcap(c || s) FROM cased",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for initcap() function",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_casefold",
+      "sql": "SELECT casefold(c || s) FROM cased",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for lower() function",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_ilike",
+      "sql": "SELECT c ILIKE s FROM cased",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for ILIKE",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_not_ilike",
+      "sql": "SELECT c NOT ILIKE s FROM cased",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for ILIKE",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_like",
+      "sql": "SELECT c LIKE s FROM cased",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for LIKE",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_resolved",
+      "sql": "SELECT id, lower((c || s) COLLATE \"C\") AS c, c ILIKE s COLLATE \"pg_c_utf8\" AS matched FROM cased ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "c",
+            "matched"
+          ],
+          "type_oids": [
+            23,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "\u00c9\u00df \u03a3\u03a3 \u01c6x\u00c9\u00df \u03a3\u03a3 \u01c6x",
+              "t"
+            ],
+            [
+              "2",
+              "mixed casemixed case",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "conflict_null_input",
+      "sql": "SELECT lower(NULL::text COLLATE \"C\" || s) AS lowered FROM cased WHERE id = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "conflict_no_rows",
+      "sql": "SELECT lower(c || s) FROM cased WHERE id = 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lower"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "explicit_conflict",
+      "sql": "SELECT lower(c COLLATE \"C\" || s COLLATE \"POSIX\") FROM cased",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P21",
+        "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW cased_view AS SELECT id, lower(c) AS lc, upper(s) AS us, initcap(u) AS iu, casefold(f) AS ff, c ILIKE ('%' || chr(233) || '%') AS ci, lower(f COLLATE \"C\") AS lfc FROM cased",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "view_rows",
+      "sql": "SELECT * FROM cased_view ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "lc",
+            "us",
+            "iu",
+            "ff",
+            "ci",
+            "lfc"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            25,
+            25,
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\u00c9\u00df \u03a3\u03a3 \u01c6x",
+              "\u00c9\u00df \u03a3\u03a3 \u01c4X",
+              "\u00c9\u00df \u03a3\u03c2 \u01c5x",
+              "\u00e9ss \u03c3\u03c3 \u01c6x",
+              "f",
+              "\u00c9\u00df \u03a3\u03a3 \u01c6x"
+            ],
+            [
+              "2",
+              "mixed case",
+              "MIXED CASE",
+              "Mixed Case",
+              "mixed case",
+              "f",
+              "mixed case"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_checked",
+      "sql": "CREATE TABLE checked (x text COLLATE \"C\" CHECK (lower(x) = x), y text CHECK (upper(y COLLATE \"pg_c_utf8\") <> y))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "checked_accepts",
+      "sql": "INSERT INTO checked VALUES (chr(201), 'b')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "checked_rejects_x",
+      "sql": "INSERT INTO checked VALUES ('A', 'b')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"checked\" violates check constraint \"checked_x_check\"",
+        "detail": "Failing row contains (A, b).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "checked_rejects_y",
+      "sql": "INSERT INTO checked VALUES ('a', chr(223))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"checked\" violates check constraint \"checked_y_check\"",
+        "detail": "Failing row contains (a, \u00df).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "checked_rows",
+      "sql": "SELECT x, y FROM checked",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\u00c9",
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_defaults",
+      "sql": "CREATE TABLE defaulted (id int, x text COLLATE \"pg_c_utf8\", d text DEFAULT initcap((chr(223) || 'a') COLLATE \"C\"), g text GENERATED ALWAYS AS (upper(x)) STORED, h text GENERATED ALWAYS AS (lower(x COLLATE \"unicode\")) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "defaults_insert",
+      "sql": "INSERT INTO defaulted (id, x) VALUES (1, chr(223) || chr(931) || chr(931))",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "defaults_rows",
+      "sql": "SELECT id, x, d, g, h FROM defaulted ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "x",
+            "d",
+            "g",
+            "h"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\u00df\u03a3\u03a3",
+              "\u00dfA",
+              "\u00df\u03a3\u03a3",
+              "\u00df\u03c3\u03c2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "defaults_update",
+      "sql": "UPDATE defaulted SET x = chr(304) || 'b' WHERE id = 1",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "defaults_after_update",
+      "sql": "SELECT id, x, g, h FROM defaulted ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "x",
+            "g",
+            "h"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\u0130b",
+              "\u0130B",
+              "i\u0307b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE cased_statement(text) AS SELECT lower($1 COLLATE \"C\") AS c, upper($1 COLLATE \"pg_c_utf8\") AS s, initcap($1 COLLATE \"unicode\") AS u, $1 ILIKE ('%' || chr(233) || '%') COLLATE \"C\" AS ci",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute",
+      "sql": "EXECUTE cased_statement(chr(201) || chr(223) || 'x yz')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "s",
+            "u",
+            "ci"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "\u00c9\u00dfx yz",
+              "\u00c9\u00dfX YZ",
+              "\u00c9\u00dfx Yz",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_rows",
+      "sql": "PREPARE cased_rows(int) AS SELECT lower(c) AS c, lower(s) AS s, upper(f) AS f FROM cased WHERE id = $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_rows",
+      "sql": "EXECUTE cased_rows(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "s",
+            "f"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\u00c9\u00df \u03a3\u03a3 \u01c6x",
+              "\u00e9\u00df \u03c3\u03c3 \u01c6x",
+              "\u00c9SS \u03a3\u03a3 \u01c4X"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "update_from_column",
+      "sql": "UPDATE cased SET p = upper(s) WHERE id = 1",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "updated_row",
+      "sql": "SELECT p FROM cased WHERE id = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\u00c9\u00df \u03a3\u03a3 \u01c4X"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_sql_function",
+      "sql": "CREATE FUNCTION cased_sql(t text) RETURNS text LANGUAGE sql AS $$ SELECT (SELECT lower(t COLLATE \"C\")) || '|' || upper(t COLLATE \"pg_c_utf8\") $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "call_sql_function",
+      "sql": "SELECT cased_sql(chr(201) || chr(223)) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\u00c9\u00df|\u00c9\u00df"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_plpgsql_function",
+      "sql": "CREATE FUNCTION cased_plpgsql(t text) RETURNS text LANGUAGE plpgsql AS $$ DECLARE x text; BEGIN x := initcap(t COLLATE \"C\"); RETURN x || '|' || initcap(t COLLATE \"pg_unicode_fast\") || '|' || (t ILIKE (chr(233) || '%') COLLATE \"pg_c_utf8\")::text; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "call_plpgsql_function",
+      "sql": "SELECT cased_plpgsql(chr(201) || chr(223) || 'x yz') AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\u00c9\u00dfX Yz|\u00c9\u00dfx Yz|true"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_trigger_table",
+      "sql": "CREATE TABLE triggered (x text COLLATE \"C\", y text, z text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_trigger_function",
+      "sql": "CREATE FUNCTION triggered_case() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.y := upper(NEW.x); NEW.z := lower(NEW.x COLLATE \"pg_unicode_fast\"); RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_trigger",
+      "sql": "CREATE TRIGGER triggered_case BEFORE INSERT ON triggered FOR EACH ROW WHEN (lower(NEW.x) <> NEW.x OR NEW.x ILIKE 'a%') EXECUTE FUNCTION triggered_case()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "trigger_insert",
+      "sql": "INSERT INTO triggered (x) VALUES (chr(201) || chr(223)), ('abc'), (chr(233))",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "trigger_rows",
+      "sql": "SELECT x, y, z FROM triggered ORDER BY x",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "abc",
+              "ABC",
+              "abc"
+            ],
+            [
+              "\u00c9\u00df",
+              null,
+              null
+            ],
+            [
+              "\u00e9",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_named",
+      "sql": "CREATE TABLE named (n name); INSERT INTO named VALUES (chr(201) || 'A')",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "name_collation",
+      "sql": "SELECT lower(n) AS lowered, upper(n) AS uppered, n ILIKE (chr(233) || 'a') AS matched FROM named",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered",
+            "uppered",
+            "matched"
+          ],
+          "type_oids": [
+            25,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "\u00c9a",
+              "\u00c9A",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_domain",
+      "sql": "CREATE DOMAIN c_text AS text COLLATE \"C\"",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "domain_collation",
+      "sql": "SELECT lower((chr(201) || 'A')::c_text) AS lowered, upper((chr(223) || 'a')::c_text) AS uppered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered",
+            "uppered"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\u00c9a",
+              "\u00dfA"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "subquery_collation",
+      "sql": "SELECT lower(v) AS lowered FROM (SELECT c AS v FROM cased WHERE id = 1) AS source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lowered"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\u00c9\u00df \u03a3\u03a3 \u01c6x"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "cte_collation",
+      "sql": "WITH source AS (SELECT s AS v FROM cased WHERE id = 1) SELECT upper(v) AS uppered, initcap(lower(v)) AS titled FROM source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "uppered",
+            "titled"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\u00c9\u00df \u03a3\u03a3 \u01c4X",
+              "\u00c9\u00df \u03a3\u03c3 \u01c4x"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "nested_calls",
+      "sql": "SELECT id, lower(upper(c)) AS c, initcap(lower(s)) AS s, upper(lower(u)) AS u FROM cased ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "c",
+            "s",
+            "u"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\u00c9\u00df \u03a3\u03a3 \u01c6x",
+              "\u00c9\u00df \u03a3\u03c3 \u01c4x",
+              "\u00c9SS \u03a3\u03a3 \u01c4X"
+            ],
+            [
+              "2",
+              "mixed case",
+              "Mixed Case",
+              "MIXED CASE"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "conflict_union_all",
+      "sql": "SELECT lower(v) FROM (SELECT c AS v FROM cased UNION ALL SELECT s FROM cased) AS source",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for lower() function",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_case",
+      "sql": "SELECT lower(CASE WHEN id = 1 THEN c ELSE s END) FROM cased",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for lower() function",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_coalesce",
+      "sql": "SELECT upper(COALESCE(c, s)) FROM cased",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for upper() function",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "collation_for",
+      "sql": "SELECT pg_collation_for(lower(c)) AS c, pg_collation_for(upper(s)) AS s, pg_collation_for(initcap(u COLLATE \"POSIX\")) AS u FROM cased WHERE id = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "s",
+            "u"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\"C\"",
+              "pg_c_utf8",
+              "\"POSIX\""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_unique",
+      "sql": "CREATE TABLE uniq (x text COLLATE \"C\")",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_unique_index",
+      "sql": "CREATE UNIQUE INDEX uniq_lower ON uniq (lower(x))",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unique_accepts",
+      "sql": "INSERT INTO uniq VALUES (chr(201)), (chr(233)), ('A')",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unique_rejects",
+      "sql": "INSERT INTO uniq VALUES ('a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"uniq_lower\"",
+        "detail": "Key (lower(x))=(a) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "unique_rows",
+      "sql": "SELECT x, lower(x) AS lowered FROM uniq ORDER BY x",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "lowered"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "A",
+              "a"
+            ],
+            [
+              "\u00c9",
+              "\u00c9"
+            ],
+            [
+              "\u00e9",
+              "\u00e9"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_rule_tables",
+      "sql": "CREATE TABLE ruled (x text COLLATE \"C\"); CREATE TABLE ruled_log (l text, u text)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "create_rule",
+      "sql": "CREATE RULE ruled_log AS ON INSERT TO ruled DO ALSO INSERT INTO ruled_log VALUES (lower(NEW.x), upper(NEW.x COLLATE \"pg_unicode_fast\"))",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "rule_insert",
+      "sql": "INSERT INTO ruled VALUES (chr(201) || chr(223) || 'A')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "rule_rows",
+      "sql": "SELECT l, u FROM ruled_log",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "u"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\u00c9\u00dfa",
+              "\u00c9SSA"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "merge_update",
+      "sql": "MERGE INTO cased AS target USING (SELECT 2 AS id) AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET p = initcap(target.c)",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "merged_row",
+      "sql": "SELECT p FROM cased WHERE id = 2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "Mixed Case"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "checked_reopen_probe",
+      "sql": "BEGIN; INSERT INTO checked VALUES ('z', 'y'); SELECT x, y FROM checked ORDER BY x; ROLLBACK",
+      "command_tags": [
+        "BEGIN",
+        "INSERT 0 1",
+        "SELECT 2",
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "z",
+              "y"
+            ],
+            [
+              "\u00c9",
+              "b"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "defaults_reopen_probe",
+      "sql": "BEGIN; INSERT INTO defaulted (id, x) VALUES (2, chr(931) || chr(931) || 'x'); SELECT id, x, d, g, h FROM defaulted ORDER BY id; ROLLBACK",
+      "command_tags": [
+        "BEGIN",
+        "INSERT 0 1",
+        "SELECT 2",
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "id",
+            "x",
+            "d",
+            "g",
+            "h"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\u0130b",
+              "\u00dfA",
+              "\u0130B",
+              "i\u0307b"
+            ],
+            [
+              "2",
+              "\u03a3\u03a3x",
+              "\u00dfA",
+              "\u03a3\u03a3X",
+              "\u03c3\u03c3x"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "trigger_reopen_probe",
+      "sql": "BEGIN; INSERT INTO triggered (x) VALUES ('abd'); SELECT x, y, z FROM triggered WHERE x = 'abd'; ROLLBACK",
+      "command_tags": [
+        "BEGIN",
+        "INSERT 0 1",
+        "SELECT 1",
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "abd",
+              "ABD",
+              "abd"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "unique_reopen_probe",
+      "sql": "INSERT INTO uniq VALUES ('a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"uniq_lower\"",
+        "detail": "Key (lower(x))=(a) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "rule_reopen_probe",
+      "sql": "BEGIN; INSERT INTO ruled VALUES ('Q' || chr(931)); SELECT l, u FROM ruled_log ORDER BY l COLLATE \"C\"; ROLLBACK",
+      "command_tags": [
+        "BEGIN",
+        "INSERT 0 1",
+        "SELECT 2",
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "l",
+            "u"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "q\u03a3",
+              "Q\u03a3"
+            ],
+            [
+              "\u00c9\u00dfa",
+              "\u00c9SSA"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "pg_get_expr",
+      "sql": "SELECT pg_get_viewdef('cased_view'::regclass) IS NOT NULL AS defined",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "defined"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

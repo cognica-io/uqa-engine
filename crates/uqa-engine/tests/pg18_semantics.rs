@@ -84,6 +84,8 @@ mod array_transforms;
 mod assignment_subscripts;
 #[path = "pg18_semantics/checksums.rs"]
 mod checksums;
+#[path = "pg18_semantics/collation_case_mapping.rs"]
+mod collation_case_mapping;
 #[path = "pg18_semantics/comparisons_and_arrays.rs"]
 mod comparisons_and_arrays;
 #[path = "pg18_semantics/concatenation.rs"]
