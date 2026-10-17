@@ -166,8 +166,18 @@ fn multirange_constructor(
                 ranges.push_produced(parse_range_with_control(text, subtype, control)?)?;
             }
             Value::Array(array) => {
+                if array.dimensions().len() > 1 {
+                    return Err(SQLError::Routine {
+                        sqlstate: "21000".into(),
+                        message: "multiranges cannot be constructed from multidimensional arrays"
+                            .into(),
+                    });
+                }
                 for value in array.elements() {
                     control.check()?;
+                    if matches!(value, Value::Null) {
+                        return Err(null_multirange_member());
+                    }
                     let (Value::Str(text) | Value::FixedChar(text)) = value else {
                         return Err(SQLError::TypeMismatch(format!(
                             "{} variadic input must contain ranges",
@@ -177,7 +187,8 @@ fn multirange_constructor(
                     ranges.push_produced(parse_range_with_control(text, subtype, control)?)?;
                 }
             }
-            Value::Null => return inline_value(Value::Null, control),
+            Value::Null if args.len() == 1 => return inline_value(Value::Null, control),
+            Value::Null => return Err(null_multirange_member()),
             other => {
                 return Err(SQLError::TypeMismatch(format!(
                     "{} requires range arguments, got {other:?}",
@@ -188,6 +199,13 @@ fn multirange_constructor(
     }
     let ranges = multirange_from_produced_ranges(subtype, ranges.finish()?, control)?;
     text_value(ranges.to_text_with_control(control)?, control)
+}
+
+fn null_multirange_member() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22004".into(),
+        message: "multirange values cannot contain null members".into(),
+    }
 }
 
 fn accessor(

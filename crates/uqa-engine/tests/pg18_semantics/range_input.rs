@@ -8,6 +8,23 @@
 
 use uqa_engine::Engine;
 
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn multirange_constructor_inputs_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("multirange-input.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../uqa-sql/src/expr/scalar_range/tests/constructor-inputs-postgresql.json"
+        )),
+    );
+}
+
 pub(super) fn open(provider: usize, path: &std::path::Path) -> Engine {
     match provider {
         0 => Engine::new(),

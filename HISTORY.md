@@ -28,6 +28,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Match PostgreSQL multirange constructor errors for NULL members and multidimensional variadic arrays, preserving single-argument NULL results and valid normalization.
+
 - Preserve catalog-vector casts to OID-alias and domain arrays, including zero-based bounds, empty dimensions, NULL and checked integer-to-OID conversion.
 
 - Preserve PostgreSQL unsigned Julian DATE output when an owned retained composite field is reinterpreted after a same-width type change.
