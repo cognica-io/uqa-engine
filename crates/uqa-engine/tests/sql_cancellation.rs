@@ -152,6 +152,23 @@ fn portal_worker_evaluation_observes_engine_cancel() {
 }
 
 #[test]
+fn scroll_cursor_branch_evaluation_observes_engine_cancel() {
+    let engine = Arc::new(Engine::new());
+    let observations = register_cancel_and_observe(&engine);
+    engine.sql("BEGIN", &[]).unwrap();
+    engine
+        .sql(
+            "DECLARE observed SCROLL CURSOR FOR SELECT i FROM generate_series(1, 2) AS g(i) WHERE cancel_and_observe() IS NOT NULL UNION ALL SELECT i FROM generate_series(3, 4) AS g(i)",
+            &[],
+        )
+        .unwrap();
+    assert!(observations.lock().unwrap().is_empty());
+    assert_observed_cancel_request(&observations, engine.sql("FETCH NEXT FROM observed", &[]));
+    engine.reset_cancellation();
+    engine.sql("ROLLBACK", &[]).unwrap();
+}
+
+#[test]
 fn statement_timeout_interrupts_a_long_scalar_evaluation() {
     let engine = Engine::new();
     engine

@@ -459,3 +459,45 @@ fn pg18_scroll_cursor_defers_union_all_branch_ctes_until_branch_entry() {
     );
     engine.sql("ROLLBACK", &[]).unwrap();
 }
+
+#[test]
+fn pg18_scroll_cursor_union_all_branches_read_the_session_temporal_inputs() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "SET DateStyle = 'ISO, DMY'; SET IntervalStyle = 'sql_standard'; BEGIN",
+            &[],
+        )
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    engine
+        .sql(
+            "DECLARE temporal_cursor SCROLL CURSOR FOR SELECT ('02/0' || value || '/2020')::date::text AS day, ((value - 2) || ' day 2 hours')::interval::text AS span, repeat('now', value - 2)::timestamptz = transaction_timestamp() AS clock FROM generate_series(3, 3) AS values(value) UNION ALL SELECT ('02/0' || value || '/2020')::date::text, ((value - 2) || ' day 2 hours')::interval::text, repeat('now', value - 2)::timestamptz = transaction_timestamp() FROM generate_series(3, 3) AS values(value)",
+            &[],
+        )
+        .unwrap();
+    for sql in [
+        "FETCH NEXT FROM temporal_cursor",
+        "FETCH NEXT FROM temporal_cursor",
+        "FETCH PRIOR FROM temporal_cursor",
+    ] {
+        let result = engine.sql(sql, &[]).unwrap();
+        assert_eq!(result.rows.len(), 1, "{sql}");
+        assert_eq!(
+            result.rows[0]["day"],
+            uqa_core::Value::Str("2020-03-02".into()),
+            "{sql}"
+        );
+        assert_eq!(
+            result.rows[0]["span"],
+            uqa_core::Value::Str("1 2:00:00".into()),
+            "{sql}"
+        );
+        assert_eq!(
+            result.rows[0]["clock"],
+            uqa_core::Value::Bool(true),
+            "{sql}"
+        );
+    }
+    engine.sql("ROLLBACK", &[]).unwrap();
+}
