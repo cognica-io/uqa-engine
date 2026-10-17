@@ -13038,6 +13038,19 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "the_running_statements_cancellation_reaches_the_engine",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/engine/tests.rs",
+      "capability": "PostgreSQL regular expression evaluation",
+      "workload": "Independent PostgreSQL 18.4 regular-expression statements covering match selection, ARE syntax, every flag, invalid patterns, replacement escapes, operators, long inputs, nested groups within and beyond the 2 MB stack budget, per-collation character classes and case folding, collation conflicts, and stored views, CHECK constraints and defaults across provider reopening, with engine allocations under fixed allowances and canceled scopes.",
+      "invariant": "Every regular-expression function and operator returns PostgreSQL 18.4's matches, results and diagnostics through PostgreSQL's engine, each engine allocation is charged to the call's allowance and released when the call ends, a refused reservation reports the allowance's own error, and the engine's interrupt checks report the statement's cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "test",
       "test": "regular_expression_engine_matches_postgresql_and_reopen",

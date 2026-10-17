@@ -62,9 +62,10 @@ impl<'c> RegexCall<'c> {
             .map_err(|error| self.failure(error, "regular expression failed"))
     }
 
-    /// `CHECK_FOR_INTERRUPTS` between engine operations.
+    /// `CHECK_FOR_INTERRUPTS` between engine operations: the call's own cancellation scopes and the running statement's, which ordinary evaluation, planning and table functions leave to the statement.
     pub(super) fn check(&self) -> Result<()> {
         self.control.check()?;
+        crate::expr::check_statement_cancellation()?;
         Ok(())
     }
 
@@ -75,6 +76,7 @@ impl<'c> RegexCall<'c> {
 
     fn cancel_requested(&self) -> bool {
         self.control.check_cancellation().is_err()
+            || crate::expr::check_statement_cancellation().is_err()
     }
 
     fn failure(&self, error: RegexError, context: &str) -> SQLError {
@@ -89,7 +91,11 @@ impl<'c> RegexCall<'c> {
         }
         match error {
             RegexError::Code(_) => engine_error(error, context),
-            RegexError::Cancelled => match self.control.check_cancellation() {
+            RegexError::Cancelled => match self
+                .control
+                .check_cancellation()
+                .and_then(|()| crate::expr::check_statement_cancellation())
+            {
                 Err(cancelled) => cancelled.into(),
                 Ok(()) => SQLError::Internal(
                     "the regular expression engine stopped for a cancellation the statement does not report".into(),

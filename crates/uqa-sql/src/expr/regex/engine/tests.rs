@@ -128,6 +128,30 @@ fn engine_interrupt_checks_report_the_statement_cancellation() {
 }
 
 #[test]
+fn the_running_statements_cancellation_reaches_the_engine() {
+    // Ordinary evaluation, planning and table functions call the engine without a cancellation scope of their own, so the engine observes the running statement's.
+    let token = CancellationToken::new();
+    let _statement = crate::expr::StatementCancellationScope::enter(token.clone());
+    let control = ProductionControl::uncontrolled();
+    let call = RegexCall::new(&control);
+    let mut allowance = call.allowance();
+    token.cancel();
+    let collation = RegexCollation::from_oid(DEFAULT_COLLATION).unwrap();
+    let Err(error) = Regex::compile("(a|b)*c", REG_ADVANCED, collation, &mut allowance) else {
+        panic!("a canceled statement stops the engine")
+    };
+    assert_eq!(error, RegexError::Cancelled);
+    assert_eq!(
+        call.failure(error, "invalid regular expression").sqlstate(),
+        Some("57014")
+    );
+    let Err(error) = call.compile("a", REG_ADVANCED, DEFAULT_COLLATION, &mut allowance) else {
+        panic!("a canceled statement stops the call between engine operations")
+    };
+    assert_eq!(error.sqlstate(), Some("57014"));
+}
+
+#[test]
 fn collations_are_checked_before_the_pattern() {
     let control = ProductionControl::uncontrolled();
     let call = RegexCall::new(&control);

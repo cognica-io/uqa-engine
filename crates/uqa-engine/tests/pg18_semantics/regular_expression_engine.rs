@@ -56,3 +56,27 @@ fn regular_expression_engine_matches_postgresql_and_reopen(#[case] provider: usi
     assert_eq!(reference["cases"].as_array().unwrap().len(), 5);
     crate::pg18_oracle::verify(&engine, &reference.to_string());
 }
+
+#[test]
+fn a_long_match_stops_at_the_statement_timeout() {
+    // Dissecting 3000 nested capture groups takes seconds in PostgreSQL 18.4 and here. The engine's interrupt checks end it at the statement timeout, as CHECK_FOR_INTERRUPTS does in PostgreSQL, in a scalar call and in a table function alike.
+    let engine = Engine::new();
+    engine.sql("SET statement_timeout = 50", &[]).unwrap();
+    for query in [
+        "SELECT regexp_match('a', repeat('(', 3000) || 'a' || repeat(')', 3000)) AS captures",
+        "SELECT * FROM regexp_matches('a', repeat('(', 3000) || 'a' || repeat(')', 3000)) AS m(captures)",
+    ] {
+        let started = std::time::Instant::now();
+        let error = engine.sql(query, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("57014"), "{query}: {error}");
+        assert_eq!(
+            error.to_string(),
+            "canceling statement due to statement timeout"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{query} ran to completion instead of stopping at the timeout"
+        );
+    }
+    assert_eq!(engine.sql("SELECT 1 AS value", &[]).unwrap().rows.len(), 1);
+}
