@@ -1,0 +1,143 @@
+{
+  "docker_image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+  "setup": [
+    "CREATE TYPE range_cache_first AS ENUM ('first','last')",
+    "ALTER TYPE range_cache_first ADD VALUE 'middle' BEFORE 'last'",
+    "CREATE TYPE range_cache_second AS ENUM ('first','last')",
+    "ALTER TYPE range_cache_second ADD VALUE 'middle' BEFORE 'last'",
+    "CREATE DOMAIN range_cache_domain AS range_cache_first",
+    "CREATE TYPE domain_cached_range AS RANGE (subtype=range_cache_domain, multirange_type_name=domain_cached_ranges)",
+    "CREATE TYPE cached_range AS RANGE (subtype=range_cache_first, multirange_type_name=cached_ranges)",
+    "CREATE TYPE independent_range AS RANGE (subtype=range_cache_first)",
+    "CREATE FUNCTION raw_first(oid,oid) RETURNS range_cache_first AS 'enum_smaller' LANGUAGE internal IMMUTABLE STRICT",
+    "CREATE FUNCTION reference_eval(label text, statement text) RETURNS jsonb LANGUAGE plpgsql AS $$ DECLARE output jsonb; code text; message text; BEGIN EXECUTE statement INTO output; RETURN jsonb_build_object('name',label,'sql',statement,'value',output); EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS code=RETURNED_SQLSTATE,message=MESSAGE_TEXT; RETURN jsonb_build_object('name',label,'sql',statement,'error',jsonb_build_object('sqlstate',code,'message',message)); END $$",
+    "CREATE TABLE points AS SELECT cached_range('middle','middle','[]') AS a, cached_range('last','last','[]') AS b, domain_cached_range('middle','middle','[]') AS c, domain_cached_range('last','last','[]') AS d"
+  ],
+  "metadata": {
+    "name": "metadata",
+    "types": {
+      "cached_range": "38061",
+      "cached_ranges": "38059",
+      "independent_range": "38071",
+      "range_cache_first": "38035",
+      "range_cache_domain": "38047",
+      "range_cache_second": "38041"
+    },
+    "labels": [
+      {
+        "oid": "38036",
+        "type": "38035",
+        "label": "first"
+      },
+      {
+        "oid": "38039",
+        "type": "38035",
+        "label": "middle"
+      },
+      {
+        "oid": "38038",
+        "type": "38035",
+        "label": "last"
+      },
+      {
+        "oid": "38042",
+        "type": "38041",
+        "label": "first"
+      },
+      {
+        "oid": "38045",
+        "type": "38041",
+        "label": "middle"
+      },
+      {
+        "oid": "38044",
+        "type": "38041",
+        "label": "last"
+      }
+    ],
+    "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+  },
+  "cases": [
+    {
+      "sql": "SELECT to_jsonb(ARRAY[a::text,b::text]) FROM points",
+      "name": "equal_points",
+      "value": [
+        "[middle,middle]",
+        "[last,last]"
+      ]
+    },
+    {
+      "sql": "SELECT to_jsonb(cached_range(raw_first((SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='first'),(SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='first')),raw_first((SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='last'),(SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='last')))::text)",
+      "name": "even_foreign_fast_path",
+      "value": "[first,last)"
+    },
+    {
+      "sql": "SELECT to_jsonb(cached_range(raw_first((SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='middle'),(SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='middle')),raw_first((SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='last'),(SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='last')))::text)",
+      "name": "prime_foreign_inside_rollback",
+      "value": "[middle,last)"
+    },
+    {
+      "sql": "SELECT to_jsonb(cached_range('middle','last')::text)",
+      "name": "range_after_rollback",
+      "error": {
+        "message": "enum value 38039 not found in cache for enum range_cache_second",
+        "sqlstate": "XX000"
+      }
+    },
+    {
+      "sql": "SELECT to_jsonb(cached_ranges(a,b)::text) FROM points",
+      "name": "multirange_same_state",
+      "error": {
+        "message": "enum value 38039 not found in cache for enum range_cache_second",
+        "sqlstate": "XX000"
+      }
+    },
+    {
+      "sql": "SELECT to_jsonb(independent_range('middle','last')::text)",
+      "name": "independent_range_state",
+      "value": "[middle,last)"
+    },
+    {
+      "sql": "SELECT to_jsonb(cached_range(raw_first((SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='middle'),(SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='middle')),raw_first((SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='last'),(SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='last')))::text)",
+      "name": "same_foreign_type",
+      "value": "[middle,last)"
+    },
+    {
+      "sql": "SELECT to_jsonb(domain_cached_range(raw_first((SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='first'),(SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='first')),raw_first((SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='last'),(SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='last')))::text)",
+      "name": "domain_even_foreign_fast_path",
+      "value": "[first,last)"
+    },
+    {
+      "sql": "SELECT to_jsonb(domain_cached_range(raw_first((SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='middle'),(SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='middle')),raw_first((SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='last'),(SELECT oid FROM pg_enum WHERE enumtypid='range_cache_second'::regtype AND enumlabel='last')))::text)",
+      "name": "domain_prime_foreign_inside_rollback",
+      "value": "[middle,last)"
+    },
+    {
+      "sql": "SELECT to_jsonb(domain_cached_range('middle','last')::text)",
+      "name": "domain_range_after_rollback",
+      "error": {
+        "message": "enum value 38039 not found in cache for enum range_cache_second",
+        "sqlstate": "XX000"
+      }
+    },
+    {
+      "sql": "SELECT to_jsonb(domain_cached_ranges(c,d)::text) FROM points",
+      "name": "domain_multirange_same_state",
+      "error": {
+        "message": "enum value 38039 not found in cache for enum range_cache_second",
+        "sqlstate": "XX000"
+      }
+    }
+  ],
+  "transaction_scope": {
+    "prime_foreign_inside_rollback": [
+      "BEGIN",
+      "ROLLBACK"
+    ],
+    "domain_prime_foreign_inside_rollback": [
+      "BEGIN",
+      "ROLLBACK"
+    ]
+  },
+  "source_sha256": "a8adfe8384e5f97a06c306eb0f6f359f87b25811dbcdc7768bf450e9bcbfd496"
+}

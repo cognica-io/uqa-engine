@@ -12,6 +12,7 @@ use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
 mod projections;
 mod snapshots;
+mod support;
 
 fn roles() -> BTreeMap<String, RoleDefinition> {
     BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])

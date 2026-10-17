@@ -585,6 +585,80 @@ fn comparison_cache_follows_the_first_slow_call_and_bypasses_fast_calls() {
 }
 
 #[test]
+fn selected_btree_enum_support_keeps_private_call_state_separate_from_container_state() {
+    for domain in [false, true] {
+        selected_enum_state(domain);
+    }
+}
+
+fn selected_enum_state(domain: bool) {
+    let catalog = Catalog::new();
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let ty = crate::ColumnType::Enum(crate::ast::EnumTypeReference {
+        schema: "public".into(),
+        name: "enum_probe".into(),
+        oid: 16_384,
+        array_oid: 16_385,
+    });
+    let ty = if domain {
+        crate::ColumnType::Domain {
+            schema: "public".into(),
+            name: "enum_domain".into(),
+            oid: 90_000,
+            array_oid: Some(90_001),
+            collation_oid: None,
+            base: Box::new(ty),
+        }
+    } else {
+        ty
+    };
+    let selected_input = |oid: u32| {
+        Value::Datum(DatumValue::new(
+            crate::catalog::type_metadata::pg_type_oid(&ty) as u32,
+            0,
+            oid.to_le_bytes().to_vec(),
+        ))
+    };
+    let class = crate::catalog::index::operator_classes::default_btree_operator_class(&ty).unwrap();
+    let binding = class.bind_input(&ty, class.name, &control).unwrap();
+    let private = EnumComparisonState::default();
+    let compare = |left, right, state| {
+        crate::expr::compare_btree_inputs_with_invocation_state(
+            binding,
+            &selected_input(left),
+            &selected_input(right),
+            0,
+            Some(&catalog),
+            Some(state),
+            &control,
+        )
+    };
+    assert_eq!(compare(2, 8, &private).unwrap(), Ordering::Less);
+    assert_eq!(private.cached_type(), None);
+    assert_eq!(compare(11, 8, &private).unwrap(), Ordering::Less);
+    assert_eq!(private.cached_type(), Some(16_400));
+    assert_eq!(
+        compare(5, 4, &private).unwrap_err().sqlstate(),
+        Some("XX000")
+    );
+    let independent = EnumComparisonState::default();
+    assert_eq!(compare(5, 4, &independent).unwrap(), Ordering::Less);
+    assert_eq!(independent.cached_type(), Some(16_384));
+    // Container support for the declared enum has its own state and was not contaminated by the range's direct subtype call.
+    assert_eq!(
+        crate::expr::compare_typed_values_with_enum_catalog(
+            &nested(0, physical(5), Value::Null),
+            &nested(0, physical(4), Value::Null),
+            &control,
+            Some(&catalog),
+            None,
+        )
+        .unwrap(),
+        Ordering::Less
+    );
+}
+
+#[test]
 fn admitted_native_values_use_the_call_sites_existing_actual_type() {
     let catalog = Catalog::new();
     let state = EnumComparisonState::default();

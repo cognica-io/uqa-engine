@@ -11813,6 +11813,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_definitions_invoke_selected_comparisons_and_keys_for_postgresql_datums",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/support.rs",
+      "capability": "Definition-derived range comparison and keys",
+      "workload": "Seven independent PostgreSQL selected-class comparisons and fourteen physical Datums, under both range and multirange OIDs.",
+      "invariant": "The captured class selects the same comparison and exact equality domain for logical/physical carriers, with returned keys retaining and releasing their allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_support_keeps_pinned_selection_and_reuses_definition_lookup_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/support.rs",
+      "capability": "Pinned range support lookup",
+      "workload": "Two catalog generations select different integer classes; 256 repeated identity lookups and comparisons follow one warmed generation.",
+      "invariant": "Earlier views retain the earlier selection; range and multirange borrow the same definition; repeated lookup and ordinary integer comparison allocate nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_support_preserves_selected_unicode_order_and_resource_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/support.rs",
+      "capability": "Admitted selected range collation",
+      "workload": "Independent PostgreSQL Unicode pair matrix, exact-key equivalence, zero key allowance and both cancellation scopes.",
+      "invariant": "Selected comparison and key equality agree; quota and cancellation remain typed and every temporary reservation is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_and_multirange_share_private_enum_support_without_affecting_other_ranges",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/support.rs",
+      "capability": "Range subtype invocation state",
+      "workload": "Eleven independent PostgreSQL direct-enum/domain range observations, actual physical label OIDs, range/multirange cache sharing after rollback, independent ranges/sessions and logical/physical exact-key agreement.",
+      "invariant": "The first slow call selects one actual enum type; the corresponding multirange shares that support state while other ranges/sessions remain independent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_support_rejects_missing_or_incompatible_selections_without_changing_observation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/support.rs",
+      "capability": "Selected range support diagnostics",
+      "workload": "Missing class, incompatible class input and unknown nonzero collation with a retained read-only layout.",
+      "invariant": "Invocation and exact-key generation reject invalid selections without substituting defaults or blocking independent layout observation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_btree_enum_support_keeps_private_call_state_separate_from_container_state",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/enums/physical/tests.rs",
+      "capability": "Private selected enum comparison state",
+      "workload": "Selected enum and domain-over-enum support over physical OIDs exercises fast calls, the first slow call, retained foreign type errors and independent container state.",
+      "invariant": "Native selected comparison forwards its private call state to the existing enum owner without contaminating shared array/record type support.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

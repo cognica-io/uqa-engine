@@ -20,6 +20,7 @@ use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 use super::type_records::{TypeRecord, TypeRecordFormat};
 
 mod descriptors;
+pub mod support;
 mod validation;
 pub(crate) use descriptors::RangeDescriptors;
 pub use validation::validate_catalog;
