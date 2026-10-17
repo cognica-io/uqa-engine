@@ -14,7 +14,7 @@ The requested comparison found reproducible valid-input rejection, literal/comme
 - [x] Implement native file COPY, watch, database reconnection/connection information, cancellation and notification draining through existing Engine interfaces.
 - [x] Correct catalog command meanings, patterns and SQL help while retaining explicit UQA graph/analyzer/foreign-server commands.
 - [x] Verify public executable behavior against independent PostgreSQL 18 references and owning-crate tests; update the manual, history and command help.
-- [ ] Review actual automatic Linux/macOS performance results and applicable final-ready qualification; merge and remove the completed branch.
+- [x] Review actual automatic Linux/macOS performance results and applicable final-ready qualification; merge and remove the completed branch.
 
 ## Preservation argument
 
@@ -38,4 +38,8 @@ PostgreSQL 18.4 Docker references establish the shell fixture, typed CSV output 
 
 Automatic review identified six further corrections, all implemented in the same PR: qualified-column completion, interrupted batch/include processing, nonfatal completion lookup errors, expanded-record footers, declared numeric alignment including all-NULL columns, and Markdown command-table escaping. PostgreSQL 18.4 independently confirms interruption status 3 and the output rules. The binary terminal fixture exercises idle pipes, executing piped SQL, script files and interactive includes. Input scopes retain interrupts between statements, and stdout is not locked across input waits; 63 CLI owner tests and all 36 binary tests pass after these corrections. Interrupting a batch terminates its remaining input without changing already committed observations, while active-query cancellation remains Engine-owned.
 
-The final unchecked item is automatic Linux/macOS performance qualification, applicable ready-for-review FDW qualification, PR review and merge/cleanup. Successful compilation alone does not satisfy it; record the tested source and actual work/memory/output results before delivery.
+Delivery is complete in [PR #994](https://github.com/cognica-io/uqa-engine/pull/994), squash-merged as `964a0b595706e4312acd1f909ff0254df2b4822b`; [#995](https://github.com/cognica-io/uqa-engine/issues/995) closed with the PR, and its local and remote implementation branches were removed. The six actionable automatic-review findings were corrected and their threads resolved before merge.
+
+[Automatic performance qualification](https://github.com/cognica-io/uqa-engine/actions/runs/39038347220) passed 933 checks / 1,353 cases plus eight independent-process correctness cases on each of Linux and macOS. Downloaded reports and JUnit confirm no failures or skips, current test-source hashes and tested merge revision `12896ef6344701d1a483fadcb892b386ed90c42f`; its tree `d17dc312d0c2833a55abc315b4a30a4c26bf4ae3` is identical to final source `89f35335fee10898aed63e9522db866053f5504d` and the squash merge. This qualifies bounded work, memory and output correctness without making a timing acceptance claim.
+
+[Final FDW qualification](https://github.com/cognica-io/uqa-engine/actions/runs/39038353416) passed all six Linux/macOS memory, Arrow and DuckDB configurations for input fingerprint `f6e69543f2925c12d324a8148bbd4e5ed070ffec2874056839d7c4c2b1a1c244`, with the completed proof retained by CI. Both platforms also passed all 36 CLI executable integration tests. [HTTP value parity](https://github.com/cognica-io/uqa-engine/actions/runs/39038347149), formatting and dependency checks passed at the final source. Only these compact provenance references are retained in the repository; machine reports remain CI artifacts.
