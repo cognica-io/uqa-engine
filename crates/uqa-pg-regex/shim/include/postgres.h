@@ -128,6 +128,16 @@ typedef size_t Size;
 typedef ptrdiff_t ssize_t;
 #endif
 
+#ifdef WIN32
+/*
+ * Compilers that define WIN32, such as MinGW, expose pg_wchar.h's
+ * declaration of PostgreSQL's Windows UTF-16 message conversion, whose
+ * return type PostgreSQL's port headers obtain from <windows.h>.  The engine
+ * never calls it; the declaration needs only the type.
+ */
+typedef wchar_t WCHAR;
+#endif
+
 typedef unsigned int Oid;
 
 #define InvalidOid ((Oid) 0)
