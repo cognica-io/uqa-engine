@@ -107,3 +107,43 @@ fn escape_failure_nulls_and_both_cancellation_owners_release_admitted_buffers() 
         assert_eq!(memory.used(), 0);
     }
 }
+
+/// The translation `similar_to_escape(pattern, escape)` produces.
+fn similar_translation(pattern: &str, escape: &str) -> String {
+    let arguments = vec![Value::Str(pattern.into()), Value::Str(escape.into())];
+    match evaluate(true, &arguments, &ProductionControl::uncontrolled())
+        .unwrap()
+        .into_parts()
+        .0
+    {
+        Value::Str(text) => text,
+        value => panic!("similar_to_escape returned {value:?}"),
+    }
+}
+
+#[test]
+fn multibyte_escapes_follow_postgresql_slow_path() {
+    // With a multibyte escape, `similar_escape_internal` copies or escapes a multibyte pattern character without moving its bracket position, so a following ']' stays literal and '%' inside it is not translated.
+    assert_eq!(
+        similar_translation("[\u{e9}]%", "\u{a7}"),
+        "^(?:[\u{e9}]%)$"
+    );
+    assert_eq!(
+        similar_translation("[\u{f1}]\u{e9}\"x\u{e9}\"", "\u{e9}"),
+        "^(?:[\u{f1}]\\\"x\\\")$"
+    );
+    assert_eq!(
+        similar_translation("\u{a7}\u{e9}a", "\u{a7}"),
+        "^(?:\\\u{e9}a)$"
+    );
+    assert_eq!(
+        similar_translation("\u{a7}\"a\u{a7}\"b", "\u{a7}"),
+        "^(?:){1,1}?(a){1,1}(?:b)$"
+    );
+    // A single-byte escape treats multibyte characters as ordinary class members.
+    assert_eq!(similar_translation("[\u{e9}]%", "#"), "^(?:[\u{e9}].*)$");
+    assert_eq!(
+        similar_translation("#\u{e9}[#\u{e9}]%", "#"),
+        "^(?:\\\u{e9}[\\\u{e9}].*)$"
+    );
+}

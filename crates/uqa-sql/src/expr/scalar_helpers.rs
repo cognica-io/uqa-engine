@@ -266,6 +266,8 @@ pub(super) fn similar_to_regex_with_control(
 ) -> Result<Produced<String>> {
     control.check()?;
     let escape = like_pattern::escape_character(escape)?;
+    // `similar_escape_internal` scans bytes. With a multibyte escape, a multibyte pattern character takes its slow path, which escapes or copies the character without updating the bracket position; every other character behaves as its bytes do on the byte path.
+    let multibyte_escape = escape.is_some_and(|escape| escape.len_utf8() > 1);
     let mut out = ProductionString::new(*control);
     out.push_str("^(?:")?;
     let mut after_escape = false;
@@ -273,6 +275,17 @@ pub(super) fn similar_to_regex_with_control(
     let mut bracket_depth = 0usize;
     let mut bracket_position = 0usize;
     for character in pattern.chars() {
+        if multibyte_escape && character.len_utf8() > 1 {
+            if after_escape {
+                push_similar_escaped(&mut out, character)?;
+                after_escape = false;
+            } else if escape == Some(character) {
+                after_escape = true;
+            } else {
+                out.push(character)?;
+            }
+            continue;
+        }
         if after_escape {
             if character == '"' && bracket_depth == 0 {
                 match quote_count {
