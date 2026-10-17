@@ -17,9 +17,31 @@ When building from this repository instead, run the Rust binary directly:
 cargo run -p uqa-cli --bin usql
 ```
 
-The Rust CLI enables the bundled `nori` analyzer by default, matching the Python-installed command. A custom `cargo build -p uqa-cli --no-default-features` omits Nori and rejects requests for that analyzer. Enabling `--features nori` forwards the feature to the existing Engine and analysis owners.
+The Rust CLI enables the bundled `nori` and `kuromoji` analyzers by default, matching the Python-installed command. A custom `cargo build -p uqa-cli --no-default-features` omits both and rejects requests for those analyzers. Enabling `--features nori,kuromoji` forwards the features to the existing Engine and analysis owners.
 
 Current source builds include the memory foreign-data wrapper. Add `--features arrow` for native Arrow IPC execution or `--features duckdb` for native DuckDB execution; neither feature enables the other. Foreign-table definitions, `\d`, `\dft`, `\dfs` and completion use SQL catalog metadata and remain available for omitted native handlers.
+
+## Standalone release installation (development source)
+
+Starting with the next release, GitHub releases attach `usql-<version>-<target>.tar.gz` for Linux and macOS, `.zip` archives for Windows, matching `.sha256` files, and `install-usql.sh` / `install-usql.ps1`. Each system has x86_64 and ARM64 builds on native runners. The standalone executable includes Nori, Kuromoji, Arrow and DuckDB; no Python or Rust installation is needed. Linux builds target GNU libc on Ubuntu 24.04, so use Ubuntu 24.04 or a compatible newer distribution; these are not musl/Alpine binaries.
+
+Download the installer from the desired [GitHub release](https://github.com/cognica-io/uqa-engine/releases), then run it. Each attached installer is pinned to that release version and downloads the matching architecture's archive over HTTPS, verifies its SHA-256 checksum, and installs into a user directory without changing shell configuration:
+
+```sh
+sh install-usql.sh
+# Optional destination or previously downloaded archive and checksum:
+sh install-usql.sh --bin-dir "$HOME/bin" --archive-dir ./downloads
+```
+
+```powershell
+pwsh -File .\install-usql.ps1
+# Optional destination or previously downloaded archive and checksum:
+pwsh -File .\install-usql.ps1 -BinDir "$HOME\bin" -ArchiveDirectory .\downloads
+```
+
+The defaults are `$HOME/.local/bin` on Linux/macOS and `%LOCALAPPDATA%\UQA\bin` on Windows. Add the chosen directory to `PATH` if the installer reports that it is missing. The archive also contains license notices and a manifest recording the source commit, target and enabled features. Installers verify downloads before replacing an existing executable; failed downloads or checksums preserve the previous installation.
+
+## Invocation
 
 Common forms are:
 
