@@ -78,7 +78,7 @@ extern int	uqa_pg_regex_callback_reallocate(void *operation, void *pointer,
 											 size_t size, void **result);
 extern int	uqa_pg_regex_callback_free(void *operation, void *pointer);
 extern int	uqa_pg_regex_callback_interrupt(void *operation);
-extern int	uqa_pg_regex_callback_stack(void *operation, size_t depth);
+extern int	uqa_pg_regex_callback_stack(void *operation, size_t measure);
 
 /* Locale state of the current operation, used by regc_pg_locale.c. */
 extern void uqa_pg_regex_select_locale(Oid locale);

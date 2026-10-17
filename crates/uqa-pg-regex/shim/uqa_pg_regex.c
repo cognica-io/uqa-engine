@@ -14,11 +14,15 @@
  * frame with sigsetjmp before it enters the engine, and the failure paths
  * below siglongjmp to the innermost frame.  The same path abandons an
  * operation whose stack cannot go deeper, which the Rust wrapper then runs
- * again on a larger stack.  The frame belongs to C code called
- * directly by Rust, and the Rust callbacks return before any longjmp starts,
- * so no Rust frame lies between a longjmp and its frame.  Frames form a
- * per-thread stack, so a resource hook may itself run another operation, and
- * operations on different threads never share state.
+ * again on a larger stack.  The frame belongs to C code called directly by
+ * Rust, and the Rust callbacks return before any longjmp starts, so no Rust
+ * frame lies between a longjmp and its frame.  Frames form a per-thread
+ * stack, so a resource hook may itself run another operation, and operations
+ * on different threads never share state.
+ *
+ * Under Emscripten the engine's calls run on the WebAssembly call stack,
+ * which C cannot measure, so the engine's depth checks count its live frames
+ * instead; see __cyg_profile_func_enter_bare() below.
  */
 
 /*
@@ -35,6 +39,10 @@
 
 #include "miscadmin.h"
 #include "uqa_pg_regex.h"
+
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/stack.h>
+#endif
 
 #if defined(_MSC_VER)
 #define UQA_PG_REGEX_THREAD_LOCAL __declspec(thread)
@@ -70,9 +78,59 @@ typedef struct UQAPgRegexFrame
 	uintptr_t	stack_base;		/* stack position at operation entry */
 	Oid			locale;			/* token set by pg_set_regex_collation */
 	struct UQAPgRegexFrame *previous;	/* enclosing operation, if any */
+#if defined(__EMSCRIPTEN__)
+	size_t		engine_frames;	/* live engine frames at operation entry */
+	bool		engine_frames_lost; /* their overflow state at entry */
+#endif
 } UQAPgRegexFrame;
 
 static UQA_PG_REGEX_THREAD_LOCAL UQAPgRegexFrame *current_frame = NULL;
+
+#if defined(__EMSCRIPTEN__)
+/*
+ * The live engine frames of this thread, as positions on the stack in linear
+ * memory.
+ *
+ * The build compiles the engine's translation units with
+ * -finstrument-function-entry-bare, which calls __cyg_profile_func_enter_bare()
+ * on entry to every engine function that remains a function after inlining,
+ * and with -fstack-protector-all, which gives each of those functions a frame
+ * of its own on the stack in linear memory.  A live frame therefore always
+ * lies strictly below its caller there, and a frame entered at or above a
+ * recorded position means that the recorded frame has returned.  The engine
+ * calls stack_is_too_deep() through rstacktoodeep(), whose frame has the
+ * smallest size, so by then every returned frame has been discarded and the
+ * count is exact.  Clang's exit hook is not used because it computes a return
+ * address, which Emscripten derives from a JavaScript stack trace.
+ *
+ * The count spans every operation on the thread, because nested operations
+ * share one call stack.  An operation restores the count of its entry when it
+ * leaves, including through its error frame, which skips the engine's
+ * returns.  Positions beyond the capacity are not recorded; the count is then
+ * marked lost, which makes every later depth check of the operation fail.
+ */
+#define ENGINE_FRAME_CAPACITY 16384
+
+static UQA_PG_REGEX_THREAD_LOCAL uintptr_t engine_frames[ENGINE_FRAME_CAPACITY];
+static UQA_PG_REGEX_THREAD_LOCAL size_t engine_frame_count = 0;
+static UQA_PG_REGEX_THREAD_LOCAL bool engine_frames_lost = false;
+
+extern void __cyg_profile_func_enter_bare(void);
+
+__attribute__((no_instrument_function)) void
+__cyg_profile_func_enter_bare(void)
+{
+	uintptr_t	here = emscripten_stack_get_current();
+
+	while (engine_frame_count > 0 &&
+		   engine_frames[engine_frame_count - 1] <= here)
+		engine_frame_count--;
+	if (engine_frame_count < ENGINE_FRAME_CAPACITY)
+		engine_frames[engine_frame_count++] = here;
+	else
+		engine_frames_lost = true;
+}
+#endif
 
 /*
  * The engine's static functions are reachable only through the operation
@@ -108,6 +166,10 @@ enter_frame(UQAPgRegexFrame *frame, void *operation,
 	frame->stack_base = (uintptr_t) frame;
 	frame->locale = InvalidOid;
 	frame->previous = current_frame;
+#if defined(__EMSCRIPTEN__)
+	frame->engine_frames = engine_frame_count;
+	frame->engine_frames_lost = engine_frames_lost;
+#endif
 	thrown->kind = UQA_PG_REGEX_THROW_NONE;
 	thrown->first = 0;
 	thrown->second = 0;
@@ -117,6 +179,10 @@ enter_frame(UQAPgRegexFrame *frame, void *operation,
 static void
 leave_frame(UQAPgRegexFrame *frame)
 {
+#if defined(__EMSCRIPTEN__)
+	engine_frame_count = frame->engine_frames;
+	engine_frames_lost = frame->engine_frames_lost;
+#endif
 	current_frame = frame->previous;
 }
 
@@ -315,26 +381,33 @@ uqa_pg_regex_check_for_interrupts(void)
 }
 
 /*
- * stack_is_too_deep(): measure the stack used since the operation entered the
- * engine and let the Rust wrapper decide.  A refusal makes the engine fail
- * with REG_ETOOBIG; a stack that cannot go deeper with room to spare abandons
- * the operation, which the wrapper runs again on a larger stack.
+ * stack_is_too_deep(): measure the engine's stack and let the Rust wrapper
+ * decide.  The measure is the stack in bytes used since the operation entered
+ * the engine, or under Emscripten the thread's live engine frames.  A refusal
+ * makes the engine fail with REG_ETOOBIG; a stack that cannot go deeper with
+ * room to spare abandons the operation, which the wrapper runs again on a
+ * larger stack.
  */
 bool
 stack_is_too_deep(void)
 {
 	UQAPgRegexFrame *frame = require_frame();
-	char		marker;
-	uintptr_t	here = (uintptr_t) &marker;
-	size_t		depth;
+	size_t		measure;
 	int			status;
 
-	depth = here < frame->stack_base ? frame->stack_base - here :
+#if defined(__EMSCRIPTEN__)
+	measure = engine_frames_lost ? SIZE_MAX : engine_frame_count;
+#else
+	char		marker;
+	uintptr_t	here = (uintptr_t) &marker;
+
+	measure = here < frame->stack_base ? frame->stack_base - here :
 		here - frame->stack_base;
-	status = uqa_pg_regex_callback_stack(frame->operation, depth);
+#endif
+	status = uqa_pg_regex_callback_stack(frame->operation, measure);
 	check_callback(status);
 	if (status == UQA_PG_REGEX_CALLBACK_RESTART)
-		throw_failure(UQA_PG_REGEX_THROW_STACK, depth, 0);
+		throw_failure(UQA_PG_REGEX_THROW_STACK, measure, 0);
 	return status == UQA_PG_REGEX_CALLBACK_REFUSED;
 }
 

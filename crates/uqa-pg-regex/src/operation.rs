@@ -17,7 +17,7 @@ use std::ptr::{self, NonNull};
 use crate::ffi::{CALLBACK_OK, CALLBACK_PANICKED, CALLBACK_REFUSED, CALLBACK_RESTART};
 use crate::memory::MemoryContext;
 use crate::resources::RegexResources;
-use crate::stack::MAX_STACK_DEPTH;
+use crate::stack::{self, MAX_STACK_DEPTH};
 
 pub(crate) struct Operation<'a> {
     context: *mut MemoryContext,
@@ -150,9 +150,10 @@ extern "C" fn uqa_pg_regex_callback_interrupt(operation: *mut c_void) -> c_int {
 }
 
 #[no_mangle]
-extern "C" fn uqa_pg_regex_callback_stack(operation: *mut c_void, depth: usize) -> c_int {
+extern "C" fn uqa_pg_regex_callback_stack(operation: *mut c_void, measure: usize) -> c_int {
     // SAFETY: C passes back the pointer of the operation it is serving.
     let operation = unsafe { Operation::from_raw(operation) };
+    let depth = stack::depth(measure);
     if depth > MAX_STACK_DEPTH {
         // PostgreSQL's default max_stack_depth: the engine fails with REG_ETOOBIG.
         return CALLBACK_REFUSED;

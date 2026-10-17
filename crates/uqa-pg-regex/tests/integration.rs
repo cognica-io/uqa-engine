@@ -6,6 +6,8 @@
 
 //! Consolidated uqa-pg-regex integration tests.
 
+#[path = "call_depth.rs"]
+mod call_depth;
 #[path = "collations.rs"]
 mod collations;
 #[path = "oracle.rs"]
