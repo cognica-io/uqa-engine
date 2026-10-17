@@ -1,0 +1,1711 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "reference": "PostgreSQL 18.4 in a disposable Docker database",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "7449244d2911f037da0680fd36dbad72d7714e6cc453a04ad5094edd02c8a606"
+  },
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "first_match",
+      "sql": "SELECT regexp_matches('a1b2', '[0-9]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "global_matches",
+      "sql": "SELECT regexp_matches('a1b2', '[0-9]', 'g')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1}"
+            ],
+            [
+              "{2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "global_groups",
+      "sql": "SELECT regexp_matches('a1b2', '([a-z])([0-9])', 'g')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a,1}"
+            ],
+            [
+              "{b,2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "nonparticipating_group",
+      "sql": "SELECT regexp_matches('ab', '(a)(x)?')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a,NULL}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "global_alternation_groups",
+      "sql": "SELECT regexp_matches('ab', '(a)|(b)', 'g')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a,NULL}"
+            ],
+            [
+              "{NULL,b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "global_empty_pattern",
+      "sql": "SELECT regexp_matches('abc', '', 'g')",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"\"}"
+            ],
+            [
+              "{\"\"}"
+            ],
+            [
+              "{\"\"}"
+            ],
+            [
+              "{\"\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "global_empty_star",
+      "sql": "SELECT regexp_matches('abc', 'x*', 'g')",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"\"}"
+            ],
+            [
+              "{\"\"}"
+            ],
+            [
+              "{\"\"}"
+            ],
+            [
+              "{\"\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "global_after_greedy_match",
+      "sql": "SELECT regexp_matches('aab', 'a*', 'g')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{aa}"
+            ],
+            [
+              "{\"\"}"
+            ],
+            [
+              "{\"\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "global_anchor",
+      "sql": "SELECT regexp_matches('abc', '^', 'g')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "global_case_insensitive",
+      "sql": "SELECT regexp_matches('aAa', 'a', 'gi')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a}"
+            ],
+            [
+              "{A}"
+            ],
+            [
+              "{a}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "global_multibyte",
+      "sql": "SELECT regexp_matches('a' || chr(233) || 'b' || chr(233), chr(233), 'g')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\u00e9}"
+            ],
+            [
+              "{\u00e9}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "global_multibyte_empty",
+      "sql": "SELECT regexp_matches(chr(233) || chr(233), '', 'g')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"\"}"
+            ],
+            [
+              "{\"\"}"
+            ],
+            [
+              "{\"\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "global_newline_sensitive",
+      "sql": "SELECT regexp_matches(E'a\\nb\\n', '.?$', 'mg')",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a}"
+            ],
+            [
+              "{\"\"}"
+            ],
+            [
+              "{b}"
+            ],
+            [
+              "{\"\"}"
+            ],
+            [
+              "{\"\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "no_match",
+      "sql": "SELECT regexp_matches('abc', 'z')",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "no_match_count",
+      "sql": "SELECT count(*) FROM (SELECT regexp_matches('abc', 'z')) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "null_input",
+      "sql": "SELECT count(*) FROM regexp_matches(NULL, 'a')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "null_pattern",
+      "sql": "SELECT count(*) FROM regexp_matches('abc', NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "null_flags",
+      "sql": "SELECT count(*) FROM regexp_matches('abc', 'b', NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "null_constant_select_list",
+      "sql": "SELECT regexp_matches(NULL, 'a')",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "null_column_select_list",
+      "sql": "SELECT x, regexp_matches(x, 'a') FROM (VALUES ('a'), (NULL)) v(x)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "regexp_matches"
+          ],
+          "type_oids": [
+            25,
+            1009
+          ],
+          "rows": [
+            [
+              "a",
+              "{a}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "bpchar_input",
+      "sql": "SELECT regexp_matches('ab  '::char(4), ' ', 'g')",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "invalid_flag",
+      "sql": "SELECT regexp_matches('abc', 'b', 'z')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "invalid_flag_after_global",
+      "sql": "SELECT regexp_matches('abc', 'b', 'gz')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "scalar_match",
+      "sql": "SELECT regexp_match('a1b2', '[0-9]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "scalar_match_global",
+      "sql": "SELECT regexp_match('abc', 'b', 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "regexp_match() does not support the \"global\" option",
+        "detail": null,
+        "hint": "Use the regexp_matches function instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "scalar_match_invalid_flag_after_global",
+      "sql": "SELECT regexp_match('abc', 'b', 'gz')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "scalar_match_global_before_pattern",
+      "sql": "SELECT regexp_match('abc', '(', 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "regexp_match() does not support the \"global\" option",
+        "detail": null,
+        "hint": "Use the regexp_matches function instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "scalar_match_named",
+      "sql": "SELECT regexp_match(string => 'a1b2', pattern => '[0-9]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "scalar_match_named_flags",
+      "sql": "SELECT regexp_match('a1b2', '[a-z]', flags => 'i')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_match"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "like_global",
+      "sql": "SELECT regexp_like('abc', 'b', 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "regexp_like() does not support the \"global\" option",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "count_global",
+      "sql": "SELECT regexp_count('abc', 'b', 1, 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "regexp_count() does not support the \"global\" option",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "count_start_before_global",
+      "sql": "SELECT regexp_count('abc', 'b', 0, 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"start\": 0",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "instr_global",
+      "sql": "SELECT regexp_instr('abc', 'b', 1, 1, 0, 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "regexp_instr() does not support the \"global\" option",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "substr_global",
+      "sql": "SELECT regexp_substr('abc', 'b', 1, 1, 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "regexp_substr() does not support the \"global\" option",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "replace_global",
+      "sql": "SELECT regexp_replace('aaa', 'a', 'b', 'g')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "bbb"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_list_lockstep",
+      "sql": "SELECT generate_series(1, 3) AS n, regexp_matches('a1b2', '[0-9]', 'g') AS m",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "m"
+          ],
+          "type_oids": [
+            23,
+            1009
+          ],
+          "rows": [
+            [
+              "1",
+              "{1}"
+            ],
+            [
+              "2",
+              "{2}"
+            ],
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_list_rows",
+      "sql": "SELECT x, regexp_matches(x, 'a', 'g') FROM (VALUES ('aa'), ('b')) v(x)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "regexp_matches"
+          ],
+          "type_oids": [
+            25,
+            1009
+          ],
+          "rows": [
+            [
+              "aa",
+              "{a}"
+            ],
+            [
+              "aa",
+              "{a}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_list_limit",
+      "sql": "SELECT regexp_matches('a1b2c3', '[0-9]', 'g') LIMIT 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1}"
+            ],
+            [
+              "{2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_list_subscript",
+      "sql": "SELECT (regexp_matches('a1b2', '([a-z])([0-9])', 'g'))[2]",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "from_ordinality",
+      "sql": "SELECT * FROM regexp_matches('a1b2', '[a-z]([0-9])', 'g') WITH ORDINALITY",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches",
+            "ordinality"
+          ],
+          "type_oids": [
+            1009,
+            20
+          ],
+          "rows": [
+            [
+              "{1}",
+              "1"
+            ],
+            [
+              "{2}",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "from_alias_subscript",
+      "sql": "SELECT m[1] FROM regexp_matches('a1b2', '[a-z]([0-9])', 'g') AS m",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "from_column_alias",
+      "sql": "SELECT r FROM regexp_matches('a1b2', '[0-9]', 'g') AS t(r)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1}"
+            ],
+            [
+              "{2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lateral",
+      "sql": "SELECT v.x, m FROM (VALUES ('a1'), ('b22')) v(x), LATERAL regexp_matches(v.x, '[0-9]', 'g') m",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "m"
+          ],
+          "type_oids": [
+            25,
+            1009
+          ],
+          "rows": [
+            [
+              "a1",
+              "{1}"
+            ],
+            [
+              "b22",
+              "{2}"
+            ],
+            [
+              "b22",
+              "{2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "rows_from",
+      "sql": "SELECT * FROM ROWS FROM (regexp_matches('a1b2', '[0-9]', 'g'), generate_series(1, 3)) AS t(m, n)",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "n"
+          ],
+          "type_oids": [
+            1009,
+            23
+          ],
+          "rows": [
+            [
+              "{1}",
+              "1"
+            ],
+            [
+              "{2}",
+              "2"
+            ],
+            [
+              null,
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "named_arguments",
+      "sql": "SELECT regexp_matches(string => 'a1b2', pattern => '[0-9]', flags => 'g')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1}"
+            ],
+            [
+              "{2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "named_arguments_from",
+      "sql": "SELECT * FROM regexp_matches(pattern => '[0-9]', string => 'a1')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "named_arguments_mixed",
+      "sql": "SELECT regexp_matches('a1', pattern => '[0-9]')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "result_type",
+      "sql": "SELECT pg_typeof(regexp_matches('a', 'a'))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "where_rejected",
+      "sql": "SELECT 1 WHERE regexp_matches('a', 'a') IS NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_table",
+      "sql": "CREATE TABLE regexp_matches_source (id integer, x text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_rows",
+      "sql": "INSERT INTO regexp_matches_source VALUES (1, 'a1b22'), (2, NULL), (3, 'c'), (4, '333x4')",
+      "command_tags": [
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_lateral",
+      "sql": "SELECT id, m FROM regexp_matches_source, LATERAL regexp_matches(x, '[0-9]+', 'g') AS m ORDER BY id, m",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "m"
+          ],
+          "type_oids": [
+            23,
+            1009
+          ],
+          "rows": [
+            [
+              "1",
+              "{1}"
+            ],
+            [
+              "1",
+              "{22}"
+            ],
+            [
+              "4",
+              "{333}"
+            ],
+            [
+              "4",
+              "{4}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_select_list",
+      "sql": "SELECT id, regexp_matches(x, '[0-9]+', 'g') AS m FROM regexp_matches_source ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "m"
+          ],
+          "type_oids": [
+            23,
+            1009
+          ],
+          "rows": [
+            [
+              "1",
+              "{1}"
+            ],
+            [
+              "1",
+              "{22}"
+            ],
+            [
+              "4",
+              "{333}"
+            ],
+            [
+              "4",
+              "{4}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_left_lateral",
+      "sql": "SELECT id, count(m) FROM regexp_matches_source LEFT JOIN LATERAL regexp_matches(x, '[0-9]', 'g') AS m ON true GROUP BY id ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "count"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "0"
+            ],
+            [
+              "3",
+              "0"
+            ],
+            [
+              "4",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_rows",
+      "sql": "PREPARE regexp_matches_rows(text, text) AS SELECT regexp_matches($1, $2, 'g')",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_rows",
+      "sql": "EXECUTE regexp_matches_rows('a1b2', '[0-9]')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1}"
+            ],
+            [
+              "{2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_null",
+      "sql": "EXECUTE regexp_matches_rows(NULL, '[0-9]')",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "deallocate_rows",
+      "sql": "DEALLOCATE regexp_matches_rows",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_view",
+      "sql": "CREATE VIEW regexp_matches_view AS SELECT x, regexp_matches(x, '[0-9]', 'g') AS m FROM (VALUES ('a1b2'), ('c')) v(x)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "view_rows",
+      "sql": "SELECT * FROM regexp_matches_view",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "m"
+          ],
+          "type_oids": [
+            25,
+            1009
+          ],
+          "rows": [
+            [
+              "a1b2",
+              "{1}"
+            ],
+            [
+              "a1b2",
+              "{2}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_from_view",
+      "sql": "CREATE VIEW regexp_matches_from_view AS SELECT t.m, t.n FROM regexp_matches('a1b2', '[0-9]', 'g') WITH ORDINALITY AS t(m, n)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "from_view_rows",
+      "sql": "SELECT * FROM regexp_matches_from_view",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "n"
+          ],
+          "type_oids": [
+            1009,
+            20
+          ],
+          "rows": [
+            [
+              "{1}",
+              "1"
+            ],
+            [
+              "{2}",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "check_rejected",
+      "sql": "CREATE TABLE regexp_matches_check (x text CHECK (regexp_matches(x, 'a') IS NOT NULL))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in check constraints",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "default_rejected",
+      "sql": "CREATE TABLE regexp_matches_default (x text[] DEFAULT regexp_matches('a', 'a'))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in DEFAULT expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "index_rejected",
+      "sql": "CREATE INDEX ON regexp_matches_source (regexp_matches(x, 'a'))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in index expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "generated_rejected",
+      "sql": "CREATE TABLE regexp_matches_generated (x integer GENERATED ALWAYS AS (cardinality(regexp_matches('a', 'a'))) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in column generation expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "regprocedure",
+      "sql": "SELECT 'regexp_matches(text,text)'::regprocedure, 'regexp_matches(text,text,text)'::regprocedure::oid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regprocedure",
+            "oid"
+          ],
+          "type_oids": [
+            2202,
+            26
+          ],
+          "rows": [
+            [
+              "regexp_matches(text,text)",
+              "2764"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "catalog",
+      "sql": "SELECT oid,proname,prokind,proisstrict,provolatile,proparallel,proleakproof,prorettype,proargtypes::text AS argument_types,prosrc FROM pg_proc WHERE oid IN (2763, 2764) ORDER BY oid",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "proname",
+            "prokind",
+            "proisstrict",
+            "provolatile",
+            "proparallel",
+            "proleakproof",
+            "prorettype",
+            "argument_types",
+            "prosrc"
+          ],
+          "type_oids": [
+            26,
+            19,
+            18,
+            16,
+            18,
+            18,
+            16,
+            26,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "2763",
+              "regexp_matches",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "1009",
+              "25 25",
+              "regexp_matches_no_flags"
+            ],
+            [
+              "2764",
+              "regexp_matches",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "1009",
+              "25 25 25",
+              "regexp_matches"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "catalog_set_metadata",
+      "sql": "SELECT oid, proretset, prorows, proargnames FROM pg_proc WHERE oid IN (2763, 2764) ORDER BY oid",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "proretset",
+            "prorows",
+            "proargnames"
+          ],
+          "type_oids": [
+            26,
+            16,
+            700,
+            1009
+          ],
+          "rows": [
+            [
+              "2763",
+              "t",
+              "1",
+              "{string,pattern}"
+            ],
+            [
+              "2764",
+              "t",
+              "10",
+              "{string,pattern,flags}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

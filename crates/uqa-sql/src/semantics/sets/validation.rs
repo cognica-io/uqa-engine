@@ -21,6 +21,7 @@ pub fn builtin_returns_set(name: &str) -> bool {
         "generate_series"
             | "pg_listening_channels"
             | "unnest"
+            | "regexp_matches"
             | "regexp_split_to_table"
             | "string_to_table"
             | "json_array_elements"

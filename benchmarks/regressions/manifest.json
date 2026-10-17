@@ -12549,6 +12549,126 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regexp_matches_rows_match_the_postgresql_reference",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/match_rows.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches returns one text[] row per match in PostgreSQL's order and no rows for no match or a NULL argument, rows are produced on demand, single-result regular-expression functions reject g after validating every flag, and the scalar regular-expression results, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "single_result_functions_reject_global_after_flags_and_before_the_pattern",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/match_rows.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches returns one text[] row per match in PostgreSQL's order and no rows for no match or a NULL argument, rows are produced on demand, single-result regular-expression functions reject g after validating every flag, and the scalar regular-expression results, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regexp_matches_rows_admit_each_row_and_keep_the_cursor_at_a_rejected_one",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/match_rows.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches returns one text[] row per match in PostgreSQL's order and no rows for no match or a NULL argument, rows are produced on demand, single-result regular-expression functions reject g after validating every flag, and the scalar regular-expression results, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regexp_matches_rows_observe_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/match_rows.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches returns one text[] row per match in PostgreSQL's order and no rows for no match or a NULL argument, rows are produced on demand, single-result regular-expression functions reject g after validating every flag, and the scalar regular-expression results, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "regexp_matches_rows_match_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/regexp_matches.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches returns one text[] row per match in PostgreSQL's order and no rows for no match or a NULL argument, rows are produced on demand, single-result regular-expression functions reject g after validating every flag, and the scalar regular-expression results, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "strict_null_simplification_keeps_set_returning_calls",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches returns one text[] row per match in PostgreSQL's order and no rows for no match or a NULL argument, rows are produced on demand, single-result regular-expression functions reject g after validating every flag, and the scalar regular-expression results, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "regexp_matches_streams_one_row_per_match_and_none_for_null_inputs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_functions/regular_expressions/tests.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches returns one text[] row per match in PostgreSQL's order and no rows for no match or a NULL argument, rows are produced on demand, single-result regular-expression functions reject g after validating every flag, and the scalar regular-expression results, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "regexp_matches_reports_flag_errors_before_the_first_row",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_functions/regular_expressions/tests.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches returns one text[] row per match in PostgreSQL's order and no rows for no match or a NULL argument, rows are produced on demand, single-result regular-expression functions reject g after validating every flag, and the scalar regular-expression results, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "regexp_matches_metadata_and_set_estimates_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/builtin_routines/tests.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches returns one text[] row per match in PostgreSQL's order and no rows for no match or a NULL argument, rows are produced on demand, single-result regular-expression functions reject g after validating every flag, and the scalar regular-expression results, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

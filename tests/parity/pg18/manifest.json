@@ -140,6 +140,7 @@
       "functions.gamma-functions",
       "functions.string-binary-lengths",
       "functions.substring-pattern-forms",
+      "functions.regexp-matches-rows",
       "functions.uuid-extraction",
       "query.window-frames",
       "aggregates.null-and-enum-inputs",
@@ -708,6 +709,14 @@
       "supported_version": "PostgreSQL 18.4 substring pattern forms selected by the resolved signature rather than argument values, including unknown literals and untyped parameters; POSIX extraction of the first parenthesized subexpression or the whole match, with NULL for no match or a non-participating subexpression; SQL regular-expression extraction through similar_to_escape with zero, one or two escape-double-quote separators and empty or NULL escapes, PostgreSQL's inlined NULL order and planning-time translation errors; 2200C and 22025 diagnostics with HINT; unchanged positional text and bytea forms; pg_proc identities of the text and bytea substring and substr overloads, including the SQL-language body of OID 2074; and stored views and CHECK constraints across memory, native SQLite, SQLite Key/Value and redb reopening",
       "status": "partial",
       "open_issue": "Match selection inside both forms, including PostgreSQL's shortest match before the first SIMILAR separator, and the messages of invalid POSIX patterns follow the regular-expression engine correction in #980. PostgreSQL's CONTEXT for errors raised inside the SQL-language form is tracked in #306, SQL-syntax printing of SUBSTRING in stored definitions in #984, the bit-string overloads in #989 and constant folding of unreferenced subquery outputs in #990."
+    },
+    {
+      "id": "functions.regexp-matches-rows",
+      "postgresql_reference": "PostgreSQL 18.4 live regexp_matches(text, text) and regexp_matches(text, text, text) rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, named arguments, prepared parameters, stored views and table rows, set-returning context errors, the global-option diagnostics of regexp_match, regexp_like, regexp_count, regexp_instr and regexp_substr, and pg_proc metadata of OIDs 2763 and 2764, plus pattern-matching and table-function documentation",
+      "uqa_test": "cargo test -p uqa-engine --test integration regexp_matches_rows_match_postgresql_and_reopen; cargo test -p uqa-sql --lib match_rows; cargo test -p uqa-sql --lib named_scalar_inputs_preserve_declaration_order_and_omitted_defaults; cargo test -p uqa-planner --lib strict_null_simplification_keeps_set_returning_calls; cargo test -p uqa-execution --lib regular_expressions; cargo test -p uqa-execution --lib regexp_matches_metadata_and_set_estimates_match_postgresql",
+      "supported_version": "PostgreSQL 18.4 regexp_matches as a strict set-returning function with one text[] row per match: the first match without g, every match with g under setup_regexp_matches advancement, including empty matches and one-character steps over multibyte input, NULL elements for non-participating subexpressions, and no rows for no match or a NULL argument; select-list lockstep expansion, LIMIT and subscripts, FROM relation and column aliases, LATERAL, ROWS FROM padding, WITH ORDINALITY, and named or mixed arguments; flag validation before the 22023 global-option rejection of the single-result functions, with the regexp_match HINT; set-returning rejection in WHERE, CHECK constraints, defaults, index and generation expressions; pg_proc identities with argument names, proretset and prorows; and stored views and table rows across memory, native SQLite, SQLite Key/Value and redb reopening",
+      "status": "partial",
+      "open_issue": "Match selection inside each row and the messages of invalid patterns follow the regular-expression engine correction in #980. PostgreSQL's HINT for set-returning calls in CASE, COALESCE, aggregate and window arguments and its SQLSTATE for the NOT operand are tracked in #993, and the catalog identities of the scalar regular-expression functions in #992."
     },
     {
       "id": "functions.uuid-extraction",

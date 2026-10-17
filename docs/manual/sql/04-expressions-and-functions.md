@@ -561,12 +561,20 @@ The window functions are `row_number`, `rank`, `dense_rank`, `percent_rank`, `cu
 | --- | --- |
 | `generate_series(start, stop [, step])` | Integer series with two or three arguments |
 | `unnest(array)` | One row per array value |
+| `regexp_matches(string, pattern [, flags])` | One `text[]` row per match |
 | `regexp_split_to_table(text, pattern)` | One row per split value |
 | `string_to_table(text, delimiter)` | One row per split value |
 | JSON expansion functions | Key/value or element rows |
 | Registered table callbacks | Schema returned by the callback |
 
 `generate_series` has separate two- and three-argument overloads for `integer` and `bigint`; the two-argument form is a distinct function rather than a default argument on the three-argument form. The selected overload determines the output type, so `generate_series(1, 3::bigint)` returns `bigint`. SQL routine bodies, stored views and `ROWS FROM` retain that selected identity across reopening and later search-path shadowing. The corresponding `pg_proc` rows expose the set-returning flag, argument types, result type, row estimate and planner support identity.
+
+`regexp_matches(string, pattern [, flags])` is PostgreSQL's set-returning function over the `(text, text)` and `(text, text, text)` signatures, with the argument names `string`, `pattern` and `flags`. Each row is a `text[]` holding the pattern's parenthesized subexpressions, or the whole match when it has none, and a subexpression that does not participate in the match is NULL. Without the `g` flag the function returns at most the first match. With it, each search starts where the previous match ended, or one character later after an empty match, so `regexp_matches('aab', 'a*', 'g')` returns `{aa}`, `{""}` and `{""}`. No match and a NULL argument return no rows. The function can appear in `FROM`, `LATERAL`, `ROWS FROM` and `WITH ORDINALITY`, and in a select list, where its rows expand in lockstep with the list's other set-returning functions; each match is found only when its row is read. It reports invalid flags with `22023` before any row and is rejected where PostgreSQL rejects a set-returning function, such as in `WHERE`, constraints, defaults and index expressions; it does not change database state. The single-result functions `regexp_match`, `regexp_like`, `regexp_count`, `regexp_instr` and `regexp_substr` validate every flag first and then reject `g` with `22023`, `regexp_match() does not support the "global" option`, which `regexp_match` follows with the hint `Use the regexp_matches function instead.`; only `regexp_matches` and `regexp_replace` accept it.
+
+```sql execute
+SELECT digits, n
+FROM regexp_matches('a1b22', '[a-z]([0-9]+)', 'g') WITH ORDINALITY AS m(digits, n);
+```
 
 Table functions accept a relation alias, positional output-column aliases, and a column definition list where the function contract requires one. PostgreSQL's `ROWS FROM (function_call [AS (column type, ...)], ...) [WITH ORDINALITY] [AS alias (column, ...)]` form preserves each member and its declared columns independently, while the relation alias, positional aliases, and ordinality apply to the complete group.
 

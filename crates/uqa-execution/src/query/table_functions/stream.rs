@@ -98,6 +98,7 @@ fn build_table_function_value_row_stream_with_row(
             "generate_series"
                 | "pg_listening_channels"
                 | "unnest"
+                | "regexp_matches"
                 | "regexp_split_to_table"
                 | "string_to_table"
                 | "json_array_elements"
@@ -142,10 +143,19 @@ fn build_table_function_value_row_stream_with_row(
                 .collect::<Vec<_>>()
         });
         let call_args = eval_call_arguments(bound.as_deref().unwrap_or(args), &scalar_context)?;
-        if call_args.iter().any(|(name, _)| name.is_some()) {
-            return Err(uqa_sql::expr::unknown_function_error(&lower, &call_args));
-        }
-        let evaluated: Vec<Value> = call_args.into_iter().map(|(_, value)| value).collect();
+        // Named arguments take their declared positions as in a scalar call; a function without such a signature is undefined.
+        let evaluated: Vec<Value> = if call_args.iter().any(|(name, _)| name.is_some()) {
+            uqa_sql::expr::builtin_named_args(
+                &lower,
+                &call_args,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?
+            .ok_or_else(|| uqa_sql::expr::unknown_function_error(&lower, &call_args))?
+            .into_parts()
+            .0
+        } else {
+            call_args.into_iter().map(|(_, value)| value).collect()
+        };
         if lower == "unnest" {
             let aliases = if ordinality {
                 &column_aliases[..column_aliases.len().min(evaluated.len())]
@@ -171,6 +181,12 @@ fn build_table_function_value_row_stream_with_row(
                 )
             }
             "generate_series" => generate_series_values(evaluated)?,
+            "regexp_matches" => {
+                return super::regular_expressions::regexp_matches_row_stream(
+                    &evaluated,
+                    default_col,
+                );
+            }
             "regexp_split_to_table" => regexp_split_values(evaluated)?,
             "string_to_table" => string_to_table_values(evaluated)?,
             "json_array_elements"

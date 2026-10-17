@@ -140,5 +140,6 @@ pub mod context;
 mod dispatch;
 mod graphs;
 mod records;
+mod regular_expressions;
 mod stream;
 pub use stream::build_table_function_row_stream_with_row;

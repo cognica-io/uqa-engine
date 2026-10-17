@@ -132,7 +132,7 @@ impl BuiltinRoutineCatalogEntry {
     }
 
     pub const fn returns_set(self) -> bool {
-        matches!(self.oid, 1066..=1069 | 3035 | 1689)
+        matches!(self.oid, 1066..=1069 | 3035 | 1689 | 2763 | 2764)
     }
 
     pub const fn support_oid(self) -> i64 {
@@ -153,6 +153,8 @@ impl BuiltinRoutineCatalogEntry {
     pub const fn estimated_rows(self) -> f64 {
         if matches!(self.oid, 1066..=1069) {
             1000.0
+        } else if self.oid == 2763 {
+            1.0
         } else if self.returns_set() {
             10.0
         } else {
@@ -225,6 +227,7 @@ mod pattern;
 mod privileges;
 mod ranges;
 mod records;
+mod regular_expressions;
 mod scalar;
 mod sequences;
 mod series;
@@ -280,6 +283,7 @@ pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     ],
     support::ROUTINES,
     pattern::ROUTINES,
+    regular_expressions::ROUTINES,
     text::ROUTINES,
     substrings::ROUTINES,
     scalar::ROUTINES,

@@ -249,6 +249,7 @@ fn folds_value_builtins_after_binding_without_evaluating_stateful_or_set_calls()
         "sum",
         "pg_catalog.sum",
         "generate_series",
+        "regexp_matches",
     ] {
         let call = bound_call(name, vec![ScalarExpr::Literal(Value::Int(1))]);
         let unchanged = fold_literal_expression(call.clone(), |_| {
@@ -460,6 +461,37 @@ fn strict_null_simplification_does_not_evaluate_nonconstant_siblings() {
         scalar_type(&folded, &RowSchema::default(), &[]).unwrap(),
         Some(ColumnType::Text)
     );
+}
+
+#[test]
+fn strict_null_simplification_keeps_set_returning_calls() {
+    let null_text = || ScalarExpr::TypedLiteral {
+        collation_oid: None,
+        composite_source: None,
+        value: Value::Null,
+        ty: "text".into(),
+        bound_type: Some(ColumnType::Text),
+        parameter_index: None,
+    };
+    // `regexp_matches` is strict, but a NULL input yields no rows rather than one NULL row, so only the scalar `regexp_match` folds.
+    let set_call = bound_call(
+        "regexp_matches",
+        vec![null_text(), ScalarExpr::Column("pattern".into())],
+    );
+    let unchanged = fold_literal_expression(set_call.clone(), |_| {
+        panic!("a set-returning call must not execute during planning")
+    })
+    .unwrap();
+    assert_eq!(unchanged, set_call);
+    let scalar_call = bound_call(
+        "regexp_match",
+        vec![null_text(), ScalarExpr::Column("pattern".into())],
+    );
+    let folded = fold_literal_expression(scalar_call, |_| {
+        panic!("strict NULL simplification evaluated a sibling")
+    })
+    .unwrap();
+    assert_eq!(literal_value(&folded), Some(&Value::Null));
 }
 
 #[test]

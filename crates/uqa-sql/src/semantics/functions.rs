@@ -75,6 +75,7 @@ fn is_pg_catalog_function(local: &str) -> bool {
         local,
         "generate_series"
             | "unnest"
+            | "regexp_matches"
             | "regexp_split_to_table"
             | "string_to_table"
             | "json_array_elements"

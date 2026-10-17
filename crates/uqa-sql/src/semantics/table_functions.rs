@@ -256,6 +256,7 @@ fn has_builtin_table_function_overloads(name: &str) -> bool {
         "generate_series"
             | "pg_listening_channels"
             | "unnest"
+            | "regexp_matches"
             | "regexp_split_to_table"
             | "string_to_table"
             | "json_array_elements"
@@ -310,6 +311,23 @@ fn builtin_table_function_overloads(
             };
             vec![overload(vec![ColumnType::AnyArray], 0, element.clone())]
         }
+        "regexp_matches" => {
+            let named = |argument_names: &[&str]| BuiltinFunctionOverload {
+                variadic: false,
+                name: canonical_name.clone(),
+                argument_names: argument_names
+                    .iter()
+                    .map(|name| Some((*name).to_string()))
+                    .collect(),
+                argument_types: vec![ColumnType::Text; argument_names.len()],
+                default_arguments: 0,
+                return_type: ColumnType::Array(Box::new(ColumnType::Text)),
+            };
+            vec![
+                named(&["string", "pattern"]),
+                named(&["string", "pattern", "flags"]),
+            ]
+        }
         "regexp_split_to_table" | "string_to_table" => vec![overload(
             vec![ColumnType::Text, ColumnType::Text],
             0,
@@ -348,6 +366,7 @@ pub fn is_builtin_table_function(name: &str) -> bool {
         "generate_series"
             | "pg_listening_channels"
             | "unnest"
+            | "regexp_matches"
             | "regexp_split_to_table"
             | "string_to_table"
             | "json_array_elements"
@@ -443,6 +462,7 @@ pub fn table_function_empty_schema(
             }
             "generate_series"
             | "pg_listening_channels"
+            | "regexp_matches"
             | "regexp_split_to_table"
             | "string_to_table"
             | "json_array_elements"
@@ -592,6 +612,7 @@ pub fn table_function_column_types(
                         .and_then(|ty| crate::type_resolution::array_element_type(&ty).cloned())
                 })
                 .collect(),
+            "regexp_matches" => vec![Some(ColumnType::Array(Box::new(ColumnType::Text)))],
             "regexp_split_to_table"
             | "string_to_table"
             | "json_object_keys"

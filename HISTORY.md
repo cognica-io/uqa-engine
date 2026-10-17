@@ -30,6 +30,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Return `regexp_matches` as PostgreSQL's set-returning function in `FROM`, `LATERAL`, `ROWS FROM`, `WITH ORDINALITY` and select lists, with one `text[]` row per match under `g`, PostgreSQL's advancement after empty matches, no rows for no match or a NULL argument, named arguments and its `pg_proc` identities, instead of one row holding the first match or NULL. `regexp_match`, `regexp_like`, `regexp_count`, `regexp_instr` and `regexp_substr` now validate every flag before rejecting `g` with PostgreSQL's global-option message, and `regexp_match` accepts its named arguments.
+
 - Evaluate the POSIX and SQL regular-expression forms of `substring`, including `SIMILAR ... ESCAPE` and `FROM ... FOR` with text arguments, by their resolved PostgreSQL signature instead of reporting `42804` or returning a positional slice for a pattern that parses as an integer, with PostgreSQL's NULL handling and planning-time translation errors for the SQL form. The `substring` and `substr` overloads now have PostgreSQL's catalog identities, so CHECK constraints, defaults, `regprocedure` input and routine privileges accept them instead of reporting an internal error.
 
 - Match PostgreSQL routine lookup errors and notices for quoted names, including bare-name DROP, ALTER and GRANT, while preserving exact name and signature resolution.

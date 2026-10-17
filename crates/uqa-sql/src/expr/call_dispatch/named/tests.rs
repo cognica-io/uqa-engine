@@ -26,6 +26,27 @@ fn named_scalar_inputs_preserve_declaration_order_and_omitted_defaults() {
             vec![Value::Str("baa".into()), Value::Str("a+".into())],
         ),
         (
+            "regexp_match",
+            vec![
+                (None, Value::Str("ab".into())),
+                named("pattern", Value::Str("b".into())),
+            ],
+            vec![Value::Str("ab".into()), Value::Str("b".into())],
+        ),
+        (
+            "regexp_matches",
+            vec![
+                named("flags", Value::Str("g".into())),
+                named("pattern", Value::Str("a".into())),
+                named("string", Value::Str("aa".into())),
+            ],
+            vec![
+                Value::Str("aa".into()),
+                Value::Str("a".into()),
+                Value::Str("g".into()),
+            ],
+        ),
+        (
             "make_interval",
             vec![
                 named("secs", Value::Float(1.5)),
