@@ -138,7 +138,7 @@ impl TemporalValue {
             Some(DatePart::Special(special)) => special_days(special, now_micros)?,
             None => return Err(TemporalInputError::InvalidSyntax),
         };
-        if !super::calendar::valid_date(days) {
+        if !Self::date_days_in_range(days) {
             return Err(TemporalInputError::OutOfRange);
         }
         Ok(Self::Date { days })
