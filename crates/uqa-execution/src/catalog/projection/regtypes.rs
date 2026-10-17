@@ -6,8 +6,10 @@
 
 //! Catalog-backed `reg*` input/output and type-name resolution.
 
+mod alias_constants;
 mod collations;
 mod format_type;
+pub(crate) use alias_constants::AliasConstantOutput;
 pub(crate) use collations::format_expression_collation;
 pub use collations::{resolve_expression_collation_oid, resolve_regcollation_oid};
 pub mod relation_oid;
@@ -495,6 +497,8 @@ struct RegtypeCatalogEntry {
     argument_types: Vec<i64>,
     array_oid: i64,
     element_oid: i64,
+    /// `pg_type.typlen`; zero for relations and routines.
+    length: i64,
     is_defined: bool,
 }
 
@@ -539,6 +543,7 @@ impl RegtypeOutputCatalog {
                         argument_types: Vec::new(),
                         array_oid: 0,
                         element_oid: 0,
+                        length: 0,
                         is_defined: true,
                     },
                 )
@@ -612,6 +617,7 @@ impl RegtypeOutputCatalog {
                     })?,
                     array_oid: 0,
                     element_oid: 0,
+                    length: 0,
                     is_defined: true,
                 },
             );
@@ -634,6 +640,7 @@ impl RegtypeOutputCatalog {
                         argument_types: Vec::new(),
                         array_oid: catalog_int(&row, "typarray").unwrap_or(0),
                         element_oid: catalog_int(&row, "typelem").unwrap_or(0),
+                        length: catalog_int(&row, "typlen").unwrap_or(0),
                         is_defined: row.get("typisdefined") == Some(&Value::Bool(true)),
                     },
                 ))
@@ -679,68 +686,6 @@ impl OutputVisibility {
                 &resolution.current_user,
                 true,
             ),
-        }
-    }
-}
-
-/// The output of `regtype`, `regproc`, `regprocedure` and `regnamespace` constants in reconstructed SQL, built from a catalog view and the session's name resolution when a deparser first prints one.
-pub(crate) struct AliasConstantOutput {
-    catalog: Arc<RegtypeOutputCatalog>,
-    visibility: OutputVisibility,
-}
-
-impl AliasConstantOutput {
-    /// Type spelling reuses `format_type`'s modifiers and the same visible catalog identity as OID-alias output.
-    pub(crate) fn type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
-        let oid = uqa_sql::catalog::type_metadata::pg_type_oid(ty);
-        if oid == 0 {
-            return Ok(ty.sql_name());
-        }
-        format_type::format_catalog_type(
-            &self.catalog,
-            &self.visibility,
-            oid,
-            Some(uqa_sql::catalog::type_metadata::pg_type_modifier(ty)),
-        )
-    }
-
-    pub(crate) fn build(
-        catalog: &CatalogReadView,
-        resolution: &RelationNameResolution,
-    ) -> Result<Self, SQLError> {
-        Ok(Self {
-            catalog: RegtypeOutputCatalog::without_relations(catalog, resolution)?,
-            visibility: OutputVisibility::from_resolution(catalog, resolution),
-        })
-    }
-
-    /// Names a selected catalog signature using the same visibility rule as `regprocedure` output.
-    pub(crate) fn routine_name_parts(
-        &self,
-        schema: &str,
-        name: &str,
-        argument_types: &[i64],
-    ) -> Option<Vec<String>> {
-        procedures::signature_name_parts(
-            &self.visibility,
-            &self.catalog,
-            schema,
-            name,
-            argument_types,
-        )
-    }
-
-    /// The constant's output text, or `None` when no object holds the OID or the type is not one this output prints.
-    pub(crate) fn text(&self, ty: &ColumnType, oid: i64) -> Option<String> {
-        match ty {
-            ColumnType::Regtype => format_regtype(&self.visibility, &self.catalog, oid),
-            ColumnType::Regcollation => collations::format_regcollation(&self.visibility, oid),
-            ColumnType::Regproc => format_regproc(&self.visibility, &self.catalog, oid),
-            ColumnType::Regprocedure => format_regprocedure(&self.visibility, &self.catalog, oid),
-            ColumnType::Regnamespace => {
-                namespace_name(&self.catalog, oid).map(uqa_sql::expr::quote_ident)
-            }
-            _ => None,
         }
     }
 }

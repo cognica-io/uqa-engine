@@ -1,0 +1,5662 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "reference": "PostgreSQL 18.4 in a disposable Docker database",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "79669b5f2a5790179e9abeb8710ccdad6569ae95fb790d6f121644984afccedc"
+  },
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "catalog",
+      "sql": "SELECT oid,proname,prokind,proisstrict,provolatile,proparallel,proleakproof,prorettype,proargtypes::text AS argument_types,prosrc FROM pg_proc WHERE proname IN ('regexp_count','regexp_instr','regexp_like','regexp_match','regexp_matches','regexp_replace','regexp_split_to_array','regexp_split_to_table','regexp_substr') ORDER BY oid",
+      "command_tags": [
+        "SELECT 29"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "proname",
+            "prokind",
+            "proisstrict",
+            "provolatile",
+            "proparallel",
+            "proleakproof",
+            "prorettype",
+            "argument_types",
+            "prosrc"
+          ],
+          "type_oids": [
+            26,
+            19,
+            18,
+            16,
+            18,
+            18,
+            16,
+            26,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "2284",
+              "regexp_replace",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 25",
+              "textregexreplace_noopt"
+            ],
+            [
+              "2285",
+              "regexp_replace",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 25 25",
+              "textregexreplace"
+            ],
+            [
+              "2763",
+              "regexp_matches",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "1009",
+              "25 25",
+              "regexp_matches_no_flags"
+            ],
+            [
+              "2764",
+              "regexp_matches",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "1009",
+              "25 25 25",
+              "regexp_matches"
+            ],
+            [
+              "2765",
+              "regexp_split_to_table",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25",
+              "regexp_split_to_table_no_flags"
+            ],
+            [
+              "2766",
+              "regexp_split_to_table",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 25",
+              "regexp_split_to_table"
+            ],
+            [
+              "2767",
+              "regexp_split_to_array",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "1009",
+              "25 25",
+              "regexp_split_to_array_no_flags"
+            ],
+            [
+              "2768",
+              "regexp_split_to_array",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "1009",
+              "25 25 25",
+              "regexp_split_to_array"
+            ],
+            [
+              "3396",
+              "regexp_match",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "1009",
+              "25 25",
+              "regexp_match_no_flags"
+            ],
+            [
+              "3397",
+              "regexp_match",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "1009",
+              "25 25 25",
+              "regexp_match"
+            ],
+            [
+              "6251",
+              "regexp_replace",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 25 23 23 25",
+              "textregexreplace_extended"
+            ],
+            [
+              "6252",
+              "regexp_replace",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 25 23 23",
+              "textregexreplace_extended_no_flags"
+            ],
+            [
+              "6253",
+              "regexp_replace",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 25 23",
+              "textregexreplace_extended_no_n"
+            ],
+            [
+              "6254",
+              "regexp_count",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "23",
+              "25 25",
+              "regexp_count_no_start"
+            ],
+            [
+              "6255",
+              "regexp_count",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "23",
+              "25 25 23",
+              "regexp_count_no_flags"
+            ],
+            [
+              "6256",
+              "regexp_count",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "23",
+              "25 25 23 25",
+              "regexp_count"
+            ],
+            [
+              "6257",
+              "regexp_instr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "23",
+              "25 25",
+              "regexp_instr_no_start"
+            ],
+            [
+              "6258",
+              "regexp_instr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "23",
+              "25 25 23",
+              "regexp_instr_no_n"
+            ],
+            [
+              "6259",
+              "regexp_instr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "23",
+              "25 25 23 23",
+              "regexp_instr_no_endoption"
+            ],
+            [
+              "6260",
+              "regexp_instr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "23",
+              "25 25 23 23 23",
+              "regexp_instr_no_flags"
+            ],
+            [
+              "6261",
+              "regexp_instr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "23",
+              "25 25 23 23 23 25",
+              "regexp_instr_no_subexpr"
+            ],
+            [
+              "6262",
+              "regexp_instr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "23",
+              "25 25 23 23 23 25 23",
+              "regexp_instr"
+            ],
+            [
+              "6263",
+              "regexp_like",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "16",
+              "25 25",
+              "regexp_like_no_flags"
+            ],
+            [
+              "6264",
+              "regexp_like",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "16",
+              "25 25 25",
+              "regexp_like"
+            ],
+            [
+              "6265",
+              "regexp_substr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25",
+              "regexp_substr_no_start"
+            ],
+            [
+              "6266",
+              "regexp_substr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 23",
+              "regexp_substr_no_n"
+            ],
+            [
+              "6267",
+              "regexp_substr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 23 23",
+              "regexp_substr_no_flags"
+            ],
+            [
+              "6268",
+              "regexp_substr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 23 23 25",
+              "regexp_substr_no_subexpr"
+            ],
+            [
+              "6269",
+              "regexp_substr",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 23 23 25 23",
+              "regexp_substr"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "catalog_arguments",
+      "sql": "SELECT oid, pronargs, pronargdefaults, proargdefaults IS NULL AS no_defaults, proargnames, proargmodes IS NULL AS input_only, proallargtypes IS NULL AS declared_inputs, provariadic, proretset, prorows, procost, prosupport::oid AS support, prolang, prosecdef, proowner = 10 AS bootstrap_owner FROM pg_proc WHERE proname IN ('regexp_count','regexp_instr','regexp_like','regexp_match','regexp_matches','regexp_replace','regexp_split_to_array','regexp_split_to_table','regexp_substr') ORDER BY oid",
+      "command_tags": [
+        "SELECT 29"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "pronargs",
+            "pronargdefaults",
+            "no_defaults",
+            "proargnames",
+            "input_only",
+            "declared_inputs",
+            "provariadic",
+            "proretset",
+            "prorows",
+            "procost",
+            "support",
+            "prolang",
+            "prosecdef",
+            "bootstrap_owner"
+          ],
+          "type_oids": [
+            26,
+            21,
+            21,
+            16,
+            1009,
+            16,
+            16,
+            26,
+            16,
+            700,
+            700,
+            26,
+            26,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "2284",
+              "3",
+              "0",
+              "t",
+              "{string,pattern,replacement}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "2285",
+              "4",
+              "0",
+              "t",
+              "{string,pattern,replacement,flags}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "2763",
+              "2",
+              "0",
+              "t",
+              "{string,pattern}",
+              "t",
+              "t",
+              "0",
+              "t",
+              "1",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "2764",
+              "3",
+              "0",
+              "t",
+              "{string,pattern,flags}",
+              "t",
+              "t",
+              "0",
+              "t",
+              "10",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "2765",
+              "2",
+              "0",
+              "t",
+              "{string,pattern}",
+              "t",
+              "t",
+              "0",
+              "t",
+              "1000",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "2766",
+              "3",
+              "0",
+              "t",
+              "{string,pattern,flags}",
+              "t",
+              "t",
+              "0",
+              "t",
+              "1000",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "2767",
+              "2",
+              "0",
+              "t",
+              "{string,pattern}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "2768",
+              "3",
+              "0",
+              "t",
+              "{string,pattern,flags}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "3396",
+              "2",
+              "0",
+              "t",
+              "{string,pattern}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "3397",
+              "3",
+              "0",
+              "t",
+              "{string,pattern,flags}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6251",
+              "6",
+              "0",
+              "t",
+              "{string,pattern,replacement,start,N,flags}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6252",
+              "5",
+              "0",
+              "t",
+              "{string,pattern,replacement,start,N}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6253",
+              "4",
+              "0",
+              "t",
+              "{string,pattern,replacement,start}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6254",
+              "2",
+              "0",
+              "t",
+              "{string,pattern}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6255",
+              "3",
+              "0",
+              "t",
+              "{string,pattern,start}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6256",
+              "4",
+              "0",
+              "t",
+              "{string,pattern,start,flags}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6257",
+              "2",
+              "0",
+              "t",
+              "{string,pattern}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6258",
+              "3",
+              "0",
+              "t",
+              "{string,pattern,start}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6259",
+              "4",
+              "0",
+              "t",
+              "{string,pattern,start,N}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6260",
+              "5",
+              "0",
+              "t",
+              "{string,pattern,start,N,endoption}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6261",
+              "6",
+              "0",
+              "t",
+              "{string,pattern,start,N,endoption,flags}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6262",
+              "7",
+              "0",
+              "t",
+              "{string,pattern,start,N,endoption,flags,subexpr}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6263",
+              "2",
+              "0",
+              "t",
+              "{string,pattern}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6264",
+              "3",
+              "0",
+              "t",
+              "{string,pattern,flags}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6265",
+              "2",
+              "0",
+              "t",
+              "{string,pattern}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6266",
+              "3",
+              "0",
+              "t",
+              "{string,pattern,start}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6267",
+              "4",
+              "0",
+              "t",
+              "{string,pattern,start,N}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6268",
+              "5",
+              "0",
+              "t",
+              "{string,pattern,start,N,flags}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ],
+            [
+              "6269",
+              "6",
+              "0",
+              "t",
+              "{string,pattern,start,N,flags,subexpr}",
+              "t",
+              "t",
+              "0",
+              "f",
+              "0",
+              "1",
+              "0",
+              "12",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "catalog_signatures",
+      "sql": "SELECT oid, pg_get_function_arguments(oid) AS arguments, pg_get_function_identity_arguments(oid) AS identity, pg_get_function_result(oid) AS result FROM pg_proc WHERE proname IN ('regexp_count','regexp_instr','regexp_like','regexp_match','regexp_matches','regexp_replace','regexp_split_to_array','regexp_split_to_table','regexp_substr') ORDER BY oid",
+      "command_tags": [
+        "SELECT 29"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "arguments",
+            "identity",
+            "result"
+          ],
+          "type_oids": [
+            26,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "2284",
+              "string text, pattern text, replacement text",
+              "string text, pattern text, replacement text",
+              "text"
+            ],
+            [
+              "2285",
+              "string text, pattern text, replacement text, flags text",
+              "string text, pattern text, replacement text, flags text",
+              "text"
+            ],
+            [
+              "2763",
+              "string text, pattern text",
+              "string text, pattern text",
+              "SETOF text[]"
+            ],
+            [
+              "2764",
+              "string text, pattern text, flags text",
+              "string text, pattern text, flags text",
+              "SETOF text[]"
+            ],
+            [
+              "2765",
+              "string text, pattern text",
+              "string text, pattern text",
+              "SETOF text"
+            ],
+            [
+              "2766",
+              "string text, pattern text, flags text",
+              "string text, pattern text, flags text",
+              "SETOF text"
+            ],
+            [
+              "2767",
+              "string text, pattern text",
+              "string text, pattern text",
+              "text[]"
+            ],
+            [
+              "2768",
+              "string text, pattern text, flags text",
+              "string text, pattern text, flags text",
+              "text[]"
+            ],
+            [
+              "3396",
+              "string text, pattern text",
+              "string text, pattern text",
+              "text[]"
+            ],
+            [
+              "3397",
+              "string text, pattern text, flags text",
+              "string text, pattern text, flags text",
+              "text[]"
+            ],
+            [
+              "6251",
+              "string text, pattern text, replacement text, start integer, \"N\" integer, flags text",
+              "string text, pattern text, replacement text, start integer, \"N\" integer, flags text",
+              "text"
+            ],
+            [
+              "6252",
+              "string text, pattern text, replacement text, start integer, \"N\" integer",
+              "string text, pattern text, replacement text, start integer, \"N\" integer",
+              "text"
+            ],
+            [
+              "6253",
+              "string text, pattern text, replacement text, start integer",
+              "string text, pattern text, replacement text, start integer",
+              "text"
+            ],
+            [
+              "6254",
+              "string text, pattern text",
+              "string text, pattern text",
+              "integer"
+            ],
+            [
+              "6255",
+              "string text, pattern text, start integer",
+              "string text, pattern text, start integer",
+              "integer"
+            ],
+            [
+              "6256",
+              "string text, pattern text, start integer, flags text",
+              "string text, pattern text, start integer, flags text",
+              "integer"
+            ],
+            [
+              "6257",
+              "string text, pattern text",
+              "string text, pattern text",
+              "integer"
+            ],
+            [
+              "6258",
+              "string text, pattern text, start integer",
+              "string text, pattern text, start integer",
+              "integer"
+            ],
+            [
+              "6259",
+              "string text, pattern text, start integer, \"N\" integer",
+              "string text, pattern text, start integer, \"N\" integer",
+              "integer"
+            ],
+            [
+              "6260",
+              "string text, pattern text, start integer, \"N\" integer, endoption integer",
+              "string text, pattern text, start integer, \"N\" integer, endoption integer",
+              "integer"
+            ],
+            [
+              "6261",
+              "string text, pattern text, start integer, \"N\" integer, endoption integer, flags text",
+              "string text, pattern text, start integer, \"N\" integer, endoption integer, flags text",
+              "integer"
+            ],
+            [
+              "6262",
+              "string text, pattern text, start integer, \"N\" integer, endoption integer, flags text, subexpr integer",
+              "string text, pattern text, start integer, \"N\" integer, endoption integer, flags text, subexpr integer",
+              "integer"
+            ],
+            [
+              "6263",
+              "string text, pattern text",
+              "string text, pattern text",
+              "boolean"
+            ],
+            [
+              "6264",
+              "string text, pattern text, flags text",
+              "string text, pattern text, flags text",
+              "boolean"
+            ],
+            [
+              "6265",
+              "string text, pattern text",
+              "string text, pattern text",
+              "text"
+            ],
+            [
+              "6266",
+              "string text, pattern text, start integer",
+              "string text, pattern text, start integer",
+              "text"
+            ],
+            [
+              "6267",
+              "string text, pattern text, start integer, \"N\" integer",
+              "string text, pattern text, start integer, \"N\" integer",
+              "text"
+            ],
+            [
+              "6268",
+              "string text, pattern text, start integer, \"N\" integer, flags text",
+              "string text, pattern text, start integer, \"N\" integer, flags text",
+              "text"
+            ],
+            [
+              "6269",
+              "string text, pattern text, start integer, \"N\" integer, flags text, subexpr integer",
+              "string text, pattern text, start integer, \"N\" integer, flags text, subexpr integer",
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "regprocedure_count",
+      "sql": "SELECT 'regexp_count(text,text)'::regprocedure::oid AS no_start, 'regexp_count(text,text,integer)'::regprocedure::oid AS no_flags, 'regexp_count(text,text,integer,text)'::regprocedure::oid AS flags",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "no_start",
+            "no_flags",
+            "flags"
+          ],
+          "type_oids": [
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "6254",
+              "6255",
+              "6256"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "regprocedure_instr",
+      "sql": "SELECT 'regexp_instr(text,text)'::regprocedure::oid AS no_start, 'regexp_instr(text,text,int)'::regprocedure::oid AS no_n, 'regexp_instr(text,text,int,int)'::regprocedure::oid AS no_endoption, 'regexp_instr(text,text,int,int,int)'::regprocedure::oid AS no_flags, 'regexp_instr(text,text,int,int,int,text)'::regprocedure::oid AS no_subexpr, 'regexp_instr(text,text,int,int,int,text,int)'::regprocedure::oid AS complete",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "no_start",
+            "no_n",
+            "no_endoption",
+            "no_flags",
+            "no_subexpr",
+            "complete"
+          ],
+          "type_oids": [
+            26,
+            26,
+            26,
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "6257",
+              "6258",
+              "6259",
+              "6260",
+              "6261",
+              "6262"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "regprocedure_like_match",
+      "sql": "SELECT 'regexp_like(text,text)'::regprocedure, 'regexp_like(text, text, text)'::regprocedure::oid AS like_flags, 'pg_catalog.regexp_match(text,text)'::regprocedure::oid AS match, 'regexp_match(text,text,text)'::regprocedure::oid AS match_flags",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regprocedure",
+            "like_flags",
+            "match",
+            "match_flags"
+          ],
+          "type_oids": [
+            2202,
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "regexp_like(text,text)",
+              "6264",
+              "3396",
+              "3397"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "regprocedure_replace",
+      "sql": "SELECT 'regexp_replace(text,text,text)'::regprocedure::oid AS no_options, 'regexp_replace(text,text,text,text)'::regprocedure::oid AS flags, 'regexp_replace(text,text,text,integer)'::regprocedure::oid AS start, 'regexp_replace(text,text,text,integer,integer)'::regprocedure::oid AS n, 'regexp_replace(text,text,text,integer,integer,text)'::regprocedure::oid AS complete",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "no_options",
+            "flags",
+            "start",
+            "n",
+            "complete"
+          ],
+          "type_oids": [
+            26,
+            26,
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "2284",
+              "2285",
+              "6253",
+              "6252",
+              "6251"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "regprocedure_substr",
+      "sql": "SELECT 'regexp_substr(text,text)'::regprocedure::oid AS no_start, 'regexp_substr(text,text,integer)'::regprocedure::oid AS no_n, 'regexp_substr(text,text,integer,integer)'::regprocedure::oid AS no_flags, 'regexp_substr(text,text,integer,integer,text)'::regprocedure::oid AS no_subexpr, 'regexp_substr(text,text,integer,integer,text,integer)'::regprocedure::oid AS complete",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "no_start",
+            "no_n",
+            "no_flags",
+            "no_subexpr",
+            "complete"
+          ],
+          "type_oids": [
+            26,
+            26,
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "6265",
+              "6266",
+              "6267",
+              "6268",
+              "6269"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "regprocedure_output",
+      "sql": "SELECT 6259::regprocedure AS instr, 2285::regprocedure AS replace, 6269::regprocedure AS substr, 2767::regprocedure AS split",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "instr",
+            "replace",
+            "substr",
+            "split"
+          ],
+          "type_oids": [
+            2202,
+            2202,
+            2202,
+            2202
+          ],
+          "rows": [
+            [
+              "regexp_instr(text,text,integer,integer)",
+              "regexp_replace(text,text,text,text)",
+              "regexp_substr(text,text,integer,integer,text,integer)",
+              "regexp_split_to_array(text,text)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "regprocedure_missing",
+      "sql": "SELECT to_regprocedure('regexp_like(text)') IS NULL AS missing, to_regprocedure('regexp_like(text,text,text)')::oid AS present",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "missing",
+            "present"
+          ],
+          "type_oids": [
+            16,
+            26
+          ],
+          "rows": [
+            [
+              "t",
+              "6264"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "regproc_ambiguous",
+      "sql": "SELECT 'regexp_like'::regproc",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "more than one function named \"regexp_like\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "regprocedure_undefined",
+      "sql": "SELECT 'regexp_like(integer,text)'::regprocedure",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"regexp_like(integer,text)\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "named_quoted_n",
+      "sql": "SELECT regexp_instr('abcb', 'b', 1, \"N\" => 2) AS position",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "position"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "named_lowercase_n",
+      "sql": "SELECT regexp_instr('abc', 'b', N => 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_instr(unknown, unknown, n => integer) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "named_complete",
+      "sql": "SELECT regexp_substr(subexpr => 1, flags => 'i', \"N\" => 2, start => 1, pattern => '([a-z])[0-9]', string => 'a1B2c3') AS piece",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "piece"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "B"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "named_like",
+      "sql": "SELECT regexp_like('Abc', 'a', flags => 'i') AS flagged, regexp_like(pattern => 'b', string => 'abc') AS reordered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "flagged",
+            "reordered"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "named_count",
+      "sql": "SELECT regexp_count('abcb', 'b', start => 3) AS from_start, regexp_count(string => 'aBab', pattern => 'b', start => 1, flags => 'i') AS flagged",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "from_start",
+            "flagged"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "named_split",
+      "sql": "SELECT regexp_split_to_array(pattern => ',', string => 'a,b') AS pieces, regexp_match(string => 'a1', pattern => '([a-z])([0-9])', flags => 'i') AS groups",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pieces",
+            "groups"
+          ],
+          "type_oids": [
+            1009,
+            1009
+          ],
+          "rows": [
+            [
+              "{a,b}",
+              "{a,1}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "named_duplicate",
+      "sql": "SELECT regexp_like(string => 'a', string => 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "argument name \"string\" used more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "named_before_positional",
+      "sql": "SELECT regexp_like(string => 'a', 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "positional argument cannot follow named argument",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "named_unknown",
+      "sql": "SELECT regexp_like('a', pattern => 'a', options => 'i')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_like(unknown, pattern => unknown, options => unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "replace_overloads",
+      "sql": "SELECT regexp_replace('abcb', 'b', 'x', start => 3) AS named_start, regexp_replace('abcb', 'b', 'x', flags => 'g') AS named_flags, regexp_replace('abcb', 'b', 'x', 'g') AS unknown_fourth, regexp_replace('abcb', 'b', 'x', 3) AS integer_fourth, regexp_replace('abcbb', 'b', 'x', 1, 2, 'i') AS complete",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "named_start",
+            "named_flags",
+            "unknown_fourth",
+            "integer_fourth",
+            "complete"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "abcx",
+              "axcx",
+              "axcx",
+              "abcx",
+              "abcxb"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_bigint_start",
+      "sql": "SELECT regexp_replace('a', 'a', 'b', 2::bigint)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_replace(unknown, unknown, unknown, bigint) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "count_smallint_start",
+      "sql": "SELECT regexp_count('aaa', 'a', 2::smallint) AS count",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "count_bigint_start",
+      "sql": "SELECT regexp_count('a', 'a', 1::bigint)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_count(unknown, unknown, bigint) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "count_unknown_start",
+      "sql": "SELECT regexp_count('a', 'a', 'x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "count_one_argument",
+      "sql": "SELECT regexp_count('abc')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_count(unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "like_integer_input",
+      "sql": "SELECT regexp_like(1, '1')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_like(integer, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "like_integer_flags",
+      "sql": "SELECT regexp_like('a', 'a', 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_like(unknown, unknown, integer) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "instr_too_many",
+      "sql": "SELECT regexp_instr('abc', 'b', 1, 1, 0, 'i', 0, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_instr(unknown, unknown, integer, integer, integer, unknown, integer, integer) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "substr_too_many",
+      "sql": "SELECT regexp_substr('abc', 'b', 1, 1, 'i', 0, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_substr(unknown, unknown, integer, integer, unknown, integer, integer) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "matches_integer",
+      "sql": "SELECT regexp_matches(123, '2')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_matches(integer, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "matches_named_integer",
+      "sql": "SELECT regexp_matches(string => 123, pattern => '2')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_matches(string => integer, pattern => unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "matches_one_argument",
+      "sql": "SELECT regexp_matches('a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_matches(unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "matches_four_arguments",
+      "sql": "SELECT regexp_matches('a', 'a', 'g', 'x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_matches(unknown, unknown, unknown, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "matches_from_integer",
+      "sql": "SELECT * FROM regexp_matches(123, '2')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_matches(integer, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "split_table_integer",
+      "sql": "SELECT regexp_split_to_table(1, ',')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_split_to_table(integer, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "split_table_from_integer",
+      "sql": "SELECT * FROM regexp_split_to_table(1, ',')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_split_to_table(integer, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "split_array_integer",
+      "sql": "SELECT regexp_split_to_array(1, ',')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_split_to_array(integer, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "string_types",
+      "sql": "SELECT regexp_like('abc'::varchar, 'b') AS varchar_input, regexp_like('abc'::char(3), 'c') AS bpchar_input, regexp_count('abc'::name, '[a-z]') AS name_input, regexp_substr('a1'::varchar(5), '[0-9]'::varchar) AS varchar_pattern",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "varchar_input",
+            "bpchar_input",
+            "name_input",
+            "varchar_pattern"
+          ],
+          "type_oids": [
+            16,
+            16,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "null_results",
+      "sql": "SELECT regexp_count(NULL, 'a') IS NULL AS count, regexp_like('a', NULL) IS NULL AS like, regexp_instr('a', 'a', NULL) IS NULL AS instr, regexp_substr(NULL, 'a') IS NULL AS substr, regexp_replace('a', 'a', NULL) IS NULL AS replace, regexp_match(NULL, 'a') IS NULL AS match, regexp_split_to_array(NULL, ',') IS NULL AS split",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count",
+            "like",
+            "instr",
+            "substr",
+            "replace",
+            "match",
+            "split"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "result_types",
+      "sql": "SELECT pg_typeof(regexp_count('a', 'a')) AS count, pg_typeof(regexp_instr('a', 'a')) AS instr, pg_typeof(regexp_like('a', 'a')) AS like, pg_typeof(regexp_match('a', 'a')) AS match, pg_typeof(regexp_replace('a', 'a', 'b')) AS replace, pg_typeof(regexp_split_to_array('a', 'a')) AS split, pg_typeof(regexp_substr('a', 'a')) AS substr",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count",
+            "instr",
+            "like",
+            "match",
+            "replace",
+            "split",
+            "substr"
+          ],
+          "type_oids": [
+            2206,
+            2206,
+            2206,
+            2206,
+            2206,
+            2206,
+            2206
+          ],
+          "rows": [
+            [
+              "integer",
+              "integer",
+              "boolean",
+              "text[]",
+              "text",
+              "text[]",
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "qualified_calls",
+      "sql": "SELECT pg_catalog.regexp_like('a', 'a') AS like, pg_catalog.regexp_count('aa', 'a') AS count, pg_catalog.regexp_split_to_array('a,b', ',') AS split",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "like",
+            "count",
+            "split"
+          ],
+          "type_oids": [
+            16,
+            23,
+            1009
+          ],
+          "rows": [
+            [
+              "t",
+              "2",
+              "{a,b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "qualified_from",
+      "sql": "SELECT * FROM pg_catalog.regexp_split_to_table('a,b', ',') AS piece",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "piece"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "where_filter",
+      "sql": "SELECT x FROM (SELECT 'ab' AS x UNION ALL SELECT 'cd') s WHERE regexp_like(x, '^a') AND regexp_count(x, '[a-z]') = 2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "ab"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "user_overload",
+      "sql": "CREATE FUNCTION public.regexp_like(s integer, p text) RETURNS boolean LANGUAGE sql IMMUTABLE RETURN s::text ~ p",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "user_overload_calls",
+      "sql": "SELECT regexp_like(12, '2') AS user_defined, regexp_like('ab', 'b') AS builtin",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "user_defined",
+            "builtin"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "user_overload_drop",
+      "sql": "DROP FUNCTION public.regexp_like(integer, text)",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_table",
+      "sql": "CREATE TABLE regex_identity_source (id integer PRIMARY KEY, x text CONSTRAINT regex_identity_x CHECK (regexp_like(x, '^[a-z0-9,]*$')), y text CONSTRAINT regex_identity_y CHECK (regexp_count(y, ',') < 2), n integer DEFAULT regexp_instr('abcabc', 'c', 1, 2), s text DEFAULT regexp_substr('a1b22', '[0-9]+', 1, 2), t text DEFAULT regexp_replace('aXa', 'x', '-', flags => 'gi'), r text GENERATED ALWAYS AS (regexp_replace(x, '[0-9]', '#', 'g')) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_rows",
+      "sql": "INSERT INTO regex_identity_source (id, x, y) VALUES (1, 'a1b2', 'p,q'), (2, 'c,d', NULL), (3, NULL, 'z')",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "stored_rows",
+      "sql": "SELECT id, x, y, n, s, t, r FROM regex_identity_source ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "x",
+            "y",
+            "n",
+            "s",
+            "t",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            23,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "a1b2",
+              "p,q",
+              "6",
+              "22",
+              "a-a",
+              "a#b#"
+            ],
+            [
+              "2",
+              "c,d",
+              null,
+              "6",
+              "22",
+              "a-a",
+              "c,d"
+            ],
+            [
+              "3",
+              null,
+              "z",
+              "6",
+              "22",
+              "a-a",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "check_like_rejects",
+      "sql": "INSERT INTO regex_identity_source (id, x) VALUES (4, 'A!')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"regex_identity_source\" violates check constraint \"regex_identity_x\"",
+        "detail": "Failing row contains (4, A!, null, 6, 22, a-a, A!).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "check_count_rejects",
+      "sql": "INSERT INTO regex_identity_source (id, x, y) VALUES (5, 'a', 'a,b,c')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"regex_identity_source\" violates check constraint \"regex_identity_y\"",
+        "detail": "Failing row contains (5, a, a,b,c, 6, 22, a-a, a).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "update_check_rejects",
+      "sql": "UPDATE regex_identity_source SET x = 'Z' WHERE id = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"regex_identity_source\" violates check constraint \"regex_identity_x\"",
+        "detail": "Failing row contains (1, Z, p,q, 6, 22, a-a, Z).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "generated_update",
+      "sql": "UPDATE regex_identity_source SET x = 'z9' WHERE id = 2",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "generated_rows",
+      "sql": "SELECT id, x, y, n, s, t, r FROM regex_identity_source ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "x",
+            "y",
+            "n",
+            "s",
+            "t",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            23,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "a1b2",
+              "p,q",
+              "6",
+              "22",
+              "a-a",
+              "a#b#"
+            ],
+            [
+              "2",
+              "z9",
+              null,
+              "6",
+              "22",
+              "a-a",
+              "z#"
+            ],
+            [
+              "3",
+              null,
+              "z",
+              "6",
+              "22",
+              "a-a",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "check_definitions",
+      "sql": "SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = 'regex_identity_source'::regclass AND contype = 'c' ORDER BY conname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "definition"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "regex_identity_x",
+              "CHECK (regexp_like(x, '^[a-z0-9,]*$'::text))"
+            ],
+            [
+              "regex_identity_y",
+              "CHECK ((regexp_count(y, ','::text) < 2))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "default_definitions",
+      "sql": "SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) AS expression FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum WHERE d.adrelid = 'regex_identity_source'::regclass ORDER BY a.attnum",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "expression"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "n",
+              "regexp_instr('abcabc'::text, 'c'::text, 1, 2)"
+            ],
+            [
+              "s",
+              "regexp_substr('a1b22'::text, '[0-9]+'::text, 1, 2)"
+            ],
+            [
+              "t",
+              "regexp_replace('aXa'::text, 'x'::text, '-'::text, flags => 'gi'::text)"
+            ],
+            [
+              "r",
+              "regexp_replace(x, '[0-9]'::text, '#'::text, 'g'::text)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_index",
+      "sql": "CREATE INDEX regex_identity_index ON regex_identity_source (regexp_replace(x, '[0-9]', '', 'g'))",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "index_definition",
+      "sql": "SELECT pg_get_indexdef('regex_identity_index'::regclass) AS definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CREATE INDEX regex_identity_index ON public.regex_identity_source USING btree (regexp_replace(x, '[0-9]'::text, ''::text, 'g'::text))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "index_rows",
+      "sql": "SELECT id FROM regex_identity_source WHERE regexp_replace(x, '[0-9]', '', 'g') = 'ab'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_partial_index",
+      "sql": "CREATE INDEX regex_identity_partial ON regex_identity_source (id) WHERE regexp_like(x, '^a')",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "partial_index_definition",
+      "sql": "SELECT pg_get_indexdef('regex_identity_partial'::regclass) AS definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CREATE INDEX regex_identity_partial ON public.regex_identity_source USING btree (id) WHERE regexp_like(x, '^a'::text)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_domain",
+      "sql": "CREATE DOMAIN regex_identity_word AS text CONSTRAINT regex_identity_word_letters CHECK (regexp_like(VALUE, '^[a-z]+$'))",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "domain_accepts",
+      "sql": "SELECT 'abc'::regex_identity_word AS word",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "word"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "abc"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "domain_rejects",
+      "sql": "SELECT 'ABC'::regex_identity_word",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain regex_identity_word violates check constraint \"regex_identity_word_letters\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "domain_definition",
+      "sql": "SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE contypid = 'regex_identity_word'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "definition"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "regex_identity_word_letters",
+              "CHECK (regexp_like(VALUE, '^[a-z]+$'::text))"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_view",
+      "sql": "CREATE VIEW regex_identity_view AS SELECT id, regexp_like(x, 'A', 'i') AS liked, regexp_match(x, '([a-z])([0-9])') AS matched, regexp_split_to_array(x, ',') AS pieces, regexp_substr(x, '[0-9]', 1, 2) AS second_digit, regexp_instr(x, '[0-9]', 1, 1, 1) AS after_digit, regexp_count(x, '[a-z]') AS letters, regexp_replace(x, '[a-z]', '*', 1, 0, 'i') AS masked FROM regex_identity_source",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "view_rows",
+      "sql": "SELECT * FROM regex_identity_view ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "liked",
+            "matched",
+            "pieces",
+            "second_digit",
+            "after_digit",
+            "letters",
+            "masked"
+          ],
+          "type_oids": [
+            23,
+            16,
+            1009,
+            1009,
+            25,
+            23,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "{a,1}",
+              "{a1b2}",
+              "2",
+              "3",
+              "2",
+              "*1*2"
+            ],
+            [
+              "2",
+              "f",
+              "{z,9}",
+              "{z9}",
+              null,
+              "3",
+              "1",
+              "*9"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "view_definition",
+      "sql": "SELECT pg_get_viewdef('regex_identity_view'::regclass) AS definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    regexp_like(x, 'A'::text, 'i'::text) AS liked,\n    regexp_match(x, '([a-z])([0-9])'::text) AS matched,\n    regexp_split_to_array(x, ','::text) AS pieces,\n    regexp_substr(x, '[0-9]'::text, 1, 2) AS second_digit,\n    regexp_instr(x, '[0-9]'::text, 1, 1, 1) AS after_digit,\n    regexp_count(x, '[a-z]'::text) AS letters,\n    regexp_replace(x, '[a-z]'::text, '*'::text, 1, 0, 'i'::text) AS masked\n   FROM regex_identity_source;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_named_view",
+      "sql": "CREATE VIEW regex_identity_named_view AS SELECT id, regexp_like(string => x, pattern => 'B', flags => 'i') AS liked, regexp_instr(x, '[0-9]', \"N\" => 2, start => 1) AS second_digit, regexp_replace(x, '[0-9]', '_', flags => 'g') AS replaced FROM regex_identity_source",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "named_view_rows",
+      "sql": "SELECT * FROM regex_identity_named_view ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "liked",
+            "second_digit",
+            "replaced"
+          ],
+          "type_oids": [
+            23,
+            16,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "4",
+              "a_b_"
+            ],
+            [
+              "2",
+              "f",
+              "0",
+              "z_"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "named_view_definition",
+      "sql": "SELECT pg_get_viewdef('regex_identity_named_view'::regclass) AS definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    regexp_like(string => x, pattern => 'B'::text, flags => 'i'::text) AS liked,\n    regexp_instr(x, '[0-9]'::text, \"N\" => 2, start => 1) AS second_digit,\n    regexp_replace(x, '[0-9]'::text, '_'::text, flags => 'g'::text) AS replaced\n   FROM regex_identity_source;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_set_view",
+      "sql": "CREATE VIEW regex_identity_set_view AS SELECT s.id, piece, m FROM regex_identity_source s, LATERAL regexp_split_to_table(s.x, ',') AS piece, LATERAL regexp_matches(piece, '[a-z]', 'g') AS m",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "set_view_rows",
+      "sql": "SELECT * FROM regex_identity_set_view ORDER BY id, piece, m",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "piece",
+            "m"
+          ],
+          "type_oids": [
+            23,
+            25,
+            1009
+          ],
+          "rows": [
+            [
+              "1",
+              "a1b2",
+              "{a}"
+            ],
+            [
+              "1",
+              "a1b2",
+              "{b}"
+            ],
+            [
+              "2",
+              "z9",
+              "{z}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_select_set_view",
+      "sql": "CREATE VIEW regex_identity_select_set_view AS SELECT id, regexp_matches(x, '[a-z]', 'g') AS m, regexp_split_to_table(x, ',') AS piece FROM regex_identity_source",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "select_set_view_rows",
+      "sql": "SELECT * FROM regex_identity_select_set_view ORDER BY id, m",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "m",
+            "piece"
+          ],
+          "type_oids": [
+            23,
+            1009,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{a}",
+              "a1b2"
+            ],
+            [
+              "1",
+              "{b}",
+              null
+            ],
+            [
+              "2",
+              "{z}",
+              "z9"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "sql_function",
+      "sql": "CREATE FUNCTION regex_identity_like(s text) RETURNS boolean LANGUAGE sql IMMUTABLE RETURN regexp_like(s, '^a')",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "sql_function_calls",
+      "sql": "SELECT regex_identity_like('abc') AS starts, regex_identity_like('xbc') AS other",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "starts",
+            "other"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "sql_function_body",
+      "sql": "SELECT pg_get_function_sqlbody('regex_identity_like(text)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "RETURN regexp_like(s, '^a'::text)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "sql_function_rejects_integer",
+      "sql": "CREATE FUNCTION regex_identity_bad(s integer) RETURNS boolean LANGUAGE sql RETURN regexp_like(s, 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_like(integer, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "plpgsql_function",
+      "sql": "CREATE FUNCTION regex_identity_count(s text) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RETURN regexp_count(s, 'a', 1, 'i'); END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "plpgsql_call",
+      "sql": "SELECT regex_identity_count('AbA') AS count",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "plpgsql_integer",
+      "sql": "CREATE FUNCTION regex_identity_count_integer(s integer) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RETURN regexp_count(s, 'a'); END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "plpgsql_integer_call",
+      "sql": "SELECT regex_identity_count_integer(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function regexp_count(integer, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "sql_function_pieces",
+      "sql": "CREATE FUNCTION regex_identity_pieces(s text) RETURNS text[] LANGUAGE sql IMMUTABLE RETURN regexp_split_to_array(s, ',')",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "sql_function_pieces_call",
+      "sql": "SELECT regex_identity_pieces('a,b') AS pieces",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pieces"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a,b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_user_type",
+      "sql": "CREATE TYPE regex_identity_kind AS ENUM ('letter', 'digit')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "sql_function_kind",
+      "sql": "CREATE FUNCTION regex_identity_kind_of(s text) RETURNS regex_identity_kind LANGUAGE sql STABLE RETURN CASE WHEN regexp_like(s, '^[0-9]') THEN 'digit'::regex_identity_kind ELSE 'letter'::regex_identity_kind END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "sql_function_kind_call",
+      "sql": "SELECT regex_identity_kind_of('7a') AS first, regex_identity_kind_of('a7') AS second",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "first",
+            "second"
+          ],
+          "type_oids": [
+            40931,
+            40931
+          ],
+          "rows": [
+            [
+              "digit",
+              "letter"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "sql_procedure",
+      "sql": "CREATE PROCEDURE regex_identity_procedure(s text) LANGUAGE sql BEGIN ATOMIC SELECT regexp_like(s, 'a'); END",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "sql_procedure_call",
+      "sql": "CALL regex_identity_procedure('abc')",
+      "command_tags": [
+        "CALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_from",
+      "sql": "PREPARE regex_identity_from AS SELECT * FROM regexp_matches('abc', $1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_from",
+      "sql": "EXECUTE regex_identity_from('b')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_select",
+      "sql": "PREPARE regex_identity_select AS SELECT regexp_matches('abc', $1, $2)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_select",
+      "sql": "EXECUTE regex_identity_select('[a-c]', 'g')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a}"
+            ],
+            [
+              "{b}"
+            ],
+            [
+              "{c}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_scalar",
+      "sql": "PREPARE regex_identity_scalar AS SELECT regexp_like($1, $2) AS liked, regexp_count($1, $2, $3) AS count, regexp_replace($1, $2, 'x', $4) AS replaced",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_scalar",
+      "sql": "EXECUTE regex_identity_scalar('banana', 'an', 2, 'g')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "liked",
+            "count",
+            "replaced"
+          ],
+          "type_oids": [
+            16,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "t",
+              "2",
+              "bxxa"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_split",
+      "sql": "PREPARE regex_identity_split AS SELECT regexp_split_to_array($1, $2) AS pieces, (SELECT count(*) FROM regexp_split_to_table($1, $2)) AS count",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_split",
+      "sql": "EXECUTE regex_identity_split('a,b,c', ',')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pieces",
+            "count"
+          ],
+          "type_oids": [
+            1009,
+            20
+          ],
+          "rows": [
+            [
+              "{a,b,c}",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_lateral",
+      "sql": "PREPARE regex_identity_lateral AS SELECT s.id, piece FROM regex_identity_source s, LATERAL regexp_split_to_table(s.x, $1) AS piece ORDER BY s.id, piece",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_lateral",
+      "sql": "EXECUTE regex_identity_lateral(',')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "piece"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "a1b2"
+            ],
+            [
+              "2",
+              "z9"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_rows_from",
+      "sql": "PREPARE regex_identity_rows_from AS SELECT * FROM ROWS FROM (regexp_matches($1, '[0-9]', 'g'), regexp_split_to_table($1, '[0-9]')) AS t(m, piece)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_rows_from",
+      "sql": "EXECUTE regex_identity_rows_from('a1b2')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "piece"
+          ],
+          "type_oids": [
+            1009,
+            25
+          ],
+          "rows": [
+            [
+              "{1}",
+              "a"
+            ],
+            [
+              "{2}",
+              "b"
+            ],
+            [
+              null,
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_substr",
+      "sql": "PREPARE regex_identity_substr AS SELECT regexp_substr($1, $2, $3, $4, $5, $6) AS piece, regexp_instr($1, $2, $3, $4, 0, $5, $6) AS position",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_substr",
+      "sql": "EXECUTE regex_identity_substr('a1B2c3', '([a-z])([0-9])', 1, 2, 'i', 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "piece",
+            "position"
+          ],
+          "type_oids": [
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_where",
+      "sql": "PREPARE regex_identity_where AS SELECT id FROM regex_identity_source WHERE regexp_like(x, $1) ORDER BY id",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_where",
+      "sql": "EXECUTE regex_identity_where('^c')",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_named",
+      "sql": "PREPARE regex_identity_named AS SELECT regexp_like(string => $1, pattern => $2, flags => $3) AS liked",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_named",
+      "sql": "EXECUTE regex_identity_named('ABC', 'b', 'i')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "liked"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepared_types",
+      "sql": "SELECT name, parameter_types::text AS parameter_types FROM pg_prepared_statements WHERE name LIKE 'regex\\_identity\\_%' ORDER BY name",
+      "command_tags": [
+        "SELECT 9"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "regex_identity_from",
+              "{text}"
+            ],
+            [
+              "regex_identity_lateral",
+              "{text}"
+            ],
+            [
+              "regex_identity_named",
+              "{text,text,text}"
+            ],
+            [
+              "regex_identity_rows_from",
+              "{text}"
+            ],
+            [
+              "regex_identity_scalar",
+              "{text,text,integer,text}"
+            ],
+            [
+              "regex_identity_select",
+              "{text,text}"
+            ],
+            [
+              "regex_identity_split",
+              "{text,text}"
+            ],
+            [
+              "regex_identity_substr",
+              "{text,text,integer,integer,text,integer}"
+            ],
+            [
+              "regex_identity_where",
+              "{text}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "deallocate",
+      "sql": "DEALLOCATE ALL",
+      "command_tags": [
+        "DEALLOCATE ALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "routines_types",
+      "sql": "SELECT specific_name, routine_type, data_type, type_udt_catalog = current_database() AS current_catalog, type_udt_schema, type_udt_name, dtd_identifier, parameter_style, security_type, as_locator FROM information_schema.routines WHERE routine_name LIKE 'regexp\\_%' ORDER BY specific_name",
+      "command_tags": [
+        "SELECT 29"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "specific_name",
+            "routine_type",
+            "data_type",
+            "current_catalog",
+            "type_udt_schema",
+            "type_udt_name",
+            "dtd_identifier",
+            "parameter_style",
+            "security_type",
+            "as_locator"
+          ],
+          "type_oids": [
+            19,
+            1043,
+            1043,
+            16,
+            19,
+            19,
+            19,
+            1043,
+            1043,
+            1043
+          ],
+          "rows": [
+            [
+              "regexp_count_6254",
+              "FUNCTION",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_count_6255",
+              "FUNCTION",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_count_6256",
+              "FUNCTION",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_instr_6257",
+              "FUNCTION",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_instr_6258",
+              "FUNCTION",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_instr_6259",
+              "FUNCTION",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_instr_6260",
+              "FUNCTION",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_instr_6261",
+              "FUNCTION",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_instr_6262",
+              "FUNCTION",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_like_6263",
+              "FUNCTION",
+              "boolean",
+              "t",
+              "pg_catalog",
+              "bool",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_like_6264",
+              "FUNCTION",
+              "boolean",
+              "t",
+              "pg_catalog",
+              "bool",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_match_3396",
+              "FUNCTION",
+              "ARRAY",
+              "t",
+              "pg_catalog",
+              "_text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_match_3397",
+              "FUNCTION",
+              "ARRAY",
+              "t",
+              "pg_catalog",
+              "_text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_matches_2763",
+              "FUNCTION",
+              "ARRAY",
+              "t",
+              "pg_catalog",
+              "_text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_matches_2764",
+              "FUNCTION",
+              "ARRAY",
+              "t",
+              "pg_catalog",
+              "_text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_replace_2284",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_replace_2285",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_replace_6251",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_replace_6252",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_replace_6253",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_split_to_array_2767",
+              "FUNCTION",
+              "ARRAY",
+              "t",
+              "pg_catalog",
+              "_text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_split_to_array_2768",
+              "FUNCTION",
+              "ARRAY",
+              "t",
+              "pg_catalog",
+              "_text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_split_to_table_2765",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_split_to_table_2766",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_substr_6265",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_substr_6266",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_substr_6267",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_substr_6268",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ],
+            [
+              "regexp_substr_6269",
+              "FUNCTION",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0",
+              "GENERAL",
+              "INVOKER",
+              "NO"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "routines_user_types",
+      "sql": "SELECT routine_name, routine_type, data_type, type_udt_catalog = current_database() AS current_catalog, type_udt_schema, type_udt_name, dtd_identifier, udt_catalog, udt_schema, udt_name, parameter_style, security_type, as_locator, is_null_call FROM information_schema.routines WHERE routine_name LIKE 'regex\\_identity\\_%' ORDER BY routine_name",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_name",
+            "routine_type",
+            "data_type",
+            "current_catalog",
+            "type_udt_schema",
+            "type_udt_name",
+            "dtd_identifier",
+            "udt_catalog",
+            "udt_schema",
+            "udt_name",
+            "parameter_style",
+            "security_type",
+            "as_locator",
+            "is_null_call"
+          ],
+          "type_oids": [
+            19,
+            1043,
+            1043,
+            16,
+            19,
+            19,
+            19,
+            19,
+            19,
+            19,
+            1043,
+            1043,
+            1043,
+            1043
+          ],
+          "rows": [
+            [
+              "regex_identity_count",
+              "FUNCTION",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0",
+              null,
+              null,
+              null,
+              "GENERAL",
+              "INVOKER",
+              "NO",
+              "NO"
+            ],
+            [
+              "regex_identity_count_integer",
+              "FUNCTION",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0",
+              null,
+              null,
+              null,
+              "GENERAL",
+              "INVOKER",
+              "NO",
+              "NO"
+            ],
+            [
+              "regex_identity_kind_of",
+              "FUNCTION",
+              "USER-DEFINED",
+              "t",
+              "public",
+              "regex_identity_kind",
+              "0",
+              null,
+              null,
+              null,
+              "GENERAL",
+              "INVOKER",
+              "NO",
+              "NO"
+            ],
+            [
+              "regex_identity_like",
+              "FUNCTION",
+              "boolean",
+              "t",
+              "pg_catalog",
+              "bool",
+              "0",
+              null,
+              null,
+              null,
+              "GENERAL",
+              "INVOKER",
+              "NO",
+              "NO"
+            ],
+            [
+              "regex_identity_pieces",
+              "FUNCTION",
+              "ARRAY",
+              "t",
+              "pg_catalog",
+              "_text",
+              "0",
+              null,
+              null,
+              null,
+              "GENERAL",
+              "INVOKER",
+              "NO",
+              "NO"
+            ],
+            [
+              "regex_identity_procedure",
+              "PROCEDURE",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              "GENERAL",
+              "INVOKER",
+              "NO",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "routines_user_definitions",
+      "sql": "SELECT routine_name, routine_definition FROM information_schema.routines WHERE routine_name LIKE 'regex\\_identity\\_%' ORDER BY routine_name",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_name",
+            "routine_definition"
+          ],
+          "type_oids": [
+            19,
+            1043
+          ],
+          "rows": [
+            [
+              "regex_identity_count",
+              " BEGIN RETURN regexp_count(s, 'a', 1, 'i'); END "
+            ],
+            [
+              "regex_identity_count_integer",
+              " BEGIN RETURN regexp_count(s, 'a'); END "
+            ],
+            [
+              "regex_identity_kind_of",
+              ""
+            ],
+            [
+              "regex_identity_like",
+              ""
+            ],
+            [
+              "regex_identity_pieces",
+              ""
+            ],
+            [
+              "regex_identity_procedure",
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "routines_return_types",
+      "sql": "SELECT specific_name, data_type, type_udt_catalog = current_database() AS current_catalog, type_udt_schema, type_udt_name, dtd_identifier FROM information_schema.routines WHERE specific_name IN ('abs_1394', 'abs_1705', 'aclexplode_1689', 'array_append_378', 'array_in_750', 'array_out_751', 'date_part_1171', 'date_trunc_1217', 'daterange_3941', 'datemultirange_4292', 'enum_in_3506', 'gen_random_uuid_3432', 'int4multirange_4280', 'int4range_3840', 'int8multirange_4295', 'int8range_3945', 'json_strip_nulls_3261', 'jsonb_extract_path_3217', 'justify_hours_1175', 'lag_3106', 'lag_3108', 'like_1569', 'like_escape_2009', 'mod_940', 'mod_947', 'multirange_4298', 'nummultirange_4283', 'numrange_3844', 'octet_length_720', 'pg_get_userbyid_1642', 'pg_my_temp_schema_2854', 'pg_typeof_1619', 'range_merge_4057', 'regexp_matches_2763', 'regprocedurein_2212', 'shell_in_2398', 'textlike_support_1023', 'timezone_1026', 'to_regclass_3495', 'to_regcollation_4195', 'to_regnamespace_4086', 'to_regproc_3494', 'to_regrole_4093', 'tsmultirange_4286', 'tsrange_3933', 'tstzmultirange_4289', 'tstzrange_3937', 'version_89') ORDER BY specific_name",
+      "command_tags": [
+        "SELECT 48"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "specific_name",
+            "data_type",
+            "current_catalog",
+            "type_udt_schema",
+            "type_udt_name",
+            "dtd_identifier"
+          ],
+          "type_oids": [
+            19,
+            1043,
+            16,
+            19,
+            19,
+            19
+          ],
+          "rows": [
+            [
+              "abs_1394",
+              "real",
+              "t",
+              "pg_catalog",
+              "float4",
+              "0"
+            ],
+            [
+              "abs_1705",
+              "numeric",
+              "t",
+              "pg_catalog",
+              "numeric",
+              "0"
+            ],
+            [
+              "aclexplode_1689",
+              "record",
+              "t",
+              "pg_catalog",
+              "record",
+              "0"
+            ],
+            [
+              "array_append_378",
+              "anycompatiblearray",
+              "t",
+              "pg_catalog",
+              "anycompatiblearray",
+              "0"
+            ],
+            [
+              "array_in_750",
+              "anyarray",
+              "t",
+              "pg_catalog",
+              "anyarray",
+              "0"
+            ],
+            [
+              "array_out_751",
+              "cstring",
+              "t",
+              "pg_catalog",
+              "cstring",
+              "0"
+            ],
+            [
+              "date_part_1171",
+              "double precision",
+              "t",
+              "pg_catalog",
+              "float8",
+              "0"
+            ],
+            [
+              "date_trunc_1217",
+              "timestamp with time zone",
+              "t",
+              "pg_catalog",
+              "timestamptz",
+              "0"
+            ],
+            [
+              "datemultirange_4292",
+              "datemultirange",
+              "t",
+              "pg_catalog",
+              "datemultirange",
+              "0"
+            ],
+            [
+              "daterange_3941",
+              "daterange",
+              "t",
+              "pg_catalog",
+              "daterange",
+              "0"
+            ],
+            [
+              "enum_in_3506",
+              "anyenum",
+              "t",
+              "pg_catalog",
+              "anyenum",
+              "0"
+            ],
+            [
+              "gen_random_uuid_3432",
+              "uuid",
+              "t",
+              "pg_catalog",
+              "uuid",
+              "0"
+            ],
+            [
+              "int4multirange_4280",
+              "int4multirange",
+              "t",
+              "pg_catalog",
+              "int4multirange",
+              "0"
+            ],
+            [
+              "int4range_3840",
+              "int4range",
+              "t",
+              "pg_catalog",
+              "int4range",
+              "0"
+            ],
+            [
+              "int8multirange_4295",
+              "int8multirange",
+              "t",
+              "pg_catalog",
+              "int8multirange",
+              "0"
+            ],
+            [
+              "int8range_3945",
+              "int8range",
+              "t",
+              "pg_catalog",
+              "int8range",
+              "0"
+            ],
+            [
+              "json_strip_nulls_3261",
+              "json",
+              "t",
+              "pg_catalog",
+              "json",
+              "0"
+            ],
+            [
+              "jsonb_extract_path_3217",
+              "jsonb",
+              "t",
+              "pg_catalog",
+              "jsonb",
+              "0"
+            ],
+            [
+              "justify_hours_1175",
+              "interval",
+              "t",
+              "pg_catalog",
+              "interval",
+              "0"
+            ],
+            [
+              "lag_3106",
+              "anyelement",
+              "t",
+              "pg_catalog",
+              "anyelement",
+              "0"
+            ],
+            [
+              "lag_3108",
+              "anycompatible",
+              "t",
+              "pg_catalog",
+              "anycompatible",
+              "0"
+            ],
+            [
+              "like_1569",
+              "boolean",
+              "t",
+              "pg_catalog",
+              "bool",
+              "0"
+            ],
+            [
+              "like_escape_2009",
+              "bytea",
+              "t",
+              "pg_catalog",
+              "bytea",
+              "0"
+            ],
+            [
+              "mod_940",
+              "smallint",
+              "t",
+              "pg_catalog",
+              "int2",
+              "0"
+            ],
+            [
+              "mod_947",
+              "bigint",
+              "t",
+              "pg_catalog",
+              "int8",
+              "0"
+            ],
+            [
+              "multirange_4298",
+              "anymultirange",
+              "t",
+              "pg_catalog",
+              "anymultirange",
+              "0"
+            ],
+            [
+              "nummultirange_4283",
+              "nummultirange",
+              "t",
+              "pg_catalog",
+              "nummultirange",
+              "0"
+            ],
+            [
+              "numrange_3844",
+              "numrange",
+              "t",
+              "pg_catalog",
+              "numrange",
+              "0"
+            ],
+            [
+              "octet_length_720",
+              "integer",
+              "t",
+              "pg_catalog",
+              "int4",
+              "0"
+            ],
+            [
+              "pg_get_userbyid_1642",
+              "name",
+              "t",
+              "pg_catalog",
+              "name",
+              "0"
+            ],
+            [
+              "pg_my_temp_schema_2854",
+              "oid",
+              "t",
+              "pg_catalog",
+              "oid",
+              "0"
+            ],
+            [
+              "pg_typeof_1619",
+              "regtype",
+              "t",
+              "pg_catalog",
+              "regtype",
+              "0"
+            ],
+            [
+              "range_merge_4057",
+              "anyrange",
+              "t",
+              "pg_catalog",
+              "anyrange",
+              "0"
+            ],
+            [
+              "regexp_matches_2763",
+              "ARRAY",
+              "t",
+              "pg_catalog",
+              "_text",
+              "0"
+            ],
+            [
+              "regprocedurein_2212",
+              "regprocedure",
+              "t",
+              "pg_catalog",
+              "regprocedure",
+              "0"
+            ],
+            [
+              "shell_in_2398",
+              "void",
+              "t",
+              "pg_catalog",
+              "void",
+              "0"
+            ],
+            [
+              "textlike_support_1023",
+              "internal",
+              "t",
+              "pg_catalog",
+              "internal",
+              "0"
+            ],
+            [
+              "timezone_1026",
+              "timestamp without time zone",
+              "t",
+              "pg_catalog",
+              "timestamp",
+              "0"
+            ],
+            [
+              "to_regclass_3495",
+              "regclass",
+              "t",
+              "pg_catalog",
+              "regclass",
+              "0"
+            ],
+            [
+              "to_regcollation_4195",
+              "regcollation",
+              "t",
+              "pg_catalog",
+              "regcollation",
+              "0"
+            ],
+            [
+              "to_regnamespace_4086",
+              "regnamespace",
+              "t",
+              "pg_catalog",
+              "regnamespace",
+              "0"
+            ],
+            [
+              "to_regproc_3494",
+              "regproc",
+              "t",
+              "pg_catalog",
+              "regproc",
+              "0"
+            ],
+            [
+              "to_regrole_4093",
+              "regrole",
+              "t",
+              "pg_catalog",
+              "regrole",
+              "0"
+            ],
+            [
+              "tsmultirange_4286",
+              "tsmultirange",
+              "t",
+              "pg_catalog",
+              "tsmultirange",
+              "0"
+            ],
+            [
+              "tsrange_3933",
+              "tsrange",
+              "t",
+              "pg_catalog",
+              "tsrange",
+              "0"
+            ],
+            [
+              "tstzmultirange_4289",
+              "tstzmultirange",
+              "t",
+              "pg_catalog",
+              "tstzmultirange",
+              "0"
+            ],
+            [
+              "tstzrange_3937",
+              "tstzrange",
+              "t",
+              "pg_catalog",
+              "tstzrange",
+              "0"
+            ],
+            [
+              "version_89",
+              "text",
+              "t",
+              "pg_catalog",
+              "text",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_setup",
+      "sql": "CREATE ROLE regex_identity_reader; GRANT USAGE ON SCHEMA public TO regex_identity_reader; GRANT SELECT, INSERT ON regex_identity_source TO regex_identity_reader; GRANT SELECT ON regex_identity_view, regex_identity_named_view, regex_identity_set_view, regex_identity_select_set_view TO regex_identity_reader; REVOKE EXECUTE ON FUNCTION regexp_matches(text,text), regexp_like(text,text,text), regexp_split_to_table(text,text), regexp_split_to_array(text,text), regexp_count(text,text) FROM PUBLIC; SET ROLE regex_identity_reader",
+      "command_tags": [
+        "CREATE ROLE",
+        "GRANT",
+        "GRANT",
+        "GRANT",
+        "REVOKE",
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_matches_select_list",
+      "sql": "SELECT regexp_matches('a', 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_matches",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_matches_other_overload",
+      "sql": "SELECT regexp_matches('a', 'a', 'g') AS m",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_matches_from",
+      "sql": "SELECT * FROM regexp_matches('a', 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_matches",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_matches_lateral",
+      "sql": "SELECT m FROM (SELECT 'a' AS x) s, LATERAL regexp_matches(s.x, 'a') AS m",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_matches",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_matches_rows_from",
+      "sql": "SELECT * FROM ROWS FROM (regexp_matches('a', 'a'), generate_series(1, 2)) AS t(m, n)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_matches",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_matches_named",
+      "sql": "SELECT regexp_matches(pattern => 'a', string => 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_matches",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_split_table",
+      "sql": "SELECT regexp_split_to_table('a,b', ',')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_split_to_table",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_split_array",
+      "sql": "SELECT regexp_split_to_array('a,b', ',')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_split_to_array",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_like_flags",
+      "sql": "SELECT regexp_like('a', 'A', 'i')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_like",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_like_named",
+      "sql": "SELECT regexp_like(string => 'a', pattern => 'A', flags => 'i')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_like",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_like_allowed",
+      "sql": "SELECT regexp_like('a', 'a') AS liked",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "liked"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_count_where",
+      "sql": "SELECT id FROM regex_identity_source WHERE regexp_count(x, 'a') > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_count",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_count_allowed",
+      "sql": "SELECT regexp_count('aa', 'a', 1) AS count",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_view",
+      "sql": "SELECT liked FROM regex_identity_view",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_like",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_set_view",
+      "sql": "SELECT piece FROM regex_identity_set_view",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_split_to_table",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_select_set_view",
+      "sql": "SELECT * FROM regex_identity_select_set_view",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_split_to_table",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_check_insert",
+      "sql": "INSERT INTO regex_identity_source (id, x) VALUES (6, 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_count",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_prepare",
+      "sql": "PREPARE regex_identity_acl AS SELECT regexp_count($1, 'a')",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_execute",
+      "sql": "EXECUTE regex_identity_acl('aa')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_count",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_sql_function",
+      "sql": "SELECT regex_identity_like('abc') AS starts",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "starts"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_sql_function_revoked",
+      "sql": "SELECT regex_identity_pieces('a,b')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_split_to_array",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_routines_visible",
+      "sql": "SELECT specific_name FROM information_schema.routines WHERE routine_name LIKE 'regexp\\_%' ORDER BY specific_name",
+      "command_tags": [
+        "SELECT 24"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "specific_name"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "regexp_count_6255"
+            ],
+            [
+              "regexp_count_6256"
+            ],
+            [
+              "regexp_instr_6257"
+            ],
+            [
+              "regexp_instr_6258"
+            ],
+            [
+              "regexp_instr_6259"
+            ],
+            [
+              "regexp_instr_6260"
+            ],
+            [
+              "regexp_instr_6261"
+            ],
+            [
+              "regexp_instr_6262"
+            ],
+            [
+              "regexp_like_6263"
+            ],
+            [
+              "regexp_match_3396"
+            ],
+            [
+              "regexp_match_3397"
+            ],
+            [
+              "regexp_matches_2764"
+            ],
+            [
+              "regexp_replace_2284"
+            ],
+            [
+              "regexp_replace_2285"
+            ],
+            [
+              "regexp_replace_6251"
+            ],
+            [
+              "regexp_replace_6252"
+            ],
+            [
+              "regexp_replace_6253"
+            ],
+            [
+              "regexp_split_to_array_2768"
+            ],
+            [
+              "regexp_split_to_table_2766"
+            ],
+            [
+              "regexp_substr_6265"
+            ],
+            [
+              "regexp_substr_6266"
+            ],
+            [
+              "regexp_substr_6267"
+            ],
+            [
+              "regexp_substr_6268"
+            ],
+            [
+              "regexp_substr_6269"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_user_routines_visible",
+      "sql": "SELECT routine_name, routine_definition FROM information_schema.routines WHERE routine_name LIKE 'regex\\_identity\\_%' ORDER BY routine_name",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_name",
+            "routine_definition"
+          ],
+          "type_oids": [
+            19,
+            1043
+          ],
+          "rows": [
+            [
+              "regex_identity_count",
+              null
+            ],
+            [
+              "regex_identity_count_integer",
+              null
+            ],
+            [
+              "regex_identity_kind_of",
+              null
+            ],
+            [
+              "regex_identity_like",
+              null
+            ],
+            [
+              "regex_identity_pieces",
+              null
+            ],
+            [
+              "regex_identity_procedure",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_reset",
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_observation",
+      "sql": "SELECT has_function_privilege('regex_identity_reader', 'regexp_matches(text,text)', 'EXECUTE') AS matches, has_function_privilege('regex_identity_reader', 'regexp_matches(text,text,text)', 'EXECUTE') AS matches_flags, has_function_privilege('regex_identity_reader', 'regexp_like(text,text,text)', 'EXECUTE') AS like_flags, has_function_privilege('regex_identity_reader', 6254, 'EXECUTE') AS count, has_function_privilege('regex_identity_reader', 'regexp_split_to_array(text,text)', 'EXECUTE') AS split",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matches",
+            "matches_flags",
+            "like_flags",
+            "count",
+            "split"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t",
+              "f",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_catalog",
+      "sql": "SELECT p.oid, CASE WHEN a.grantee = p.proowner THEN 'owner' ELSE pg_get_userbyid(a.grantee) END AS grantee, a.grantor = p.proowner AS owner_grantor, a.privilege_type, a.is_grantable FROM pg_proc p, LATERAL aclexplode(p.proacl) a WHERE p.proname IN ('regexp_count','regexp_instr','regexp_like','regexp_match','regexp_matches','regexp_replace','regexp_split_to_array','regexp_split_to_table','regexp_substr') ORDER BY p.oid, 2",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "grantee",
+            "owner_grantor",
+            "privilege_type",
+            "is_grantable"
+          ],
+          "type_oids": [
+            26,
+            19,
+            16,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "2763",
+              "owner",
+              "t",
+              "EXECUTE",
+              "f"
+            ],
+            [
+              "2765",
+              "owner",
+              "t",
+              "EXECUTE",
+              "f"
+            ],
+            [
+              "2767",
+              "owner",
+              "t",
+              "EXECUTE",
+              "f"
+            ],
+            [
+              "6254",
+              "owner",
+              "t",
+              "EXECUTE",
+              "f"
+            ],
+            [
+              "6264",
+              "owner",
+              "t",
+              "EXECUTE",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_grant",
+      "sql": "GRANT EXECUTE ON FUNCTION regexp_matches(text,text), regexp_like(text,text,text) TO regex_identity_reader; SET ROLE regex_identity_reader",
+      "command_tags": [
+        "GRANT",
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_granted_select_list",
+      "sql": "SELECT regexp_matches('a', 'a') AS m, regexp_like('a', 'A', 'i') AS liked",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "liked"
+          ],
+          "type_oids": [
+            1009,
+            16
+          ],
+          "rows": [
+            [
+              "{a}",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_granted_from",
+      "sql": "SELECT * FROM regexp_matches('ab', '[ab]', 'g') AS m",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a}"
+            ],
+            [
+              "{b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_granted_execute",
+      "sql": "EXECUTE regex_identity_acl('aa')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_count",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_granted_still_revoked",
+      "sql": "SELECT regexp_split_to_array('a,b', ',')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_split_to_array",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_granted_routines_visible",
+      "sql": "SELECT specific_name FROM information_schema.routines WHERE routine_name LIKE 'regexp\\_%' ORDER BY specific_name",
+      "command_tags": [
+        "SELECT 26"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "specific_name"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "regexp_count_6255"
+            ],
+            [
+              "regexp_count_6256"
+            ],
+            [
+              "regexp_instr_6257"
+            ],
+            [
+              "regexp_instr_6258"
+            ],
+            [
+              "regexp_instr_6259"
+            ],
+            [
+              "regexp_instr_6260"
+            ],
+            [
+              "regexp_instr_6261"
+            ],
+            [
+              "regexp_instr_6262"
+            ],
+            [
+              "regexp_like_6263"
+            ],
+            [
+              "regexp_like_6264"
+            ],
+            [
+              "regexp_match_3396"
+            ],
+            [
+              "regexp_match_3397"
+            ],
+            [
+              "regexp_matches_2763"
+            ],
+            [
+              "regexp_matches_2764"
+            ],
+            [
+              "regexp_replace_2284"
+            ],
+            [
+              "regexp_replace_2285"
+            ],
+            [
+              "regexp_replace_6251"
+            ],
+            [
+              "regexp_replace_6252"
+            ],
+            [
+              "regexp_replace_6253"
+            ],
+            [
+              "regexp_split_to_array_2768"
+            ],
+            [
+              "regexp_split_to_table_2766"
+            ],
+            [
+              "regexp_substr_6265"
+            ],
+            [
+              "regexp_substr_6266"
+            ],
+            [
+              "regexp_substr_6267"
+            ],
+            [
+              "regexp_substr_6268"
+            ],
+            [
+              "regexp_substr_6269"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_granted_view",
+      "sql": "SELECT * FROM regex_identity_named_view ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "liked",
+            "second_digit",
+            "replaced"
+          ],
+          "type_oids": [
+            23,
+            16,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "4",
+              "a_b_"
+            ],
+            [
+              "2",
+              "f",
+              "0",
+              "z_"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_granted_select_set_view",
+      "sql": "SELECT * FROM regex_identity_select_set_view",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function regexp_split_to_table",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "acl_granted_reset",
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_granted_deallocate",
+      "sql": "DEALLOCATE regex_identity_acl",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_granted_observation",
+      "sql": "SELECT has_function_privilege('regex_identity_reader', 'regexp_matches(text,text)', 'EXECUTE') AS matches, has_function_privilege('regex_identity_reader', 'regexp_like(text,text,text)', 'EXECUTE') AS like_flags, has_function_privilege('regex_identity_reader', 'regexp_count(text,text)', 'EXECUTE') AS count, has_function_privilege('regexp_split_to_array(text,text)', 'EXECUTE') AS owner_split",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matches",
+            "like_flags",
+            "count",
+            "owner_split"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "acl_granted_catalog",
+      "sql": "SELECT p.oid, CASE WHEN a.grantee = p.proowner THEN 'owner' ELSE pg_get_userbyid(a.grantee) END AS grantee, a.grantor = p.proowner AS owner_grantor, a.privilege_type, a.is_grantable FROM pg_proc p, LATERAL aclexplode(p.proacl) a WHERE p.proname IN ('regexp_count','regexp_instr','regexp_like','regexp_match','regexp_matches','regexp_replace','regexp_split_to_array','regexp_split_to_table','regexp_substr') ORDER BY p.oid, 2",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "grantee",
+            "owner_grantor",
+            "privilege_type",
+            "is_grantable"
+          ],
+          "type_oids": [
+            26,
+            19,
+            16,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "2763",
+              "owner",
+              "t",
+              "EXECUTE",
+              "f"
+            ],
+            [
+              "2763",
+              "regex_identity_reader",
+              "t",
+              "EXECUTE",
+              "f"
+            ],
+            [
+              "2765",
+              "owner",
+              "t",
+              "EXECUTE",
+              "f"
+            ],
+            [
+              "2767",
+              "owner",
+              "t",
+              "EXECUTE",
+              "f"
+            ],
+            [
+              "6254",
+              "owner",
+              "t",
+              "EXECUTE",
+              "f"
+            ],
+            [
+              "6264",
+              "owner",
+              "t",
+              "EXECUTE",
+              "f"
+            ],
+            [
+              "6264",
+              "regex_identity_reader",
+              "t",
+              "EXECUTE",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}
