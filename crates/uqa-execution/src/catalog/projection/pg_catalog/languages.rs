@@ -9,7 +9,10 @@
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity, Value};
 use uqa_sql::{
     catalog::{
-        languages::{language_name, C_LANGUAGE, INTERNAL_LANGUAGE, PLPGSQL_LANGUAGE, SQL_LANGUAGE},
+        languages::{
+            language_name, C_LANGUAGE, INTERNAL_LANGUAGE, PLPGSQL_CALL_HANDLER,
+            PLPGSQL_INLINE_HANDLER, PLPGSQL_LANGUAGE, PLPGSQL_VALIDATOR, SQL_LANGUAGE,
+        },
         relation_oids::RelationCatalogOids,
         VirtualRelation,
     },
@@ -30,7 +33,14 @@ pub fn build_pg_language() -> Vec<ResultRow> {
         (INTERNAL_LANGUAGE, false, false, 0, 0, 2246),
         (C_LANGUAGE, false, false, 0, 0, 2247),
         (SQL_LANGUAGE, false, true, 0, 0, 2248),
-        (PLPGSQL_LANGUAGE, true, true, 13_644, 13_645, 13_646),
+        (
+            PLPGSQL_LANGUAGE,
+            true,
+            true,
+            PLPGSQL_CALL_HANDLER,
+            PLPGSQL_INLINE_HANDLER,
+            PLPGSQL_VALIDATOR,
+        ),
     ]
     .into_iter()
     .map(|(oid, procedural, trusted, call, inline, validator)| {
@@ -43,9 +53,9 @@ pub fn build_pg_language() -> Vec<ResultRow> {
             ("lanowner", int_value(RoleIdentity::BOOTSTRAP.oid)),
             ("lanispl", bool_value(procedural)),
             ("lanpltrusted", bool_value(trusted)),
-            ("lanplcallfoid", int_value(call)),
-            ("laninline", int_value(inline)),
-            ("lanvalidator", int_value(validator)),
+            ("lanplcallfoid", int_value(i64::from(call))),
+            ("laninline", int_value(i64::from(inline))),
+            ("lanvalidator", int_value(i64::from(validator))),
             ("lanacl", Value::Null),
         ])
     })

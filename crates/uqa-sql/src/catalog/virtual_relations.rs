@@ -69,6 +69,7 @@ virtual_relations! {
     PgEnum => ("pg_catalog", "pg_enum", 3501),
     PgProc => ("pg_catalog", "pg_proc", 1255),
     PgLanguage => ("pg_catalog", "pg_language", 2612),
+    PgExtension => ("pg_catalog", "pg_extension", 3079),
     PgForeignDataWrapper => ("pg_catalog", "pg_foreign_data_wrapper", 2328),
     PgForeignServer => ("pg_catalog", "pg_foreign_server", 1417),
     PgForeignTable => ("pg_catalog", "pg_foreign_table", 3118),

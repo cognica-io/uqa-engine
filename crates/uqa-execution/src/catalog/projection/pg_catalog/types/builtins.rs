@@ -123,6 +123,7 @@ pub(in crate::catalog::projection) fn builtin_type_oid_in_use(oid: i64) -> bool 
         oids.extend(domains.flat_map(|ty| [pg_type_oid(&ty), pg_type_array_oid(&ty)]));
         oids.extend(super::super::super::ag_catalog::age_type_oids());
         oids.extend(super::super::languages::type_oids());
+        oids.extend(super::super::extensions::type_oids());
         oids.extend(
             uqa_sql::catalog::foreign_relations::FOREIGN_CATALOGS
                 .iter()
