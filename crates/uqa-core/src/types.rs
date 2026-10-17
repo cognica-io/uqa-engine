@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Duration, NaiveDate};
+use chrono::{DateTime, NaiveDate};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Document identifier.

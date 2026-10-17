@@ -6,7 +6,7 @@
 
 //! SQL temporal values, parsing, formatting, and total ordering.
 
-use super::{DateTime, Duration, NaiveDate, Ordering};
+use super::{DateTime, NaiveDate, Ordering};
 use crate::{
     memory::{ProductionControl, ProductionString},
     ValueRetentionError,
@@ -21,6 +21,7 @@ mod production;
 mod timezone;
 
 pub use infinite::TemporalInfinity;
+mod calendar;
 pub use input::{TemporalDateOrder, TemporalInputError};
 pub use interval_style::TemporalIntervalStyle;
 pub use timezone::TemporalTimeZone;
