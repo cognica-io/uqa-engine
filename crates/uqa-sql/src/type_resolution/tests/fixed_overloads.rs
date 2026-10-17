@@ -572,6 +572,45 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
             vec!["text"],
             ColumnType::Regtype,
         ),
+        (
+            "substring",
+            vec![
+                param(Value::Str("Thomas".into())),
+                param(Value::Str("...$".into())),
+            ],
+            Some(FunctionDispatch::RegexSubstring),
+            vec!["text", "text"],
+            ColumnType::Text,
+        ),
+        (
+            "substring",
+            vec![
+                param(Value::Str("Thomas".into())),
+                param(Value::Str("%#\"o_a#\"_".into())),
+                param(Value::Str("#".into())),
+            ],
+            Some(FunctionDispatch::SimilarSubstring),
+            vec!["text", "text", "text"],
+            ColumnType::Text,
+        ),
+        (
+            "substring",
+            vec![param(Value::Str("Thomas".into())), param(Value::Int(2))],
+            None,
+            vec!["text", "integer"],
+            ColumnType::Text,
+        ),
+        (
+            "substring",
+            vec![
+                param(Value::Str("Thomas".into())),
+                param(Value::Int(2)),
+                param(Value::Int(3)),
+            ],
+            None,
+            vec!["text", "integer", "integer"],
+            ColumnType::Text,
+        ),
     ] {
         let expression = ScalarExpr::Func {
             order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,

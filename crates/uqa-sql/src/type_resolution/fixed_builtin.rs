@@ -476,6 +476,14 @@ pub(crate) fn runtime_dispatch(binding: &FunctionBinding) -> Option<FunctionDisp
         ("random", [left, right]) if left == "numeric" && right == "numeric" => {
             FunctionDispatch::RandomNumericRange
         }
+        ("substring", [input, pattern]) if input == "text" && pattern == "text" => {
+            FunctionDispatch::RegexSubstring
+        }
+        ("substring", [input, pattern, escape])
+            if input == "text" && pattern == "text" && escape == "text" =>
+        {
+            FunctionDispatch::SimilarSubstring
+        }
         _ => return None,
     })
 }

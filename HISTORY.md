@@ -28,6 +28,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Evaluate the POSIX and SQL regular-expression forms of `substring`, including `SIMILAR ... ESCAPE` and `FROM ... FOR` with text arguments, by their resolved PostgreSQL signature instead of reporting `42804` or returning a positional slice for a pattern that parses as an integer.
+
 - Preserve catalog-vector casts to OID-alias and domain arrays, including zero-based bounds, empty dimensions, NULL and checked integer-to-OID conversion.
 
 - Preserve PostgreSQL unsigned Julian DATE output when an owned retained composite field is reinterpreted after a same-width type change.

@@ -657,6 +657,8 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             | FunctionDispatch::RandomInt4Range
             | FunctionDispatch::RandomInt8Range
             | FunctionDispatch::RandomNumericRange
+            | FunctionDispatch::RegexSubstring
+            | FunctionDispatch::SimilarSubstring
             | FunctionDispatch::ArraySortJson
             | FunctionDispatch::Range { .. }
             | FunctionDispatch::Enum { .. } => {}

@@ -258,6 +258,8 @@ pub fn bound_scalar_function_strictness(
             | FunctionDispatch::RandomInt4Range
             | FunctionDispatch::RandomInt8Range
             | FunctionDispatch::RandomNumericRange
+            | FunctionDispatch::RegexSubstring
+            | FunctionDispatch::SimilarSubstring
             | FunctionDispatch::ArraySortJson
             | FunctionDispatch::JsonPath { .. }
             | FunctionDispatch::JsonExtract { .. }

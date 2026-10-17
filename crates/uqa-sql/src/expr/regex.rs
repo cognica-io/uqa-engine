@@ -15,6 +15,8 @@ use uqa_core::{
 mod preparation;
 mod query;
 mod replacement;
+mod substring;
+pub(super) use substring::evaluate_dispatched as eval_dispatched_substring;
 
 #[derive(Clone, Copy, Debug)]
 struct Options {

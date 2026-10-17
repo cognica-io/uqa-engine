@@ -90,6 +90,9 @@ pub(super) fn eval_dispatched_postgres_function_with_control(
     if let Some(result) = eval_postgres_integer_base_with_control(dispatch, args, control) {
         return Some(result);
     }
+    if let Some(result) = super::regex::eval_dispatched_substring(dispatch, args, control) {
+        return Some(result);
+    }
     comparison::evaluate(dispatch, args, control)
 }
 

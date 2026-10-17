@@ -127,6 +127,10 @@ pub enum FunctionDispatch {
     RandomInt4Range,
     RandomInt8Range,
     RandomNumericRange,
+    /// `substring(text, text)`: the POSIX regular-expression extraction selected by overload resolution, never inferred from argument values.
+    RegexSubstring,
+    /// `substring(text, text, text)`: SQL regular-expression extraction, which applies `similar_to_escape` before the POSIX extraction.
+    SimilarSubstring,
     ArraySortJson,
     /// SQL concatenation syntax, with its selected catalog overload after operand analysis.
     Concat {
@@ -271,6 +275,7 @@ impl FunctionDispatch {
             Self::RandomInt4Range | Self::RandomInt8Range | Self::RandomNumericRange => {
                 "pg_catalog.random"
             }
+            Self::RegexSubstring | Self::SimilarSubstring => "pg_catalog.substring",
             Self::ArraySortJson => "pg_catalog.array_sort",
             Self::Concat { .. } => "||",
             Self::ArrayConcat => "pg_catalog.array_cat",

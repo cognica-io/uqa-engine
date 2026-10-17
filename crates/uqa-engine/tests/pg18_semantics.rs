@@ -138,6 +138,8 @@ mod sql_value_clock;
 mod string_binary_lengths;
 #[path = "pg18_semantics/strings_and_bytea.rs"]
 mod strings_and_bytea;
+#[path = "pg18_semantics/substring_patterns.rs"]
+mod substring_patterns;
 #[path = "pg18_semantics/temporal.rs"]
 mod temporal;
 #[path = "pg18_semantics/temporal_comparisons.rs"]
