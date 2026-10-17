@@ -6,7 +6,7 @@ This crate compiles PostgreSQL's Advanced Regular Expression engine, Henry Spenc
 - Tag: `REL_18_4` (PostgreSQL 18.4)
 - Commit: `f5cc81719e6da4cbdb1f797c48b693e91018153a`
 
-`python3 scripts/sync-uqa-pg-regex.py` writes every file below unchanged to `postgres/` at its PostgreSQL path and regenerates `SHA256SUMS` and this file. `python3 scripts/sync-uqa-pg-regex.py --check` verifies the tree offline. An update must change the pinned tag and commit in the script, review the upstream diff of every listed file, and regenerate both files in the same change.
+`python3 scripts/sync-uqa-pg-regex.py` writes every file below unchanged to `postgres/` at its PostgreSQL path and regenerates `SHA256SUMS`, this file and `THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt`. `python3 scripts/sync-uqa-pg-regex.py --check` verifies the tree offline. An update must change the pinned tag and commit in the script, review the upstream diff of every listed file, regenerate the three files in the same change, and copy the notice into the bindings with `python3 scripts/sync-crate-legal-files.py`.
 
 ## Imported files
 
@@ -51,4 +51,4 @@ This crate compiles PostgreSQL's Advanced Regular Expression engine, Henry Spenc
 
 ## Licenses
 
-The imported files keep their notices: `postgres/COPYRIGHT` is the PostgreSQL License, and `postgres/src/backend/regex/COPYRIGHT` carries Henry Spencer's license for the regular expression package and the Tcl license for portions of `regc_locale.c`. `LICENSE` states the terms of the UQA-owned wrapper, build script and shims.
+The imported files keep their notices: `postgres/COPYRIGHT` is the PostgreSQL License, and `postgres/src/backend/regex/COPYRIGHT` carries Henry Spencer's license for the regular expression package and the Tcl license for portions of `regc_locale.c`. `LICENSE` states the terms of the UQA-owned wrapper, build script and shims. `THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt` reproduces both upstream files with this pin for the packages that redistribute the engine.

@@ -33,10 +33,14 @@ class SyncUQAPGRegexTest(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(SYNC.CRATE / name, target)
         shutil.copytree(SYNC.CRATE / SYNC.IMPORT_ROOT, self.crate / SYNC.IMPORT_ROOT)
+        self.notice = self.crate / SYNC.NOTICE.relative_to(SYNC.CRATE)
+        self.notice.parent.mkdir(parents=True)
+        shutil.copyfile(SYNC.NOTICE, self.notice)
         self.patches = [
             mock.patch.object(SYNC, "CRATE", self.crate),
             mock.patch.object(SYNC, "CHECKSUMS", self.crate / "SHA256SUMS"),
             mock.patch.object(SYNC, "UPSTREAM", self.crate / "UPSTREAM.md"),
+            mock.patch.object(SYNC, "NOTICE", self.notice),
         ]
         for patch in self.patches:
             patch.start()
@@ -90,6 +94,22 @@ class SyncUQAPGRegexTest(unittest.TestCase):
             self.assertIn(f"`{SYNC.IMPORT_ROOT}/{relative}`", text)
         for adaptation in SYNC.ADAPTATIONS:
             self.assertIn(adaptation, text)
+
+    def test_the_redistribution_notice_reproduces_the_license_files_unchanged(self) -> None:
+        notice = SYNC.render_notice(SYNC.checksum_entries())
+        self.assertEqual(self.notice.read_bytes(), notice)
+        for relative in SYNC.NOTICE_LICENSES:
+            self.assertIn((self.crate / SYNC.IMPORT_ROOT / relative).read_bytes(), notice)
+        self.assertIn(f"Source commit: {SYNC.POSTGRESQL_COMMIT}".encode(), notice)
+        self.assertTrue(notice.isascii())
+
+    def test_a_notice_that_differs_from_the_pin_is_rejected(self) -> None:
+        self.notice.write_bytes(self.notice.read_bytes().replace(b"Henry Spencer", b"H. Spencer", 1))
+        with self.assertRaisesRegex(RuntimeError, "POSTGRESQL-REGEX-NOTICE.txt differs"):
+            SYNC.check_tree()
+        self.notice.unlink()
+        with self.assertRaisesRegex(RuntimeError, "cannot read"):
+            SYNC.check_tree()
 
     def test_a_source_whose_tag_moved_is_rejected(self) -> None:
         def resolve(_source: pathlib.Path, revision: str) -> str:

@@ -18,6 +18,7 @@ include = [
     "UPSTREAM.md",
     "LICENSE",
     "SHA256SUMS",
+    "THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt",
     "build.rs",
     "src/**/*.rs",
     "postgres/**/*",

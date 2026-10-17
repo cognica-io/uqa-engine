@@ -22,6 +22,7 @@ CRATE = ROOT / "crates" / "uqa-pg-regex"
 IMPORT_ROOT = "postgres"
 CHECKSUMS = CRATE / "SHA256SUMS"
 UPSTREAM = CRATE / "UPSTREAM.md"
+NOTICE = CRATE / "THIRD-PARTY" / "POSTGRESQL-REGEX-NOTICE.txt"
 POSTGRESQL_REPOSITORY = "https://github.com/postgres/postgres.git"
 POSTGRESQL_TAG = "REL_18_4"
 POSTGRESQL_COMMIT = "f5cc81719e6da4cbdb1f797c48b693e91018153a"
@@ -52,6 +53,11 @@ IMPORTED_FILES = (
     "src/include/regex/regex.h",
     "src/include/regex/regguts.h",
 )
+
+# Imported license files that the redistribution notice reproduces unchanged.
+NOTICE_LICENSES = ("COPYRIGHT", "src/backend/regex/COPYRIGHT")
+
+NOTICE_SUMMARY = "UQA Engine evaluates PostgreSQL regular expressions with the uqa-pg-regex crate, which compiles PostgreSQL's Advanced Regular Expression engine, Henry Spencer's library in src/backend/regex, and PostgreSQL's Unicode category and case tables from unchanged PostgreSQL 18.4 sources. COPYRIGHT below states the PostgreSQL License that covers those sources, and src/backend/regex/COPYRIGHT below states Henry Spencer's license for the regular expression package and the Tcl license for portions of regc_locale.c. Both files follow unchanged."
 
 ADAPTATIONS = (
     "No imported file is edited. The build compiles the imported translation units `regcomp.c`, `regexec.c`, `regerror.c`, `regfree.c`, `unicode_category.c` and `unicode_case.c` together with the UQA-owned `shim/uqa_pg_regex.c`, with `shim/include` and `shim/regex` ahead of `postgres/src/include` on the include path, at `-O2` in every build profile as PostgreSQL compiles them, because the stack the engine's recursion uses depends on the optimization level.",
@@ -97,7 +103,7 @@ def render_upstream(entries: list[tuple[str, str]]) -> str:
         f"- Tag: `{POSTGRESQL_TAG}` (PostgreSQL 18.4)",
         f"- Commit: `{POSTGRESQL_COMMIT}`",
         "",
-        f"`python3 scripts/sync-uqa-pg-regex.py` writes every file below unchanged to `{IMPORT_ROOT}/` at its PostgreSQL path and regenerates `SHA256SUMS` and this file. `python3 scripts/sync-uqa-pg-regex.py --check` verifies the tree offline. An update must change the pinned tag and commit in the script, review the upstream diff of every listed file, and regenerate both files in the same change.",
+        f"`python3 scripts/sync-uqa-pg-regex.py` writes every file below unchanged to `{IMPORT_ROOT}/` at its PostgreSQL path and regenerates `SHA256SUMS`, this file and `THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt`. `python3 scripts/sync-uqa-pg-regex.py --check` verifies the tree offline. An update must change the pinned tag and commit in the script, review the upstream diff of every listed file, regenerate the three files in the same change, and copy the notice into the bindings with `python3 scripts/sync-crate-legal-files.py`.",
         "",
         "## Imported files",
         "",
@@ -111,10 +117,29 @@ def render_upstream(entries: list[tuple[str, str]]) -> str:
         "",
         "## Licenses",
         "",
-        f"The imported files keep their notices: `{IMPORT_ROOT}/COPYRIGHT` is the PostgreSQL License, and `{IMPORT_ROOT}/src/backend/regex/COPYRIGHT` carries Henry Spencer's license for the regular expression package and the Tcl license for portions of `regc_locale.c`. `LICENSE` states the terms of the UQA-owned wrapper, build script and shims.",
+        f"The imported files keep their notices: `{IMPORT_ROOT}/COPYRIGHT` is the PostgreSQL License, and `{IMPORT_ROOT}/src/backend/regex/COPYRIGHT` carries Henry Spencer's license for the regular expression package and the Tcl license for portions of `regc_locale.c`. `LICENSE` states the terms of the UQA-owned wrapper, build script and shims. `THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt` reproduces both upstream files with this pin for the packages that redistribute the engine.",
         "",
     ])
     return "\n".join(lines)
+
+
+def render_notice(entries: list[tuple[str, str]]) -> bytes:
+    """The notice that packages redistributing the engine ship: the pin and the imported license files, unchanged."""
+    digests = dict(entries)
+    header = [
+        "PostgreSQL regular expression engine",
+        "",
+        NOTICE_SUMMARY,
+        "",
+        f"Source: https://github.com/postgres/postgres/tree/{POSTGRESQL_TAG}",
+        f"Source commit: {POSTGRESQL_COMMIT}",
+    ]
+    header.extend(f"{relative} SHA-256: {digests[f'{IMPORT_ROOT}/{relative}']}" for relative in NOTICE_LICENSES)
+    parts = [("\n".join(header) + "\n").encode()]
+    for relative in NOTICE_LICENSES:
+        parts.append(f"\n======== {relative} ========\n\n".encode())
+        parts.append((CRATE / IMPORT_ROOT / relative).read_bytes())
+    return b"".join(parts)
 
 
 def run(command: list[str], cwd: pathlib.Path | None = None) -> bytes:
@@ -165,6 +190,8 @@ def import_files(source: pathlib.Path) -> None:
     entries = checksum_entries()
     CHECKSUMS.write_text(render_checksums(entries), encoding="utf-8")
     UPSTREAM.write_text(render_upstream(entries), encoding="utf-8")
+    NOTICE.parent.mkdir(parents=True, exist_ok=True)
+    NOTICE.write_bytes(render_notice(entries))
 
 
 def parse_checksums(text: str) -> list[tuple[str, str]]:
@@ -203,6 +230,12 @@ def check_tree() -> int:
         raise RuntimeError(f"cannot read {UPSTREAM}: {error}") from error
     if upstream != render_upstream(recorded):
         raise RuntimeError("UPSTREAM.md differs from the pinned import; run scripts/sync-uqa-pg-regex.py")
+    try:
+        notice = NOTICE.read_bytes()
+    except OSError as error:
+        raise RuntimeError(f"cannot read {NOTICE}: {error}") from error
+    if notice != render_notice(recorded):
+        raise RuntimeError("THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt differs from the pinned import; run scripts/sync-uqa-pg-regex.py")
     return len(recorded)
 
 

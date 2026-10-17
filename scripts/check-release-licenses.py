@@ -44,6 +44,7 @@ SEPARATELY_LICENSED_CRATES = {
         "LICENSE",
         "postgres/COPYRIGHT",
         "postgres/src/backend/regex/COPYRIGHT",
+        "THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt",
     ),
 }
 NPM_PACKAGES = (
@@ -52,6 +53,9 @@ NPM_PACKAGES = (
 )
 BINDING_PACKAGES = (*NPM_PACKAGES, ROOT / "python" / "uqa")
 SQL_SORT_NOTICE = "THIRD-PARTY/POSTGRESQL-SORT-NOTICE.txt"
+# Bindings ship the PostgreSQL regular expression engine with a notice that reproduces its upstream license files unchanged.
+POSTGRESQL_REGEX_NOTICE = "THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt"
+POSTGRESQL_REGEX_LICENSES = ("postgres/COPYRIGHT", "postgres/src/backend/regex/COPYRIGHT")
 PROJECT_TABLE = re.compile(
     r"^\[project\][ \t]*(?:#.*)?$(.*?)(?=^\[[^\n]+\][ \t]*(?:#.*)?$|\Z)",
     re.MULTILINE | re.DOTALL,
@@ -205,7 +209,18 @@ def binding_dictionary_payloads() -> dict[str, bytes]:
             payloads[f"THIRD-PARTY/{language.upper()}-{kind.upper()}-MANIFEST.json"] = (data / f"data/{kind}_manifest.json").read_bytes()
     payloads["THIRD-PARTY/LUCENE-SOURCE.md"] = (ROOT / "crates/uqa-analysis/THIRD-PARTY/LUCENE-SOURCE.md").read_bytes()
     payloads[SQL_SORT_NOTICE] = (ROOT / "crates/uqa-sql" / SQL_SORT_NOTICE).read_bytes()
+    payloads[POSTGRESQL_REGEX_NOTICE] = postgresql_regex_notice()
     return payloads
+
+
+def postgresql_regex_notice() -> bytes:
+    """The regular expression engine's notice, which must contain the pinned PostgreSQL, Spencer and Tcl license files unchanged."""
+    crate = ROOT / "crates/uqa-pg-regex"
+    notice = (crate / POSTGRESQL_REGEX_NOTICE).read_bytes()
+    for relative in POSTGRESQL_REGEX_LICENSES:
+        if (crate / relative).read_bytes() not in notice:
+            raise RuntimeError(f"{crate / POSTGRESQL_REGEX_NOTICE} must reproduce {relative} unchanged")
+    return notice
 
 
 def check_binding_sources() -> None:
