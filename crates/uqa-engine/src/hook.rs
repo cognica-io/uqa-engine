@@ -12,6 +12,20 @@ use uqa_sql::SQLError;
 use super::Engine;
 
 impl uqa_sql::expr::EngineHook for Engine {
+    fn read_range_input(
+        &self,
+        oid: u32,
+        text: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Value>, SQLError> {
+        uqa_execution::catalog::range_type::input::read_input(
+            &self.range_input_context(&self.catalog_read_view(), self),
+            oid,
+            text,
+            control,
+        )
+    }
+
     fn require_builtin_execute(
         &self,
         binding: &uqa_sql::ast::FunctionBinding,

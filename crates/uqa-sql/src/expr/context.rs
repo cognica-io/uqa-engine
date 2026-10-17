@@ -87,6 +87,18 @@ pub trait EngineHook {
         None
     }
 
+    /// Invoke the retained declaration's input and optional canonical support. Read-only value catalogs never execute these effects.
+    fn read_range_input(
+        &self,
+        oid: u32,
+        _text: &str,
+        _control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        Err(SQLError::Internal(format!(
+            "cache lookup failed for range type {oid}"
+        )))
+    }
+
     /// Resolve a catalog-owned SQL type name for casts evaluated with an engine context.
     fn resolve_type_name(&self, _name: &str) -> std::result::Result<Option<ColumnType>, String> {
         Ok(None)

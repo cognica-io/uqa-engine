@@ -1,0 +1,14 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "setup": "CREATE TYPE r AS RANGE (subtype=integer); CREATE TYPE other_r AS RANGE (subtype=integer); CREATE DOMAIN wrapped_r AS r; CREATE FUNCTION observe(statement text) RETURNS jsonb LANGUAGE plpgsql AS $$ DECLARE output text; code text; message text; detail text; hint text; BEGIN EXECUTE statement INTO output; RETURN jsonb_build_object('output',output); EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS code=RETURNED_SQLSTATE,message=MESSAGE_TEXT,detail=PG_EXCEPTION_DETAIL,hint=PG_EXCEPTION_HINT; RETURN jsonb_build_object('error',jsonb_build_object('sqlstate',code,'message',message,'detail',detail,'hint',hint)); END $$;",
+  "source_sha256": "792cb75a309e8e542df1643aa7eeac326a66525fbf91ed57fc69162dcf5515f0",
+  "docker_image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+  "cases": [
+    {"source":null,"sql":"SELECT (NULL::r)::text","output":null},
+    {"source":"text","sql":"SELECT (NULL::text::r)::text","output":null},
+    {"source":"integer","sql":"SELECT (NULL::integer::r)::text","error":{"hint":"","detail":"","message":"cannot cast type integer to r","sqlstate":"42846"}},
+    {"source":"r","sql":"SELECT (NULL::r::r)::text","output":null},
+    {"source":"other_r","sql":"SELECT (NULL::other_r::r)::text","error":{"hint":"","detail":"","message":"cannot cast type other_r to r","sqlstate":"42846"}},
+    {"source":"wrapped_r","sql":"SELECT (NULL::wrapped_r::r)::text","output":null}
+  ]
+}

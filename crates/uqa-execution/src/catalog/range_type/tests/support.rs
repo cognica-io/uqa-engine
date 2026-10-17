@@ -18,10 +18,17 @@ use uqa_sql::{
     SQLError,
 };
 
-struct Values(crate::catalog::CatalogReadView);
+pub(super) struct Values(pub(super) crate::catalog::CatalogReadView);
 
 impl SQLValueCatalog for Values {
     fn value_type_by_oid(&self, oid: u32) -> Result<Option<ColumnType>, SQLError> {
+        if let Some(definition) = self.0.range_definition_by_oid(oid)? {
+            return Ok(Some(if oid == definition.oid {
+                definition.column_type()
+            } else {
+                definition.multirange_type()
+            }));
+        }
         Ok(self
             .0
             .ranges()
@@ -80,6 +87,18 @@ impl SQLValueCatalog for Values {
                 .iter()
                 .position(|label| label.oid == oid)
                 .map(|position| (definition.oid, position))
+        }))
+    }
+    fn enum_value_by_oid(&self, oid: u32) -> Result<Option<uqa_core::EnumValue>, SQLError> {
+        Ok(self.0.enums().find_map(|definition| {
+            definition
+                .labels
+                .iter()
+                .find(|label| label.oid == oid)
+                .map(|label| {
+                    uqa_core::EnumValue::new(definition.oid, label.key.clone())
+                        .with_label_oid(Some(oid))
+                })
         }))
     }
     fn enum_label_uncommitted(&self, _: u32) -> bool {

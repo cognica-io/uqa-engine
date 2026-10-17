@@ -20,6 +20,7 @@ use crate::{
 
 mod datestyle;
 mod intervalstyle;
+mod ranges;
 mod timezone;
 
 /// Catalog input needed after analysis selects a type for an unknown literal. Domain array input includes each element's constraints, so the caller must retain this value rather than read the text again at execution.
@@ -31,11 +32,13 @@ pub(crate) fn requires_domain_array_input(target: &ColumnType) -> bool {
     matches!(target, ColumnType::Array(element) if matches!(array_leaf_type(element), ColumnType::Domain { .. }))
 }
 
-/// Input constants containing named composites or domain array elements must be read while the definition's catalog descriptor is available.
+/// Input constants containing declared composites/ranges or domain array elements must be read while the definition's catalog descriptor is available.
 pub(crate) fn requires_catalog_constant_input(target: &ColumnType) -> bool {
     requires_domain_array_input(target)
         || match target {
-            ColumnType::Composite(_) => true,
+            ColumnType::Composite(_)
+            | ColumnType::DeclaredRange(_)
+            | ColumnType::DeclaredMultirange(_) => true,
             ColumnType::Array(element) | ColumnType::Domain { base: element, .. } => {
                 requires_catalog_constant_input(element)
             }
@@ -54,7 +57,7 @@ pub fn read_catalog_input(
     }
     if !requires_catalog_constant_input(target) {
         return Err(SQLError::Internal(
-            "catalog input requires a composite or domain array".into(),
+            "catalog input requires a declared type or domain array".into(),
         ));
     }
     super::cast_value_with_type_resolution(
@@ -314,25 +317,15 @@ pub fn cast_value_with_type_resolution_with_control(
         {
             return Ok(output);
         }
-        if let Some(value) = engine.cast_domain(value, source_ty, target)? {
-            return Ok(control.retain_external_value(value)?);
-        }
-        if let Some(value) = super::super::enums::cast_to_enum_with_control(
-            engine.enum_labels(),
+        if let Some(value) = cast_defined_type(
+            engine,
             value,
+            source_ty,
             resolved_source_type.as_deref(),
             target,
             control,
         )? {
             return Ok(value);
-        }
-        if let Some(value) = super::super::composites::cast_to_composite(
-            engine,
-            value,
-            resolved_source_type.as_deref(),
-            target,
-        )? {
-            return Ok(control.retain_external_value(value)?);
         }
         if let Some(output) =
             catalog_array_output(value, source_ty, target_ty, target, engine, control)?
@@ -382,6 +375,35 @@ pub fn cast_value_with_type_resolution_with_control(
         engine,
         control,
     )
+}
+
+/// Declared type input and identity coercion precede generic output and array casts. Domain checks keep their established first position.
+fn cast_defined_type(
+    engine: &dyn EngineHook,
+    value: &Value,
+    source_name: Option<&str>,
+    source: Option<&ColumnType>,
+    target: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>> {
+    if let Some(value) = engine.cast_domain(value, source_name, target)? {
+        return Ok(Some(control.retain_external_value(value)?));
+    }
+    if let Some(value) = ranges::cast(engine, value, source, target, control)? {
+        return Ok(Some(value));
+    }
+    if let Some(value) = super::super::enums::cast_to_enum_with_control(
+        engine.enum_labels(),
+        value,
+        source,
+        target,
+        control,
+    )? {
+        return Ok(Some(value));
+    }
+    super::super::composites::cast_to_composite(engine, value, source, target)?
+        .map(|value| control.retain_external_value(value).map_err(SQLError::from))
+        .transpose()
 }
 
 fn resolve_catalog_type_with_control(
@@ -602,6 +624,8 @@ fn requires_catalog_array_cast(ty: &ColumnType) -> bool {
         | ColumnType::Regnamespace
         | ColumnType::Enum(_)
         | ColumnType::Composite(_)
+        | ColumnType::DeclaredRange(_)
+        | ColumnType::DeclaredMultirange(_)
         | ColumnType::TimestampTz
         | ColumnType::TimestampTzPrecision(_) => true,
         ColumnType::Array(element) => requires_catalog_array_cast(element),

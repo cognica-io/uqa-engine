@@ -21,6 +21,7 @@ mod catalog_indexes;
 mod constraint_names;
 mod generated_rewrite;
 mod mutation_rows;
+mod range_input;
 mod relation_arrays;
 mod relation_names;
 mod scoped_catalog;
