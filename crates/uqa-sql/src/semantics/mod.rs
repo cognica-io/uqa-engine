@@ -115,6 +115,7 @@ pub mod conflict;
 
 pub mod returning;
 
+pub mod insert_values;
 pub mod mutation_inputs;
 
 pub mod constraint_catalog;

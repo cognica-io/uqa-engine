@@ -590,6 +590,7 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
         params,
         inherited_ctes,
     )?;
+    super::analysis::reject_set_valued_inserts(context.query.source.ctes.routines, plan)?;
     let (statement_commands, _running_statement) =
         begin_view_merge_statement(inherited_ctes, triggers, &events, &target)?;
     let mut statement_scope = None;

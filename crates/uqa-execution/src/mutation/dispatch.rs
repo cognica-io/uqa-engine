@@ -42,6 +42,8 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
             uqa_sql::ast::RuleEvent::Insert,
         )? {
             let _ = view_privileges::ensure_insert(rewrite.authorization, stmt)?;
+            let expanded = set_returning_values_query(context, stmt)?;
+            let stmt = expanded.as_ref().unwrap_or(stmt);
             super::routine_calls::insert(context, stmt, params, inherited_ctes)?;
             return super::views::commands::run_view_insert_inner(
                 context,
@@ -59,12 +61,37 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
             view_rewrite::rewrite_insert_to_base(rewrite, stmt, params, bindings.as_ref())?;
         return run_insert(context, planning, &rewritten, params, inherited_ctes);
     }
+    let expanded = set_returning_values_query(context, stmt)?;
     crate::mutation::insert::table::run_table_insert(
         context,
         planning,
-        stmt,
+        expanded.as_ref().unwrap_or(stmt),
         params,
         inherited_ctes,
+    )
+}
+
+/// A single VALUES row runs as a target list, so its set-returning calls insert one row per result; the INSERT then takes its `INSERT ... SELECT` form. The target's own rewrite rules decide whether they read such an entry.
+fn set_returning_values_query<S: Clone + Send + Sync + 'static>(
+    context: &MutationStatementContext<'_, S>,
+    stmt: &InsertPlan,
+) -> Result<Option<InsertPlan>, SQLError> {
+    uqa_sql::semantics::insert_values::single_row_values_query(
+        context.query.source.ctes.routines,
+        stmt,
+        || {
+            uqa_sql::semantics::rules::analysis::relation_rule_row_columns(
+                context.mutation.rules.rules.analysis,
+                &stmt.table,
+                uqa_sql::ast::RuleEvent::Insert,
+            )
+        },
+        || {
+            uqa_sql::semantics::insert_values::implicit_target_columns(
+                context.mutation.rules.views.rewrite,
+                &stmt.table,
+            )
+        },
     )
 }
 

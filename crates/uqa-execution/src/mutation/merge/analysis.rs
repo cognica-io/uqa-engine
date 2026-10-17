@@ -66,6 +66,25 @@ pub(in crate::mutation) fn ensure_merge_privileges<S: Clone + 'static>(
     ensure_select_privileges_for_source_expressions(&stmt.source, &expressions, &scope)
 }
 
+/// Reject an INSERT action whose VALUES contain a set-returning call before the merge runs. `PostgreSQL` analyzes that list like a target list, and its executor rejects the call when it initializes the action, whether or not the action ever fires.
+pub(super) fn reject_set_valued_inserts(
+    routines: &dyn uqa_sql::routines::RoutineResolution,
+    stmt: &MergePlan,
+) -> Result<(), SQLError> {
+    for clause in &stmt.when_clauses {
+        if let uqa_sql::plan::MergeWhenPlan::InsertNotMatched { values, .. } = clause {
+            if values.iter().any(|value| {
+                uqa_sql::semantics::sets::static_setness::expression_may_return_set_statically(
+                    routines, value,
+                )
+            }) {
+                return Err(uqa_sql::semantics::sets::placement::set_valued_call_error());
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn merge_target_lock_strength(
     catalog: &dyn crate::query::locking::context::LockingCatalog,
     stmt: &MergePlan,
