@@ -22,6 +22,12 @@ Do not put rollout phase identifiers in source comments, documentation comments,
 
 Name feature branches with the `feature/` prefix and bug-fix branches with the `fix/` prefix. Do not use any other branch prefix.
 
+Associate each implementation branch with a pull request when first pushing it. Record its task, scope, dependency PRs and current verification state in that PR. Keep dependent diffs limited to their own logical unit by selecting the appropriate base branch. Finish verified deliveries, close their resolved issues and remove merged branches promptly; do not leave pushed work on branches without PRs or keep expanding a queue of unfinished branches and PRs.
+
+Apply the repository's existing type and applicable area labels when creating issues and pull requests, following comparable recent items and adding relevant concern labels where appropriate. Read back the created item to verify its labels, linked tasks and current scope; do not leave classification for a later pass or invent a new label when an established one fits.
+
+Preserve inherited task descriptions and scope while keeping their checkboxes, completion evidence and remaining work current. Reconcile the original task list, current plan and PR body whenever work is completed or transferred to a successor PR. Mark a task complete only with the required verification and delivery evidence; describe partial completion and the exact remaining requirements on unchecked items. Keep any historical snapshot explicitly separate from live progress. Never freeze a live checklist merely to preserve its original wording.
+
 Do not prefix commit messages or pull request titles with labels such as `feat:`, `fix:`, `chore:`, `doc:`, or `docs:`.
 
 Keep exactly one test executable per crate. Put additional integration-test files in submodules of that crate's single test target; never add another top-level `tests/*.rs` file or `[[test]]` target.
