@@ -73,13 +73,52 @@ pub fn resolve_routine_type_references(
 ) -> Result<RoutineShellTypes, SQLError> {
     let catalog = context.types;
     let mut shells = RoutineShellTypes::default();
+    resolve_parameter_type_references(context, def, &mut shells)?;
+    let written = def.return_written_type.take();
+    match &mut def.returns {
+        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
+            if !shells.result(
+                context,
+                &def.language,
+                type_name,
+                def.return_type_reference.as_ref(),
+            )? {
+                *type_name = resolve_used_routine_type(
+                    catalog,
+                    type_name,
+                    ROUTINE_RESULT_PSEUDO_TYPES,
+                    def.return_type_reference.as_ref(),
+                    MissingRoutineType::Result(written.as_deref()),
+                )?;
+            }
+        }
+        FunctionReturns::None | FunctionReturns::Table => {}
+    }
+    def.return_type_reference = None;
+    Ok(shells)
+}
+
+/// Bind ordered argument types and defaults before inspecting the declared result.
+fn resolve_parameter_type_references(
+    context: &super::compilation::RoutineCompilationContext<'_>,
+    def: &mut CreateFunction,
+    shells: &mut RoutineShellTypes,
+) -> Result<(), SQLError> {
+    let catalog = context.types;
     let mut have_defaults = false;
     let mut after_variadic = false;
     for index in 0..def.params.len() {
         let (previous, rest) = def.params.split_at_mut(index);
         let parameter = &mut rest[0];
         let written = parameter.written_type.take();
-        if !shells.argument(context, &def.language, &parameter.type_name, parameter.mode)? {
+        let shell_oid = shells.argument(
+            context,
+            &def.language,
+            &parameter.type_name,
+            parameter.type_reference.as_ref(),
+            parameter.mode,
+        )?;
+        if shell_oid.is_none() {
             parameter.type_name = resolve_used_routine_type(
                 catalog,
                 &parameter.type_name,
@@ -132,8 +171,12 @@ pub fn resolve_routine_type_references(
                     "only input parameters can have default values",
                 ));
             }
-            parameter.default_type =
-                super::defaults::analyze_parameter_default(context, default, &parameter.type_name)?;
+            parameter.default_type = super::defaults::analyze_parameter_default(
+                context,
+                default,
+                &parameter.type_name,
+                shell_oid,
+            )?;
             have_defaults = true;
         } else if input && have_defaults {
             return Err(routine_definition_error(
@@ -145,23 +188,7 @@ pub fn resolve_routine_type_references(
             ));
         }
     }
-    let written = def.return_written_type.take();
-    match &mut def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            if !shells.result(context, &def.language, type_name)? {
-                *type_name = resolve_used_routine_type(
-                    catalog,
-                    type_name,
-                    ROUTINE_RESULT_PSEUDO_TYPES,
-                    def.return_type_reference.as_ref(),
-                    MissingRoutineType::Result(written.as_deref()),
-                )?;
-            }
-        }
-        FunctionReturns::None | FunctionReturns::Table => {}
-    }
-    def.return_type_reference = None;
-    Ok(shells)
+    Ok(())
 }
 
 /// Whether two parameters of these modes may not share a name: a pure input never conflicts with a pure output.
