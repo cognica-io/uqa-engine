@@ -478,7 +478,7 @@ fn cast_resolved_value(
         return cast_array(
             value,
             source_name.as_ref().map(|name| name.as_str()),
-            "regrole",
+            &ColumnType::Regrole,
             "regrole[]",
             engine,
             control,
@@ -568,7 +568,9 @@ fn resolve_regobject_input(
         ObjectKind::RoutineName
     } else if target_ty.eq_ignore_ascii_case("regprocedure") {
         ObjectKind::Routine
-    } else if target_ty.eq_ignore_ascii_case("regrole") {
+    } else if matches!(target_column_type, Some(ColumnType::Regrole))
+        || target_ty.eq_ignore_ascii_case("regrole")
+    {
         ObjectKind::Role
     } else if matches!(target_column_type, Some(ColumnType::Regnamespace)) {
         ObjectKind::Namespace
@@ -645,12 +647,11 @@ fn cast_catalog_array(
     }
     let source_element = source.map(|name| name.trim_end_matches("[]"));
     let leaf = array_leaf_type(target);
-    let target_element = control.copy_text(&leaf.catalog_name())?;
     let target_name = target.sql_name_with_control(control)?;
     let output = cast_array(
         value,
         source_element,
-        &target_element,
+        leaf,
         &target_name,
         Some(engine),
         control,
@@ -667,14 +668,32 @@ fn cast_catalog_array(
 fn cast_array(
     value: &Value,
     source: Option<&str>,
-    target_element: &str,
+    target_element: &ColumnType,
     target_name: &str,
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    control.check()?;
+    if matches!(value, Value::Null) {
+        return Ok(control.finish(Value::Null, control.empty_reservation())?);
+    }
+    let vector_element = match value {
+        Value::LegacyVector(vector) => Some(match vector.kind() {
+            uqa_core::LegacyVectorKind::SmallInteger => ColumnType::SmallInteger,
+            uqa_core::LegacyVectorKind::Oid => ColumnType::Oid,
+        }),
+        _ => None,
+    };
+    let vector_name = vector_element
+        .as_ref()
+        .map(|element| element.sql_name_with_control(control))
+        .transpose()?;
+    let source = vector_name.as_deref().map(String::as_str).or(source);
+    let target_element_name = target_element.catalog_name_with_control(control)?;
     let parsed;
     let array = match value {
         Value::Array(array) => array,
+        Value::LegacyVector(vector) => vector.as_array(),
         Value::Str(text) => {
             parsed = parse_pg_array_literal_with_control(text, control)?;
             &parsed
@@ -685,11 +704,33 @@ fn cast_array(
             )))
         }
     };
-    let elements = cast_array_elements(array.elements(), source, target_element, engine, control)?;
-    let array = rebuild_array(array, elements, control)?
-        .ok_or_else(|| SQLError::TypeMismatch("array dimensions changed during cast".into()))?;
+    let elements = cast_array_elements(
+        array.elements(),
+        source,
+        &target_element_name,
+        engine,
+        control,
+    )?;
+    let normalize_empty =
+        if let Some(source) = vector_element.filter(|_| array.elements().is_empty()) {
+            source != *target_element
+                && !crate::type_resolution::cast_catalog_entry_with_control(
+                    &source,
+                    target_element,
+                    control,
+                )?
+                .is_some_and(|entry| entry.method == crate::type_resolution::CastMethod::Binary)
+        } else {
+            false
+        };
+    let array = if normalize_empty {
+        ArrayValue::try_new_with_control(elements, control)?
+    } else {
+        rebuild_array(array, elements, control)?
+    }
+    .ok_or_else(|| SQLError::TypeMismatch("array dimensions changed during cast".into()))?;
     let (array, memory) = array.into_parts();
-    let oid = if target_element == "regrole" {
+    let oid = if matches!(target_element, ColumnType::Regrole) {
         Some(crate::catalog::type_metadata::pg_type_oid(&ColumnType::Regrole) as u32)
     } else {
         array.element_type_oid()

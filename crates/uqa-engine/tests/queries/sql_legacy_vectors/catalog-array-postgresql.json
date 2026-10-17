@@ -1,0 +1,451 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT '23 25'::oidvector::regtype[]::text, array_dims('23 25'::oidvector::regtype[]), pg_typeof('23 25'::oidvector::regtype[])::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "array_dims",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "[0:1]={integer,text}",
+              "[0:1]",
+              "regtype[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ''::oidvector::regtype[]::text, array_dims(''::oidvector::regtype[]), cardinality(''::oidvector::regtype[])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "array_dims",
+            "cardinality"
+          ],
+          "type_oids": [
+            25,
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "{}",
+              "[0:-1]",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '23 25'::int2vector::regtype[]::text, array_dims('23 25'::int2vector::regtype[])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "array_dims"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "[0:1]={integer,text}",
+              "[0:1]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ''::int2vector::regtype[]::text, array_dims(''::int2vector::regtype[])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "array_dims"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{}",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '0 4294967295'::oidvector::regrole[]::text, array_dims('0 4294967295'::oidvector::regrole[])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "array_dims"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "[0:1]={-,4294967295}",
+              "[0:1]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '0 -1'::int2vector::regrole[]::text, array_dims('0 -1'::int2vector::regrole[])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "array_dims"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "[0:1]={-,4294967295}",
+              "[0:1]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '23 25'::oidvector::regtype[]::text[]::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[0:1]={integer,text}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT NULL::oidvector::regtype[] IS NULL, NULL::oidvector::regrole[] IS NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT (-1)::smallint::regproc::oid, (-1)::smallint::regprocedure::oid, (-1)::smallint::regrole::oid, (-1)::smallint::regtype::oid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "oid",
+            "oid",
+            "oid"
+          ],
+          "type_oids": [
+            26,
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "4294967295",
+              "4294967295",
+              "4294967295",
+              "4294967295"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT (-1)::integer::regproc::oid, (-1)::integer::regprocedure::oid, (-1)::integer::regrole::oid, (-1)::integer::regtype::oid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "oid",
+            "oid",
+            "oid"
+          ],
+          "type_oids": [
+            26,
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "4294967295",
+              "4294967295",
+              "4294967295",
+              "4294967295"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT (-1)::bigint::regproc",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "OID out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT (-1)::bigint::regprocedure",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "OID out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 4294967296::bigint::regrole",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "OID out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT 4294967296::bigint::regtype",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "OID out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE DOMAIN positive_oid AS oid CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '23 25'::oidvector::positive_oid[]::text, array_dims('23 25'::oidvector::positive_oid[])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "array_dims"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "[0:1]={23,25}",
+              "[0:1]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT '0 23'::oidvector::positive_oid[]",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain positive_oid violates check constraint \"positive_oid_check\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT ''::oidvector::positive_oid[]::text, array_dims(''::oidvector::positive_oid[])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "array_dims"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{}",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION vector_signature(integer,text) RETURNS integer LANGUAGE SQL AS 'SELECT $1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT proargtypes::regtype[]::text FROM pg_proc WHERE proname='vector_signature'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "proargtypes"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[0:1]={integer,text}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ],
+  "provenance": {
+    "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "scope": "Legacy-vector casts to catalog-dependent arrays; values, dimensions, NULL and domain constraints",
+    "postgresql": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "source_commit": "f5cc81719e6da4cbdb1f797c48b693e91018153a"
+  }
+}

@@ -12361,6 +12361,45 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_vector_casts_preserve_element_identity_bounds_and_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/tests/legacy_vectors.rs",
+      "capability": "Catalog vector array casts",
+      "workload": "OID and int2 legacy vectors with populated and empty arrays, held outputs, exhausted allowance and both cancellation owners.",
+      "invariant": "Catalog array casts preserve element OIDs, zero bounds and PostgreSQL empty dimensions; quota/cancellation failures leave inputs and retained output reservations intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "oid_alias_integer_casts_preserve_postgresql_width_and_bounds",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/casting/tests.rs",
+      "capability": "Catalog vector array casts",
+      "workload": "Four OID alias targets with negative int2/int4 and bigint inputs at and beyond unsigned 32-bit bounds.",
+      "invariant": "Narrow signed inputs retain their PostgreSQL 32-bit word and bigint out-of-range conversions report 22003.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "legacy_vector_catalog_array_casts_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/sql_legacy_vectors.rs",
+      "capability": "Catalog vector array casts",
+      "workload": "Twenty independent PostgreSQL 18 observations across catalog vectors, OID aliases, NULL, zero-based and empty arrays, domain constraints and pg_proc.",
+      "invariant": "Public values, types, array bounds, diagnostics and catalog function signatures match the independent PostgreSQL reference.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

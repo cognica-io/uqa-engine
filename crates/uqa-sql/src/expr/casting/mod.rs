@@ -224,7 +224,7 @@ pub fn cast_value_from_with_control(
             return Ok(control.finish(Value::Decimal(value), memory)?);
         }
         "regproc" | "regprocedure" | "regrole" | "regtype" if matches!(v, Value::Int(_)) => {
-            Ok(v.clone())
+            cast_oid(v, source_ty, control)
         }
         "pg_node_tree" => {
             let source = canonical_cast_source_with_control(source_ty, v, control)?;

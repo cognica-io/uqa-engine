@@ -9,6 +9,7 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 mod domain_inputs;
 mod enum_arrays;
+mod legacy_vectors;
 mod ranges;
 mod timezone;
 

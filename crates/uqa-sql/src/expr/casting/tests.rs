@@ -279,6 +279,28 @@ fn xid_rejects_integer_and_oid_cast_sources() {
 }
 
 #[test]
+fn oid_alias_integer_casts_preserve_postgresql_width_and_bounds() {
+    for target in ["regproc", "regprocedure", "regrole", "regtype"] {
+        for source in ["smallint", "integer"] {
+            assert_eq!(
+                cast_value_from(&Value::Int(-1), target, Some(source)).unwrap(),
+                Value::Int(i64::from(u32::MAX)),
+                "{source} to {target}"
+            );
+        }
+        for input in [-1, i64::from(u32::MAX) + 1] {
+            let error = cast_value_from(&Value::Int(input), target, Some("bigint")).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("22003"));
+            assert_eq!(error.to_string(), "OID out of range");
+        }
+        assert_eq!(
+            cast_value_from(&Value::Int(i64::from(u32::MAX)), target, Some("bigint")).unwrap(),
+            Value::Int(i64::from(u32::MAX))
+        );
+    }
+}
+
+#[test]
 fn legacy_vector_text_casts_use_postgresql_space_separation() {
     let vector = Value::List(vec![Value::Int(23), Value::Int(25)]);
     assert_eq!(
