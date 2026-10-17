@@ -92,6 +92,12 @@ impl uqa_execution::query::routine_invocation::SQLRoutineInvoker for ScopedEngin
             ),
         }
     }
+    fn require_user_function_execute(
+        &self,
+        function: &uqa_sql::routines::SQLUserFunction,
+    ) -> Result<(), SQLError> {
+        uqa_sql::routines::security::ensure_routine_execute_privilege(self.engine, &function.def)
+    }
 }
 
 impl uqa_execution::query::set_projection::SetFunctionRuntime for ScopedEngineHook<'_> {

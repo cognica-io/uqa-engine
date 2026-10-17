@@ -96,10 +96,33 @@ pub fn user_function_composite_result(
     else {
         return Ok(None);
     };
+    // A polymorphic result without a resolved invocation type names no composite.
+    if crate::type_resolution::routine_polymorphic_type(name).is_some() {
+        return Ok(None);
+    }
     let Some(ColumnType::Composite(reference)) = routines.resolve_type_name(name)? else {
         return Ok(None);
     };
     crate::expr::composites::descriptor(routines.composite_types(), reference.oid).map(Some)
+}
+
+/// The columns a user function in FROM declares, before column aliases: a named composite result's attributes, including those of a single composite OUT parameter, or else the OUT parameters. `None` for a function with neither, whose single column the FROM item names.
+pub fn user_function_declared_columns(
+    routines: &dyn RoutineResolution,
+    function: &SQLUserFunction,
+    invocation: Option<&RoutineInvocationBinding>,
+) -> Result<Option<Vec<String>>, SQLError> {
+    Ok(
+        user_function_composite_result(routines, function, invocation)?
+            .map(|descriptor| {
+                descriptor
+                    .attributes
+                    .iter()
+                    .map(|attribute| attribute.name.clone())
+                    .collect()
+            })
+            .or_else(|| user_function_output_columns_for(function)),
+    )
 }
 
 pub fn resolve_user_table_function(

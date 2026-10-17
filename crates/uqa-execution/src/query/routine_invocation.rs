@@ -8,7 +8,7 @@
 
 use crate::functions::SQLTableFunctionResult;
 use uqa_core::Value;
-use uqa_sql::{ast::FunctionBinding, SQLError};
+use uqa_sql::{ast::FunctionBinding, routines::SQLUserFunction, SQLError};
 
 /// Execute a routine through the caller's transaction and session context.
 pub trait SQLRoutineInvoker {
@@ -35,4 +35,6 @@ pub trait SQLRoutineInvoker {
         binding: Option<&FunctionBinding>,
         arguments: &[(Option<String>, Value)],
     ) -> Option<Result<SQLTableFunctionResult, SQLError>>;
+    /// Enforce EXECUTE on a user routine that a FROM item calls, as `PostgreSQL` checks it when it initializes the scan, before the routine runs for any row.
+    fn require_user_function_execute(&self, function: &SQLUserFunction) -> Result<(), SQLError>;
 }

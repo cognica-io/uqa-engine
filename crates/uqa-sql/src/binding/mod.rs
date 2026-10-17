@@ -604,26 +604,11 @@ impl SchemaScope {
                 let columns = user_function
                     .as_ref()
                     .map(|resolved| {
-                        crate::semantics::user_function_composite_result(
+                        crate::semantics::user_function_declared_columns(
                             routines,
                             &resolved.function,
                             resolved.binding.invocation.as_deref(),
                         )
-                        .map(|descriptor| {
-                            descriptor
-                                .map(|descriptor| {
-                                    descriptor
-                                        .attributes
-                                        .iter()
-                                        .map(|attribute| attribute.name.clone())
-                                        .collect()
-                                })
-                                .or_else(|| {
-                                    crate::semantics::user_function_output_columns_for(
-                                        &resolved.function,
-                                    )
-                                })
-                        })
                     })
                     .transpose()?
                     .flatten()

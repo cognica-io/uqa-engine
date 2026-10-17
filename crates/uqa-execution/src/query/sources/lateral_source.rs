@@ -13,6 +13,55 @@ use super::{
     TableFunctionCall,
 };
 
+/// Enforce EXECUTE on each function of a lateral FROM item, which the join calls once per outer row, as `PostgreSQL` checks it when it initializes the scan, before any outer row is read.
+pub(super) fn require_lateral_function_execute<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    source: &SourcePlan,
+    input_schema: &crate::RowSchema,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+) -> Result<(), SQLError> {
+    let calls = match source {
+        SourcePlan::Function {
+            name,
+            binding,
+            args,
+            ..
+        } => vec![(name.as_str(), binding.as_ref(), args.as_slice())],
+        SourcePlan::FunctionGroup { functions, .. } => functions
+            .iter()
+            .map(|function| {
+                (
+                    function.name.as_str(),
+                    function.binding.as_ref(),
+                    function.args.as_slice(),
+                )
+            })
+            .collect(),
+        _ => return Ok(()),
+    };
+    let hook = context.relational.expression_scope(ctes.clone());
+    for (name, binding, args) in calls {
+        match resolve_user_table_function(
+            context.relational.catalog,
+            name,
+            binding,
+            args,
+            input_schema,
+            params,
+            hook.as_ref(),
+        )? {
+            Some(resolved) => hook.require_user_function_execute(&resolved.function)?,
+            None => {
+                if let Some(binding) = binding.filter(|binding| binding.builtin) {
+                    hook.require_builtin_execute(binding)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) context: SourceContext<'a, S>,
     pub(super) right: SourcePlan,

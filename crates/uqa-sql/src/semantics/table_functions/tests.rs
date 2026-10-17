@@ -6,9 +6,11 @@
 
 use super::{
     builtin_table_function_overloads, upgrade_legacy_table_function_binding,
-    validate_table_function_column_definition, ColumnDefinitionRequest,
+    user_function_declared_columns, validate_table_function_column_definition,
+    ColumnDefinitionRequest,
 };
 use crate::ast::{ColumnType, FunctionBinding};
+use crate::routines::{RoutineBody, SQLUserFunction};
 use crate::{RowSchema, SQLError, ScalarExpr};
 
 fn legacy_binding(kind: &str) -> FunctionBinding {
@@ -223,4 +225,38 @@ fn built_in_results_decide_column_definition_lists() {
     }
     // UQA extensions and host-registered functions describe their own results.
     column_definition("cypher", &[], &["agtype"]).unwrap();
+}
+
+fn user_function(sql: &str) -> SQLUserFunction {
+    let crate::Statement::CreateFunction(definition) = crate::compile(sql).unwrap().remove(0)
+    else {
+        unreachable!("CREATE FUNCTION fixture")
+    };
+    SQLUserFunction::new(*definition, RoutineBody::Source)
+}
+
+#[test]
+fn user_functions_declare_their_from_columns_before_aliases() {
+    let declared =
+        |sql: &str| user_function_declared_columns(&NoRoutines, &user_function(sql), None).unwrap();
+    // OUT parameters, including the columns of RETURNS TABLE, name the columns; an unnamed one takes its position.
+    assert_eq!(
+        declared(
+            "CREATE FUNCTION f(OUT a int, OUT int) RETURNS SETOF record LANGUAGE sql AS 'SELECT 1, 2'"
+        ),
+        Some(vec!["a".to_string(), "column2".to_string()])
+    );
+    assert_eq!(
+        declared("CREATE FUNCTION f(n int) RETURNS TABLE (u int) LANGUAGE sql AS 'SELECT n'"),
+        Some(vec!["u".to_string()])
+    );
+    // The FROM item names the single column of any other result.
+    assert_eq!(
+        declared("CREATE FUNCTION f() RETURNS SETOF int LANGUAGE sql AS 'SELECT 1'"),
+        None
+    );
+    assert_eq!(
+        declared("CREATE FUNCTION f() RETURNS SETOF record LANGUAGE sql AS 'SELECT 1'"),
+        None
+    );
 }

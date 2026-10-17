@@ -6,24 +6,12 @@
 
 //! Lazy generate-series, string, and JSON value streams.
 
-use super::TableFunctionRows;
 use uqa_core::Value;
 use uqa_sql::assignment::conversion::{json_table_arg, json_table_value_to_text};
-use uqa_sql::{semantics::table_function_empty_schema, SQLError};
+use uqa_sql::SQLError;
 
-pub fn unnest_row_stream(
-    evaluated: Vec<Value>,
-    output_name: &str,
-    alias: Option<&str>,
-    column_aliases: &[String],
-) -> Result<TableFunctionRows, SQLError> {
-    if evaluated.is_empty() || column_aliases.len() > evaluated.len() {
-        return Err(SQLError::BadArity {
-            name: "unnest".into(),
-            expected: "one output alias per array argument".into(),
-            actual: evaluated.len(),
-        });
-    }
+/// The rows of `unnest(array [, ...])`: one per position of the longest array, with NULL past the end of a shorter one.
+pub fn unnest_rows(evaluated: Vec<Value>) -> Result<crate::PhysicalProjectRows, SQLError> {
     let arrays = evaluated
         .into_iter()
         .map(|value| match value {
@@ -50,26 +38,15 @@ pub fn unnest_row_stream(
             )),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let columns = table_function_empty_schema(
-        "unnest",
-        output_name,
-        alias,
-        column_aliases,
-        arrays.len(),
-        false,
-    );
     let row_count = arrays.iter().map(Vec::len).max().unwrap_or(0);
-    Ok(TableFunctionRows::new(
-        columns,
-        Box::new((0..row_count).map(move |row_position| {
-            Ok(crate::PhysicalRow::from_values(
-                arrays
-                    .iter()
-                    .map(|array| array.get(row_position).cloned().unwrap_or(Value::Null))
-                    .collect(),
-            ))
-        })),
-    ))
+    Ok(Box::new((0..row_count).map(move |row_position| {
+        Ok(crate::PhysicalRow::from_values(
+            arrays
+                .iter()
+                .map(|array| array.get(row_position).cloned().unwrap_or(Value::Null))
+                .collect(),
+        ))
+    })))
 }
 
 pub fn generate_series_values(
@@ -89,9 +66,10 @@ pub fn generate_series_values(
         .get(2)
         .map_or(Ok(1), |value| generate_series_integer(value, "step"))?;
     if increment == 0 {
-        return Err(SQLError::TypeMismatch(
-            "generate_series step cannot be 0".into(),
-        ));
+        return Err(SQLError::Routine {
+            sqlstate: "22023".into(),
+            message: "step size cannot equal zero".into(),
+        });
     }
     let mut current = Some(start);
     Ok(Box::new(std::iter::from_fn(move || {
@@ -215,12 +193,11 @@ pub fn json_object_key_values(
     Ok(Box::new(object.into_iter().map(|(key, _)| Value::Str(key))))
 }
 
-pub fn json_each_row_stream(
+/// The rows of `json_each` and its variants: one key and value per member of a JSON object.
+pub fn json_each_rows(
     name: &str,
     evaluated: Vec<Value>,
-    _alias: Option<&str>,
-    column_aliases: &[String],
-) -> Result<TableFunctionRows, SQLError> {
+) -> Result<crate::PhysicalProjectRows, SQLError> {
     if evaluated.len() != 1 {
         return Err(SQLError::TypeMismatch(format!("{name} takes 1 arg")));
     }
@@ -230,21 +207,10 @@ pub fn json_each_row_stream(
             "{name}: argument is not an object"
         )));
     };
-    let key_column = column_aliases
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "key".into());
-    let value_column = column_aliases
-        .get(1)
-        .cloned()
-        .unwrap_or_else(|| "value".into());
-    Ok(TableFunctionRows::new(
-        vec![key_column, value_column],
-        Box::new(object.into_iter().map(move |(key, value)| {
-            Ok(crate::PhysicalRow::from_values(vec![
-                Value::Str(key),
-                json_table_value_to_text(&value),
-            ]))
-        })),
-    ))
+    Ok(Box::new(object.into_iter().map(move |(key, value)| {
+        Ok(crate::PhysicalRow::from_values(vec![
+            Value::Str(key),
+            json_table_value_to_text(&value),
+        ]))
+    })))
 }
