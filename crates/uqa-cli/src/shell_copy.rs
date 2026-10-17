@@ -12,7 +12,7 @@ use crate::lexer::{tokenize_sql, TokenKind};
 impl Session {
     pub(super) fn copy_file(&mut self, argument: &str, out: &mut impl Write) -> Result<(), String> {
         let (sql, from, path) = parse_copy(argument)?;
-        let _interrupt = crate::interrupt::QueryInterrupt::new(self.engine.cancellation_token());
+        let _interrupt = crate::interrupt::QueryInterrupt::new(self.engine.cancellation_token())?;
         self.prepare_statement_transaction(&sql)?;
         let count = if from {
             let file =

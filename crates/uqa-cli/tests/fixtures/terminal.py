@@ -96,11 +96,14 @@ try:
     output = terminal.sample("string continuation", b"SELECT")
     assert b"\x1b[1;34mSELECT" not in output, output
     terminal.sample("clear", b"\x03")
-    terminal.sample("catalog", b"CREATE TABLE shell_probe(id int);\r", b"usql> ")
+    terminal.sample("catalog", b"CREATE TABLE shell_probe(shell_probe_column int);\r", b"usql> ")
     for line in (b"SELECT * FROM shell_pr\t", b"SELECT * FROM public.shell_pr\t"):
         output = terminal.sample("completion", line)
         assert b"shell_probe" in output, output
         terminal.sample("clear", b"\x03")
+    output = terminal.sample("qualified column", b"SELECT t.shell_probe_c\t")
+    assert b"t.shell_probe_column" in output, output
+    terminal.sample("clear", b"\x03")
     terminal.sample("long query", b"SELECT pg_sleep(30);\r")
     terminal.sample("cancel query", b"\x03", b"57014")
     terminal.sample("reuse session", b"SELECT 42;\r", b"(1 row)")
@@ -108,6 +111,12 @@ try:
     terminal.sample("abort transaction", b"SELECT 1/0;\r", b"22012")
     terminal.sample("recover transaction", b"ROLLBACK;\r", b"usql> ")
     terminal.sample("reuse after rollback", b"SELECT 43;\r", b"(1 row)")
+    included = WORK / "interrupted.sql"
+    included.write_text("SELECT 'include_ready';\nSELECT pg_sleep(30);\nSELECT 'must_not_continue';\n")
+    terminal.sample("include", f"\\i '{included}'\r".encode(), b"include_ready")
+    output = terminal.sample("interrupt include", b"\x03", b"usql> ")
+    assert b"must_not_continue" not in output, output
+    terminal.sample("reuse after include", b"SELECT 44;\r", b"(1 row)")
     terminal.sample("highlight off", b"\\set HIGHLIGHT off\r", b"usql> ")
     output = terminal.sample("plain input", b"SELECT")
     assert b"\x1b[1;34mSELECT" not in output, output
@@ -148,4 +157,43 @@ try:
 finally:
     terminal.close()
 assert "from_editor" not in (WORK / "processes.history").read_text()
+
+
+def pipe_witness(process, witness):
+    output = b""
+    deadline = time.monotonic() + 10
+    while witness not in output and time.monotonic() < deadline:
+        if select.select([process.stdout], [], [], 0.1)[0]:
+            part = os.read(process.stdout.fileno(), 65536)
+            if not part:
+                break
+            output += part
+    assert witness in output, output
+    return output
+
+
+for mode in ("idle", "pipe", "file"):
+    script = "SELECT 'interrupt_ready';\nSELECT pg_sleep(30);\nSELECT 'must_not_continue';\n"
+    path = WORK / "batch-interrupt.sql"
+    path.write_text(script)
+    args = [BINARY, str(path)] if mode == "file" else [BINARY]
+    process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               env={**os.environ, "UQA_HISTORY": str(WORK / "batch.history")})
+    try:
+        if mode == "pipe":
+            process.stdin.write(script.encode())
+            process.stdin.flush()
+        before = pipe_witness(process, b"usql> " if mode == "idle" else b"interrupt_ready")
+        process.send_signal(signal.SIGINT)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired as error:
+            raise AssertionError(f"SIGINT did not stop {mode} input") from error
+        after, error = process.communicate(timeout=5)
+        assert process.returncode == 3, (mode, process.returncode, before + after, error)
+        assert b"must_not_continue" not in before + after, (mode, before + after)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=5)
 print("Terminal editing, completion, cancellation, idle notifications, editor, pager and history passed")

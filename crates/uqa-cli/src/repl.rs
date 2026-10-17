@@ -69,13 +69,7 @@ impl Session {
         }
         let mut buffer = String::new();
         loop {
-            let mut helper = match self.repl_helper() {
-                Ok(helper) => helper,
-                Err(err) => {
-                    let _ = writeln!(out, "completion catalog error: {err}");
-                    return ExitCode::FAILURE;
-                }
-            };
+            let mut helper = self.interactive_helper(out);
             helper.configure(
                 &buffer,
                 self.shell.variables.flag("HIGHLIGHT", true),
@@ -139,11 +133,16 @@ impl Session {
     }
 
     pub(super) fn run_line_repl(&mut self, out: &mut impl Write) -> ExitCode {
+        let input_scope = crate::interrupt::InputScope::enter();
+        let generation = input_scope.generation;
         let stdin = io::stdin();
         let mut input = String::new();
         let mut buffer = String::new();
         let mut had_error = false;
         loop {
+            if crate::interrupt::generation() != generation {
+                return ExitCode::from(3);
+            }
             let prompt = if buffer.is_empty() {
                 PROMPT_PRIMARY
             } else {
@@ -152,7 +151,16 @@ impl Session {
             let _ = write!(out, "{prompt}");
             let _ = out.flush();
             input.clear();
-            let read = stdin.lock().read_line(&mut input);
+            let read = {
+                let _waiting = crate::interrupt::InputWait::enter();
+                if crate::interrupt::generation() != generation {
+                    return ExitCode::from(3);
+                }
+                stdin.lock().read_line(&mut input)
+            };
+            if crate::interrupt::generation() != generation {
+                return ExitCode::from(3);
+            }
             match read {
                 Ok(0) => {
                     if let Err(error) = self.finish_input(&mut buffer, out) {
@@ -173,7 +181,11 @@ impl Session {
                 }
             }
             let line = input.trim_end_matches(['\n', '\r']);
-            match self.handle_prompt_line(line, &mut buffer, out) {
+            let outcome = self.handle_prompt_line(line, &mut buffer, out);
+            if crate::interrupt::generation() != generation {
+                return ExitCode::from(3);
+            }
+            match outcome {
                 PromptLineOutcome::Continue => {}
                 PromptLineOutcome::Failed => {
                     had_error = true;
@@ -302,6 +314,20 @@ impl Session {
             Vec::new(),
             columns.into_iter().collect(),
         ))
+    }
+
+    pub(super) fn interactive_helper(&self, out: &mut impl Write) -> UsqlHelper {
+        match self.repl_helper() {
+            Ok(helper) => helper,
+            Err(error) => {
+                let _ = writeln!(
+                    out,
+                    "completion catalog error: {}",
+                    crate::printing::terminal_text(&error)
+                );
+                UsqlHelper::new(Vec::new(), Vec::new(), Vec::new())
+            }
+        }
     }
 
     pub(super) fn load_readline_history(&self, editor: &mut UsqlEditor) -> Result<(), String> {

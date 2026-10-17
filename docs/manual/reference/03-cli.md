@@ -104,8 +104,8 @@ SQL owns typed text output, including booleans, arrays, enums, retained composit
 | `\new` | Replace the current engine with a fresh in-memory engine |
 | `\reset` | Reopen the current database and reset session state |
 | `\where`, `\conninfo` | Print the current database location or connection information |
-| `\timing [on|off]` | Configure timing output |
-| `\expanded [on|off|auto]`, `\x [on|off|auto]` | Configure expanded display |
+| `\timing [on\|off]` | Configure timing output |
+| `\expanded [on\|off\|auto]`, `\x [on\|off\|auto]` | Configure expanded display |
 | `\pset [option [value]]` | Inspect or change printing settings |
 | `\a`, `\H`, `\t`, `\f`, `\C` | Output format, tuples, separator and title shortcuts |
 | `\o [path]` | Redirect query output or restore standard output |
@@ -154,7 +154,7 @@ Client file COPY keeps SQL parsing and text/CSV encoding in Engine. Failed expor
 \copy items FROM 'items.csv' WITH (FORMAT CSV, HEADER)
 ```
 
-Ctrl-C clears pending input or cancels an executing SQL command. Cancellation leaves PostgreSQL transaction recovery rules intact: an aborted explicit transaction requires rollback. LISTEN notifications use the current session's bounded inbox and are shown while the editor is idle as well as after commands; no idle notification polling runs without committed subscriptions. Reconnection keeps client printing settings and variables but replaces the SQL session.
+Ctrl-C clears pending interactive input or cancels an executing SQL command. In piped input or script-file mode, interruption stops the remaining input and exits with status 3, matching psql; an interrupted interactive `\i` returns to the prompt. Catalog completion errors leave the prompt available for transaction recovery. Cancellation leaves PostgreSQL transaction recovery rules intact: an aborted explicit transaction requires rollback. LISTEN notifications use the current session's bounded inbox and are shown while the editor is idle as well as after commands; no idle notification polling runs without committed subscriptions. Reconnection keeps client printing settings and variables but replaces the SQL session.
 
 ## Script execution and transactions
 

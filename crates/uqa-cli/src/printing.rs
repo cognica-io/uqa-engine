@@ -354,7 +354,7 @@ impl PrintOptions {
                 result.push_str(&separator);
             }
         }
-        if self.footer && !self.tuples_only {
+        if self.footer && !self.tuples_only && (!expanded || rows.is_empty()) {
             writeln!(
                 result,
                 "({} {})",
@@ -488,10 +488,27 @@ impl DisplayTable {
             .collect::<Result<Vec<_>, _>>()?;
         let numeric = (0..columns.len())
             .map(|column| {
+                if let Some(ty) = result.column_types.get(column).and_then(Option::as_ref) {
+                    let mut ty = ty;
+                    while let uqa_sql::ColumnType::Domain { base, .. } = ty {
+                        ty = base;
+                    }
+                    return matches!(
+                        ty,
+                        uqa_sql::ColumnType::SmallInteger
+                            | uqa_sql::ColumnType::Integer
+                            | uqa_sql::ColumnType::BigInteger
+                            | uqa_sql::ColumnType::Oid
+                            | uqa_sql::ColumnType::Xid
+                            | uqa_sql::ColumnType::Real
+                            | uqa_sql::ColumnType::DoublePrecision
+                            | uqa_sql::ColumnType::Numeric { .. }
+                    );
+                }
                 (0..result.rows.len()).any(|row| {
                     matches!(
                         result.value_at(row, column),
-                        Some(Value::Int(_) | Value::Float(_))
+                        Some(Value::Int(_) | Value::Float(_) | Value::Decimal(_))
                     )
                 })
             })

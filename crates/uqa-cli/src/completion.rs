@@ -12,6 +12,11 @@ use super::{
 };
 
 pub(crate) const SQL_KEYWORDS: &[&str] = &[
+    "BEGIN",
+    "COMMIT",
+    "ROLLBACK",
+    "SAVEPOINT",
+    "RELEASE",
     "CREATE",
     "TABLE",
     "DROP",
@@ -433,9 +438,15 @@ impl Completer for UsqlHelper {
         if let Some((start, candidates)) = self.backslash_argument_completions(prefix_line) {
             return Ok((start, candidates));
         }
+        Ok(self.sql_completions(prefix_line))
+    }
+}
+
+impl UsqlHelper {
+    fn sql_completions(&self, prefix_line: &str) -> (usize, Vec<Pair>) {
         let (start, prefix) = word_completion_prefix(prefix_line);
         if prefix_line[..start].ends_with(':') && !prefix_line[..start].ends_with("::") {
-            return Ok((
+            return (
                 start,
                 self.variables
                     .iter()
@@ -445,20 +456,33 @@ impl Completer for UsqlHelper {
                         replacement: name.clone(),
                     })
                     .collect(),
-            ));
+            );
         }
         let after_table_keyword = follows_table_keyword(&prefix_line[..start]);
         if prefix.is_empty() && !after_table_keyword {
-            return Ok((start, Vec::new()));
+            return (start, Vec::new());
         }
-        Ok((
+        if !after_table_keyword {
+            if let Some(dot) = prefix.rfind('.') {
+                let mut candidates = self.table_completion_candidates(prefix, true);
+                if candidates.is_empty() {
+                    Self::push_matches(
+                        &mut candidates,
+                        &self.column_names,
+                        &prefix[dot + 1..].to_ascii_uppercase(),
+                        "column",
+                    );
+                    return (start + dot + 1, candidates);
+                }
+                return (start, candidates);
+            }
+        }
+        (
             start,
             self.completion_candidates(prefix, after_table_keyword),
-        ))
+        )
     }
-}
 
-impl UsqlHelper {
     fn complete_filename(
         &self,
         line: &str,

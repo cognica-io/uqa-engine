@@ -193,7 +193,9 @@ fn run_cli(args: CliArgs) -> ExitCode {
     session.copy_text = args.copy_text;
     let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut out = TrackedWriter::new(stdout.lock());
+    // Do not hold stdout's lock while waiting for input: signal-driven process exit
+    // flushes stdout from the interrupt thread.
+    let mut out = TrackedWriter::new(stdout);
 
     let exit = if let Some(command) = args.command {
         let result = if command.trim_start().starts_with('\\') {
@@ -212,6 +214,7 @@ fn run_cli(args: CliArgs) -> ExitCode {
             }
         }
     } else {
+        let generation = interrupt::generation();
         let mut scripts_succeeded = true;
         for script in &args.scripts {
             if let Err(err) = session.run_file(script, &mut out) {
@@ -224,7 +227,9 @@ fn run_cli(args: CliArgs) -> ExitCode {
             }
         }
 
-        if !scripts_succeeded {
+        if interrupt::generation() != generation {
+            ExitCode::from(3)
+        } else if !scripts_succeeded {
             ExitCode::FAILURE
         } else if session.shell.quit || (!args.scripts.is_empty() && !stdin.is_terminal()) {
             ExitCode::SUCCESS

@@ -43,6 +43,7 @@ impl Session {
         out: &mut impl Write,
         history: bool,
     ) -> PromptLineOutcome {
+        let _input_scope = crate::interrupt::InputScope::enter();
         match self.process_line_result(line, buffer, out, history) {
             Ok(outcome) => outcome,
             Err(error) => {
@@ -175,23 +176,35 @@ impl Session {
         let mut line = String::new();
         let mut failure = None;
         let mut number = 0;
+        let input_scope = crate::interrupt::InputScope::enter();
+        let generation = input_scope.generation;
         loop {
+            if crate::interrupt::generation() != generation {
+                return Err("canceling script due to user request".into());
+            }
             line.clear();
             let bytes = reader
                 .by_ref()
                 .take(16 * 1024 * 1024 + 1)
                 .read_line(&mut line)
                 .map_err(|error| error.to_string())?;
+            if crate::interrupt::generation() != generation {
+                return Err("canceling script due to user request".into());
+            }
             if bytes == 0 {
                 break;
             }
             number += 1;
-            match self.process_line_result(
+            let outcome = self.process_line_result(
                 line.trim_end_matches(['\n', '\r']),
                 &mut buffer,
                 out,
                 false,
-            ) {
+            );
+            if crate::interrupt::generation() != generation {
+                return Err("canceling script due to user request".into());
+            }
+            match outcome {
                 Ok(PromptLineOutcome::Quit) => {
                     self.shell.quit = true;
                     return Ok(());
@@ -499,7 +512,7 @@ impl Session {
     }
 
     pub(super) fn query(&mut self, sql: &str) -> Result<SQLResult, String> {
-        let _interrupt = crate::interrupt::QueryInterrupt::new(self.engine.cancellation_token());
+        let _interrupt = crate::interrupt::QueryInterrupt::new(self.engine.cancellation_token())?;
         self.prepare_statement_transaction(sql)?;
         let updates_listen = tokenize_sql(sql).iter().any(|token| {
             token.kind == TokenKind::Word

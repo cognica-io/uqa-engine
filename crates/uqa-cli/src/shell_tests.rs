@@ -75,6 +75,60 @@ fn completion_displays_controls_without_changing_the_inserted_identifier() {
 }
 
 #[test]
+fn qualified_column_completion_preserves_aliases_and_table_qualification() {
+    let session = session();
+    session
+        .engine
+        .sql("CREATE TABLE shell_probe(name text)", &[])
+        .unwrap();
+    let helper = session.repl_helper().unwrap();
+    let history = MemHistory::new();
+    let context = Context::new(&history);
+    for prefix in [
+        "SELECT t.",
+        "SELECT shell_probe.",
+        "SELECT public.shell_probe.",
+        "SELECT \"table.alias\".",
+    ] {
+        let input = format!("{prefix}na");
+        let (start, candidates) = helper.complete(&input, input.len(), &context).unwrap();
+        assert_eq!(start, prefix.len(), "{input}");
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.replacement == "name"),
+            "{input}"
+        );
+    }
+    let input = "SELECT * FROM public.shell_pr";
+    let (start, candidates) = helper.complete(input, input.len(), &context).unwrap();
+    assert_eq!(&input[..start], "SELECT * FROM ");
+    assert!(candidates
+        .iter()
+        .any(|candidate| candidate.replacement == "public.shell_probe"));
+}
+
+#[test]
+fn completion_catalog_failure_preserves_the_interactive_helper_and_rollback() {
+    let session = session();
+    session.engine.sql("BEGIN", &[]).unwrap();
+    let token = session.engine.cancellation_token();
+    token.cancel();
+    let mut output = Vec::new();
+    let helper = session.interactive_helper(&mut output);
+    assert!(String::from_utf8(output)
+        .unwrap()
+        .contains("completion catalog error:"));
+    assert!(!helper.completion_candidates("ROLLBACK", false).is_empty());
+    token.reset();
+    session.engine.sql("ROLLBACK", &[]).unwrap();
+    assert_eq!(
+        session.engine.sql("SELECT 42", &[]).unwrap().value_at(0, 0),
+        Some(&Value::Int(42))
+    );
+}
+
+#[test]
 fn filename_completion_inserts_psql_quotes_for_spaces_and_apostrophes() {
     let mut session = session();
     let directory = tempfile::tempdir().unwrap();
@@ -208,6 +262,22 @@ fn formats_preserve_positional_columns_and_escape_terminal_controls() {
     assert!(!output.contains('\x1b'));
     assert!(output.contains("한글 |"), "{output}");
     assert!(output.contains("a    |"), "{output}");
+}
+
+#[test]
+fn expanded_footers_and_numeric_null_alignment_match_postgresql() {
+    let mut session = session();
+    let (output, failed) = script(&mut session, "\\x on\nSELECT 1;\nSELECT 1 WHERE false;\n");
+    assert!(!failed, "{output}");
+    assert!(output.contains("RECORD 1"), "{output}");
+    assert!(!output.contains("(1 row)"), "{output}");
+    assert!(output.contains("(0 rows)"), "{output}");
+    let (output, failed) = script(
+        &mut session,
+        "\\x off\n\\pset null 'nil'\nSELECT 1.2::numeric AS price, NULL::numeric AS amount;\n",
+    );
+    assert!(!failed, "{output}");
+    assert!(output.contains("   1.2 |    nil \n"), "{output}");
 }
 
 #[test]
