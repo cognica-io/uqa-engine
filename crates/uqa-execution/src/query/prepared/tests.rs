@@ -121,6 +121,8 @@ impl PreparedArgumentScopes for Scopes {
                 aggregates: &aggregates,
                 volatility: self,
                 cast_type: &cast_type,
+                routines: &crate::catalog::test_support::NoRoutines,
+                parameters,
             },
             assignment: self,
             analyze_type: &mut analyze_type,

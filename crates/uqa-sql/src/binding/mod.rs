@@ -118,6 +118,10 @@ struct SchemaScope {
     rule_condition_event: Option<crate::ast::RuleEvent>,
     /// Native MERGE action syntax is legal in a RETURNING expression and its descendant queries.
     merge_returning: bool,
+    /// The kind of expression under analysis at this query level, which decides where a set-returning call may appear, as `PostgreSQL`'s `p_expr_kind` does.
+    set_placement: crate::semantics::sets::placement::SetPlacement,
+    /// The set-returning calls analyzed so far at this query level. Two readings differ exactly when an expression analyzed between them contains one, as `PostgreSQL` compares `p_last_srf`.
+    set_calls: usize,
     stored_whole_rows: BTreeMap<String, ScalarExpr>,
     /// The parameters of the SQL routine whose body is bound, as the outermost scope: a reference that resolves into them, because no column of any query level takes its name, becomes the positional parameter it names.
     routine_parameters: Option<RoutineParameterScope>,
@@ -151,6 +155,8 @@ impl SchemaScope {
             stored_expression_outer: None,
             rule_condition_event: None,
             merge_returning: false,
+            set_placement: crate::semantics::sets::placement::SetPlacement::Expanding,
+            set_calls: 0,
             stored_whole_rows: BTreeMap::new(),
             routine_parameters: None,
             scalar_binding: ScalarBindingMode::Stored,
@@ -180,6 +186,8 @@ impl SchemaScope {
             stored_expression_outer: None,
             rule_condition_event: None,
             merge_returning: false,
+            set_placement: crate::semantics::sets::placement::SetPlacement::Expanding,
+            set_calls: 0,
             stored_whole_rows: BTreeMap::new(),
             routine_parameters: None,
             scalar_binding: ScalarBindingMode::Stored,

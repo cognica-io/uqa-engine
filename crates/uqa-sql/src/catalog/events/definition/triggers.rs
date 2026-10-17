@@ -11,7 +11,7 @@ use crate::{
     },
     catalog::{
         events::validation::{
-            is_boolean_type, validate_trigger_condition_references,
+            is_boolean_type, validate_trigger_condition_names, validate_trigger_condition_rows,
             validate_trigger_transition_relation, TriggerConditionTypeResolver,
         },
         resolution::{RelationLookupMode, RelationResolution},
@@ -438,12 +438,8 @@ impl EventAnalysisContext<'_> {
         }
         let mut condition_routine_bindings_changed = false;
         if let Some(mut condition) = definition.when.take() {
-            condition_routine_bindings_changed = self.validate_trigger_condition(
-                definition,
-                &columns,
-                &mut condition,
-                lookup_mode == RelationLookupMode::Dynamic,
-            )?;
+            condition_routine_bindings_changed =
+                self.validate_trigger_condition(definition, &columns, &mut condition, lookup_mode)?;
             definition.when = Some(condition);
         }
         Ok((relation, condition_routine_bindings_changed))
@@ -506,9 +502,9 @@ impl EventAnalysisContext<'_> {
         definition: &CreateTrigger,
         columns: &[crate::ast::ColumnDef],
         condition: &mut Expr,
-        created: bool,
+        lookup_mode: RelationLookupMode,
     ) -> Result<bool, SQLError> {
-        validate_trigger_condition_references(definition, columns, condition)?;
+        validate_trigger_condition_names(columns, condition)?;
         let bound = bind_expr(condition, &mut TriggerConditionTypeResolver { columns })?;
         let lowered = crate::plan::ExpressionPlan::lower_with(bound, &|name: &str| {
             self.routines.has_registered_aggregate_function(name)
@@ -517,7 +513,17 @@ impl EventAnalysisContext<'_> {
         let ty =
             self.stored_routines
                 .bind_expression(&mut plan, &[], &crate::RowSchema::default())?;
-        if created {
+        if lookup_mode == RelationLookupMode::Dynamic {
+            // A condition stored by an earlier release keeps loading; evaluating a set-returning call in it reports the executor's diagnostic.
+            if crate::semantics::sets::validation::expression_may_return_set(
+                self.routines,
+                self.routines,
+                &plan.scalar,
+                &crate::RowSchema::default(),
+                &[],
+            )? {
+                crate::semantics::sets::placement::SetPlacement::TriggerWhen.admit(true)?;
+            }
             self.stored_routines
                 .assign_input_collations(&mut plan, &crate::RowSchema::default())?;
         }
@@ -540,6 +546,7 @@ impl EventAnalysisContext<'_> {
                 };
             }
         }
+        validate_trigger_condition_rows(definition, columns, condition)?;
         crate::catalog::regrole_dependencies::reject_stored_regrole_constants_with(
             self.regroles,
             condition,

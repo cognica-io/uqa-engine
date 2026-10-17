@@ -17,6 +17,7 @@ impl<T: RoutineResolution + AggregateClassifier + ?Sized> SetFunctionCatalog for
 
 pub type PhysicalProjection = (ProjectionTarget, ScalarExpr);
 
+pub mod placement;
 pub mod rewrite;
 pub mod validation;
 use rewrite::rewrite_set_calls;
@@ -78,3 +79,6 @@ impl SetProjectionPlan {
 }
 
 pub mod static_setness;
+
+#[cfg(test)]
+mod tests;

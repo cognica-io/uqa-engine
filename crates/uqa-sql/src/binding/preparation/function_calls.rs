@@ -9,6 +9,7 @@
 use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{BinaryOp, FunctionBinding};
 use crate::catalog::collations::{derivation::Derivation, CollationSelection};
+use crate::semantics::sets::placement::SetPlacement;
 use crate::type_resolution::ResolvedFunctionOverload;
 
 pub(super) struct ObservedFunctionArguments {
@@ -622,11 +623,10 @@ impl Preparation<'_> {
             order_types.push(value.ty);
         }
         if let Some(filter) = filter {
-            selected = selected.combine(
-                self.boolean_expression(filter, input, subqueries, "FILTER")?
-                    .derivation
-                    .error_only(),
-            );
+            let filter = self.in_placement(SetPlacement::Filter, |analysis| {
+                analysis.boolean_expression(filter, input, subqueries, "FILTER")
+            })?;
+            selected = selected.combine(filter.derivation.error_only());
         }
         Ok(ObservedFunctionModifiers {
             diagnostics: selected,

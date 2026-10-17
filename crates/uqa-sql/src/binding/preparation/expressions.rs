@@ -136,13 +136,6 @@ impl Preparation<'_> {
                     return Err(SQLError::Internal("Boolean test takes one input".into()));
                 };
                 let value = self.boolean_expression(argument, input, subqueries, test.label())?;
-                super::super::analysis::require_scalar_boolean_test(
-                    self.routines,
-                    argument,
-                    input,
-                    &self.parameters.values(),
-                    test,
-                )?;
                 return Ok(ExpressionType::independent(
                     Some(ColumnType::Boolean),
                     &[value],
@@ -218,6 +211,7 @@ impl Preparation<'_> {
                 return self.cast_expression(expr, ty, input, subqueries);
             }
             ScalarExpr::Binary { op, lhs, rhs } => {
+                let calls = self.set_calls();
                 let mut left = self.expression(lhs, input, subqueries)?;
                 let mut right = self.expression(rhs, input, subqueries)?;
                 if matches!(
@@ -225,6 +219,10 @@ impl Preparation<'_> {
                     (ScalarExpr::Row(_), ScalarExpr::Row(_))
                 ) {
                     self.coerce_row_comparison(*op, &mut left, &mut right, false)?;
+                    self.reject_set_inputs(
+                        calls,
+                        crate::semantics::sets::placement::row_comparison_set_error,
+                    )?;
                     let mut result = ExpressionType::resolved(Some(ColumnType::Boolean));
                     result.derivation = ExpressionType::comparison(&left, &right);
                     return Ok(result);
@@ -432,6 +430,7 @@ impl Preparation<'_> {
                 ExpressionType::resolved(Some(ColumnType::Boolean))
             }
             ScalarExpr::InSubquery { expr, subquery, .. } => {
+                let calls = self.set_calls();
                 let mut value = self.expression(expr, input, subqueries)?;
                 let query = subqueries.get(*subquery).ok_or_else(|| {
                     error("XX000", "scalar subquery slot is outside its plan".into())
@@ -442,6 +441,10 @@ impl Preparation<'_> {
                     result.derivation = Derivation::implicit(i64::from(oid));
                 }
                 self.binary(BinaryOp::Equal, &mut value, &mut result)?;
+                self.reject_set_inputs(
+                    calls,
+                    crate::semantics::sets::placement::row_comparison_set_error,
+                )?;
                 ExpressionType::combined(Some(ColumnType::Boolean), &[value, result])
             }
             ScalarExpr::Func { .. } => self.function_expression(expression, input, subqueries)?,
@@ -452,12 +455,18 @@ impl Preparation<'_> {
                 filter,
                 modifiers,
             } => {
+                let calls = self.set_calls();
                 let mut arguments =
                     self.observe_function_arguments(name, args, &[], input, subqueries)?;
                 let selected = self.select_function_arguments(name, None, args, &arguments)?;
                 self.coerce_function_arguments(name, None, args, &mut arguments, &selected)?;
                 let additional =
                     self.function_modifier_collations(&[], filter.as_deref(), input, subqueries)?;
+                self.reject_set_inputs(calls, || {
+                    crate::semantics::sets::placement::conditional_set_error(
+                        "window function calls cannot contain set-returning function calls",
+                    )
+                })?;
                 self.check_schema_window(name, (args, filter.is_some(), *modifiers), input)?;
                 if self.schema_expression.is_some() {
                     self.window_specification(spec, input, subqueries)?;
@@ -498,6 +507,7 @@ impl Preparation<'_> {
             unreachable!("function expression");
         };
         let binding = binding.as_ref();
+        let calls = self.set_calls();
         let within_group = super::super::ordered_calls::uses_ordered_arguments(
             *order_syntax,
             name,
@@ -572,14 +582,13 @@ impl Preparation<'_> {
         if let Some(selected) = &selected {
             self.parameters.retain_call(expression, &selected.binding);
         }
-        self.check_schema_function(
-            expression,
-            selected
-                .as_ref()
-                .map(|selected| &selected.binding)
-                .or(binding),
-            input,
-        )?;
+        let selected_binding = selected
+            .as_ref()
+            .map(|selected| &selected.binding)
+            .or(binding);
+        self.check_schema_function(expression, selected_binding, input)?;
+        self.check_set_inputs(name, selected_binding, calls)?;
+        self.place_set_call(name, selected_binding, calls)?;
         Ok(arguments.into_collated_result(
             ty,
             binding,

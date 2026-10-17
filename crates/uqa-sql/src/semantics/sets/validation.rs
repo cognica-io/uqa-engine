@@ -11,6 +11,10 @@ use crate::plan::{ProjectionPlan, QueryBlockPlan, SourcePlan};
 use crate::{FunctionTypeResolver, RowSchema, ScalarExpr, ScalarFrameBound};
 use crate::{SQLError, SQLParam};
 
+use super::placement::{
+    conditional_set_error, row_comparison_set_error, set_argument_error, top_level_from,
+    SetPlacement,
+};
 use super::{PhysicalProjection, SetFunctionCatalog};
 use crate::binding::context::BindingContext;
 use crate::semantics::aggregates::is_aggregate;
@@ -263,36 +267,8 @@ pub fn expression_may_return_set(
         )? || expressions_may_return_set(
             engine, resolver, list, schema, params,
         )?),
-        ScalarExpr::WindowCall {
-            args, spec, filter, ..
-        } => {
-            if expressions_may_return_set(engine, resolver, args, schema, params)?
-                || expressions_may_return_set(
-                    engine,
-                    resolver,
-                    filter.iter().map(AsRef::as_ref),
-                    schema,
-                    params,
-                )?
-                || expressions_may_return_set(engine, resolver, &spec.partition_by, schema, params)?
-                || expressions_may_return_set(
-                    engine,
-                    resolver,
-                    spec.order_by.iter().map(|order| &order.expr),
-                    schema,
-                    params,
-                )?
-            {
-                return Ok(true);
-            }
-            let Some(frame) = spec.frame.as_ref() else {
-                return Ok(false);
-            };
-            Ok(
-                frame_bound_may_return_set(engine, resolver, &frame.start, schema, params)?
-                    || frame_bound_may_return_set(engine, resolver, &frame.end, schema, params)?,
-            )
-        }
+        // A window call returns one value per row: its arguments, FILTER and frame admit no set-returning call, and its partition and ordering keys expand the rows below the window, as `expression_returns_set` treats `WindowFunc`.
+        ScalarExpr::WindowCall { .. } => Ok(false),
         ScalarExpr::Case {
             base,
             when,
@@ -350,23 +326,6 @@ fn expressions_may_return_set<'a>(
     Ok(false)
 }
 
-fn frame_bound_may_return_set(
-    engine: &dyn crate::routines::RoutineResolution,
-    resolver: &dyn FunctionTypeResolver,
-    bound: &ScalarFrameBound,
-    schema: &RowSchema,
-    params: &[SQLParam],
-) -> Result<bool, SQLError> {
-    match bound {
-        ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
-            expression_may_return_set(engine, resolver, expression, schema, params)
-        }
-        ScalarFrameBound::UnboundedPreceding
-        | ScalarFrameBound::UnboundedFollowing
-        | ScalarFrameBound::CurrentRow => Ok(false),
-    }
-}
-
 fn frame_bound_expression(bound: &ScalarFrameBound) -> Option<&ScalarExpr> {
     match bound {
         ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
@@ -378,30 +337,40 @@ fn frame_bound_expression(bound: &ScalarFrameBound) -> Option<&ScalarExpr> {
     }
 }
 
-fn set_context_error(message: impl Into<String>) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "0A000".into(),
-        message: message.into(),
-    }
-}
-
+/// Reject `expressions` when any contains a set-returning call outside its subqueries.
 fn reject_set_descendant<'a>(
     engine: &dyn SetFunctionCatalog,
     resolver: &dyn FunctionTypeResolver,
     expressions: impl IntoIterator<Item = &'a ScalarExpr>,
     schema: &RowSchema,
     params: &[SQLParam],
-    message: &str,
+    error: impl FnOnce() -> SQLError,
 ) -> Result<(), SQLError> {
     if expressions_may_return_set(engine, resolver, expressions, schema, params)? {
-        return Err(set_context_error(message));
+        return Err(error());
     }
     Ok(())
 }
 
+/// Reject a set-returning call in a clause whose expression kind admits none.
+fn reject_set_placement<'a>(
+    engine: &dyn SetFunctionCatalog,
+    resolver: &dyn FunctionTypeResolver,
+    expressions: impl IntoIterator<Item = &'a ScalarExpr>,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    placement: SetPlacement,
+) -> Result<(), SQLError> {
+    if expressions_may_return_set(engine, resolver, expressions, schema, params)? {
+        placement.admit(true)?;
+    }
+    Ok(())
+}
+
+/// Check a target-list expression in `PostgreSQL`'s transformation order: each construct's inputs first, then the construct.
 #[expect(
     clippy::too_many_lines,
-    reason = "preserves SELECT schema and row identity"
+    reason = "one ordered dispatch covers every scalar expression"
 )]
 fn validate_set_context(
     engine: &dyn SetFunctionCatalog,
@@ -410,6 +379,9 @@ fn validate_set_context(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
+    let validate = |expression| validate_set_context(engine, resolver, expression, schema, params);
+    let returns_set =
+        |expression| expression_may_return_set(engine, resolver, expression, schema, params);
     match expression {
         ScalarExpr::Func {
             name,
@@ -418,57 +390,79 @@ fn validate_set_context(
             filter,
             ..
         } => {
-            let lower = crate::semantics::builtin_function_dispatch_name(name);
+            for argument in args {
+                validate(argument)?;
+            }
+            if let Some(filter) = filter {
+                reject_set_placement(
+                    engine,
+                    resolver,
+                    [filter.as_ref()],
+                    schema,
+                    params,
+                    SetPlacement::Filter,
+                )?;
+            }
+            for order in order_by {
+                validate(&order.expr)?;
+            }
             if is_aggregate(engine, expression) {
                 reject_set_descendant(
                     engine,
                     resolver,
-                    args.iter()
-                        .chain(order_by.iter().map(|order| &order.expr))
-                        .chain(filter.iter().map(AsRef::as_ref)),
+                    args.iter().chain(order_by.iter().map(|order| &order.expr)),
                     schema,
                     params,
-                    "aggregate function calls cannot contain set-returning function calls",
+                    || {
+                        conditional_set_error(
+                            "aggregate function calls cannot contain set-returning function calls",
+                        )
+                    },
                 )?;
-            } else if lower == "coalesce" {
-                reject_set_descendant(
-                    engine,
-                    resolver,
-                    args,
-                    schema,
-                    params,
-                    "set-returning functions are not allowed in COALESCE",
-                )?;
-            }
-            for argument in args {
-                validate_set_context(engine, resolver, argument, schema, params)?;
-            }
-            for order in order_by {
-                validate_set_context(engine, resolver, &order.expr, schema, params)?;
-            }
-            if let Some(filter) = filter {
-                validate_set_context(engine, resolver, filter, schema, params)?;
+            } else if crate::semantics::builtin_function_dispatch_name(name) == "coalesce" {
+                reject_set_descendant(engine, resolver, args, schema, params, || {
+                    conditional_set_error("set-returning functions are not allowed in COALESCE")
+                })?;
             }
         }
         ScalarExpr::WindowCall {
             args, spec, filter, ..
         } => {
-            reject_set_descendant(
+            for argument in args {
+                validate(argument)?;
+            }
+            if let Some(filter) = filter {
+                reject_set_placement(
+                    engine,
+                    resolver,
+                    [filter.as_ref()],
+                    schema,
+                    params,
+                    SetPlacement::Filter,
+                )?;
+            }
+            reject_set_descendant(engine, resolver, args, schema, params, || {
+                conditional_set_error(
+                    "window function calls cannot contain set-returning function calls",
+                )
+            })?;
+            for expression in spec
+                .partition_by
+                .iter()
+                .chain(spec.order_by.iter().map(|order| &order.expr))
+            {
+                validate(expression)?;
+            }
+            reject_set_placement(
                 engine,
                 resolver,
-                args.iter()
-                    .chain(filter.iter().map(AsRef::as_ref))
-                    .chain(spec.partition_by.iter())
-                    .chain(spec.order_by.iter().map(|order| &order.expr))
-                    .chain(
-                        spec.frame
-                            .iter()
-                            .flat_map(|frame| [&frame.start, &frame.end])
-                            .filter_map(|bound| frame_bound_expression(bound)),
-                    ),
+                spec.frame
+                    .iter()
+                    .flat_map(|frame| [&frame.start, &frame.end])
+                    .filter_map(|bound| frame_bound_expression(bound)),
                 schema,
                 params,
-                "window function calls cannot contain set-returning function calls",
+                SetPlacement::WindowFrame,
             )?;
         }
         ScalarExpr::Case {
@@ -476,6 +470,20 @@ fn validate_set_context(
             when,
             else_branch,
         } => {
+            if let Some(base) = base {
+                validate(base)?;
+            }
+            for (condition, result) in when {
+                validate(condition)?;
+                // A searched WHEN is coerced to boolean; a simple CASE compares a placeholder for its base with the WHEN value.
+                if returns_set(condition)? {
+                    return Err(set_argument_error("CASE/WHEN"));
+                }
+                validate(result)?;
+            }
+            if let Some(branch) = else_branch {
+                validate(branch)?;
+            }
             let descendants = base
                 .iter()
                 .map(AsRef::as_ref)
@@ -484,93 +492,88 @@ fn validate_set_context(
                         .flat_map(|(condition, result)| [condition, result]),
                 )
                 .chain(else_branch.iter().map(AsRef::as_ref));
-            reject_set_descendant(
-                engine,
-                resolver,
-                descendants,
-                schema,
-                params,
-                "set-returning functions are not allowed in CASE",
-            )?;
+            reject_set_descendant(engine, resolver, descendants, schema, params, || {
+                conditional_set_error("set-returning functions are not allowed in CASE")
+            })?;
         }
         ScalarExpr::Not(inner) => {
-            reject_set_descendant(
-                engine,
-                resolver,
-                [inner.as_ref()],
-                schema,
-                params,
-                "argument of NOT must not return a set",
-            )?;
+            validate(inner)?;
+            if returns_set(inner)? {
+                return Err(set_argument_error("NOT"));
+            }
         }
-        ScalarExpr::UnaryMinus(inner) => {
-            validate_set_context(engine, resolver, inner, schema, params)?;
-        }
-        ScalarExpr::And(items) => {
-            reject_set_descendant(
-                engine,
-                resolver,
-                items,
-                schema,
-                params,
-                "argument of AND must not return a set",
-            )?;
-        }
-        ScalarExpr::Or(items) => {
-            reject_set_descendant(
-                engine,
-                resolver,
-                items,
-                schema,
-                params,
-                "argument of OR must not return a set",
-            )?;
+        ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => validate(inner)?,
+        ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+            let construct = if matches!(expression, ScalarExpr::And(_)) {
+                "AND"
+            } else {
+                "OR"
+            };
+            for item in items {
+                validate(item)?;
+                if returns_set(item)? {
+                    return Err(set_argument_error(construct));
+                }
+            }
         }
         ScalarExpr::InList { expr, list, .. } => {
-            validate_set_context(engine, resolver, expr, schema, params)?;
-            reject_set_descendant(
-                engine,
-                resolver,
-                list,
-                schema,
-                params,
-                "argument of IN must not return a set",
-            )?;
+            validate(expr)?;
+            for item in list {
+                validate(item)?;
+            }
+            reject_set_descendant(engine, resolver, list, schema, params, || {
+                set_argument_error("IN")
+            })?;
         }
         ScalarExpr::Between { expr, low, high } => {
+            for item in [expr, low, high] {
+                validate(item)?;
+            }
             reject_set_descendant(
                 engine,
                 resolver,
                 [expr.as_ref(), low.as_ref(), high.as_ref()],
                 schema,
                 params,
-                "argument of AND must not return a set",
+                || set_argument_error("AND"),
             )?;
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
         | ScalarExpr::CompositeRow { items, .. } => {
             for item in items {
-                validate_set_context(engine, resolver, item, schema, params)?;
+                validate(item)?;
             }
         }
         ScalarExpr::Binary { lhs, rhs, .. } => {
-            validate_set_context(engine, resolver, lhs, schema, params)?;
-            validate_set_context(engine, resolver, rhs, schema, params)?;
-        }
-        ScalarExpr::IsNull { expr, .. }
-        | ScalarExpr::Cast { expr, .. }
-        | ScalarExpr::Collated { expr, .. } => {
-            validate_set_context(engine, resolver, expr, schema, params)?;
+            validate(lhs)?;
+            validate(rhs)?;
+            if matches!(
+                (lhs.as_ref(), rhs.as_ref()),
+                (ScalarExpr::Row(_), ScalarExpr::Row(_))
+            ) {
+                reject_set_descendant(
+                    engine,
+                    resolver,
+                    [lhs.as_ref(), rhs.as_ref()],
+                    schema,
+                    params,
+                    row_comparison_set_error,
+                )?;
+            }
         }
         ScalarExpr::InSubquery { expr, .. } => {
+            validate(expr)?;
             reject_set_descendant(
                 engine,
                 resolver,
                 [expr.as_ref()],
                 schema,
                 params,
-                "row comparison operator must not return a set",
+                row_comparison_set_error,
             )?;
         }
         ScalarExpr::Default
@@ -602,6 +605,7 @@ pub fn validate_projection_set_contexts(
     Ok(())
 }
 
+/// Check a query block's clauses in `PostgreSQL`'s transformation order: the target list, WHERE, HAVING, ORDER BY, GROUP BY, DISTINCT ON, OFFSET, LIMIT and FROM, then the row-locking clause.
 pub fn validate_query_set_contexts(
     engine: &dyn SetFunctionCatalog,
     resolver: &dyn FunctionTypeResolver,
@@ -610,6 +614,31 @@ pub fn validate_query_set_contexts(
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
     validate_projection_set_contexts(engine, resolver, &statement.projections, schema, params)?;
+    for (clause, placement) in [
+        (statement.r#where.as_ref(), SetPlacement::Where),
+        (statement.having.as_ref(), SetPlacement::Having),
+    ] {
+        reject_set_placement(engine, resolver, clause, schema, params, placement)?;
+    }
+    for expression in statement
+        .order_by
+        .iter()
+        .map(|order| &order.expr)
+        .chain(statement.group_by.iter())
+        .chain(statement.grouping_sets.iter().flatten())
+        .chain(statement.distinct_on.iter())
+    {
+        validate_set_context(engine, resolver, expression, schema, params)?;
+    }
+    for (clause, placement) in [
+        (statement.offset.as_ref(), SetPlacement::Offset),
+        (statement.limit.as_ref(), SetPlacement::Limit),
+    ] {
+        reject_set_placement(engine, resolver, clause, schema, params, placement)?;
+    }
+    if let Some(source) = statement.from.as_ref() {
+        validate_source_set_contexts(engine, resolver, source, schema, params)?;
+    }
     if let Some(locking) = statement.locking.first() {
         for projection in &statement.projections {
             if expression_may_return_set(engine, resolver, &projection.expr, schema, params)? {
@@ -619,58 +648,6 @@ pub fn validate_query_set_contexts(
                 )));
             }
         }
-    }
-    for expression in statement
-        .group_by
-        .iter()
-        .chain(statement.grouping_sets.iter().flatten())
-        .chain(statement.order_by.iter().map(|order| &order.expr))
-        .chain(statement.distinct_on.iter())
-    {
-        validate_set_context(engine, resolver, expression, schema, params)?;
-    }
-    if let Some(predicate) = statement.r#where.as_ref() {
-        reject_set_descendant(
-            engine,
-            resolver,
-            [predicate],
-            schema,
-            params,
-            "set-returning functions are not allowed in WHERE",
-        )?;
-    }
-    if let Some(having) = statement.having.as_ref() {
-        reject_set_descendant(
-            engine,
-            resolver,
-            [having],
-            schema,
-            params,
-            "set-returning functions are not allowed in HAVING",
-        )?;
-    }
-    if let Some(limit) = statement.limit.as_ref() {
-        reject_set_descendant(
-            engine,
-            resolver,
-            [limit],
-            schema,
-            params,
-            "set-returning functions are not allowed in LIMIT",
-        )?;
-    }
-    if let Some(offset) = statement.offset.as_ref() {
-        reject_set_descendant(
-            engine,
-            resolver,
-            [offset],
-            schema,
-            params,
-            "set-returning functions are not allowed in OFFSET",
-        )?;
-    }
-    if let Some(source) = statement.from.as_ref() {
-        validate_source_set_contexts(engine, resolver, source, schema, params)?;
     }
     Ok(())
 }
@@ -689,13 +666,13 @@ fn validate_source_set_contexts(
             validate_source_set_contexts(engine, resolver, left, schema, params)?;
             validate_source_set_contexts(engine, resolver, right, schema, params)?;
             if let Some(condition) = on {
-                reject_set_descendant(
+                reject_set_placement(
                     engine,
                     resolver,
                     [condition],
                     schema,
                     params,
-                    "set-returning functions are not allowed in JOIN conditions",
+                    SetPlacement::JoinCondition,
                 )?;
             }
         }
@@ -703,14 +680,7 @@ fn validate_source_set_contexts(
             validate_values_set_contexts(engine, resolver, rows, schema, params)?;
         }
         SourcePlan::Function { args, .. } => {
-            reject_set_descendant(
-                engine,
-                resolver,
-                args,
-                schema,
-                params,
-                "set-returning functions must appear at top level of FROM",
-            )?;
+            reject_set_descendant(engine, resolver, args, schema, params, top_level_from)?;
         }
         SourcePlan::FunctionGroup { functions, .. } => {
             for function in functions {
@@ -720,7 +690,7 @@ fn validate_source_set_contexts(
                     &function.args,
                     schema,
                     params,
-                    "set-returning functions must appear at top level of FROM",
+                    top_level_from,
                 )?;
             }
         }
@@ -774,7 +744,7 @@ pub fn validate_source_set_contexts_before_build(
                 args,
                 outer.unwrap_or(&empty),
                 params,
-                "set-returning functions must appear at top level of FROM",
+                top_level_from,
             )
         }
         SourcePlan::FunctionGroup { functions, .. } => {
@@ -786,7 +756,7 @@ pub fn validate_source_set_contexts_before_build(
                     &function.args,
                     outer.unwrap_or(&empty),
                     params,
-                    "set-returning functions must appear at top level of FROM",
+                    top_level_from,
                 )?;
             }
             Ok(())
@@ -815,13 +785,13 @@ pub fn validate_values_set_contexts(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    reject_set_descendant(
+    reject_set_placement(
         engine,
         resolver,
         rows.iter().flatten(),
         schema,
         params,
-        "set-returning functions are not allowed in VALUES",
+        SetPlacement::Values,
     )
 }
 

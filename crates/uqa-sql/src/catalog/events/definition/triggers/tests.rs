@@ -74,7 +74,12 @@ fn trigger_condition_input_collations_match_postgresql_event_variables() {
         let mut condition = trigger.when.clone().unwrap();
         catalog
             .context()
-            .validate_trigger_condition(&trigger, &columns, &mut condition, true)
+            .validate_trigger_condition(
+                &trigger,
+                &columns,
+                &mut condition,
+                RelationLookupMode::Dynamic,
+            )
             .unwrap();
         for variable in case.variables {
             let side = match variable.relation {
@@ -107,5 +112,63 @@ fn trigger_condition_input_collations_match_postgresql_event_variables() {
                 case.sql
             );
         }
+    }
+}
+
+#[test]
+fn trigger_conditions_reject_set_returning_calls_before_row_checks() {
+    let columns = vec![
+        ColumnDef::nullable("s", ColumnType::Text),
+        ColumnDef::nullable("n", ColumnType::Integer),
+    ];
+    let catalog = Catalog {
+        columns: Some(columns.clone()),
+        ..Catalog::default()
+    };
+    let context = catalog.context();
+    let condition = |sql: &str| {
+        let Statement::CreateTrigger(trigger) = crate::compile(sql).unwrap().remove(0) else {
+            panic!("trigger")
+        };
+        let condition = trigger.when.clone().unwrap();
+        (trigger, condition)
+    };
+    // An INSERT trigger cannot read OLD, but the set-returning call is rejected first, while the condition is analyzed. A stored condition keeps loading, and only the checks made after analysis still apply to it.
+    for (sql, stored_error) in [
+        (
+            "CREATE TRIGGER t AFTER INSERT ON items FOR EACH ROW WHEN (regexp_matches(OLD.s, 'a') IS NOT NULL) EXECUTE FUNCTION f()",
+            Some("INSERT trigger's WHEN condition cannot reference OLD values"),
+        ),
+        (
+            "CREATE TRIGGER t AFTER INSERT ON items FOR EACH STATEMENT WHEN (generate_series(1, 2) > NEW.n) EXECUTE FUNCTION f()",
+            Some("statement trigger's WHEN condition cannot reference column values"),
+        ),
+        (
+            "CREATE TRIGGER t BEFORE INSERT ON items FOR EACH ROW WHEN (NOT generate_series(0, 1)::boolean) EXECUTE FUNCTION f()",
+            None,
+        ),
+    ] {
+        let (trigger, mut when) = condition(sql);
+        let error = context
+            .validate_trigger_condition(&trigger, &columns, &mut when, RelationLookupMode::Dynamic)
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("0A000"), "{sql}");
+        assert_eq!(
+            error.to_string(),
+            "set-returning functions are not allowed in trigger WHEN conditions",
+            "{sql}"
+        );
+        let (trigger, mut when) = condition(sql);
+        let stored = context.validate_trigger_condition(
+            &trigger,
+            &columns,
+            &mut when,
+            RelationLookupMode::Bound,
+        );
+        assert_eq!(
+            stored.err().map(|error| error.to_string()).as_deref(),
+            stored_error,
+            "{sql}"
+        );
     }
 }

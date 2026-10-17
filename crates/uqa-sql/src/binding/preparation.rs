@@ -26,6 +26,7 @@ pub(crate) use routines::{
     prepare_routine_body_inputs,
 };
 mod schema_expressions;
+mod set_contexts;
 mod sources;
 #[cfg(test)]
 mod tests;
@@ -431,7 +432,15 @@ pub(super) fn condition_metadata(
         parameters: ParameterTypes::fixed(params),
         schema_expression: None,
     };
-    analysis.boolean_expression(expression, input, subqueries, construct)?;
+    let placement = match construct {
+        "WHERE" => crate::semantics::sets::placement::SetPlacement::Where,
+        "HAVING" => crate::semantics::sets::placement::SetPlacement::Having,
+        "JOIN/ON" => crate::semantics::sets::placement::SetPlacement::JoinCondition,
+        _ => analysis.scope.set_placement,
+    };
+    analysis.in_placement(placement, |analysis| {
+        analysis.boolean_expression(expression, input, subqueries, construct)
+    })?;
     analysis
         .scope
         .collations
@@ -616,6 +625,7 @@ impl Preparation<'_> {
             .map(|_| ())
     }
 
+    /// Analyze an operand a construct requires to be boolean, as `coerce_to_boolean` does: its type first, then whether it returns a set.
     fn boolean_expression(
         &mut self,
         expression: &ScalarExpr,
@@ -623,6 +633,7 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
         context: &str,
     ) -> Result<ExpressionType, SQLError> {
+        let calls = self.set_calls();
         let mut observed = self.expression(expression, input, subqueries)?;
         self.parameters
             .coerce_unknown(&mut observed, &ColumnType::Boolean)?;
@@ -634,6 +645,9 @@ impl Preparation<'_> {
         if let ScalarExpr::Literal(value @ uqa_core::Value::Str(_)) = expression {
             crate::expr::cast_value(value, "boolean")?;
         }
+        self.reject_set_inputs(calls, || {
+            crate::semantics::sets::placement::set_argument_error(context)
+        })?;
         Ok(observed)
     }
 }

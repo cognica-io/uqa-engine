@@ -9,8 +9,8 @@
 use crate::scalar::plan::eval_physical;
 use uqa_core::Value;
 use uqa_sql::prepared::arguments::{
-    contains_domain, immutable_argument, parameter_base_type, validate_argument,
-    validate_assignment_type,
+    contains_domain, immutable_argument, parameter_base_type, reject_set_argument,
+    validate_argument, validate_assignment_type,
 };
 use uqa_sql::{plan::ExpressionPlan, ColumnType, SQLError, SQLParam, ScalarExpr};
 mod context;
@@ -51,6 +51,7 @@ fn bind_arguments(
         .enumerate()
         .map(|(index, (argument, target))| {
             validate_argument(context.validation.aggregates, argument)?;
+            reject_set_argument(&context.validation, argument)?;
             let source = if matches!(
                 argument.scalar,
                 ScalarExpr::Literal(Value::Str(_) | Value::Null)

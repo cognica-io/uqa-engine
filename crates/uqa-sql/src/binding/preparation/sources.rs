@@ -12,6 +12,7 @@ use super::super::{
 };
 use super::{Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{FunctionBinding, OperatorJoinRelations};
+use crate::semantics::sets::placement::SetPlacement;
 
 impl Preparation<'_> {
     pub(super) fn source(
@@ -72,46 +73,7 @@ impl Preparation<'_> {
             SourcePlan::FunctionGroup { functions, .. } => {
                 self.source_functions(functions, subqueries, outer)?;
             }
-            SourcePlan::Join {
-                left,
-                right,
-                kind,
-                on,
-                using,
-                natural,
-                alias,
-                column_aliases,
-                lateral,
-                ..
-            } => {
-                let left = self.source(left, subqueries, outer)?;
-                let right_scope = (*lateral
-                    || matches!(
-                        right.as_ref(),
-                        SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
-                    ))
-                .then(|| overlay_outer_schema(&left, outer));
-                let right = self.source(right, subqueries, right_scope.as_ref().or(outer))?;
-                if let Some(on) = on {
-                    let joined = RowSchema::join(&left, &right, std::iter::empty::<String>());
-                    let input = overlay_outer_schema(&joined, outer);
-                    self.require_boolean(on, &input, subqueries, "JOIN/ON")?;
-                }
-                return self.scope.bind_join_output_schema(JoinSchemaBinding {
-                    routines: self.routines,
-                    kind: *kind,
-                    on: None,
-                    using: using.as_ref(),
-                    natural: *natural,
-                    alias: alias.as_deref(),
-                    column_aliases,
-                    left: &left,
-                    right: &right,
-                    subqueries,
-                    params: &self.parameters.values(),
-                    outer,
-                });
-            }
+            SourcePlan::Join { .. } => return self.join_source(source, subqueries, outer),
         }
         self.scope.bind_source(
             self.routines,
@@ -120,6 +82,59 @@ impl Preparation<'_> {
             &self.parameters.values(),
             outer,
         )
+    }
+
+    /// Analyze a join: its left input, its right input, which sees the left one when it is lateral or a function, and its ON condition, which admits no set-returning call.
+    fn join_source(
+        &mut self,
+        source: &SourcePlan,
+        subqueries: &[QueryPlan],
+        outer: Option<&RowSchema>,
+    ) -> Result<RowSchema, SQLError> {
+        let SourcePlan::Join {
+            left,
+            right,
+            kind,
+            on,
+            using,
+            natural,
+            alias,
+            column_aliases,
+            lateral,
+            ..
+        } = source
+        else {
+            unreachable!("join analysis called for a different source kind")
+        };
+        let left = self.source(left, subqueries, outer)?;
+        let right_scope = (*lateral
+            || matches!(
+                right.as_ref(),
+                SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
+            ))
+        .then(|| overlay_outer_schema(&left, outer));
+        let right = self.source(right, subqueries, right_scope.as_ref().or(outer))?;
+        if let Some(on) = on {
+            let joined = RowSchema::join(&left, &right, std::iter::empty::<String>());
+            let input = overlay_outer_schema(&joined, outer);
+            self.in_placement(SetPlacement::JoinCondition, |analysis| {
+                analysis.require_boolean(on, &input, subqueries, "JOIN/ON")
+            })?;
+        }
+        self.scope.bind_join_output_schema(JoinSchemaBinding {
+            routines: self.routines,
+            kind: *kind,
+            on: None,
+            using: using.as_ref(),
+            natural: *natural,
+            alias: alias.as_deref(),
+            column_aliases,
+            left: &left,
+            right: &right,
+            subqueries,
+            params: &self.parameters.values(),
+            outer,
+        })
     }
 
     fn source_functions(
@@ -141,7 +156,24 @@ impl Preparation<'_> {
         Ok(())
     }
 
+    /// Analyze a function in FROM. Its own result may be a set, but no input of it may, as `transformRangeFunction` requires.
     fn source_function(
+        &mut self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        relations: Option<&OperatorJoinRelations>,
+        args: &[ScalarExpr],
+        subqueries: &[QueryPlan],
+        outer: Option<&RowSchema>,
+    ) -> Result<(), SQLError> {
+        let calls = self.set_calls();
+        self.in_placement(SetPlacement::FromFunction, |analysis| {
+            analysis.source_function_inputs(name, binding, relations, args, subqueries, outer)
+        })?;
+        self.reject_set_inputs(calls, crate::semantics::sets::placement::top_level_from)
+    }
+
+    fn source_function_inputs(
         &mut self,
         name: &str,
         binding: Option<&FunctionBinding>,

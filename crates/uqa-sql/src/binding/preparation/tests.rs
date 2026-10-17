@@ -24,6 +24,7 @@ mod json_operators;
 mod literal_collations;
 mod operator_joins;
 mod ordered_calls;
+mod set_contexts;
 mod stored_inputs;
 
 struct NoRoutines;

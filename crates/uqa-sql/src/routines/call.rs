@@ -32,6 +32,26 @@ pub fn validate_call_arguments(arguments: &[ExpressionPlan]) -> Result<(), SQLEr
     Ok(())
 }
 
+/// Reject a set-returning call in an argument, as `transformCallStmt` analyzes each argument as a CALL argument expression, before the procedure is resolved.
+pub fn reject_set_call_arguments(
+    routines: &dyn crate::routines::RoutineResolution,
+    arguments: &[ExpressionPlan],
+    params: &[crate::SQLParam],
+) -> Result<(), SQLError> {
+    for argument in arguments {
+        if crate::semantics::sets::validation::expression_may_return_set(
+            routines,
+            routines,
+            &argument.scalar,
+            &RowSchema::default(),
+            params,
+        )? {
+            crate::semantics::sets::placement::SetPlacement::CallArgument.admit(true)?;
+        }
+    }
+    Ok(())
+}
+
 /// Unknown string and NULL literals participate in procedure overload resolution without a concrete type.
 pub fn infer_call_argument_types(
     arguments: &[ExpressionPlan],

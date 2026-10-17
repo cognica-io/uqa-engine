@@ -34,6 +34,7 @@ fn rule_condition_row_metadata_matches_postgresql_event_variables() {
     let scopes = Scope;
     let mut context = catalog.context();
     context.stored_routines.scopes = &scopes;
+    let created = RelationLookupMode::Dynamic;
     for case in references {
         let Statement::CreateRule(rule) = crate::compile(&case.sql).unwrap().remove(0) else {
             panic!("rule")
@@ -45,7 +46,7 @@ fn rule_condition_row_metadata_matches_postgresql_event_variables() {
         let names: Vec<String> = columns.iter().map(|column| column.name.clone()).collect();
         let mut condition = rule.condition.unwrap();
         let (plan, binding) = context
-            .validate_rule_condition(&mut condition, &columns, rule.event, None, None)
+            .validate_rule_condition(&mut condition, &columns, rule.event, None, None, created)
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -62,6 +63,7 @@ fn rule_condition_row_metadata_matches_postgresql_event_variables() {
                 rule.event,
                 Some(&plan),
                 Some(&binding),
+                RelationLookupMode::Bound,
             )
             .unwrap()
             .unwrap();

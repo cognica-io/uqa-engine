@@ -221,15 +221,29 @@ impl EventAnalysisContext<'_> {
         Ok(())
     }
 
-    fn validate_rule_condition(
+    /// A new rule's WHERE condition is analyzed as a WHERE clause, which admits no set-returning call. A condition stored by an earlier release keeps loading; evaluating a set-returning call in it reports the executor's diagnostic.
+    fn reject_rule_condition_sets(
         &self,
-        condition: &mut Expr,
-        columns: &[crate::ast::ColumnDef],
-        event: RuleEvent,
-        stored_plan: Option<&crate::plan::ExpressionPlan>,
-        stored_binding: Option<&RuleConditionBinding>,
-    ) -> Result<Option<(crate::plan::ExpressionPlan, RuleConditionBinding)>, SQLError> {
-        let has_subquery = rule_condition_has_subquery(condition);
+        condition: &crate::ScalarExpr,
+        schema: &crate::RowSchema,
+        lookup_mode: RelationLookupMode,
+    ) -> Result<(), SQLError> {
+        if lookup_mode != RelationLookupMode::Bound
+            && crate::semantics::sets::validation::expression_may_return_set(
+                self.routines,
+                self.routines,
+                condition,
+                schema,
+                &[],
+            )?
+        {
+            crate::semantics::sets::placement::SetPlacement::Where.admit(true)?;
+        }
+        Ok(())
+    }
+
+    /// A rule WHERE condition admits no aggregate or window function call.
+    fn reject_rule_condition_aggregates(&self, condition: &Expr) -> Result<(), SQLError> {
         if condition.contains_aggregate()
             || condition.contains_window()
             || condition.any_node(&|node| {
@@ -242,6 +256,20 @@ impl EventAnalysisContext<'_> {
                     .into(),
             });
         }
+        Ok(())
+    }
+
+    fn validate_rule_condition(
+        &self,
+        condition: &mut Expr,
+        columns: &[crate::ast::ColumnDef],
+        event: RuleEvent,
+        stored_plan: Option<&crate::plan::ExpressionPlan>,
+        stored_binding: Option<&RuleConditionBinding>,
+        lookup_mode: RelationLookupMode,
+    ) -> Result<Option<(crate::plan::ExpressionPlan, RuleConditionBinding)>, SQLError> {
+        let has_subquery = rule_condition_has_subquery(condition);
+        self.reject_rule_condition_aggregates(condition)?;
         if !has_subquery && condition.any_node(&|node| matches!(node, Expr::Column(_))) {
             *condition = bind_expr(condition, &mut RuleConditionNameResolver { columns, event })?;
         }
@@ -257,6 +285,11 @@ impl EventAnalysisContext<'_> {
                 &mut RuleRowTypeResolver::for_condition(columns, event),
             )?;
             let lowered = crate::plan::ExpressionPlan::lower(bound);
+            self.reject_rule_condition_sets(
+                &lowered.scalar,
+                &crate::RowSchema::default(),
+                lookup_mode,
+            )?;
             match crate::common_context_expression_type(
                 &lowered.scalar,
                 &crate::RowSchema::default(),
@@ -313,6 +346,7 @@ impl EventAnalysisContext<'_> {
         let ty = self
             .stored_routines
             .bind_rule_condition(&mut plan, &schema, event)?;
+        self.reject_rule_condition_sets(&plan.scalar, &schema, lookup_mode)?;
         if let Some(ty) = ty {
             if !is_boolean_type(&ty) {
                 return Err(SQLError::TypeMismatch(format!(
@@ -584,6 +618,7 @@ impl EventAnalysisContext<'_> {
                     definition.event,
                     stored_condition_plan,
                     stored_condition_binding,
+                    lookup_mode,
                 )
             })
             .transpose()?

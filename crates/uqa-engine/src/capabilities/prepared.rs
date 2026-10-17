@@ -91,6 +91,8 @@ impl PreparedArgumentScopes for Engine {
                 aggregates: self,
                 volatility: self,
                 cast_type: &cast_type,
+                routines: self,
+                parameters,
             },
             assignment: self,
             analyze_type: &mut analyze_type,

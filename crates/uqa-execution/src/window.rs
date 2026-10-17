@@ -93,6 +93,40 @@ impl PreparedWindowPlan {
         &self.projections
     }
 
+    /// Move every partition or ordering key that `returns_set` classifies as set-returning into an internal column the input must supply, and return those keys in first-use order. A window's PARTITION BY and ORDER BY are processed like a target list, so `PostgreSQL` evaluates their set-returning calls in a projection below the window, which expands its input rows; identical keys share one column.
+    pub fn take_set_returning_keys(
+        &mut self,
+        returns_set: &mut dyn FnMut(&ScalarExpr) -> Result<bool, SQLError>,
+    ) -> Result<Vec<(uqa_sql::ast::InternalColumnRef, ScalarExpr)>, SQLError> {
+        let relation = uqa_sql::ast::InternalRelationId::allocate();
+        let mut keys: Vec<(uqa_sql::ast::InternalColumnRef, ScalarExpr)> = Vec::new();
+        for pass in &mut self.passes {
+            let expressions = pass
+                .partition_by
+                .iter_mut()
+                .chain(pass.order_by.iter_mut().map(|order| &mut order.expr));
+            for expression in expressions {
+                if !returns_set(expression)? {
+                    continue;
+                }
+                let column = match keys.iter().find(|(_, key)| key == expression) {
+                    Some((column, _)) => *column,
+                    None => {
+                        let column = relation.column(keys.len());
+                        keys.push((column, expression.clone()));
+                        column
+                    }
+                };
+                *expression = ScalarExpr::InternalColumn(column);
+            }
+            for slot in &mut pass.slots {
+                slot.spec.partition_by.clone_from(&pass.partition_by);
+                slot.spec.order_by.clone_from(&pass.order_by);
+            }
+        }
+        Ok(keys)
+    }
+
     /// The input schema with one internal column per window call, in pass order.
     pub fn output_schema(
         &self,

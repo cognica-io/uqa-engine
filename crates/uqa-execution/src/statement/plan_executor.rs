@@ -378,6 +378,11 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         arguments: &[ExpressionPlan],
     ) -> Result<SQLResult, SQLError> {
         uqa_sql::routines::call::validate_call_arguments(arguments)?;
+        uqa_sql::routines::call::reject_set_call_arguments(
+            self.context.routines.resolution,
+            arguments,
+            self.params,
+        )?;
         let scope = self.context.queries.statement_scope(None);
         let (call_arguments, explicit_variadic) = analyze_physical_call_arguments(arguments)?;
         let argument_types = uqa_sql::routines::call::infer_call_argument_types(

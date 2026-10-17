@@ -23,13 +23,43 @@ use uqa_sql::semantics::sets::validation::projections_may_return_set;
 use uqa_sql::{FunctionTypeResolver, SQLError, SQLParam, ScalarExpr};
 
 pub(super) fn attach_window_output<'a, S: Clone + 'static>(
-    operator: Box<dyn PhysicalOperator + 'a>,
+    mut operator: Box<dyn PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     resjunk: &mut RelationalResjunk,
     type_resolver: &dyn FunctionTypeResolver,
     execution: FinalProjectionExecution<'a, '_, S>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-    let plan = prepare_window_plan(&statement.projections);
+    let mut plan = prepare_window_plan(&statement.projections);
+    let input = operator.row_schema().clone();
+    let keys = plan.take_set_returning_keys(&mut |expression| {
+        uqa_sql::semantics::sets::validation::expression_may_return_set(
+            execution.context.catalog,
+            type_resolver,
+            expression,
+            &input,
+            execution.params,
+        )
+    })?;
+    if !keys.is_empty() {
+        // Set-returning partition and ordering keys expand the input rows before the windows see them.
+        operator = build_set_projection(
+            operator,
+            execution.context,
+            execution.params,
+            execution.ctes,
+            Arc::clone(&execution.evaluator),
+            crate::query::set_projection::SetProjectionOutput {
+                projections: keys
+                    .into_iter()
+                    .map(|(column, expression)| {
+                        (crate::ProjectionTarget::Internal(column), expression)
+                    })
+                    .collect(),
+                pass_through: true,
+                batch_size: crate::DEFAULT_BATCH_SIZE,
+            },
+        )?;
+    }
     let window = WindowOutput {
         work_mem_bytes: physical_work_mem_bytes(execution.runtime)?,
         schema: plan.output_schema(

@@ -136,10 +136,7 @@ impl Preparation<'_> {
                 input,
                 &params,
             )? {
-                return Err(super::parameters::error(
-                    "42804",
-                    "argument of IN must not return a set".into(),
-                ));
+                return Err(crate::semantics::sets::placement::set_argument_error("IN"));
             }
         }
         Ok(())

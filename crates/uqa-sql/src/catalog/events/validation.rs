@@ -296,8 +296,8 @@ pub fn validate_rule_returning_shape(
     Ok(())
 }
 
-pub fn validate_trigger_condition_references(
-    definition: &CreateTrigger,
+/// Reject the references `PostgreSQL` reports while it analyzes a trigger WHEN condition: subqueries, unqualified columns and names that are not columns of OLD or NEW.
+pub fn validate_trigger_condition_names(
     columns: &[crate::ast::ColumnDef],
     condition: &Expr,
 ) -> Result<(), SQLError> {
@@ -318,30 +318,6 @@ pub fn validate_trigger_condition_references(
             message: "trigger WHEN condition must qualify row columns with OLD or NEW".into(),
         });
     }
-    let references_old = condition.any_node(&|node| {
-        matches!(node, Expr::QualifiedColumn { qualifier, .. } if qualifier.eq_ignore_ascii_case("old"))
-    });
-    let references_new = condition.any_node(&|node| {
-        matches!(node, Expr::QualifiedColumn { qualifier, .. } if qualifier.eq_ignore_ascii_case("new"))
-    });
-    if !definition.row && (references_old || references_new) {
-        return Err(SQLError::Routine {
-            sqlstate: "42P01".into(),
-            message: "statement trigger's WHEN condition cannot reference row values".into(),
-        });
-    }
-    if references_old && definition.events.contains(&TriggerEvent::Insert) {
-        return Err(SQLError::Routine {
-            sqlstate: "42P17".into(),
-            message: "INSERT trigger's WHEN condition cannot reference OLD values".into(),
-        });
-    }
-    if references_new && definition.events.contains(&TriggerEvent::Delete) {
-        return Err(SQLError::Routine {
-            sqlstate: "42P17".into(),
-            message: "DELETE trigger's WHEN condition cannot reference NEW values".into(),
-        });
-    }
     let invalid_qualified_reference = std::cell::RefCell::new(None);
     let _ = condition.any_node(&|node| {
         let Expr::QualifiedColumn { qualifier, column } = node else {
@@ -359,6 +335,39 @@ pub fn validate_trigger_condition_references(
     });
     if let Some(reference) = invalid_qualified_reference.into_inner() {
         return Err(SQLError::UnknownColumn(reference));
+    }
+    Ok(())
+}
+
+/// Reject the OLD and NEW references a trigger cannot supply, which `PostgreSQL` checks after it has analyzed the whole WHEN condition.
+pub fn validate_trigger_condition_rows(
+    definition: &CreateTrigger,
+    columns: &[crate::ast::ColumnDef],
+    condition: &Expr,
+) -> Result<(), SQLError> {
+    let references_old = condition.any_node(&|node| {
+        matches!(node, Expr::QualifiedColumn { qualifier, .. } if qualifier.eq_ignore_ascii_case("old"))
+    });
+    let references_new = condition.any_node(&|node| {
+        matches!(node, Expr::QualifiedColumn { qualifier, .. } if qualifier.eq_ignore_ascii_case("new"))
+    });
+    if !definition.row && (references_old || references_new) {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: "statement trigger's WHEN condition cannot reference column values".into(),
+        });
+    }
+    if references_old && definition.events.contains(&TriggerEvent::Insert) {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: "INSERT trigger's WHEN condition cannot reference OLD values".into(),
+        });
+    }
+    if references_new && definition.events.contains(&TriggerEvent::Delete) {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: "DELETE trigger's WHEN condition cannot reference NEW values".into(),
+        });
     }
     if definition.timing == TriggerTiming::Before && references_new {
         let generated = columns

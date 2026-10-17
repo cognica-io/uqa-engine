@@ -12,6 +12,7 @@ use super::{
     ScalarExpr,
 };
 use crate::plan::{ProjectionPlan, QueryBlockPlan, RelationalPlan};
+use crate::semantics::sets::placement::SetPlacement;
 
 impl Preparation<'_> {
     pub(super) fn query(
@@ -24,6 +25,15 @@ impl Preparation<'_> {
     }
 
     pub(super) fn query_output(
+        &mut self,
+        plan: &QueryPlan,
+        outer: Option<&RowSchema>,
+        preserve_unknown: bool,
+    ) -> Result<QueryOutput, SQLError> {
+        self.in_query_level(|analysis| analysis.query_level_output(plan, outer, preserve_unknown))
+    }
+
+    fn query_level_output(
         &mut self,
         plan: &QueryPlan,
         outer: Option<&RowSchema>,
@@ -178,14 +188,30 @@ impl Preparation<'_> {
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
+        self.in_query_level(|analysis| {
+            analysis.block_level_output(block, source, outer, preserve_unknown)
+        })
+    }
+
+    fn block_level_output(
+        &mut self,
+        block: &QueryBlockPlan,
+        source: &RowSchema,
+        outer: Option<&RowSchema>,
+        preserve_unknown: bool,
+    ) -> Result<QueryOutput, SQLError> {
         let input = overlay_outer_schema(source, outer);
         let input = self.scope.with_stored_outer_internal_aliases(&input);
         let mut output = self.projections(&block.projections, source, &input, &block.subqueries)?;
         if let Some(predicate) = &block.r#where {
-            self.require_boolean(predicate, &input, &block.subqueries, "WHERE")?;
+            self.in_placement(SetPlacement::Where, |analysis| {
+                analysis.require_boolean(predicate, &input, &block.subqueries, "WHERE")
+            })?;
         }
         if let Some(having) = &block.having {
-            self.require_boolean(having, &input, &block.subqueries, "HAVING")?;
+            self.in_placement(SetPlacement::Having, |analysis| {
+                analysis.require_boolean(having, &input, &block.subqueries, "HAVING")
+            })?;
         }
         let projected = output.schema();
         for order in &block.order_by {
@@ -414,7 +440,9 @@ impl Preparation<'_> {
         let input = outer.unwrap_or(&empty);
         for row in rows {
             for (position, expression) in row.iter().enumerate() {
-                let value = self.expression(expression, input, subqueries)?;
+                let value = self.in_placement(SetPlacement::Values, |analysis| {
+                    analysis.expression(expression, input, subqueries)
+                })?;
                 if let Some(column) = columns.get_mut(position) {
                     column.push(value);
                 }
@@ -548,12 +576,14 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
-        for (expression, context) in offset
-            .map(|value| (value, "OFFSET"))
+        for (expression, context, placement) in offset
+            .map(|value| (value, "OFFSET", SetPlacement::Offset))
             .into_iter()
-            .chain(limit.map(|value| (value, "LIMIT")))
+            .chain(limit.map(|value| (value, "LIMIT", SetPlacement::Limit)))
         {
-            let mut value = self.expression(expression, input, subqueries)?;
+            let mut value = self.in_placement(placement, |analysis| {
+                analysis.expression(expression, input, subqueries)
+            })?;
             self.parameters
                 .coerce_unknown(&mut value, &ColumnType::BigInteger)?;
             let ty = value.ty.as_ref().expect("coerced slice expression");
