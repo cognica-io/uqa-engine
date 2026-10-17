@@ -279,16 +279,31 @@ mod cancellation_tests {
     }
 
     #[test]
-    fn work_dispatched_outside_a_statement_never_observes_another_statements_cancellation() {
+    fn work_dispatched_outside_a_statement_never_observes_another_statements_context() {
         let token = CancellationToken::new();
         token.cancel();
-        let _statement = StatementCancellationScope::enter(token.clone());
+        let statement = crate::statement::thread_context::StatementThreadContext {
+            temporal_input: uqa_sql::expr::TemporalInputContext {
+                transaction_clock_micros: Some(123),
+                ..uqa_sql::expr::TemporalInputContext::current()
+            },
+            cancellation: Some(token),
+        };
+        let _statement = statement.enter();
         let outside = || {
             assert!(statement_cancellation().is_none());
             assert_eq!(check_statement_cancellation(), Ok(()));
+            assert_eq!(uqa_sql::expr::transaction_clock_micros(), None);
         };
         let dispatch_outside = || {
-            let _detached = StatementCancellationScope::enter(None);
+            let _detached = crate::statement::thread_context::StatementThreadContext {
+                temporal_input: uqa_sql::expr::TemporalInputContext {
+                    transaction_clock_micros: None,
+                    ..uqa_sql::expr::TemporalInputContext::current()
+                },
+                cancellation: None,
+            }
+            .enter();
             super::ParallelExecutor::new(4).execute_branches(&[outside; 4]);
             super::run_parallel(vec![1, 2, 3, 4], 4, |chunk| {
                 outside();
@@ -300,5 +315,6 @@ mod cancellation_tests {
             check_statement_cancellation(),
             Err(QueryCancelled::USER_REQUEST)
         );
+        assert_eq!(uqa_sql::expr::transaction_clock_micros(), Some(123));
     }
 }

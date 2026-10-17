@@ -42,10 +42,11 @@ pub struct TransactionClockScope {
 }
 
 impl TransactionClockScope {
+    /// Enter `micros` as the transaction start. Entering `None` runs the thread without a transaction clock, where evaluation reads the wall clock, as a worker does for work dispatched from a thread that had none.
     #[must_use]
-    pub fn enter(micros: i64) -> Self {
+    pub fn enter(micros: impl Into<Option<i64>>) -> Self {
         Self {
-            previous: TRANSACTION_CLOCK.replace(Some(micros)),
+            previous: TRANSACTION_CLOCK.replace(micros.into()),
             _thread: PhantomData,
         }
     }

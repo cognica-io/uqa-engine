@@ -102,7 +102,9 @@ pub(super) fn statement_thread_scope<S: Clone + 'static>(
 ) -> super::thread_scope::StatementThreadScope {
     super::thread_context::StatementThreadContext {
         temporal_input: uqa_sql::expr::TemporalInputContext {
-            transaction_clock_micros: statements.transaction_timestamp_micros(),
+            transaction_clock_micros: statements
+                .transaction_timestamp_micros()
+                .or_else(uqa_sql::expr::transaction_clock_micros),
             interval_style: statements
                 .temporal_interval_style()
                 .unwrap_or_else(uqa_sql::expr::temporal_interval_style),
