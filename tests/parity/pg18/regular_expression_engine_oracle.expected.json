@@ -9,7 +9,7 @@
       "--notices"
     ],
     "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "1e5d5144535a94b64a38ab87e0db692f04bca43103582829e948c66acf1a77de"
+    "input_sha256": "6965c351c18193151fab28baa2bc0162c241f15b5320265333b921da8d053750"
   },
   "cases": [
     {
@@ -5366,6 +5366,36 @@
       "notices": []
     },
     {
+      "id": "collation_similar_substring_default",
+      "sql": "SELECT substring(chr(192) COLLATE \"C\" similar '[[:alpha:]]' escape '#') = chr(192) AS similar_form, substring(chr(192) COLLATE \"C\", '[[:alpha:]]', '#') = chr(192) AS three_argument, substring(chr(192) COLLATE \"C\" from '[[:alpha:]]') IS NULL AS posix_form",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "similar_form",
+            "three_argument",
+            "posix_form"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
       "id": "collation_implicit_conflict_table",
       "sql": "CREATE TABLE regex_collations (a text COLLATE \"C\", b text COLLATE \"POSIX\")",
       "command_tags": [
@@ -5439,6 +5469,46 @@
     {
       "id": "collation_implicit_conflict_similar",
       "sql": "SELECT a SIMILAR TO b FROM regex_collations",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P22",
+        "message": "could not determine which collation to use for regular expression",
+        "detail": null,
+        "hint": "Use the COLLATE clause to set the collation explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "collation_implicit_conflict_similar_substring",
+      "sql": "SELECT substring(a similar b escape '#'), substring(a, b, '#') FROM regex_collations",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substring",
+            "substring"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "a",
+              "a"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "collation_implicit_conflict_posix_substring",
+      "sql": "SELECT substring(a from b) FROM regex_collations",
       "command_tags": [],
       "error": {
         "sqlstate": "42P22",

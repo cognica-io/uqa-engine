@@ -17,16 +17,19 @@ use uqa_core::{
 };
 use uqa_pg_regex::{MatchSpan, REG_ADVANCED};
 
-/// The `substring` pattern overload selected by binding, under the call's input collation; every other dispatch belongs to another kernel.
+/// The `substring` pattern overload selected by binding; every other dispatch belongs to another kernel. The POSIX form, `textregexsubstr`, matches under the call's input collation. The SQL form is the SQL-standard-body function `substring($1, similar_to_escape($2, $3))`, whose inner call was bound with the database default collation when the body was created, so it matches under that collation whatever the caller's.
 pub(in crate::expr) fn evaluate_dispatched(
     dispatch: FunctionDispatch,
     arguments: &[Value],
     collation: u32,
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
-    let similar = match dispatch {
-        FunctionDispatch::RegexSubstring => false,
-        FunctionDispatch::SimilarSubstring => true,
+    let (similar, collation) = match dispatch {
+        FunctionDispatch::RegexSubstring => (false, collation),
+        FunctionDispatch::SimilarSubstring => (
+            true,
+            crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
+        ),
         _ => return None,
     };
     Some(evaluate(similar, arguments, collation, control))
