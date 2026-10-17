@@ -35,6 +35,12 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
             Some(true)
         }
         "multirange" if argument_count == 1 => Some(true),
+        "int4range_subdiff" | "int8range_subdiff" | "numrange_subdiff" | "daterange_subdiff"
+        | "tsrange_subdiff" | "tstzrange_subdiff"
+            if argument_count == 2 =>
+        {
+            Some(true)
+        }
         "coalesce" | "greatest" | "least" if argument_count >= 1 => Some(false),
         "nullif" | "concat_op" if argument_count == 2 => Some(false),
         "concat" | "format" | "json_build_array" | "jsonb_build_array" | "json_build_object"

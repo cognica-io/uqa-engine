@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Support PostgreSQL's six native range subtype-distance functions, preserving floating conversion order, temporal infinity values and numeric range diagnostics.
+
 - Add a SQL-owned deterministic Unicode comparison primitive with admitted scratch and cancellation, preserving PostgreSQL's root collation options and byte tie-breaking for selected comparison consumers.
 
 - Support transactional shell type declarations and completion as enums, domains or composite types while preserving OIDs, ownership, PostgreSQL diagnostics, savepoints and provider reopening.
@@ -25,6 +27,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Upgrade persistent databases to SQLite record format 65 and redb record format 61 for declared range definitions, shell type identities and transactional descriptions, including packed bit values and their type descriptors. Close all owners, retain a pre-upgrade backup and update every owner together; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).
 
 ### Fixed
+
+- Accept and format the full PostgreSQL finite date range without depending on the timestamp library's narrower calendar range, and reject out-of-range canonical date successors with the PostgreSQL diagnostic.
 
 - Preserve `%TYPE` routine signatures and bound enum/domain parameter defaults during shell-type validation, including exact overload identities and persistent reopening.
 

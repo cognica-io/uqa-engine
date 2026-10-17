@@ -28,6 +28,7 @@ mod input;
 mod production;
 mod relationships;
 mod semantics;
+pub(in crate::expr) mod subtype_distance;
 mod typed;
 pub(super) use production::{
     canonical_multirange_text_with_control, canonical_range_as_multirange_text_with_control,

@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 use super::PG18_BUILTIN_ROUTINE_GROUPS;
 
 mod call_signatures;
+mod range_subtype_distance;
 
 #[test]
 fn type_introspection_metadata_matches_postgresql() {
