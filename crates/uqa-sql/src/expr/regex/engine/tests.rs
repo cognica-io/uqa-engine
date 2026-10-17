@@ -106,7 +106,7 @@ fn refusals_take_precedence_over_the_engine_out_of_memory_report() {
 }
 
 #[test]
-fn engine_interrupt_checks_report_the_statement_cancellation() {
+fn engine_interrupt_checks_report_the_call_cancellation() {
     let budget = MemoryBudget::new(1024 * 1024);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);

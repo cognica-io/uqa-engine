@@ -41,7 +41,7 @@ fn regular_expression_engine_matches_postgresql_and_reopen(#[case] provider: usi
         return;
     }
     drop(engine);
-    // A stored view, CHECK constraints and a default keep the engine's matching and their input collations after reopening.
+    // A stored view and CHECK constraints keep the engine's matching and their input collations after reopening, and the row a stored default produced reads back unchanged.
     let engine = open(provider, &path);
     reference["cases"].as_array_mut().unwrap().retain(|case| {
         matches!(
