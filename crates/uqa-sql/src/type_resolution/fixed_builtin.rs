@@ -451,6 +451,12 @@ fn requires_cast(
     })
 }
 
+/// The executor operation a built-in binding selects: its recorded dispatch, or the one its resolved argument types select. Prepared and stored bindings leave that selection to execution binding.
+#[must_use]
+pub fn selected_builtin_dispatch(binding: &FunctionBinding) -> Option<FunctionDispatch> {
+    binding.dispatch.or_else(|| runtime_dispatch(binding))
+}
+
 pub(crate) fn runtime_dispatch(binding: &FunctionBinding) -> Option<FunctionDispatch> {
     if matches!(
         binding.dispatch,
@@ -475,6 +481,14 @@ pub(crate) fn runtime_dispatch(binding: &FunctionBinding) -> Option<FunctionDisp
         }
         ("random", [left, right]) if left == "numeric" && right == "numeric" => {
             FunctionDispatch::RandomNumericRange
+        }
+        ("substring", [input, pattern]) if input == "text" && pattern == "text" => {
+            FunctionDispatch::RegexSubstring
+        }
+        ("substring", [input, pattern, escape])
+            if input == "text" && pattern == "text" && escape == "text" =>
+        {
+            FunctionDispatch::SimilarSubstring
         }
         _ => return None,
     })

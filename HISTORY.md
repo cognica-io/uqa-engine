@@ -30,6 +30,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Evaluate the POSIX and SQL regular-expression forms of `substring`, including `SIMILAR ... ESCAPE` and `FROM ... FOR` with text arguments, by their resolved PostgreSQL signature instead of reporting `42804` or returning a positional slice for a pattern that parses as an integer, with PostgreSQL's NULL handling and planning-time translation errors for the SQL form. The `substring` and `substr` overloads now have PostgreSQL's catalog identities, so CHECK constraints, defaults, `regprocedure` input and routine privileges accept them instead of reporting an internal error.
+
 - Match PostgreSQL routine lookup errors and notices for quoted names, including bare-name DROP, ALTER and GRANT, while preserving exact name and signature resolution.
 
 - Match PostgreSQL multirange constructor errors for NULL members and multidimensional variadic arrays, preserving single-argument NULL results and valid normalization.

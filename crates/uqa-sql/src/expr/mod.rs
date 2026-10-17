@@ -32,6 +32,7 @@ mod random;
 mod range;
 pub(crate) use range::datum as range_datum;
 mod regex;
+pub use regex::check_constant_similar_translation;
 mod time;
 mod uuid;
 

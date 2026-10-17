@@ -487,5 +487,49 @@ fn strict_null_expression(expression: &ScalarExpr) -> bool {
     }
 }
 
+/// `PostgreSQL` evaluates a whole call when a strict input is a NULL constant or every input is constant; otherwise it inlines the SQL-language `substring(text, text, text)` and folds a constant `similar_to_escape` in its body. The planner keeps the call and checks only that translation, so its errors still surface before any row is read.
+pub(super) fn check_inlined_similar_substring(
+    expression: &ScalarExpr,
+    permissions: Option<&dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
+    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> Result<(), SQLError> {
+    let ScalarExpr::Func {
+        binding: Some(binding),
+        args,
+        distinct: false,
+        order_by,
+        filter: None,
+        ..
+    } = expression
+    else {
+        return Ok(());
+    };
+    if !binding.builtin
+        || uqa_sql::type_resolution::selected_builtin_dispatch(binding)
+            != Some(uqa_sql::ast::FunctionDispatch::SimilarSubstring)
+        || !order_by.is_empty()
+    {
+        return Ok(());
+    }
+    let [_, pattern, escape] = args.as_slice() else {
+        return Ok(());
+    };
+    let (Some(pattern), Some(escape)) = (literal_value(pattern), literal_value(escape)) else {
+        return Ok(());
+    };
+    if strict_null_expression(expression) || is_constant(expression, types, resolver) {
+        return Ok(());
+    }
+    // `inline_function` declines a routine the caller cannot execute; execution then reports the privilege error.
+    if permissions.is_some_and(|permissions| permissions.require_execute(binding).is_err()) {
+        return Ok(());
+    }
+    uqa_sql::expr::check_constant_similar_translation(
+        &[pattern.clone(), escape.clone()],
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
 #[cfg(test)]
 mod tests;

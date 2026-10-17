@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken};
 
+mod substring_patterns;
+
 fn text(value: &str) -> Value {
     Value::Str(value.into())
 }

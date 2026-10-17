@@ -1,0 +1,38 @@
+# PostgreSQL regular-expression functions
+
+Status: Active
+
+The regular-expression differences filed together as #980 through #983 are delivered one unit per pull request in this order: the `substring` pattern forms (#981), set-returning `regexp_matches` (#982), the split functions (#983), and finally the shared engine semantics (#980). The first unit also exposed SQL-syntax printing of `POSITION`, `OVERLAY`, `TRIM` and `SUBSTRING` (#984), the missing Unicode normalization functions (#985), further CONTEXT evidence for #306, ON CONFLICT inference over several expression indexes (#988), the bit-string `substring` overloads (#989) and constant folding of unreferenced subquery outputs (#990); those remain separate issues.
+
+## Units
+
+| Issue | Unit | State |
+| --- | --- | --- |
+| [#981](https://github.com/cognica-io/uqa-engine/issues/981) | `substring` pattern forms and catalog identities | Implemented with focused verification; automatic Linux/macOS acceptance pending |
+| [#982](https://github.com/cognica-io/uqa-engine/issues/982) | `regexp_matches` as a set-returning function | Open |
+| [#983](https://github.com/cognica-io/uqa-engine/issues/983) | `regexp_split_to_table` through the SQL owner and `regexp_split_to_array` | Open |
+| [#980](https://github.com/cognica-io/uqa-engine/issues/980) | ARE match selection, constraints, collation-dependent classes and diagnostics | Open |
+
+## Substring pattern forms (#981)
+
+### Ownership and correction
+
+SQL owns overload resolution, the regular-expression kernels and scalar execution; Planner owns constant simplification; Execution owns the routine catalog projection. Overload binding already resolved `substring(text, text)` and `substring(text, text, text)`, but evaluation dispatched by name and read the second and third arguments as integer positions. Execution binding now derives `FunctionDispatch::RegexSubstring` or `FunctionDispatch::SimilarSubstring` from the resolved argument types, as it derives the selected `to_bin` and `random` overloads, and the dispatched PostgreSQL scalar kernels pass those calls to the regular-expression owner's `eval_dispatched_substring`. Prepared and stored bindings keep their existing representation without a dispatch, so definitions created before this change select the pattern forms after reopening and no persisted format changes.
+
+The POSIX form compiles the pattern through the existing regular-expression owner and returns the first parenthesized subexpression or the whole match. The SQL form is PostgreSQL's SQL-language function `substring($1, similar_to_escape($2, $3))`, which PostgreSQL inlines while planning. Its kernel therefore returns NULL for a NULL pattern or escape, then applies the existing `similar_to_escape` kernel, and only then returns NULL for a NULL string before the same extraction. The planner keeps the call but follows `simplify_function`: a strict NULL constant or an all-constant call is folded as before, and otherwise a constant pattern and escape are translated by `check_constant_similar_translation`, as the inlined body's constant `similar_to_escape` would be folded, unless the caller lacks EXECUTE on the routine, in which case PostgreSQL does not inline it either.
+
+The routine catalog gains PostgreSQL's identities for the implemented `substring` and `substr` overloads (OIDs 877, 883, 936, 937, 2012, 2013, 2073, 2074, 2085 and 2086), including OID 2074 as a SQL-language routine with PostgreSQL's stored body. Stored expressions, CHECK constraints, defaults, `regprocedure` input and routine privileges previously failed for every `substring` and `substr` form because no catalog signature existed. The bit-string overloads 1680 and 1699 are not implemented (#989).
+
+### Preservation argument
+
+Dispatch is a function of the resolved signature only. The positional signatures `(text, integer)`, `(text, integer, integer)` and their bytea counterparts map to no dispatch, so their calls reach the unchanged positional kernel exactly as before. Only `(text, text)` and `(text, text, text)` map to the new variants; before this change those calls failed with `42804` for every non-numeric pattern and returned a positional slice when the pattern text parsed as an integer. Every previously successful result of a positional signature is therefore preserved, and the only changed observations are those of the two pattern signatures, which now follow PostgreSQL's definitions.
+
+For the POSIX form, PostgreSQL's strict `textregexsubstr(s, p)` returns the span of the first parenthesized subexpression `m1` when `p` has one and the whole match `m0` otherwise, and NULL when the selected span is absent. The implementation computes the same function of `(m0, m1)` from the owner's captures, so any remaining difference from PostgreSQL is confined to the engine's choice of `m0` and `m1`, which #980 tracks.
+
+For the SQL form, let `t(p, e)` be `similar_to_escape(p, e)`, which is strict and whose translation text equals PostgreSQL's for every independently observed pattern. PostgreSQL evaluates `substring(s, p, e)` as `NULL` when a constant argument is NULL, as the folded value when all arguments are constant, and otherwise as `textregexsubstr(s, t(p, e))` with `t` folded when `p` and `e` are constant. The planner preserves the first two cases through the existing folds and reproduces the third case's planning-time evaluation of `t` without changing the expression. At execution, the kernel evaluates `NULL` when `p` or `e` is NULL, otherwise `t(p, e)`, then `NULL` when `s` is NULL, otherwise the POSIX extraction: this is exactly the strict evaluation of the inlined body, including its error precedence. Any remaining difference is again the engine's selection of matches, including PostgreSQL's non-greedy prefix produced by `t`.
+
+The new catalog rows add identities for routines that already resolved and executed; they do not change overload resolution, results or the routine catalogs of other functions. Evaluation reads only its arguments and the per-call compiled pattern. It does not touch storage, catalog state, row support, multiplicity or ordering. The input copy, translated pattern and result are admitted under the caller's allowance; only the result survives a successful call, and a rejected output releases its reservation. Both cancellation scopes are checked before and after matching.
+
+### Verification
+
+The independent Docker PostgreSQL 18.4 transcript `tests/parity/pg18/substring_pattern_forms_oracle.expected.json` (69 identified statements, captured with `tests/parity/pg18/capture_command_completion_oracle.py` in a disposable database) passes on memory, native SQLite, SQLite Key/Value and redb. Nine stored-definition, deferred-error and catalog cases pass again after persistent reopening. Before the correction, 29 of its first 34 single-statement queries differed. Four SQL owner tests replay its constant and row-level cases, planning translation errors, admission and cancellation; the fixed-overload binding test covers all four `substring` signatures; a planner test covers PostgreSQL's planning-time translation; and an execution catalog test compares the ten routine identities and the stored body of OID 2074. Remaining differences inside these forms are match selection and the text of invalid-pattern messages (#980), CONTEXT for errors raised inside the SQL-language form (#306), SQL-syntax printing in stored definitions (#984) and constant folding of unreferenced subquery outputs (#990); the manifest item `functions.substring-pattern-forms` is therefore `partial`. Automatic Linux/macOS acceptance is required before delivery.

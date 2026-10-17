@@ -139,6 +139,7 @@
       "functions.crc-checksums",
       "functions.gamma-functions",
       "functions.string-binary-lengths",
+      "functions.substring-pattern-forms",
       "functions.uuid-extraction",
       "query.window-frames",
       "aggregates.null-and-enum-inputs",
@@ -699,6 +700,14 @@
       "supported_version": "PostgreSQL 18.4 one-argument length, char_length, character_length, octet_length, and bit_length text, character, and bytea overloads with Unicode-character, blank-padding, UTF-8 byte, raw-byte, and bit semantics; strict NULL and integer return types; preferred text context; character-family casts; scalar-subquery binding; undefined-function SQLSTATEs; user-overload and pg_catalog search order; immutable generated-column binding across reopen; and exact OIDs 720, 1317, 1318, 1367, 1369, 1372, 1374, 1375, 1381, 1810, 1811, and 2010 catalog behavior including bit_length SQL bodies",
       "status": "verified",
       "open_issue": null
+    },
+    {
+      "id": "functions.substring-pattern-forms",
+      "postgresql_reference": "PostgreSQL 18.4 live substring(text FROM pattern), substring(text, text), substring(text SIMILAR pattern ESCAPE escape), substring(text FROM pattern FOR escape) and substring(text, text, text) results, SQLSTATEs, messages and HINTs, NULL and planning-time translation behavior, prepared parameters, stored views and CHECK constraints, and pg_proc metadata of the substring and substr overloads, plus string-function and pattern-matching documentation",
+      "uqa_test": "cargo test -p uqa-engine --test integration substring_pattern_forms_match_postgresql_and_reopen; cargo test -p uqa-sql --lib substring_pattern_forms; cargo test -p uqa-sql --lib constant_similar_translation_reports_postgresql_planning_errors; cargo test -p uqa-sql --lib fixed_builtin_binding_uses_typed_sql_parameters_across_families; cargo test -p uqa-planner --lib similar_substring_translation_follows_postgresql_inlining_while_planning; cargo test -p uqa-execution --lib substring_metadata_and_sql_body_match_postgresql",
+      "supported_version": "PostgreSQL 18.4 substring pattern forms selected by the resolved signature rather than argument values, including unknown literals and untyped parameters; POSIX extraction of the first parenthesized subexpression or the whole match, with NULL for no match or a non-participating subexpression; SQL regular-expression extraction through similar_to_escape with zero, one or two escape-double-quote separators and empty or NULL escapes, PostgreSQL's inlined NULL order and planning-time translation errors; 2200C and 22025 diagnostics with HINT; unchanged positional text and bytea forms; pg_proc identities of the text and bytea substring and substr overloads, including the SQL-language body of OID 2074; and stored views and CHECK constraints across memory, native SQLite, SQLite Key/Value and redb reopening",
+      "status": "partial",
+      "open_issue": "Match selection inside both forms, including PostgreSQL's shortest match before the first SIMILAR separator, and the messages of invalid POSIX patterns follow the regular-expression engine correction in #980. PostgreSQL's CONTEXT for errors raised inside the SQL-language form is tracked in #306, SQL-syntax printing of SUBSTRING in stored definitions in #984, the bit-string overloads in #989 and constant folding of unreferenced subquery outputs in #990."
     },
     {
       "id": "functions.uuid-extraction",

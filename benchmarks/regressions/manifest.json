@@ -12455,6 +12455,100 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "substring_pattern_forms_match_the_postgresql_reference",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/substring_patterns.rs",
+      "capability": "Substring pattern forms",
+      "workload": "Independent PostgreSQL 18.4 POSIX and SQL regular-expression substring cases, NULL and planning-time translation order, prepared parameters, stored views and CHECK constraints across provider reopening, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "Resolved substring(text, text) and substring(text, text, text) signatures select regular-expression extraction with PostgreSQL's inlined NULL and error order; positional forms, catalog identities of other routines, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "substring_pattern_forms_keep_only_their_result_and_release_rejected_output",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/substring_patterns.rs",
+      "capability": "Substring pattern forms",
+      "workload": "Independent PostgreSQL 18.4 POSIX and SQL regular-expression substring cases, NULL and planning-time translation order, prepared parameters, stored views and CHECK constraints across provider reopening, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "Resolved substring(text, text) and substring(text, text, text) signatures select regular-expression extraction with PostgreSQL's inlined NULL and error order; positional forms, catalog identities of other routines, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "substring_pattern_forms_observe_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/substring_patterns.rs",
+      "capability": "Substring pattern forms",
+      "workload": "Independent PostgreSQL 18.4 POSIX and SQL regular-expression substring cases, NULL and planning-time translation order, prepared parameters, stored views and CHECK constraints across provider reopening, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "Resolved substring(text, text) and substring(text, text, text) signatures select regular-expression extraction with PostgreSQL's inlined NULL and error order; positional forms, catalog identities of other routines, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "substring_pattern_forms_match_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/substring_patterns.rs",
+      "capability": "Substring pattern forms",
+      "workload": "Independent PostgreSQL 18.4 POSIX and SQL regular-expression substring cases, NULL and planning-time translation order, prepared parameters, stored views and CHECK constraints across provider reopening, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "Resolved substring(text, text) and substring(text, text, text) signatures select regular-expression extraction with PostgreSQL's inlined NULL and error order; positional forms, catalog identities of other routines, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constant_similar_translation_reports_postgresql_planning_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/substring_patterns.rs",
+      "capability": "Substring pattern forms",
+      "workload": "Independent PostgreSQL 18.4 POSIX and SQL regular-expression substring cases, NULL and planning-time translation order, prepared parameters, stored views and CHECK constraints across provider reopening, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "Resolved substring(text, text) and substring(text, text, text) signatures select regular-expression extraction with PostgreSQL's inlined NULL and error order; positional forms, catalog identities of other routines, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "similar_substring_translation_follows_postgresql_inlining_while_planning",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/similar_substring.rs",
+      "capability": "Substring pattern forms",
+      "workload": "Independent PostgreSQL 18.4 POSIX and SQL regular-expression substring cases, NULL and planning-time translation order, prepared parameters, stored views and CHECK constraints across provider reopening, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "Resolved substring(text, text) and substring(text, text, text) signatures select regular-expression extraction with PostgreSQL's inlined NULL and error order; positional forms, catalog identities of other routines, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "substring_metadata_and_sql_body_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/builtin_routines/tests.rs",
+      "capability": "Substring pattern forms",
+      "workload": "Independent PostgreSQL 18.4 POSIX and SQL regular-expression substring cases, NULL and planning-time translation order, prepared parameters, stored views and CHECK constraints across provider reopening, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "Resolved substring(text, text) and substring(text, text, text) signatures select regular-expression extraction with PostgreSQL's inlined NULL and error order; positional forms, catalog identities of other routines, admitted output reservations and both cancellation scopes are unchanged.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
