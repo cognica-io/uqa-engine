@@ -21,7 +21,7 @@ use super::scalar_dispatch::{eval_scalar_function_with_context, eval_sequence_fu
 mod named;
 mod production;
 mod temporal;
-use named::builtin_named_args;
+pub use named::builtin_named_args;
 pub use production::{
     eval_builtin_function_call_with_control, eval_generated_function_call_with_control,
 };

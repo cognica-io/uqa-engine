@@ -32,7 +32,7 @@ mod random;
 mod range;
 pub(crate) use range::datum as range_datum;
 mod regex;
-pub use regex::check_constant_similar_translation;
+pub use regex::{check_constant_similar_translation, RegexMatches};
 mod time;
 mod uuid;
 
@@ -163,8 +163,8 @@ pub use call_arguments::{
     validate_named_argument_order_with_control, variadic_argument_value, wrap_variadic_argument,
 };
 pub use call_dispatch::{
-    eval_builtin_function_call, eval_builtin_function_call_with_control, eval_function_call,
-    eval_generated_function_call_with_control,
+    builtin_named_args, eval_builtin_function_call, eval_builtin_function_call_with_control,
+    eval_function_call, eval_generated_function_call_with_control,
 };
 pub use context::{
     cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,

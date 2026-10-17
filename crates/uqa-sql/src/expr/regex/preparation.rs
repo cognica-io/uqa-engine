@@ -6,27 +6,89 @@
 
 //! `PostgreSQL` pattern preparation shared by ordinary and controlled compilation.
 
-use super::Options;
+use super::{GlobalFlag, Options};
 use crate::error::{Result, SQLError};
 use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
 
 pub(super) struct PreparedPattern {
     pub pattern: Produced<String>,
     pub options: Options,
+    pub global: bool,
+}
+
+#[derive(Clone, Copy)]
+enum Syntax {
+    Advanced,
+    Basic,
+    Quoted,
+}
+
+/// The options of one flag string, validated in full as `PostgreSQL`'s `parse_re_flags` does before any caller inspects `g`.
+struct ParsedFlags {
+    options: Options,
+    syntax: Syntax,
+    expanded: bool,
+    global: bool,
 }
 
 pub(super) fn prepare(
     pattern: &str,
     flags: &str,
-    global_allowed: bool,
+    global_flag: GlobalFlag,
     control: &ProductionControl<'_>,
 ) -> Result<PreparedPattern> {
-    #[derive(Clone, Copy)]
-    enum Syntax {
-        Advanced,
-        Basic,
-        Quoted,
+    let ParsedFlags {
+        options,
+        syntax,
+        expanded,
+        global,
+    } = parse_flags(flags, control)?;
+    // A single-result function rejects `g` after every flag is valid and before the pattern is examined.
+    if let (true, GlobalFlag::Rejected { function, hint }) = (global, global_flag) {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "22023".into(),
+            message: format!("{function}() does not support the \"global\" option"),
+            detail: None,
+            hint: hint.map(Into::into),
+        });
     }
+    if matches!(syntax, Syntax::Quoted)
+        && (expanded || options.multi_line || !options.dot_matches_new_line)
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "2201B".into(),
+            message: "invalid regular expression: invalid argument to regex function".into(),
+        });
+    }
+    let expanded = if expanded {
+        expand_postgres_regex(pattern, control)?
+    } else {
+        control.copy_text(pattern)?
+    };
+    let syntax_pattern = match syntax {
+        Syntax::Advanced => expanded,
+        Syntax::Basic => {
+            let pattern = postgres_basic_regex(&expanded, control)?;
+            drop(expanded);
+            pattern
+        }
+        Syntax::Quoted => {
+            let pattern = quote(&expanded, control)?;
+            drop(expanded);
+            pattern
+        }
+    };
+    let pattern =
+        postgres_character_class_regex(&syntax_pattern, !options.dot_matches_new_line, control)?;
+    drop(syntax_pattern);
+    Ok(PreparedPattern {
+        pattern,
+        options,
+        global,
+    })
+}
+
+fn parse_flags(flags: &str, control: &ProductionControl<'_>) -> Result<ParsedFlags> {
     control.check()?;
     let mut options = Options {
         case_insensitive: false,
@@ -35,10 +97,11 @@ pub(super) fn prepare(
     };
     let mut expanded = false;
     let mut syntax = Syntax::Advanced;
+    let mut global = false;
     for flag in flags.chars() {
         control.check()?;
         match flag {
-            'g' if global_allowed => {}
+            'g' => global = true,
             // Preserve the existing PostgreSQL REG_ADVANCED/REG_EXTENDED option behavior.
             'b' | 'e' => syntax = Syntax::Basic,
             'c' => options.case_insensitive = false,
@@ -70,36 +133,12 @@ pub(super) fn prepare(
             }
         }
     }
-    if matches!(syntax, Syntax::Quoted)
-        && (expanded || options.multi_line || !options.dot_matches_new_line)
-    {
-        return Err(SQLError::Routine {
-            sqlstate: "2201B".into(),
-            message: "invalid regular expression: invalid argument to regex function".into(),
-        });
-    }
-    let expanded = if expanded {
-        expand_postgres_regex(pattern, control)?
-    } else {
-        control.copy_text(pattern)?
-    };
-    let syntax_pattern = match syntax {
-        Syntax::Advanced => expanded,
-        Syntax::Basic => {
-            let pattern = postgres_basic_regex(&expanded, control)?;
-            drop(expanded);
-            pattern
-        }
-        Syntax::Quoted => {
-            let pattern = quote(&expanded, control)?;
-            drop(expanded);
-            pattern
-        }
-    };
-    let pattern =
-        postgres_character_class_regex(&syntax_pattern, !options.dot_matches_new_line, control)?;
-    drop(syntax_pattern);
-    Ok(PreparedPattern { pattern, options })
+    Ok(ParsedFlags {
+        options,
+        syntax,
+        expanded,
+        global,
+    })
 }
 
 fn scratch_characters(

@@ -6,7 +6,9 @@
 
 //! Capture, position and predicate results retain only admitted SQL values.
 
-use super::{compile, flags, invalid_parameter, nth_capture, parameter, plain, string, tail};
+use super::{
+    compile, flags, invalid_parameter, nth_capture, parameter, plain, string, tail, GlobalFlag,
+};
 use crate::error::{Result, SQLError};
 use crate::expr::{conversion::value_to_string_with_control, out_of_range};
 use uqa_core::{
@@ -14,11 +16,8 @@ use uqa_core::{
     ArrayValue, Value,
 };
 
-pub(super) fn captures(
-    name: &str,
-    args: &[Value],
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Value>> {
+/// `regexp_match`: the capture array of the first match, or NULL. `regexp_matches` returns rows through [`super::RegexMatches`].
+pub(super) fn captures(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
     if !(2..=3).contains(&args.len()) {
         return Err(SQLError::TypeMismatch(
             "regexp_match takes 2 or 3 args".into(),
@@ -27,12 +26,24 @@ pub(super) fn captures(
     let input = value_to_string_with_control(&args[0], control)?;
     let pattern = value_to_string_with_control(&args[1], control)?;
     let flags = flags(args.get(2), control)?;
-    let regex = compile(&pattern, &flags, name == "regexp_matches", control)?;
+    let global = GlobalFlag::Rejected {
+        function: "regexp_match",
+        hint: Some("Use the regexp_matches function instead."),
+    };
+    let regex = compile(&pattern, &flags, global, control)?;
     let captures = regex.captures(&input);
     control.check()?;
     let Some(captures) = captures else {
         return plain(Value::Null, control);
     };
+    capture_array(&captures, control)
+}
+
+/// The `text[]` value of one match: its parenthesized subexpressions, or the whole match when the pattern has none. A subexpression that did not participate is NULL.
+pub(super) fn capture_array(
+    captures: &regex::Captures<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     let mut groups = ProductionVec::new(*control);
     if captures.len() == 1 {
         let matched = captures.get(0).ok_or_else(|| {
@@ -95,7 +106,12 @@ pub(super) fn evaluate(
             } else {
                 flags(args.get(2), control)?
             };
-            let regex = compile(&pattern, &flags, false, control)?;
+            let regex = compile(
+                &pattern,
+                &flags,
+                GlobalFlag::rejected_by("regexp_like"),
+                control,
+            )?;
             plain(Value::Bool(regex.is_match(&input)), control)
         }
         _ => unreachable!("regular-expression family membership was checked"),
@@ -110,7 +126,12 @@ fn count(
 ) -> Result<Produced<Value>> {
     let start = parameter(args.get(2), 1, 1, "start", control)?;
     let flags = flags(args.get(3), control)?;
-    let regex = compile(pattern, &flags, false, control)?;
+    let regex = compile(
+        pattern,
+        &flags,
+        GlobalFlag::rejected_by("regexp_count"),
+        control,
+    )?;
     let Some((tail, _)) = tail(input, start, control)? else {
         return plain(Value::Int(0), control);
     };
@@ -155,7 +176,12 @@ fn selected(
         "subexpr",
         control,
     )?;
-    let regex = compile(pattern, &flags, false, control)?;
+    let function = if position {
+        "regexp_instr"
+    } else {
+        "regexp_substr"
+    };
+    let regex = compile(pattern, &flags, GlobalFlag::rejected_by(function), control)?;
     let absent = || plain(if position { Value::Int(0) } else { Value::Null }, control);
     let Some((tail, base_chars)) = tail(input, start, control)? else {
         return absent();
@@ -211,7 +237,7 @@ fn similar(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<V
         return plain(Value::Null, control);
     }
     let input = pattern_input(&args[0], control)?;
-    let regex = compile(&pattern, "", false, control)?;
+    let regex = compile(&pattern, "", GlobalFlag::rejected_by("similar_to"), control)?;
     plain(Value::Bool(regex.is_match(&input)), control)
 }
 

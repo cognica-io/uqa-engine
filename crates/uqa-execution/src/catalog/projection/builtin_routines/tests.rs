@@ -264,6 +264,46 @@ fn substring_metadata_and_sql_body_match_postgresql() {
     }
 }
 
+#[test]
+fn regexp_matches_metadata_and_set_estimates_match_postgresql() {
+    let transcript = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/regexp_matches_rows_oracle.expected.json"
+    ));
+    assert_catalog_metadata(transcript, 2);
+    let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    let rows = reference["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["id"] == "catalog_set_metadata")
+        .unwrap()["results"][0]["rows"]
+        .clone();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    for row in rows {
+        let oid = row[0].as_str().unwrap().parse::<i64>().unwrap();
+        let routine = PG18_BUILTIN_ROUTINE_GROUPS
+            .iter()
+            .flat_map(|group| group.iter())
+            .find(|routine| routine.oid == oid)
+            .unwrap();
+        assert_eq!(
+            [
+                boolean_text(routine.returns_set()).to_string(),
+                routine.estimated_rows().to_string(),
+                format!("{{{}}}", routine.argument_names.join(",")),
+            ],
+            [
+                row[1].as_str().unwrap(),
+                row[2].as_str().unwrap(),
+                row[3].as_str().unwrap()
+            ],
+            "OID {oid}"
+        );
+    }
+}
+
 fn assert_catalog_metadata(transcript: &str, expected_count: usize) {
     let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
     let catalog = reference["cases"]

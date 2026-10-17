@@ -94,7 +94,7 @@ fn replace(
         return control.copy_text(input).map_err(Into::into);
     }
     let (prefix, tail) = input.split_at(byte_start);
-    let regex = compile(pattern, flags, true, control)?;
+    let regex = compile(pattern, flags, super::GlobalFlag::Accepted, control)?;
     let replacement = postgres_replacement(replacement, control)?;
     let mut output = ProductionString::new(*control);
     output.push_str(prefix)?;

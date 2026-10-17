@@ -468,8 +468,12 @@ fn strict_null_expression(expression: &ScalarExpr) -> bool {
             {
                 return true;
             }
+            // A strict set-returning call with a NULL input returns no rows, not one NULL value.
             uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len())
                 == Some(true)
+                && !uqa_sql::semantics::sets::validation::builtin_returns_set(
+                    &uqa_sql::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase()),
+                )
                 && args.iter().any(null)
         }
         ScalarExpr::Binary {

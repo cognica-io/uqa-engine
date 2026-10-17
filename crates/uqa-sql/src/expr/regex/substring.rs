@@ -91,7 +91,12 @@ fn translate(
 
 /// `textregexsubstr`: the first parenthesized subexpression when the pattern has one, otherwise the whole match. No match, or a first subexpression that did not participate in the match, yields NULL.
 fn extract(input: &str, pattern: &str, control: &ProductionControl<'_>) -> Result<Produced<Value>> {
-    let regex = compile(pattern, "", false, control)?;
+    let regex = compile(
+        pattern,
+        "",
+        super::GlobalFlag::rejected_by("substring"),
+        control,
+    )?;
     let captures = regex.captures(input);
     control.check()?;
     let Some(captures) = captures else {

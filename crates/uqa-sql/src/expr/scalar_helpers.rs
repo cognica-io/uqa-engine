@@ -86,16 +86,13 @@ pub(super) mod casing;
 pub(in crate::expr) mod like_pattern;
 pub use like_pattern::CompiledLikePattern;
 
+/// Compile a pattern as the single-result `regexp_like` does, which rejects `g`.
 #[cfg(test)]
-fn compile_pg_regex(
-    pattern: &str,
-    flags: &str,
-    global_allowed: bool,
-) -> Result<super::regex::LocalRegex> {
+fn compile_pg_regex(pattern: &str, flags: &str) -> Result<super::regex::LocalRegex> {
     super::regex::compile(
         pattern,
         flags,
-        global_allowed,
+        super::regex::GlobalFlag::rejected_by("regexp_like"),
         &ProductionControl::uncontrolled(),
     )
 }

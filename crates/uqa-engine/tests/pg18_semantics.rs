@@ -128,6 +128,8 @@ mod range_peers;
 mod range_rowsets;
 #[path = "pg18_semantics/range_subtype_distance.rs"]
 mod range_subtype_distance;
+#[path = "pg18_semantics/regexp_matches.rs"]
+mod regexp_matches;
 #[path = "pg18_semantics/reverse_overloads.rs"]
 mod reverse_overloads;
 #[path = "pg18_semantics/review_regressions.rs"]
