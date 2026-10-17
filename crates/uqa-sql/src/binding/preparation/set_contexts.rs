@@ -9,6 +9,7 @@
 use super::{Preparation, SQLError};
 use crate::ast::FunctionBinding;
 use crate::semantics::sets::placement::SetPlacement;
+use crate::semantics::sets::placement_scope::placing_set_calls;
 
 impl Preparation<'_> {
     /// Analyze `clause` as the expression kind `placement`, then restore the enclosing kind.
@@ -47,7 +48,7 @@ impl Preparation<'_> {
         before: usize,
         error: impl FnOnce() -> SQLError,
     ) -> Result<(), SQLError> {
-        if self.scope.set_calls == before {
+        if self.scope.set_calls == before || !placing_set_calls() {
             Ok(())
         } else {
             Err(error())
@@ -61,7 +62,7 @@ impl Preparation<'_> {
         selected: Option<&FunctionBinding>,
         before: usize,
     ) -> Result<(), SQLError> {
-        if self.scope.set_calls == before {
+        if self.scope.set_calls == before || !placing_set_calls() {
             return Ok(());
         }
         if selected.is_none_or(|binding| binding.builtin)
@@ -93,11 +94,13 @@ impl Preparation<'_> {
         selected: Option<&FunctionBinding>,
         before: usize,
     ) -> Result<(), SQLError> {
-        if crate::semantics::sets::static_setness::function_may_return_set_statically(
-            self.routines,
-            name,
-            selected,
-        ) {
+        if placing_set_calls()
+            && crate::semantics::sets::static_setness::function_may_return_set_statically(
+                self.routines,
+                name,
+                selected,
+            )
+        {
             self.scope
                 .set_placement
                 .admit(self.scope.set_calls != before)?;

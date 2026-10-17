@@ -24,6 +24,7 @@ mod schema_publication;
 mod schemas;
 mod sequences;
 mod set_returning_definitions;
+mod set_returning_placements;
 mod table_alteration;
 mod table_alteration_locks;
 mod table_authorization;

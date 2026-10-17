@@ -22,6 +22,7 @@ use uqa_sql::{
     schema::table_creation::{
         create_table_as_columns, existing_create_as_target, validate_create_table_as_columns,
     },
+    semantics::sets::placement_scope::SetPlacementScope,
     SQLError,
 };
 
@@ -263,10 +264,14 @@ pub fn refresh_materialized_view(
             let owner = view
                 .security
                 .owner_reference(&context.namespace.roles.role_definitions())?;
-            let result = context.query_owners.with_owner(
-                &owner,
-                Box::new(|queries| queries.execute(&view.query, &[])),
-            )?;
+            // The stored query runs as it was created; its set-returning calls are not placed again.
+            let result = {
+                let _stored = SetPlacementScope::stored_definition();
+                context.query_owners.with_owner(
+                    &owner,
+                    Box::new(|queries| queries.execute(&view.query, &[])),
+                )
+            }?;
             replace_materialized_rows(&mut view, Some(&result))?;
         }
         context.locks.prepare_definition_write()?;

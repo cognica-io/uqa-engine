@@ -15,6 +15,7 @@ use super::placement::{
     conditional_set_error, row_comparison_set_error, set_argument_error, top_level_from,
     SetPlacement,
 };
+use super::placement_scope::placing_set_calls;
 use super::{PhysicalProjection, SetFunctionCatalog};
 use crate::binding::context::BindingContext;
 use crate::semantics::aggregates::is_aggregate;
@@ -599,13 +600,16 @@ pub fn validate_projection_set_contexts(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
+    if !placing_set_calls() {
+        return Ok(());
+    }
     for projection in projections {
         validate_set_context(engine, resolver, &projection.expr, schema, params)?;
     }
     Ok(())
 }
 
-/// Check a query block's clauses in `PostgreSQL`'s transformation order: the target list, WHERE, HAVING, ORDER BY, GROUP BY, DISTINCT ON, OFFSET, LIMIT and FROM, then the row-locking clause.
+/// Check a query block's clauses in `PostgreSQL`'s transformation order: the target list, WHERE, HAVING, ORDER BY, GROUP BY, DISTINCT ON, OFFSET, LIMIT and FROM, then the row-locking clause. A block of a stored definition is not checked again.
 pub fn validate_query_set_contexts(
     engine: &dyn SetFunctionCatalog,
     resolver: &dyn FunctionTypeResolver,
@@ -613,6 +617,9 @@ pub fn validate_query_set_contexts(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
+    if !placing_set_calls() {
+        return Ok(());
+    }
     validate_projection_set_contexts(engine, resolver, &statement.projections, schema, params)?;
     for (clause, placement) in [
         (statement.r#where.as_ref(), SetPlacement::Where),
@@ -707,6 +714,9 @@ pub fn validate_source_set_contexts_before_build(
     ctes: &BindingContext<'_>,
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
+    if !placing_set_calls() {
+        return Ok(());
+    }
     match source {
         SourcePlan::Join {
             left,
@@ -785,6 +795,9 @@ pub fn validate_values_set_contexts(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
+    if !placing_set_calls() {
+        return Ok(());
+    }
     reject_set_placement(
         engine,
         resolver,

@@ -94,6 +94,7 @@ use crate::ast::ColumnType;
 use crate::catalog::analysis::CatalogReadView;
 use crate::catalog::resolution::RelationNameResolution;
 use crate::routines::RoutineResolution;
+use crate::semantics::sets::placement_scope::SetPlacementScope;
 use crate::semantics::{
     apply_table_function_aliases, table_function_column_types, table_function_empty_schema,
     validate_table_function_alias_count, validate_table_function_column_definition,
@@ -444,16 +445,19 @@ impl SchemaScope {
                         )));
                     }
                     self.record_stored_query_dependencies(&view.query);
-                    let result = self
-                        .bind_query(routines, &view.query, params, outer)
-                        .and_then(|schema| {
-                            let schema = rename_schema(
-                                &schema,
-                                view.output_columns.as_deref().unwrap_or(&[]),
-                                Some(qualifier),
-                            );
-                            self.alias_relation_schema(&schema, name, qualifier, column_aliases)
-                        });
+                    // A view's stored query is bound as it was created; its set-returning calls are not placed again.
+                    let result = {
+                        let _stored = SetPlacementScope::stored_definition();
+                        self.bind_query(routines, &view.query, params, outer)
+                    }
+                    .and_then(|schema| {
+                        let schema = rename_schema(
+                            &schema,
+                            view.output_columns.as_deref().unwrap_or(&[]),
+                            Some(qualifier),
+                        );
+                        self.alias_relation_schema(&schema, name, qualifier, column_aliases)
+                    });
                     self.visiting_views.remove(&key);
                     return result;
                 }

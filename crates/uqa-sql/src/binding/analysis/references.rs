@@ -298,9 +298,11 @@ fn require_scalar_boolean_test(
     params: &[SQLParam],
     test: crate::ast::BooleanTest,
 ) -> Result<(), SQLError> {
-    if crate::semantics::sets::validation::expression_may_return_set(
-        routines, routines, argument, schema, params,
-    )? {
+    if crate::semantics::sets::placement_scope::placing_set_calls()
+        && crate::semantics::sets::validation::expression_may_return_set(
+            routines, routines, argument, schema, params,
+        )?
+    {
         Err(crate::semantics::sets::placement::set_argument_error(
             test.label(),
         ))

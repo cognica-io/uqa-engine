@@ -20,7 +20,10 @@ use crate::{
         view::StoredViewKind,
     },
     plpgsql::bind_expr,
-    semantics::rules::action_binding::rule_action_has_set_operation,
+    semantics::{
+        rules::action_binding::rule_action_has_set_operation,
+        sets::placement_scope::SetPlacementScope,
+    },
     SQLError,
 };
 use uqa_core::{RelationIdentity, Value};
@@ -577,6 +580,9 @@ impl EventAnalysisContext<'_> {
         ),
         SQLError,
     > {
+        // A stored rule is analyzed as it was created; its set-returning calls are not placed again.
+        let _stored =
+            (lookup_mode == RelationLookupMode::Bound).then(SetPlacementScope::stored_definition);
         let (relation, _) =
             self.resolve_rule_event_relation_kind(&definition.table, lookup_mode)?;
         definition.table = relation.qualified_name();

@@ -33,7 +33,7 @@ fn rename_calls(value: &mut serde_json::Value) -> usize {
     }
 }
 
-fn legacy_calls(json: &str) -> (String, usize) {
+pub(super) fn legacy_calls(json: &str) -> (String, usize) {
     let mut value: serde_json::Value = serde_json::from_str(json).unwrap();
     let renamed = rename_calls(&mut value);
     (serde_json::to_string(&value).unwrap(), renamed)

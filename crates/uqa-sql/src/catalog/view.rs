@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use crate::semantics::sets::placement_scope::SetPlacementScope;
 use crate::{RowSchema, SQLError};
 
 mod materialized;
@@ -134,13 +135,17 @@ impl ViewRewriteDefinition {
                 self.materialized_column_collations.as_deref(),
             );
         }
-        let query_schema = crate::binding::analyze_query_plan_schema_with_catalog(
-            routines,
-            &self.query,
-            &[],
-            catalog,
-            resolution,
-        )?;
+        // The stored query is analyzed as it was created; its set-returning calls are not placed again.
+        let query_schema = {
+            let _stored = SetPlacementScope::stored_definition();
+            crate::binding::analyze_query_plan_schema_with_catalog(
+                routines,
+                &self.query,
+                &[],
+                catalog,
+                resolution,
+            )
+        }?;
         let output_columns = match &self.output_columns {
             Some(columns) => columns.clone(),
             None => create_view_output_columns(&query_schema, &[])?,

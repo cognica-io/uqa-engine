@@ -26,7 +26,7 @@ use crate::{
     ast::{CreateFunction, FunctionBinding, FunctionBody, FunctionReturns},
     binding::{bind_routine_parameter_references, prepare_routine_body_inputs},
     plan::{ComputePlan, QueryBlockPlan, RelationalPlan, UnifiedPlan},
-    semantics::volatility::VolatilityCatalog,
+    semantics::{sets::placement_scope::SetPlacementScope, volatility::VolatilityCatalog},
     ColumnType, SQLError, ScalarExpr,
 };
 
@@ -203,14 +203,22 @@ impl RoutineInliningContext<'_> {
             .then(|| sql_body_parameter_scope(definition, &parameters))
             .transpose()?;
         let snapshot = self.catalog.binding_snapshot()?;
-        let result = prepare_routine_body_inputs(
-            self.routines,
-            &mut plan,
-            &parameters,
-            &snapshot.context(),
-            self.catalog,
-            names.as_ref(),
-        )?;
+        let result = {
+            // A SQL-standard body is inlined as it was stored; a body compiled from source text places its set-returning calls as a new statement does.
+            let _placement = if matches!(definition.body, FunctionBody::Statements(_)) {
+                SetPlacementScope::stored_definition()
+            } else {
+                SetPlacementScope::compiled_source()
+            };
+            prepare_routine_body_inputs(
+                self.routines,
+                &mut plan,
+                &parameters,
+                &snapshot.context(),
+                self.catalog,
+                names.as_ref(),
+            )
+        }?;
         if let Some(names) = &names {
             bind_routine_parameter_references(
                 self.routines,
