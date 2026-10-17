@@ -30,7 +30,7 @@ fn editor_context_preserves_literals_comments_and_real_catalog_names() {
     session
         .engine
         .sql(
-            "CREATE TABLE shell_probe(id int); CREATE TABLE \"이름 표\"(\"열 이름\" int)",
+            "CREATE TABLE shell_probe(id int); CREATE TABLE \"user\"(id int); CREATE TABLE \"이름 표\"(\"열 이름\" int)",
             &[],
         )
         .unwrap();
@@ -41,6 +41,7 @@ fn editor_context_preserves_literals_comments_and_real_catalog_names() {
         "SELECT * FROM shell_pr",
         "SELECT * FROM public.shell_pr",
         "SELECT * FROM \"이름",
+        "SELECT * FROM \"us",
     ] {
         let (_, matches) = helper.complete(input, input.len(), &context).unwrap();
         assert!(!matches.is_empty(), "{input}");
@@ -61,6 +62,16 @@ fn editor_context_preserves_literals_comments_and_real_catalog_names() {
             "{buffer}\n{line}"
         );
     }
+}
+
+#[test]
+fn completion_displays_controls_without_changing_the_inserted_identifier() {
+    let name = "\"unsafe\x1b[31mname\"";
+    let helper = UsqlHelper::new(vec![name.into()], Vec::new(), Vec::new());
+    let candidates = helper.completion_candidates("\"unsafe", true);
+    assert_eq!(candidates.len(), 1);
+    assert!(!candidates[0].display.contains('\x1b'));
+    assert_eq!(candidates[0].replacement, name);
 }
 
 #[test]

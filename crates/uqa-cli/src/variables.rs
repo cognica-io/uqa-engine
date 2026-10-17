@@ -246,7 +246,7 @@ pub(crate) fn parse_boolean(value: &str) -> Result<bool, String> {
 }
 
 fn valid_key(value: &str) -> bool {
-    !value.is_empty() && value.chars().all(|c| c.is_alphanumeric() || c == '_')
+    !value.is_empty() && value.chars().all(crate::lexer::variable_character)
 }
 
 /// Meta-command argument quoting is lexical only; it never executes substitutions or a shell.
@@ -329,6 +329,18 @@ mod tests {
         );
         assert_eq!(variables.expand("SELECT :missing"), "SELECT :missing");
         assert!(!format!("{variables:?}").contains("Reilly"));
+    }
+    #[test]
+    fn non_ascii_variable_names_match_psql_token_boundaries() {
+        // PostgreSQL 18.4 psql accepts every non-ASCII UTF-8 name byte, including emoji.
+        let mut variables = Variables::default();
+        variables.set("변수", "42".into()).unwrap();
+        variables.set("😀", "7".into()).unwrap();
+        assert_eq!(
+            variables.expand("SELECT :변수, :😀, :{?변수}, :'변수'"),
+            "SELECT 42, 7, TRUE, '42'"
+        );
+        assert!(variables.set("bad-key", "1".into()).is_err());
     }
     #[test]
     fn skipped_nested_branches_never_enable_a_command() {

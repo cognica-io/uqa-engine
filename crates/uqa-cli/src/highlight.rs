@@ -88,10 +88,7 @@ fn word_style(word: &str, rest: &str) -> Option<&'static str> {
     if SQL_KEYWORDS.contains(&upper.as_str()) {
         return Some("1;34");
     }
-    if uqa_sql::registry::registered_names()
-        .iter()
-        .any(|name| name.eq_ignore_ascii_case(word))
-    {
+    if uqa_sql::registry::lookup(word).is_some() {
         return Some("35");
     }
     rest.trim_start().starts_with('(').then_some("35")

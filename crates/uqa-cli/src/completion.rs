@@ -325,7 +325,7 @@ impl UsqlHelper {
         for value in values {
             if value.to_ascii_uppercase().starts_with(upper) {
                 candidates.push(Pair {
-                    display: format!("{value}\t{kind}"),
+                    display: format!("{}\t{kind}", crate::printing::terminal_text(value)),
                     replacement: value.clone(),
                 });
             }

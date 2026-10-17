@@ -159,8 +159,8 @@ pub(crate) fn tokenize_sql(source: &str) -> Vec<Token> {
     tokens
 }
 
-fn variable_character(character: char) -> bool {
-    character.is_ascii_alphanumeric() || character == '_'
+pub(crate) fn variable_character(character: char) -> bool {
+    !character.is_ascii() || character.is_ascii_alphanumeric() || character == '_'
 }
 
 fn word_end(source: &str, start: usize, accepts: impl Fn(char) -> bool) -> usize {

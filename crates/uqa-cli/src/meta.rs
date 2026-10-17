@@ -168,8 +168,9 @@ impl Session {
             Ok(Some(table)) => {
                 let _ = writeln!(
                     out,
-                    "Foreign table \"{name}\" (server: {})",
-                    table.server_name
+                    "Foreign table \"{}\" (server: {})",
+                    crate::printing::terminal_text(name),
+                    crate::printing::terminal_text(&table.server_name)
                 );
                 let rows = table
                     .columns

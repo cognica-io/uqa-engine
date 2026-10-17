@@ -175,6 +175,9 @@ impl PrintOptions {
                 String::new()
             };
         }
+        if self.format == "csv" {
+            return self.render_csv(response, terminal);
+        }
         let headers: Vec<_> = response.columns.iter().map(|s| terminal_text(s)).collect();
         let rows: Vec<Vec<String>> = response
             .rows
@@ -199,7 +202,6 @@ impl PrintOptions {
             })
             .collect();
         match self.format.as_str() {
-            "csv" => self.render_csv(response, terminal),
             "html" => self.render_html(&headers, &rows),
             "unaligned" => self.render_unaligned(&headers, &rows),
             _ => self.render_aligned(response, &headers, &rows, expanded_once),
@@ -341,13 +343,12 @@ impl PrintOptions {
                 result.push_str(&separator);
             }
             for row in rows {
-                let numeric: Vec<_> = response
-                    .columns
-                    .iter()
-                    .enumerate()
-                    .map(|(column, _)| response.numeric.get(column).copied().unwrap_or(false))
-                    .collect();
-                result.push_str(&aligned_row(row, &widths, self.border, Some(&numeric)));
+                result.push_str(&aligned_row(
+                    row,
+                    &widths,
+                    self.border,
+                    Some(&response.numeric),
+                ));
             }
             if self.border == 2 {
                 result.push_str(&separator);
@@ -366,33 +367,29 @@ impl PrintOptions {
     }
 }
 pub(crate) fn terminal_text(source: &str) -> String {
-    source
-        .chars()
-        .map(|c| {
-            if c.is_control() {
-                match c {
-                    '\n' => "\\n".into(),
-                    '\r' => "\\r".into(),
-                    '\t' => "\\t".into(),
-                    _ => format!("\\u{{{:x}}}", u32::from(c)),
-                }
-            } else {
-                c.to_string()
-            }
-        })
-        .collect()
+    escape_controls(source, |_| false)
 }
 
-fn csv_terminal_text(source: &str) -> String {
+fn escape_controls(source: &str, preserve: impl Fn(char) -> bool) -> String {
     let mut output = String::with_capacity(source.len());
     for character in source.chars() {
-        if character.is_control() && !matches!(character, '\n' | '\r' | '\t') {
-            write!(output, "\\u{{{:x}}}", u32::from(character)).expect("String writes do not fail");
+        if character.is_control() && !preserve(character) {
+            match character {
+                '\n' => output.push_str("\\n"),
+                '\r' => output.push_str("\\r"),
+                '\t' => output.push_str("\\t"),
+                _ => write!(output, "\\u{{{:x}}}", u32::from(character))
+                    .expect("String writes do not fail"),
+            }
         } else {
             output.push(character);
         }
     }
     output
+}
+
+fn csv_terminal_text(source: &str) -> String {
+    escape_controls(source, |character| matches!(character, '\n' | '\r' | '\t'))
 }
 fn padded(value: &str, width: usize, right: bool) -> String {
     let padding = " ".repeat(width.saturating_sub(UnicodeWidthStr::width(value)));
@@ -411,7 +408,13 @@ fn aligned_row(
     let cells = values
         .iter()
         .enumerate()
-        .map(|(i, v)| padded(v, widths[i], numeric.is_some_and(|n| n[i])))
+        .map(|(i, v)| {
+            padded(
+                v,
+                widths[i],
+                numeric.is_some_and(|n| n.get(i) == Some(&true)),
+            )
+        })
         .collect::<Vec<_>>()
         .join(if border == 0 { " " } else { " | " });
     match border {
@@ -508,14 +511,5 @@ impl DisplayTable {
 
 /// Keep message line breaks while making terminal control sequences inert.
 pub(super) fn message_text(source: &str) -> String {
-    source
-        .chars()
-        .map(|c| {
-            if c == '\n' || c == '\t' {
-                c.to_string()
-            } else {
-                terminal_text(&c.to_string())
-            }
-        })
-        .collect()
+    escape_controls(source, |character| matches!(character, '\n' | '\t'))
 }

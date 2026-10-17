@@ -18,6 +18,9 @@ SELECT :value + 1 AS answer \gset r_
 \echo :{?n}
 \unset n
 \echo :{?n}
+\set 변수 42
+\set 😀 7
+SELECT :변수, :😀;
 \set AUTOCOMMIT off
 CREATE TEMP TABLE client_txn(value int);
 INSERT INTO client_txn VALUES (1);

@@ -150,23 +150,8 @@ fn catalog_query(command: &str) -> Option<(&'static str, &'static str, &'static 
 pub(super) fn quote_identifier(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
-pub(super) fn completion_identifier(name: &str) -> String {
-    if name
-        .chars()
-        .next()
-        .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '$')
-        && !crate::completion::SQL_KEYWORDS
-            .iter()
-            .any(|keyword| keyword.eq_ignore_ascii_case(name))
-    {
-        name.into()
-    } else {
-        quote_identifier(name)
-    }
-}
+pub(super) use uqa_sql::expr::quote_ident as completion_identifier;
+
 fn name_pattern(source: &str) -> Result<(Option<String>, String), String> {
     let mut parts = vec![String::new()];
     let mut quoted = false;
