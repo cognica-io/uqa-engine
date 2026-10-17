@@ -31,8 +31,8 @@ class CLIReleaseTest(unittest.TestCase):
             for language, ending in (("nori", "n"), ("kuromoji", "k"))
         )
         binary = cls.assets / "input"
-        binary.write_bytes(cls.payload)
         for target in CLI.TARGETS:
+            binary.write_bytes(cls.payload + target.encode())
             CLI.package(target, binary, cls.assets)
 
     def test_all_targets_have_verified_archives_checksums_and_pinned_installers(self):
@@ -96,7 +96,7 @@ class CLIReleaseTest(unittest.TestCase):
                 command = ["sh", str(archive_dir / "install-usql.sh"), "--archive-dir", str(archive_dir), "--bin-dir", str(bin_dir)]
                 subprocess.run(command, env=env, check=True, capture_output=True)
                 installed = bin_dir / "usql"
-                self.assertEqual(installed.read_bytes(), self.payload)
+                self.assertEqual(installed.read_bytes(), self.payload + target.encode())
                 self.assertTrue(os.access(installed, os.X_OK))
                 installed.write_bytes(b"previous working installation")
                 checksum = archive_dir / (CLI.asset_name(target) + ".sha256")
@@ -121,7 +121,7 @@ class CLIReleaseTest(unittest.TestCase):
                        "-ArchiveDirectory", str(archive_dir), "-BinDir", str(bin_dir)]
             subprocess.run(command, check=True, capture_output=True)
             installed = bin_dir / "usql.exe"
-            self.assertEqual(installed.read_bytes(), self.payload)
+            self.assertEqual(installed.read_bytes(), self.payload + target.encode())
             installed.write_bytes(b"previous working installation")
             (archive_dir / (CLI.asset_name(target) + ".sha256")).write_text("invalid")
             failed = subprocess.run(command, capture_output=True)
@@ -160,7 +160,7 @@ cp "$ASSET_SOURCE/${url##*/}" "$destination"
             uname.write_text('#!/bin/sh\necho unsupported\n')
             failed = subprocess.run(command, env=env, capture_output=True)
             self.assertNotEqual(failed.returncode, 0)
-            self.assertEqual((work / "bin/usql").read_bytes(), self.payload)
+            self.assertEqual((work / "bin/usql").read_bytes(), self.payload + CLI.TARGETS[0].encode())
 
     def test_release_builds_precede_publication_and_checks_do_not_run_on_each_push(self):
         release = (ROOT / ".github/workflows/release.yml").read_text()
