@@ -109,6 +109,7 @@ fn missing_functions_are_retained_but_live_oid_conflicts_are_corruption() {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     };
     let routines = BTreeMap::from([(
         definition.name.clone(),

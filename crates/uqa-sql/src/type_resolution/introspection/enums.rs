@@ -171,7 +171,8 @@ impl Binder<'_, '_> {
             },
             &self.control,
         )?;
-        call.binding = Some(self.retain(binding));
+        let binding = self.retain(binding);
+        FunctionBinding::rebind(&mut call.binding, binding);
         for (index, argument) in call.arguments.iter_mut().enumerate() {
             if types[index].is_some() {
                 continue;

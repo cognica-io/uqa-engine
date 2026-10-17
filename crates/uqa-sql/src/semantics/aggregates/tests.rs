@@ -96,6 +96,7 @@ fn builtin_aggregate_identity_distinguishes_qualification_and_scalar_overloads()
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     };
     assert!(!is_builtin_aggregate(&call("sum", Some(binding.clone()))));
     binding.object_id = None;

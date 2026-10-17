@@ -18,7 +18,11 @@ use uqa_core::{
 };
 
 /// `regexp_match`: the capture array of the first match, or NULL. `regexp_matches` returns rows through [`super::RegexMatches`].
-pub(super) fn captures(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+pub(super) fn captures(
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     if !(2..=3).contains(&args.len()) {
         return Err(SQLError::TypeMismatch(
             "regexp_match takes 2 or 3 args".into(),
@@ -31,7 +35,7 @@ pub(super) fn captures(args: &[Value], control: &ProductionControl<'_>) -> Resul
         function: "regexp_match",
         hint: Some("Use the regexp_matches function instead."),
     };
-    let regex = compile(&pattern, &flags, global, control)?;
+    let regex = compile(&pattern, &flags, global, collation, control)?;
     let captures = regex.captures(&input);
     control.check()?;
     let Some(captures) = captures else {
@@ -72,10 +76,11 @@ pub(super) fn capture_array(
 pub(super) fn evaluate(
     name: &str,
     args: &[Value],
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     if name == "similar_to" {
-        return similar(args, control);
+        return similar(args, collation, control);
     }
     let (maximum, message) = match name {
         "regexp_count" => (4, "regexp_count takes 2-4 args"),
@@ -98,8 +103,10 @@ pub(super) fn evaluate(
     };
     let pattern = value_to_string_with_control(&args[1], control)?;
     match name {
-        "regexp_count" => count(&input, &pattern, args, control),
-        "regexp_instr" | "regexp_substr" => selected(name, &input, &pattern, args, control),
+        "regexp_count" => count(&input, &pattern, args, collation, control),
+        "regexp_instr" | "regexp_substr" => {
+            selected(name, &input, &pattern, args, collation, control)
+        }
         // `~*` is `regexp_like` with the `i` flag; `~` and `regexp_like` take the flags written.
         "regexp_like" | "regex_match_op" | "regex_imatch_op" => {
             let flags = if name == "regex_imatch_op" {
@@ -111,6 +118,7 @@ pub(super) fn evaluate(
                 &pattern,
                 &flags,
                 GlobalFlag::rejected_by("regexp_like"),
+                collation,
                 control,
             )?;
             plain(Value::Bool(regex.is_match(&input)), control)
@@ -123,6 +131,7 @@ fn count(
     input: &str,
     pattern: &str,
     args: &[Value],
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     let start = parameter(args.get(2), 1, 1, "start", control)?;
@@ -131,6 +140,7 @@ fn count(
         pattern,
         &flags,
         GlobalFlag::rejected_by("regexp_count"),
+        collation,
         control,
     )?;
     let Some(start) = char_byte_offset(input, start - 1, control)? else {
@@ -151,6 +161,7 @@ fn selected(
     input: &str,
     pattern: &str,
     args: &[Value],
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     let start = parameter(args.get(2), 1, 1, "start", control)?;
@@ -182,7 +193,13 @@ fn selected(
     } else {
         "regexp_substr"
     };
-    let regex = compile(pattern, &flags, GlobalFlag::rejected_by(function), control)?;
+    let regex = compile(
+        pattern,
+        &flags,
+        GlobalFlag::rejected_by(function),
+        collation,
+        control,
+    )?;
     let absent = || plain(if position { Value::Int(0) } else { Value::Null }, control);
     let Some(start) = char_byte_offset(input, start - 1, control)? else {
         return absent();
@@ -232,7 +249,11 @@ fn selected(
     plain(Value::Int(position), control)
 }
 
-fn similar(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn similar(
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     if !matches!(args.len(), 2 | 3) {
         return Err(SQLError::TypeMismatch(
             "similar_to takes 2 or 3 args".into(),
@@ -255,7 +276,13 @@ fn similar(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<V
         return plain(Value::Null, control);
     }
     let input = pattern_input(&args[0], control)?;
-    let regex = compile(&pattern, "", GlobalFlag::rejected_by("similar_to"), control)?;
+    let regex = compile(
+        &pattern,
+        "",
+        GlobalFlag::rejected_by("similar_to"),
+        collation,
+        control,
+    )?;
     plain(Value::Bool(regex.is_match(&input)), control)
 }
 

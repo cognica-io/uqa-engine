@@ -11,6 +11,15 @@ use crate::ast::Expr;
 
 mod collations;
 
+/// The ordinary scalar kernels, with collation-dependent functions under the database default collation.
+fn eval_scalar_function(name: &str, args: &[Value]) -> crate::error::Result<Value> {
+    super::eval_scalar_function(
+        name,
+        args,
+        crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
+    )
+}
+
 struct DomainCastHook;
 
 impl EngineHook for DomainCastHook {

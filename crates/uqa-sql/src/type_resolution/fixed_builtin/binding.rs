@@ -121,7 +121,7 @@ pub(in crate::type_resolution) fn bind_call_in_place_with_control(
         control,
     )?;
     if matched {
-        call.binding = Some(selected.binding);
+        FunctionBinding::rebind(&mut call.binding, selected.binding);
     }
     call.arguments = selected.arguments;
     control.check()?;

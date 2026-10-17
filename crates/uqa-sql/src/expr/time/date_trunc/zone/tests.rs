@@ -8,6 +8,8 @@ use super::*;
 use crate::expr::{eval_builtin_function_call, eval_function_call, EngineHook};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+const DEFAULT_COLLATION: u32 = crate::catalog::collations::DEFAULT_COLLATION_OID as u32;
+
 fn timestamp(value: &str) -> Value {
     Value::Temporal(TemporalValue::parse_timestamp_tz(value).unwrap())
 }
@@ -184,7 +186,10 @@ fn explicit_zone_strictness_and_control_preserve_nulls_and_resource_scopes() {
     for index in 0..3 {
         let mut args = values.clone();
         args[index] = Value::Null;
-        assert_eq!(scalar("date_trunc", &args).unwrap(), Value::Null);
+        assert_eq!(
+            scalar("date_trunc", &args, DEFAULT_COLLATION).unwrap(),
+            Value::Null
+        );
     }
     let args = [
         Value::Str("day".into()),
@@ -194,9 +199,13 @@ fn explicit_zone_strictness_and_control_preserve_nulls_and_resource_scopes() {
     let budget = MemoryBudget::new(4096);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
-    let result =
-        crate::expr::scalar_dispatch::eval_generated_scalar_function("date_trunc", &args, &control)
-            .unwrap();
+    let result = crate::expr::scalar_dispatch::eval_generated_scalar_function(
+        "date_trunc",
+        &args,
+        &control,
+        DEFAULT_COLLATION,
+    )
+    .unwrap();
     assert_eq!(
         *result,
         Value::Temporal(TemporalValue::TimestampTz {
@@ -208,9 +217,14 @@ fn explicit_zone_strictness_and_control_preserve_nulls_and_resource_scopes() {
     let empty = MemoryBudget::new(0);
     let control = ProductionControl::new(&empty, &token, &token);
     assert_eq!(
-        crate::expr::scalar_dispatch::eval_generated_scalar_function("date_trunc", &args, &control)
-            .unwrap_err()
-            .sqlstate(),
+        crate::expr::scalar_dispatch::eval_generated_scalar_function(
+            "date_trunc",
+            &args,
+            &control,
+            DEFAULT_COLLATION
+        )
+        .unwrap_err()
+        .sqlstate(),
         Some("53200")
     );
     for original_cancelled in [false, true] {

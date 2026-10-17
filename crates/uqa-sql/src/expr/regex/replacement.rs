@@ -20,6 +20,7 @@ use uqa_core::{
 pub(super) fn evaluate(
     _: &str,
     args: &[Value],
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     if !(3..=6).contains(&args.len()) {
@@ -68,6 +69,7 @@ pub(super) fn evaluate(
             start,
             occurrence,
             &flags,
+            collation,
             control,
         )?,
         control,
@@ -91,6 +93,10 @@ fn reject_integer_flags(flags: &str) -> Result<()> {
 }
 
 /// `replace_text_regexp`: the pattern is compiled before the search starts, the search covers the whole input from character `start`, and the `occurrence`-th match, or every match when it is zero, is replaced while the rest of the input is copied unchanged.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps replace_text_regexp's inputs and the call's input collation aligned"
+)]
 fn replace(
     input: &str,
     pattern: &str,
@@ -98,9 +104,16 @@ fn replace(
     start: usize,
     occurrence: usize,
     flags: &str,
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {
-    let regex = compile(pattern, flags, super::GlobalFlag::Accepted, control)?;
+    let regex = compile(
+        pattern,
+        flags,
+        super::GlobalFlag::Accepted,
+        collation,
+        control,
+    )?;
     let replacement = postgres_replacement(replacement, control)?;
     let mut output = ProductionString::new(*control);
     let Some(start) = char_byte_offset(input, start - 1, control)? else {

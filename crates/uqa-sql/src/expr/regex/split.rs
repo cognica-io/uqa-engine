@@ -32,7 +32,7 @@ pub struct RegexSplit {
 }
 
 impl RegexSplit {
-    /// Prepare `function(string, pattern [, flags])` for `regexp_split_to_table` or `regexp_split_to_array`. A NULL argument yields no cursor, as both functions are strict.
+    /// Prepare `function(string, pattern [, flags])` for `regexp_split_to_table` or `regexp_split_to_array` under the call's input collation (`PostgreSQL`'s `inputcollid`, zero when indeterminate). A NULL argument yields no cursor, as both functions are strict.
     ///
     /// # Errors
     ///
@@ -40,6 +40,7 @@ impl RegexSplit {
     pub fn new(
         function: &'static str,
         arguments: &[Value],
+        collation: u32,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>> {
         control.check()?;
@@ -54,7 +55,13 @@ impl RegexSplit {
         let input = value_to_string_with_control(&arguments[0], control)?;
         let pattern = value_to_string_with_control(&arguments[1], control)?;
         let flags = flags(arguments.get(2), control)?;
-        let regex = compile(&pattern, &flags, GlobalFlag::rejected_by(function), control)?;
+        let regex = compile(
+            &pattern,
+            &flags,
+            GlobalFlag::rejected_by(function),
+            collation,
+            control,
+        )?;
         Ok(Some(Self {
             input,
             regex,
@@ -104,8 +111,13 @@ impl RegexSplit {
 }
 
 /// `regexp_split_to_array`: every piece of the split as one `text[]` value, or NULL for a NULL argument. The cursor's input copy and compiled pattern are released before the array is returned.
-pub(super) fn array(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
-    let Some(mut split) = RegexSplit::new("regexp_split_to_array", args, control)? else {
+pub(super) fn array(
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let Some(mut split) = RegexSplit::new("regexp_split_to_array", args, collation, control)?
+    else {
         return plain(Value::Null, control);
     };
     let mut pieces = ProductionVec::new(*control);

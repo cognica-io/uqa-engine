@@ -29,6 +29,9 @@ pub struct FunctionBinding {
     /// A typed overload-resolution failure retained until the expression reaches a fallible planning or execution boundary. This never reuses the SQL function-name namespace as an error channel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution_error: Option<Box<FunctionResolutionError>>,
+    /// The collation analysis selected for the call's collatable inputs, `PostgreSQL`'s `inputcollid`: the merged collation of its arguments, where an explicit `COLLATE` wins and conflicting implicit collations leave zero, an indeterminate selection that a collation-dependent function reports when it runs. A call without collatable inputs records nothing. Definitions stored before this selection was retained also record nothing; [`Self::selected_input_collation`] then supplies the database default collation, which is what `PostgreSQL` records when every collatable input carries the default collation, and recreating such a definition records its actual selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_collation: Option<crate::catalog::collations::CollationSelection>,
 }
 
 /// A field selected during preparation. Attribute numbers are never reused, even when a later attribute has the same name.
@@ -541,6 +544,7 @@ impl FunctionBinding {
             invocation: None,
             composite_field: None,
             resolution_error: None,
+            input_collation: None,
         }
     }
 
@@ -571,6 +575,7 @@ impl FunctionBinding {
                 invocation: None,
                 composite_field: None,
                 resolution_error: None,
+                input_collation: None,
             },
             memory,
         )
@@ -590,6 +595,7 @@ impl FunctionBinding {
             resolution_error: Some(Box::new(FunctionResolutionError::UndefinedFunction {
                 signature: signature.into(),
             })),
+            input_collation: None,
         }
     }
 
@@ -617,6 +623,42 @@ impl FunctionBinding {
             *binding = Some(upgraded);
         }
         true
+    }
+
+    /// The input collation a collation-dependent built-in runs with: the retained selection, or the database default collation when none was recorded.
+    #[must_use]
+    pub fn selected_input_collation(binding: Option<&Self>) -> u32 {
+        binding.and_then(|binding| binding.input_collation).map_or(
+            crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
+            |selected| selected.oid(),
+        )
+    }
+
+    /// Replace the binding of an analyzed call with a later structural or overload selection. Later binding passes do not observe argument collations, so the selection keeps the input collation analysis retained.
+    pub fn rebind(binding: &mut Option<Self>, mut selected: Self) {
+        if selected.input_collation.is_none() {
+            selected.input_collation = binding.as_ref().and_then(|binding| binding.input_collation);
+        }
+        *binding = Some(selected);
+    }
+
+    /// A built-in call that analysis selected by name, without a registered catalog signature, retained so its input collation reaches execution.
+    #[must_use]
+    pub fn builtin_by_name(
+        name: &str,
+        input_collation: Option<crate::catalog::collations::CollationSelection>,
+    ) -> Self {
+        Self {
+            object_id: None,
+            name: name.into(),
+            argument_types: Vec::new(),
+            builtin: true,
+            dispatch: None,
+            invocation: None,
+            composite_field: None,
+            resolution_error: None,
+            input_collation,
+        }
     }
 
     /// Return whether this binding marks a polymorphic syntax expression whose argument types must be inferred from its operands.

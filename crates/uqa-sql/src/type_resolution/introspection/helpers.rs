@@ -514,7 +514,7 @@ pub(super) fn bind_catalog_function(
             .is_scalar_function_binding(&selected.binding)
             .is_ok_and(|is_scalar| is_scalar)
         {
-            *binding = Some(selected.binding);
+            crate::ast::FunctionBinding::rebind(binding, selected.binding);
         }
     }
 }

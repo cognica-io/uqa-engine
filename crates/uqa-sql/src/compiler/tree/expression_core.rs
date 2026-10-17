@@ -353,6 +353,7 @@ pub(in crate::compiler) fn compile_sql_value_function(
                     invocation: None,
                     composite_field: None,
                     resolution_error: None,
+                    input_collation: None,
                 },
                 |call| call.selected.binding,
             );

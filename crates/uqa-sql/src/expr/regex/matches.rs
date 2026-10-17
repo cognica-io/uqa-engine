@@ -26,12 +26,16 @@ pub struct RegexMatches {
 }
 
 impl RegexMatches {
-    /// Prepare `regexp_matches(string, pattern [, flags])`. A NULL argument yields no cursor: the strict set-returning function returns no rows.
+    /// Prepare `regexp_matches(string, pattern [, flags])` under the call's input collation (`PostgreSQL`'s `inputcollid`, zero when indeterminate). A NULL argument yields no cursor: the strict set-returning function returns no rows.
     ///
     /// # Errors
     ///
     /// Reports `PostgreSQL`'s diagnostics for an invalid flag or pattern, an exhausted allowance and cancellation.
-    pub fn new(arguments: &[Value], control: &ProductionControl<'_>) -> Result<Option<Self>> {
+    pub fn new(
+        arguments: &[Value],
+        collation: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Self>> {
         control.check()?;
         if !(2..=3).contains(&arguments.len()) {
             return Err(SQLError::TypeMismatch(
@@ -44,7 +48,7 @@ impl RegexMatches {
         let input = value_to_string_with_control(&arguments[0], control)?;
         let pattern = value_to_string_with_control(&arguments[1], control)?;
         let flags = flags(arguments.get(2), control)?;
-        let regex = compile(&pattern, &flags, GlobalFlag::Accepted, control)?;
+        let regex = compile(&pattern, &flags, GlobalFlag::Accepted, collation, control)?;
         Ok(Some(Self {
             input,
             regex,

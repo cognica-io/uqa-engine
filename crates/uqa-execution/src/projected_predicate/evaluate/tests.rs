@@ -98,6 +98,52 @@ fn native_pattern_helpers_keep_compiled_projection_matching_and_one_field_read()
 }
 
 #[test]
+fn projected_pattern_matchers_follow_the_input_collation() {
+    let schema = RowSchema::with_types(vec!["x".into()], vec![Some(ColumnType::Text)]);
+    let collated = |source: &str, collation: u32| {
+        let mut expression = expression(source);
+        let ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } = &mut expression
+        else {
+            panic!("{source} binds a pattern operator");
+        };
+        binding.input_collation =
+            uqa_sql::catalog::collations::CollationSelection::from_oid(collation);
+        expression
+    };
+    let value = Value::Str("\u{c9}".into());
+    for (collation, expected) in [(950, false), (811, true), (6411, true), (963, true)] {
+        let predicate = ProjectedPredicate::compile_with_schema(
+            &collated("x ILIKE '\u{e9}'", collation),
+            &schema,
+            &[],
+        )
+        .unwrap()
+        .unwrap();
+        let fields = CountedFields {
+            values: std::slice::from_ref(&value),
+            reads: Cell::new(0),
+        };
+        assert_eq!(
+            keep_fields(&predicate.expression, &fields).unwrap(),
+            expected,
+            "{collation}"
+        );
+    }
+    // The canonical operator reports an indeterminate collation for each row it evaluates.
+    for source in ["x LIKE 'a'", "x ILIKE 'a'"] {
+        assert!(
+            ProjectedPredicate::compile_with_schema(&collated(source, 0), &schema, &[])
+                .unwrap()
+                .is_none(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn ordinary_pattern_named_calls_do_not_become_projection_matchers() {
     let schema = RowSchema::with_types(vec!["x".into()], vec![Some(ColumnType::Text)]);
     for source in ["like(x, 'a%')", "ilike(x, 'a%')", "public.like(x, 'a%')"] {

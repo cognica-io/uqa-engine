@@ -54,14 +54,23 @@ pub(in crate::expr) fn evaluate(
         scalar_helpers::similar_to_regex_with_control(&pattern, escape, control)?
     } else {
         let escape = scalar_helpers::like_pattern::escape_character(escape)?;
-        let mut output = ProductionString::new(*control);
-        normalize(pattern.chars(), escape, '\\', |character| {
-            output.push(character).map_err(Into::into)
-        })?;
-        output.finish()?
+        normalize_text(&pattern, escape, control)?
     };
     let (text, memory) = output.into_parts();
     Ok(control.finish(Value::Str(text), memory)?)
+}
+
+/// `like_escape` for text: rewrite `pattern` to use the backslash escape of `escape`, the selected escape character or none.
+pub(in crate::expr) fn normalize_text(
+    pattern: &str,
+    escape: Option<char>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
+    let mut output = ProductionString::new(*control);
+    normalize(pattern.chars(), escape, '\\', |character| {
+        output.push(character).map_err(Into::into)
+    })?;
+    Ok(output.finish()?)
 }
 
 fn normalize<T: Copy + Eq>(

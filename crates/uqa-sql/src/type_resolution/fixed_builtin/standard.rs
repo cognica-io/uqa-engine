@@ -32,7 +32,7 @@ declarations! { pub(super) fn lookup(name);
         "array_lower" | "array_upper" | "array_length" => &[
             Signature::new(&[T::AnyArray, T::Integer], T::Integer),
         ],
-        "lower" | "upper" => &[Signature::new(&[T::Text], T::Text)],
+        "lower" | "upper" | "initcap" => &[Signature::new(&[T::Text], T::Text)],
         "replace" => &[Signature::new(&[T::Text, T::Text, T::Text], T::Text)],
         "mod" => &[
             Signature::new(&[T::SmallInteger, T::SmallInteger], T::SmallInteger),

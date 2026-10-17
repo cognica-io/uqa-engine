@@ -171,6 +171,7 @@ fn mixed_entry() -> PreparedStatementPlan {
                     invocation: None,
                     composite_field: None,
                     resolution_error: None,
+                    input_collation: None,
                 });
             }
         });

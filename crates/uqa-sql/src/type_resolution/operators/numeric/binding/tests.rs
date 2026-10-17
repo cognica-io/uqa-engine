@@ -27,6 +27,7 @@ impl Root {
                 invocation: None,
                 composite_field: None,
                 resolution_error: None,
+                input_collation: None,
             },
             memory,
         }

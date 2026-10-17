@@ -396,7 +396,7 @@ pub(super) fn bind_call(
             resolver,
         )
     }) {
-        *binding = Some(resolved.binding);
+        FunctionBinding::rebind(binding, resolved.binding);
         return name;
     }
     let control = ProductionControl::uncontrolled();
@@ -531,7 +531,7 @@ pub(super) fn bind_call_in_place_with_control(
     if let Some(selected) = selected {
         let (selected, extra) = selected.into_parts();
         *memory = control.combine(memory.take(), extra);
-        call.binding = Some(selected);
+        FunctionBinding::rebind(&mut call.binding, selected);
     }
     control.check()?;
     Ok(())

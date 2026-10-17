@@ -11,8 +11,10 @@ use crate::{plan::UnifiedPlan, ColumnType, SQLError, SQLParam, ScalarExpr};
 use std::{borrow::Cow, collections::BTreeMap, ptr::NonNull};
 use uqa_core::Value;
 
+mod call_collations;
 mod collations;
 mod results;
+pub(super) use call_collations::CallCollations;
 
 #[derive(Clone)]
 pub(super) struct ExpressionType {
@@ -151,6 +153,7 @@ pub(super) struct ParameterTypes<'a> {
     aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
     enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
     catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
+    call_collations: Option<CallCollations>,
 }
 
 /// Original expression identities for input constants and selected fixed calls, used only while one prepared plan remains in place. No pointer is dereferenced. Analysis borrows the original expressions (including grouping aliases and table-function arguments), so neither repeated text nor CTE analysis order can conflate two inputs.
@@ -162,6 +165,8 @@ pub(super) struct InputConstants(
     collations::CollationInputs,
     results::CollationResults,
     BTreeMap<NonNull<ScalarExpr>, ColumnType>,
+    /// Each analyzed call's input collation, recorded on the binding the call keeps.
+    BTreeMap<NonNull<ScalarExpr>, Option<crate::catalog::collations::CollationSelection>>,
 );
 
 impl InputConstants {
@@ -203,6 +208,15 @@ impl InputConstants {
             if let ScalarExpr::Func { binding, .. } = expression {
                 *binding = Some(selected);
                 crate::type_resolution::json_path::normalize_retained(expression)?;
+            }
+        }
+        if let Some(collation) = self.6.remove(&identity) {
+            if let ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } = expression
+            {
+                binding.input_collation = collation;
             }
         }
         if let Some(constant) = self.0.remove(&identity) {
@@ -249,13 +263,7 @@ impl InputConstants {
                 &mut |node, arena| self.apply_membership(node, arena),
             )?;
         }
-        if self.0.is_empty()
-            && self.1.is_empty()
-            && self.2.is_empty()
-            && self.3.is_empty()
-            && self.4.is_empty()
-            && self.5.is_empty()
-        {
+        if self.is_consumed() {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -278,19 +286,23 @@ impl InputConstants {
                 self.apply_membership(node, arena)
             })?;
         }
-        if self.0.is_empty()
-            && self.1.is_empty()
-            && self.2.is_empty()
-            && self.3.is_empty()
-            && self.4.is_empty()
-            && self.5.is_empty()
-        {
+        if self.is_consumed() {
             Ok(())
         } else {
             Err(SQLError::Internal(
                 "prepared input constant did not belong to the analyzed plan".into(),
             ))
         }
+    }
+
+    fn is_consumed(&self) -> bool {
+        self.0.is_empty()
+            && self.1.is_empty()
+            && self.2.is_empty()
+            && self.3.is_empty()
+            && self.4.is_empty()
+            && self.5.is_empty()
+            && self.6.is_empty()
     }
 
     fn apply_membership(
@@ -370,6 +382,7 @@ impl<'a> ParameterTypes<'a> {
             aliases: None,
             enum_labels: None,
             catalog_inputs: None,
+            call_collations: None,
         }
     }
 
@@ -422,6 +435,42 @@ impl<'a> ParameterTypes<'a> {
                     .insert(NonNull::from(expression), selected.clone());
             }
         }
+    }
+
+    /// Record a call's input collation on whichever binding the call keeps after analysis.
+    pub(super) fn retain_input_collation(
+        &mut self,
+        expression: &ScalarExpr,
+        collation: Option<crate::catalog::collations::CollationSelection>,
+    ) {
+        if let Some(constants) = &mut self.input_constants {
+            constants.6.insert(NonNull::from(expression), collation);
+        } else if let Some(calls) = &mut self.call_collations {
+            calls.record(expression, collation);
+        }
+    }
+
+    /// Keep a built-in selected by name on a call that had no binding, so its input collation reaches execution.
+    pub(super) fn retain_builtin_selection(
+        &mut self,
+        expression: &ScalarExpr,
+        selected: crate::ast::FunctionBinding,
+    ) {
+        if let Some(constants) = &mut self.input_constants {
+            constants.1.insert(NonNull::from(expression), selected);
+        } else if let Some(calls) = &mut self.call_collations {
+            calls.record_builtin(expression, selected);
+        }
+    }
+
+    /// Record only the input collations of calls in an expression whose routines are already bound.
+    pub(super) fn with_call_collations(mut self) -> Self {
+        self.call_collations = Some(CallCollations::default());
+        self
+    }
+
+    pub(super) fn take_call_collations(&mut self) -> CallCollations {
+        self.call_collations.take().unwrap_or_default()
     }
 
     pub(super) fn take_input_constants(&mut self) -> InputConstants {

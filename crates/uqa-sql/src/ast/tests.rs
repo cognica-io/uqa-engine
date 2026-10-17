@@ -228,6 +228,7 @@ fn function_binding_builtin_identity_is_backward_compatible() {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     };
     let encoded = serde_json::to_string(&builtin).unwrap();
     assert!(encoded.contains(r#""builtin":true"#));
@@ -235,6 +236,65 @@ fn function_binding_builtin_identity_is_backward_compatible() {
         serde_json::from_str::<FunctionBinding>(&encoded).unwrap(),
         builtin
     );
+}
+
+#[test]
+fn input_collation_round_trips_as_an_oid_and_legacy_bindings_select_the_default() {
+    use crate::catalog::collations::CollationSelection;
+    let legacy: FunctionBinding =
+        serde_json::from_str(r#"{"name":"lower","argument_types":["text"],"builtin":true}"#)
+            .unwrap();
+    assert_eq!(legacy.input_collation, None);
+    assert_eq!(
+        FunctionBinding::selected_input_collation(Some(&legacy)),
+        100
+    );
+    assert_eq!(FunctionBinding::selected_input_collation(None), 100);
+    assert!(!serde_json::to_string(&legacy)
+        .unwrap()
+        .contains("input_collation"));
+    for oid in [0, 100, 811, 950, 951, 962, 963, 6411] {
+        let mut binding = legacy.clone();
+        binding.input_collation = CollationSelection::from_oid(oid);
+        let encoded = serde_json::to_value(&binding).unwrap();
+        assert_eq!(encoded["input_collation"], serde_json::json!(oid));
+        let decoded = serde_json::from_value::<FunctionBinding>(encoded).unwrap();
+        assert_eq!(decoded, binding);
+        assert_eq!(
+            FunctionBinding::selected_input_collation(Some(&decoded)),
+            oid
+        );
+    }
+    assert!(serde_json::from_str::<FunctionBinding>(
+        r#"{"name":"lower","argument_types":[],"input_collation":16384}"#
+    )
+    .unwrap_err()
+    .to_string()
+    .starts_with("collation 16384 is not a built-in collation"));
+}
+
+#[test]
+fn rebinding_keeps_the_input_collation_analysis_selected() {
+    use crate::catalog::collations::CollationSelection;
+    let c = CollationSelection::from_oid(950);
+    let posix = CollationSelection::from_oid(951);
+    let pattern = FunctionBinding::dispatched(FunctionDispatch::Pattern {
+        operator: super::PatternOperator::ILike,
+        oid: None,
+    });
+    let mut binding = Some(FunctionBinding::builtin_by_name("ilike", c));
+    FunctionBinding::rebind(&mut binding, pattern.clone());
+    assert_eq!(binding.as_ref().unwrap().dispatch, pattern.dispatch);
+    assert_eq!(binding.unwrap().input_collation, c);
+    let mut binding = Some(FunctionBinding::builtin_by_name("lower", c));
+    FunctionBinding::rebind(
+        &mut binding,
+        FunctionBinding::builtin_by_name("lower", posix),
+    );
+    assert_eq!(binding.unwrap().input_collation, posix);
+    let mut binding = None;
+    FunctionBinding::rebind(&mut binding, pattern);
+    assert_eq!(binding.unwrap().input_collation, None);
 }
 
 #[test]
@@ -265,6 +325,7 @@ fn polymorphic_builtin_syntax_binding_has_stable_serde_shape() {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     };
     assert!(!fixed.is_polymorphic_builtin_syntax());
 }
@@ -293,6 +354,7 @@ fn legacy_compiler_function_names_upgrade_only_at_the_catalog_boundary() {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     });
     assert!(FunctionBinding::upgrade_legacy_serialized_dispatch(
         &mut builtin_name,
@@ -314,6 +376,7 @@ fn legacy_compiler_function_names_upgrade_only_at_the_catalog_boundary() {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     };
     let mut user_binding_slot = Some(user_binding.clone());
     assert!(!FunctionBinding::upgrade_legacy_serialized_dispatch(
@@ -361,6 +424,7 @@ fn routine_invocation_binding_round_trips_and_legacy_bindings_default_to_none() 
         })),
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     };
     let encoded = serde_json::to_value(&binding).unwrap();
     assert_eq!(

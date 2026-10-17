@@ -27,7 +27,8 @@ fn evaluate(
     } else {
         FunctionDispatch::RegexSubstring
     };
-    eval_dispatched_substring(dispatch, args, control).expect("substring pattern dispatch")
+    eval_dispatched_substring(dispatch, args, DEFAULT_COLLATION, control)
+        .expect("substring pattern dispatch")
 }
 
 /// Compare one direct evaluation with the cell or diagnostic `PostgreSQL` recorded for case `id`.
@@ -80,7 +81,13 @@ fn substring_pattern_forms_match_the_postgresql_reference() {
         FunctionDispatch::ToBinInt4,
         FunctionDispatch::RandomInt4Range,
     ] {
-        assert!(eval_dispatched_substring(dispatch, &[text("Thomas")], &control).is_none());
+        assert!(eval_dispatched_substring(
+            dispatch,
+            &[text("Thomas")],
+            DEFAULT_COLLATION,
+            &control
+        )
+        .is_none());
     }
     let reference = reference();
     let posix = |input: &str, pattern: &str| vec![text(input), text(pattern)];

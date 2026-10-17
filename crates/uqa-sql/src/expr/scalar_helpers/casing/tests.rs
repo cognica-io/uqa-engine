@@ -4,64 +4,185 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{casefold, lowercase, uppercase};
-use icu_casemap::CaseMapper;
+use super::CaseMapping;
+use crate::catalog::collations::{BuiltinCollationCtype, DEFAULT_COLLATION_OID};
+use std::fmt::Write as _;
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
 };
 
-#[test]
-fn streaming_case_mapping_matches_pinned_unicode_scalar_mappings() {
-    // One deterministic corpus exercises every scalar with non-cased separators, so a context-sensitive sigma cannot disguise a scalar mapping difference.
-    let mut input = String::new();
-    for character in (0..=0x10_ffff).filter_map(char::from_u32) {
-        input.push(character);
-        input.push('\0');
-    }
-    let memory = MemoryBudget::new(64 * 1024 * 1024);
-    let token = CancellationToken::new();
-    let control = ProductionControl::new(&memory, &token, &token);
-    let lower = lowercase(&input, &control).unwrap();
-    assert_eq!(lower.as_str(), input.to_lowercase());
-    assert_eq!(memory.used(), lower.capacity());
-    drop(lower);
-    let upper = uppercase(&input, &control).unwrap();
-    assert_eq!(upper.as_str(), input.to_uppercase());
-    assert_eq!(memory.used(), upper.capacity());
-    drop(upper);
-    let fold = casefold(&input, &control).unwrap();
-    assert_eq!(
-        fold.as_str(),
-        CaseMapper::new().fold_string(&input).as_ref()
-    );
-    assert_eq!(memory.used(), fold.capacity());
-    drop(fold);
-    assert_eq!(memory.used(), 0);
+fn fixture() -> serde_json::Value {
+    serde_json::from_str(include_str!("tests/postgresql.json")).unwrap()
+}
+
+fn apply(mapping: CaseMapping, function: &str, text: &str) -> String {
+    let control = ProductionControl::uncontrolled();
+    let mapped = match function {
+        "lower" => mapping.lowercase(text, &control),
+        "upper" => mapping.uppercase(text, &control),
+        "initcap" => mapping.titlecase(text, &control),
+        "casefold" => mapping.fold(text, &control),
+        _ => unreachable!("fixture function"),
+    };
+    mapped.unwrap().into_uncontrolled().unwrap()
 }
 
 #[test]
-fn streaming_lowercase_preserves_final_sigma_and_case_ignorable_context() {
-    let memory = MemoryBudget::new(1024);
-    let original = CancellationToken::new();
-    let invoking = CancellationToken::new();
-    let control = ProductionControl::new(&memory, &original, &invoking);
-    for input in [
-        "Σ",
-        "ΟΣ",
-        "ΟΣΑ",
-        "Ο\u{301}Σ",
-        "ΟΣ\u{301}",
-        "ΟΣ\u{301}Α",
-        "Ο'Σ",
-        "ΟΣ'Α",
-        "Ο\u{200d}Σ\u{200d}",
-        "İ I ΣΣ",
+fn each_builtin_collation_selects_its_provider() {
+    for (oid, ctype) in [
+        (100, BuiltinCollationCtype::UnicodeFull),
+        (811, BuiltinCollationCtype::UnicodeSimple),
+        (950, BuiltinCollationCtype::Ascii),
+        (951, BuiltinCollationCtype::Ascii),
+        (962, BuiltinCollationCtype::Ascii),
+        (963, BuiltinCollationCtype::IcuRoot),
+        (6411, BuiltinCollationCtype::UnicodeFull),
     ] {
-        let result = lowercase(input, &control).unwrap();
-        assert_eq!(result.as_str(), input.to_lowercase(), "{input:?}");
-        assert_eq!(memory.used(), result.capacity());
-        drop(result);
-        assert_eq!(memory.used(), 0);
+        assert_eq!(
+            CaseMapping::select(oid, "lower() function").unwrap(),
+            CaseMapping { ctype },
+            "{oid}"
+        );
+    }
+    for subject in [
+        "lower() function",
+        "upper() function",
+        "initcap() function",
+        "LIKE",
+        "ILIKE",
+    ] {
+        let crate::SQLError::Diagnostic {
+            sqlstate,
+            message,
+            detail,
+            hint,
+        } = CaseMapping::select(0, subject).unwrap_err()
+        else {
+            panic!("indeterminate collation diagnostic");
+        };
+        assert_eq!(sqlstate, "42P22");
+        assert_eq!(
+            message,
+            format!("could not determine which collation to use for {subject}")
+        );
+        assert_eq!(detail, None);
+        assert_eq!(
+            hint.as_deref(),
+            Some("Use the COLLATE clause to set the collation explicitly.")
+        );
+    }
+    assert_eq!(
+        CaseMapping::select(16_384, "LIKE").unwrap_err().to_string(),
+        crate::SQLError::Internal("cache lookup failed for collation 16384".into()).to_string()
+    );
+}
+
+/// Every single-character result of every provider agrees with `PostgreSQL` 18.4's exhaustive digest.
+#[test]
+fn single_character_mappings_match_postgresql_for_every_code_point() {
+    let fixture = fixture();
+    for entry in fixture["single_characters"].as_array().unwrap() {
+        let collation = u32::try_from(entry["collation"].as_u64().unwrap()).unwrap();
+        let function = entry["function"].as_str().unwrap();
+        let mapping = CaseMapping::select(collation, "test").unwrap();
+        let mut canonical = String::new();
+        let mut changed = 0_u64;
+        let mut input = String::new();
+        for character in (1..=0x10_ffff).filter_map(char::from_u32) {
+            input.clear();
+            input.push(character);
+            let output = apply(mapping, function, &input);
+            if output == input {
+                continue;
+            }
+            changed += 1;
+            write!(canonical, "{:x}:", u32::from(character)).unwrap();
+            for (index, mapped) in output.chars().enumerate() {
+                if index > 0 {
+                    canonical.push(' ');
+                }
+                write!(canonical, "{:x}", u32::from(mapped)).unwrap();
+            }
+            canonical.push(';');
+        }
+        assert_eq!(
+            (changed, u64::from(crc32fast::hash(canonical.as_bytes()))),
+            (
+                entry["changed"].as_u64().unwrap(),
+                entry["crc32"].as_u64().unwrap()
+            ),
+            "{function} under collation {collation}"
+        );
+    }
+}
+
+/// Word boundaries, word-start adjustment and `Final_Sigma` context agree with `PostgreSQL` 18.4 under each provider.
+#[test]
+fn contextual_mappings_match_postgresql() {
+    let fixture = fixture();
+    for entry in fixture["strings"].as_array().unwrap() {
+        let input = entry["input"].as_str().unwrap();
+        for (name, oid) in [
+            ("unicode", 963),
+            ("pg_unicode_fast", 6411),
+            ("pg_c_utf8", 811),
+            ("C", 950),
+        ] {
+            let mapping = CaseMapping::select(oid, "test").unwrap();
+            for function in ["initcap", "lower"] {
+                assert_eq!(
+                    apply(mapping, function, input),
+                    entry[name][function].as_str().unwrap(),
+                    "{function}({input:?} COLLATE {name})"
+                );
+            }
+        }
+    }
+    let default = CaseMapping::select(DEFAULT_COLLATION_OID as u32, "test").unwrap();
+    let fast = CaseMapping::select(6411, "test").unwrap();
+    for entry in fixture["strings"].as_array().unwrap() {
+        let input = entry["input"].as_str().unwrap();
+        for function in ["initcap", "lower", "upper", "casefold"] {
+            assert_eq!(
+                apply(default, function, input),
+                apply(fast, function, input),
+                "the database default is PG_UNICODE_FAST"
+            );
+        }
+    }
+}
+
+#[test]
+fn mappings_admit_their_entire_output_and_observe_both_cancellations() {
+    for oid in [950, 811, 6411, 963] {
+        let mapping = CaseMapping::select(oid, "test").unwrap();
+        for function in ["lower", "upper", "initcap", "casefold"] {
+            let memory = MemoryBudget::new(64 * 1024);
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            let control = ProductionControl::new(&memory, &original, &invoking);
+            let input = "Stra\u{df}e \u{3a3}\u{3a3} o'neil \u{1c6}x".repeat(16);
+            let result = match function {
+                "lower" => mapping.lowercase(&input, &control),
+                "upper" => mapping.uppercase(&input, &control),
+                "initcap" => mapping.titlecase(&input, &control),
+                _ => mapping.fold(&input, &control),
+            }
+            .unwrap();
+            assert_eq!(memory.used(), result.capacity(), "{function} {oid}");
+            drop(result);
+            assert_eq!(memory.used(), 0);
+            let limited = MemoryBudget::new(8);
+            let control = ProductionControl::new(&limited, &original, &invoking);
+            let error = mapping.lowercase(&input, &control).unwrap_err();
+            assert_eq!(crate::SQLError::from(error).sqlstate(), Some("53200"));
+            assert_eq!(limited.used(), 0);
+            invoking.cancel();
+            let control = ProductionControl::new(&memory, &original, &invoking);
+            let error = mapping.titlecase(&input, &control).unwrap_err();
+            assert_eq!(crate::SQLError::from(error).sqlstate(), Some("57014"));
+            assert_eq!(memory.used(), 0);
+        }
     }
 }

@@ -375,7 +375,7 @@ pub(super) fn bind_call(
         Err(_) => return name,
     };
     if !selected.binding.builtin {
-        *binding = Some(selected.binding);
+        FunctionBinding::rebind(binding, selected.binding);
         return name;
     }
     let Some(matched) = builtins
@@ -402,7 +402,7 @@ pub(super) fn bind_call(
         selected.binding.dispatch = Some(dispatch);
     }
     selected.binding.dispatch = runtime_dispatch(&selected.binding);
-    *binding = Some(selected.binding);
+    FunctionBinding::rebind(binding, selected.binding);
     name
 }
 

@@ -789,7 +789,7 @@ impl SchemaScope {
             )?
         };
         if let Some(selected) = selected {
-            *binding = Some(selected.binding);
+            FunctionBinding::rebind(binding, selected.binding);
         }
         Ok(())
     }

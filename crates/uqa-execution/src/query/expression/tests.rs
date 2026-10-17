@@ -172,6 +172,7 @@ fn binding(builtin: bool) -> FunctionBinding {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     }
 }
 

@@ -27,7 +27,13 @@ fn case<'a>(reference: &'a serde_json::Value, id: &str) -> &'a serde_json::Value
 
 /// Every piece of one `regexp_split_to_table` call.
 fn pieces(arguments: &[Value], control: &ProductionControl<'_>) -> Result<Vec<String>> {
-    let Some(mut split) = RegexSplit::new("regexp_split_to_table", arguments, control)? else {
+    let Some(mut split) = RegexSplit::new(
+        "regexp_split_to_table",
+        arguments,
+        DEFAULT_COLLATION,
+        control,
+    )?
+    else {
         return Ok(Vec::new());
     };
     let mut pieces = Vec::new();
@@ -150,11 +156,14 @@ fn regexp_split_pieces_match_the_postgresql_reference() {
         vec![text("abc"), text("b"), Value::Null],
         vec![Value::Null, text("x"), text("z")],
     ] {
-        assert!(
-            RegexSplit::new("regexp_split_to_table", &arguments, &control)
-                .unwrap()
-                .is_none()
-        );
+        assert!(RegexSplit::new(
+            "regexp_split_to_table",
+            &arguments,
+            DEFAULT_COLLATION,
+            &control
+        )
+        .unwrap()
+        .is_none());
         assert_eq!(
             *run("regexp_split_to_array", &arguments, &control).unwrap(),
             Value::Null
@@ -171,9 +180,14 @@ fn regexp_split_admits_each_piece_and_keeps_the_cursor_before_a_rejected_one() {
     // Measure the cursor's admitted input and pattern and its first piece under an ample allowance.
     let ample = MemoryBudget::new(1 << 20);
     let ample_control = ProductionControl::new(&ample, &token, &token);
-    let mut split = RegexSplit::new("regexp_split_to_table", &arguments, &ample_control)
-        .unwrap()
-        .unwrap();
+    let mut split = RegexSplit::new(
+        "regexp_split_to_table",
+        &arguments,
+        DEFAULT_COLLATION,
+        &ample_control,
+    )
+    .unwrap()
+    .unwrap();
     let retained = ample.used();
     let first = split.next_piece(&ample_control).unwrap().unwrap();
     let first_bytes = first.reserved_bytes();
@@ -184,9 +198,14 @@ fn regexp_split_admits_each_piece_and_keeps_the_cursor_before_a_rejected_one() {
     // Leave room for the cursor and its first piece, but not for the 2048-character second piece.
     let limited = MemoryBudget::new(retained + first_bytes + 512);
     let control = ProductionControl::new(&limited, &token, &token);
-    let mut split = RegexSplit::new("regexp_split_to_table", &arguments, &control)
-        .unwrap()
-        .unwrap();
+    let mut split = RegexSplit::new(
+        "regexp_split_to_table",
+        &arguments,
+        DEFAULT_COLLATION,
+        &control,
+    )
+    .unwrap()
+    .unwrap();
     let first = split.next_piece(&control).unwrap().unwrap();
     assert_eq!(*first, text("a"));
     assert_eq!(
@@ -223,10 +242,14 @@ fn regexp_split_observes_both_cancellation_scopes() {
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();
         let control = ProductionControl::new(&budget, &original, &invoking);
-        let mut split =
-            RegexSplit::new("regexp_split_to_table", &[text("a,b"), text(",")], &control)
-                .unwrap()
-                .unwrap();
+        let mut split = RegexSplit::new(
+            "regexp_split_to_table",
+            &[text("a,b"), text(",")],
+            DEFAULT_COLLATION,
+            &control,
+        )
+        .unwrap()
+        .unwrap();
         let first = split.next_piece(&control).unwrap().unwrap();
         let retained = budget.used();
         if cancel_original {

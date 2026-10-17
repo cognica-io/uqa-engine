@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+const DEFAULT_COLLATION: u32 = crate::catalog::collations::DEFAULT_COLLATION_OID as u32;
+
 fn interval(months: i32, days: i32, micros: i64) -> Value {
     Value::Temporal(TemporalValue::Interval {
         months,
@@ -313,23 +315,34 @@ fn strict_nulls_and_retained_production_preserve_the_existing_scope() {
         vec![Value::Null, interval(0, 1, 0)],
         vec![Value::Str("invalid".into()), Value::Null],
     ] {
-        assert_eq!(scalar("date_trunc", &args).unwrap(), Value::Null);
+        assert_eq!(
+            scalar("date_trunc", &args, DEFAULT_COLLATION).unwrap(),
+            Value::Null
+        );
     }
     let args = [Value::Str("msecs".into()), interval(1, -2, -1_234_567)];
     let budget = MemoryBudget::new(4096);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
-    let output =
-        crate::expr::scalar_dispatch::eval_generated_scalar_function("date_trunc", &args, &control)
-            .unwrap();
+    let output = crate::expr::scalar_dispatch::eval_generated_scalar_function(
+        "date_trunc",
+        &args,
+        &control,
+        DEFAULT_COLLATION,
+    )
+    .unwrap();
     assert_eq!(*output, interval(1, -2, -1_234_000));
     assert_eq!(output.reserved_bytes(), 0);
     assert_eq!(budget.used(), 0);
     let empty = MemoryBudget::new(0);
     let control = ProductionControl::new(&empty, &token, &token);
-    let error =
-        crate::expr::scalar_dispatch::eval_generated_scalar_function("date_trunc", &args, &control)
-            .unwrap_err();
+    let error = crate::expr::scalar_dispatch::eval_generated_scalar_function(
+        "date_trunc",
+        &args,
+        &control,
+        DEFAULT_COLLATION,
+    )
+    .unwrap_err();
     assert_eq!(error.sqlstate(), Some("53200"));
     for cancel_original in [false, true] {
         let original = CancellationToken::new();

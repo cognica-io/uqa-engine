@@ -12,7 +12,7 @@ use crate::ast::{FunctionBinding, FunctionDispatch};
 use crate::error::{Result, SQLError};
 
 use super::call_arguments::normalized_function_name;
-use super::call_dispatch::eval_builtin_function_call;
+use super::call_dispatch::eval_selected_builtin_function_call;
 use super::context::EvalContext;
 use super::{random, scalar_array, scalar_postgres, scalar_range};
 
@@ -303,7 +303,12 @@ pub fn eval_bound_builtin_function_call(
         hook.require_builtin_execute(binding)?;
     }
     let Some(dispatch) = binding.dispatch else {
-        let value = eval_builtin_function_call(&binding.name, call_args, ctx)?;
+        let value = eval_selected_builtin_function_call(
+            &binding.name,
+            call_args,
+            ctx,
+            FunctionBinding::selected_input_collation(Some(binding)),
+        )?;
         // Fixed signatures retain widths that the shared integer and floating carriers cannot enforce on their own.
         if matches!(value, Value::Int(_) | Value::Float(_)) {
             if let Some(
@@ -387,8 +392,9 @@ pub(super) fn eval_dispatched_builtin_with_control(
             );
         }
     }
+    let collation = FunctionBinding::selected_input_collation(Some(binding));
     if let Some(result) = scalar_postgres::eval_dispatched_postgres_function_with_control(
-        dispatch, evaluated, control,
+        dispatch, evaluated, collation, control,
     ) {
         return result;
     }
@@ -421,7 +427,7 @@ pub(super) fn eval_dispatched_builtin_with_control(
             super::concatenation::evaluate(binding, oid, evaluated, control, context)
         }
         FunctionDispatch::Pattern { operator, .. } => {
-            super::pattern::evaluate(operator, evaluated, control)
+            super::pattern::evaluate(operator, evaluated, collation, control)
         }
         FunctionDispatch::PatternEscape { similar } => {
             super::pattern::escape(similar, evaluated, control)

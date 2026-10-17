@@ -189,6 +189,7 @@ fn gamma_binding_preserves_the_float8_signature_and_function_identity() {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     };
     let error = resolve_gamma_overload(
         "gamma",

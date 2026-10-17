@@ -27,7 +27,7 @@ fn case<'a>(reference: &'a serde_json::Value, id: &str) -> &'a serde_json::Value
 
 /// Every row of one `regexp_matches` call in `PostgreSQL`'s text output.
 fn rows(arguments: &[Value], control: &ProductionControl<'_>) -> Result<Vec<String>> {
-    let Some(mut cursor) = RegexMatches::new(arguments, control)? else {
+    let Some(mut cursor) = RegexMatches::new(arguments, DEFAULT_COLLATION, control)? else {
         return Ok(Vec::new());
     };
     let mut rows = Vec::new();
@@ -134,7 +134,9 @@ fn regexp_matches_rows_match_the_postgresql_reference() {
         vec![text("abc"), Value::Null],
         vec![text("abc"), text("b"), Value::Null],
     ] {
-        assert!(RegexMatches::new(&arguments, &control).unwrap().is_none());
+        assert!(RegexMatches::new(&arguments, DEFAULT_COLLATION, &control)
+            .unwrap()
+            .is_none());
     }
     assert_eq!(budget.used(), 0);
 }
@@ -226,7 +228,7 @@ fn regexp_matches_rows_admit_each_row_and_keep_the_cursor_at_a_rejected_one() {
     // Measure the cursor's admitted input and pattern and its first row under an ample allowance.
     let ample = MemoryBudget::new(1 << 20);
     let ample_control = ProductionControl::new(&ample, &token, &token);
-    let mut cursor = RegexMatches::new(&arguments, &ample_control)
+    let mut cursor = RegexMatches::new(&arguments, DEFAULT_COLLATION, &ample_control)
         .unwrap()
         .unwrap();
     let retained = ample.used();
@@ -239,7 +241,9 @@ fn regexp_matches_rows_admit_each_row_and_keep_the_cursor_at_a_rejected_one() {
     // Leave room for the cursor and its first row, but not for the 2048-character second row.
     let limited = MemoryBudget::new(retained + first_bytes + 512);
     let control = ProductionControl::new(&limited, &token, &token);
-    let mut cursor = RegexMatches::new(&arguments, &control).unwrap().unwrap();
+    let mut cursor = RegexMatches::new(&arguments, DEFAULT_COLLATION, &control)
+        .unwrap()
+        .unwrap();
     let first = cursor.next_row(&control).unwrap().unwrap();
     assert_eq!(value_to_string(&first).unwrap(), "{a}");
     assert_eq!(
@@ -269,9 +273,13 @@ fn regexp_matches_rows_observe_both_cancellation_scopes() {
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();
         let control = ProductionControl::new(&budget, &original, &invoking);
-        let mut cursor = RegexMatches::new(&[text("a1b2"), text("[0-9]"), text("g")], &control)
-            .unwrap()
-            .unwrap();
+        let mut cursor = RegexMatches::new(
+            &[text("a1b2"), text("[0-9]"), text("g")],
+            DEFAULT_COLLATION,
+            &control,
+        )
+        .unwrap()
+        .unwrap();
         let first = cursor.next_row(&control).unwrap().unwrap();
         let retained = budget.used();
         if cancel_original {
@@ -284,7 +292,7 @@ fn regexp_matches_rows_observe_both_cancellation_scopes() {
             Some("57014")
         );
         assert_eq!(
-            RegexMatches::new(&[text("a"), text("a")], &control)
+            RegexMatches::new(&[text("a"), text("a")], DEFAULT_COLLATION, &control)
                 .unwrap_err()
                 .sqlstate(),
             Some("57014")

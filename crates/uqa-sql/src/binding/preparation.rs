@@ -376,6 +376,46 @@ pub(super) fn projection_metadata(
     })
 }
 
+/// Record the input collation of each call in a stored expression whose routines are already bound for storage, as analysis records it for an executable statement. Nothing else in the expression changes, so a definition that has no other analysis pass, such as an index key or a trigger condition, keeps each call's selection.
+pub(crate) fn assign_stored_input_collations(
+    routines: &dyn RoutineResolution,
+    expression: &mut crate::plan::ExpressionPlan,
+    input: &RowSchema,
+    binding: &BindingContext<'_>,
+) -> Result<(), SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope: &mut SchemaScope::for_analysis(binding)?,
+        parameters: ParameterTypes::fixed(&[]).with_call_collations(),
+        schema_expression: None,
+    };
+    analysis.expression(&expression.scalar, input, &expression.subqueries)?;
+    analysis
+        .parameters
+        .take_call_collations()
+        .apply(&mut expression.scalar, &mut expression.subqueries)
+}
+
+/// The input collation of a call whose binding is selected after statement analysis, such as a table function in `FROM`, derived from its arguments as analysis derives every other call's.
+pub(super) fn call_input_collation(
+    scope: &mut SchemaScope,
+    routines: &dyn RoutineResolution,
+    name: &str,
+    args: &[ScalarExpr],
+    input: &RowSchema,
+    subqueries: &[QueryPlan],
+    params: &[crate::SQLParam],
+) -> Result<Option<crate::catalog::collations::CollationSelection>, SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope,
+        parameters: ParameterTypes::fixed(params),
+        schema_expression: None,
+    };
+    let arguments = analysis.observe_function_arguments(name, args, &[], input, subqueries)?;
+    arguments.input_collation(args.len(), None, false)
+}
+
 pub(super) fn condition_metadata(
     scope: &mut SchemaScope,
     routines: &dyn RoutineResolution,

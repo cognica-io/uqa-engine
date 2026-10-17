@@ -11,7 +11,7 @@ use crate::{
         conversion::{to_i64_with_control, value_to_string_with_control},
         datums::binary_payload,
         out_of_range,
-        scalar_helpers::{casing, CompiledLikePattern},
+        scalar_helpers::{casing::CaseMapping, CompiledLikePattern},
     },
 };
 use uqa_core::{
@@ -19,13 +19,27 @@ use uqa_core::{
     Value,
 };
 
+/// Case mapping and LIKE/ILIKE under the call's input collation, `PostgreSQL`'s `inputcollid`.
+pub(super) fn evaluate_collated(
+    name: &str,
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    match name {
+        "upper" | "lower" | "casefold" | "initcap" => case_mapping(name, args, collation, control),
+        "like" | "ilike" => like(args, name == "ilike", collation, control),
+        _ => unreachable!("collated text family membership was checked"),
+    }
+}
+
 pub(super) fn evaluate(
     name: &str,
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     match name {
-        "upper" | "lower" | "casefold" | "initcap" | "reverse" => unary(name, args, control),
+        "reverse" => unary(name, args, control),
         "length" | "char_length" | "character_length" => {
             length(args, name == "length", false, control)
         }
@@ -62,7 +76,6 @@ pub(super) fn evaluate(
             output.push(character)?;
             string(output.finish()?, control)
         }
-        "like" | "ilike" => like(args, name == "ilike", control),
         "like_escape" | "similar_to_escape" => {
             crate::expr::pattern::escape(name == "similar_to_escape", args, control)
         }
@@ -71,16 +84,15 @@ pub(super) fn evaluate(
 }
 
 fn unary(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
-    if name == "reverse" {
-        if let [value] = args {
-            if let Some(payload) = binary_payload(value, control)? {
-                let mut output = ProductionVec::new(*control);
-                for byte in payload.bytes().iter().rev() {
-                    output.push_copy(*byte)?;
-                }
-                let (output, memory) = output.finish()?.into_parts();
-                return Ok(control.finish(Value::Bytes(output), memory)?);
+    debug_assert_eq!(name, "reverse");
+    if let [value] = args {
+        if let Some(payload) = binary_payload(value, control)? {
+            let mut output = ProductionVec::new(*control);
+            for byte in payload.bytes().iter().rev() {
+                output.push_copy(*byte)?;
             }
+            let (output, memory) = output.finish()?.into_parts();
+            return Ok(control.finish(Value::Bytes(output), memory)?);
         }
     }
     let Some(value) = args.first() else {
@@ -90,19 +102,39 @@ fn unary(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<
         return plain(Value::Null, control);
     }
     let source = value_to_string_with_control(value, control)?;
+    let mut output = ProductionString::new(*control);
+    for character in source.chars().rev() {
+        output.push(character)?;
+    }
+    string(output.finish()?, control)
+}
+
+/// `lower`, `upper`, `casefold` and `initcap` are strict; a non-NULL input selects its provider from the input collation, so an indeterminate collation is reported only for a value the function maps. `casefold` reports `lower()` in that diagnostic, as `str_casefold` does.
+fn case_mapping(
+    name: &str,
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let Some(value) = args.first() else {
+        return Err(SQLError::TypeMismatch("string fn needs 1 arg".into()));
+    };
+    if matches!(value, Value::Null) {
+        return plain(Value::Null, control);
+    }
+    let source = value_to_string_with_control(value, control)?;
+    let subject = match name {
+        "upper" => "upper() function",
+        "initcap" => "initcap() function",
+        _ => "lower() function",
+    };
+    let mapping = CaseMapping::select(collation, subject)?;
     let output = match name {
-        "upper" => casing::uppercase(&source, control)?,
-        "lower" => casing::lowercase(&source, control)?,
-        "casefold" => casing::casefold(&source, control)?,
-        "initcap" => casing::initcap(&source, control)?,
-        "reverse" => {
-            let mut output = ProductionString::new(*control);
-            for character in source.chars().rev() {
-                output.push(character)?;
-            }
-            output.finish()?
-        }
-        _ => unreachable!("unary text family"),
+        "upper" => mapping.uppercase(&source, control)?,
+        "lower" => mapping.lowercase(&source, control)?,
+        "casefold" => mapping.fold(&source, control)?,
+        "initcap" => mapping.titlecase(&source, control)?,
+        _ => unreachable!("case-mapping family"),
     };
     string(output, control)
 }
@@ -456,6 +488,7 @@ fn search(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result
 fn like(
     args: &[Value],
     insensitive: bool,
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     if !matches!(args.len(), 2 | 3) {
@@ -471,15 +504,20 @@ fn like(
     if matches!(args[1], Value::Null) || matches!(args.get(2), Some(Value::Null)) {
         return plain(Value::Null, control);
     }
+    if let Some(escape) = args.get(2) {
+        // The escape rewrite runs before the strict operator, so its diagnostic precedes a NULL input.
+        CompiledLikePattern::validate_escape(&args[1], escape, control)?;
+    }
+    if matches!(args[0], Value::Null) {
+        return plain(Value::Null, control);
+    }
     let pattern = CompiledLikePattern::from_value_with_escape_with_control(
         &args[1],
         insensitive,
         args.get(2),
+        collation,
         control,
     )?;
-    if matches!(args[0], Value::Null) {
-        return plain(Value::Null, control);
-    }
     plain(
         Value::Bool(pattern.try_matches_value_with_control(&args[0], control)?),
         control,

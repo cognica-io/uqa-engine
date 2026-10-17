@@ -29,12 +29,14 @@ pub use production::{
 /// Execute a scalar function after its argument expressions have already been evaluated.
 ///
 /// This is the shared SQL-semantics kernel used by both the parser AST evaluator and the physical scalar IR evaluator. Keeping dispatch here avoids converting a physical expression back into an AST [`crate::ast::Expr`] merely to reuse built-in, sequence, registered, or user-defined function behavior.
+///
+/// An unbound call recorded no input collation, so collation-dependent built-ins use the database default collation.
 pub fn eval_function_call(
     name: &str,
     call_args: Vec<(Option<String>, Value)>,
     ctx: &EvalContext<'_>,
 ) -> Result<Value> {
-    eval_function_call_inner(name, call_args, ctx, true)
+    eval_function_call_inner(name, call_args, ctx, true, default_collation())
 }
 
 /// Execute a call whose stored binding selects a built-in routine. Dynamic
@@ -44,7 +46,21 @@ pub fn eval_builtin_function_call(
     call_args: Vec<(Option<String>, Value)>,
     ctx: &EvalContext<'_>,
 ) -> Result<Value> {
-    eval_function_call_inner(name, call_args, ctx, false)
+    eval_function_call_inner(name, call_args, ctx, false, default_collation())
+}
+
+/// Execute a bound built-in with the input collation its binding retained, `PostgreSQL`'s `inputcollid`.
+pub(super) fn eval_selected_builtin_function_call(
+    name: &str,
+    call_args: Vec<(Option<String>, Value)>,
+    ctx: &EvalContext<'_>,
+    collation: u32,
+) -> Result<Value> {
+    eval_function_call_inner(name, call_args, ctx, false, collation)
+}
+
+fn default_collation() -> u32 {
+    crate::ast::FunctionBinding::selected_input_collation(None)
 }
 
 #[expect(
@@ -56,6 +72,7 @@ fn eval_function_call_inner(
     call_args: Vec<(Option<String>, Value)>,
     ctx: &EvalContext<'_>,
     allow_dynamic_dispatch: bool,
+    collation: u32,
 ) -> Result<Value> {
     let lower = normalized_function_name(name);
     let lower = lower.as_ref();
@@ -231,7 +248,7 @@ fn eval_function_call_inner(
             &call_args,
             &uqa_core::memory::ProductionControl::uncontrolled(),
         )? {
-            return eval_scalar_function_with_context(lower, &positional, ctx);
+            return eval_scalar_function_with_context(lower, &positional, ctx, collation);
         }
         if let Some(engine) = ctx.engine.filter(|_| allow_dynamic_dispatch) {
             if let Some(result) = engine.call_user_function(lower, &call_args) {
@@ -274,7 +291,7 @@ fn eval_function_call_inner(
                 .expect("ordinary selection result")
         });
     }
-    match eval_scalar_function_with_context(lower, &evaluated, ctx) {
+    match eval_scalar_function_with_context(lower, &evaluated, ctx, collation) {
         // Unknown built-in: fall through to user-defined functions,
         // mirroring PostgreSQL's search-path order.
         Err(SQLError::UnknownFunction(_)) => {

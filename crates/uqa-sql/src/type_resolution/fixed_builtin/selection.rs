@@ -58,6 +58,7 @@ pub(super) fn resolve_overload_with_control(
                     invocation: None,
                     composite_field: None,
                     resolution_error: None,
+                    input_collation: None,
                 },
                 return_type,
                 exact_matches: selected.matched.exact_matches,

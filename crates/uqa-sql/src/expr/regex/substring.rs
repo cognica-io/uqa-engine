@@ -17,10 +17,11 @@ use uqa_core::{
     Value,
 };
 
-/// The `substring` pattern overload selected by binding; every other dispatch belongs to another kernel.
+/// The `substring` pattern overload selected by binding, under the call's input collation (`PostgreSQL`'s `inputcollid`, zero when indeterminate); every other dispatch belongs to another kernel.
 pub(in crate::expr) fn evaluate_dispatched(
     dispatch: FunctionDispatch,
     arguments: &[Value],
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
     let similar = match dispatch {
@@ -28,12 +29,13 @@ pub(in crate::expr) fn evaluate_dispatched(
         FunctionDispatch::SimilarSubstring => true,
         _ => return None,
     };
-    Some(evaluate(similar, arguments, control))
+    Some(evaluate(similar, arguments, collation, control))
 }
 
 fn evaluate(
     similar: bool,
     arguments: &[Value],
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     control.check()?;
@@ -49,7 +51,7 @@ fn evaluate(
         }
         let input = value_to_string_with_control(&arguments[0], control)?;
         let pattern = value_to_string_with_control(&arguments[1], control)?;
-        return extract(&input, &pattern, control);
+        return extract(&input, &pattern, collation, control);
     }
     // The planner folds a constant NULL argument of this strict form before execution. At run time PostgreSQL evaluates its inlined body, `textregexsubstr($1, similar_to_escape($2, $3))`: a NULL pattern or escape yields NULL, the translation runs and can fail even for a NULL input, and only the extraction is skipped for that input.
     let Some(escaped) = translate(&arguments[1..], control)? else {
@@ -64,7 +66,7 @@ fn evaluate(
         return plain(Value::Null, control);
     }
     let input = value_to_string_with_control(&arguments[0], control)?;
-    extract(&input, pattern, control)
+    extract(&input, pattern, collation, control)
 }
 
 /// Translate the SQL form's constant pattern and escape while planning. `PostgreSQL` inlines `substring(text, text, text)` and folds a constant `similar_to_escape` call, so its errors surface even when no row is read; the call itself is unchanged.
@@ -90,11 +92,17 @@ fn translate(
 }
 
 /// `textregexsubstr`: the first parenthesized subexpression when the pattern has one, otherwise the whole match. No match, or a first subexpression that did not participate in the match, yields NULL.
-fn extract(input: &str, pattern: &str, control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn extract(
+    input: &str,
+    pattern: &str,
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     let regex = compile(
         pattern,
         "",
         super::GlobalFlag::rejected_by("substring"),
+        collation,
         control,
     )?;
     let captures = regex.captures(input);

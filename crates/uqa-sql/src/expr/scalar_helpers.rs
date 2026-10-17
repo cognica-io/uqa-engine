@@ -93,6 +93,7 @@ fn compile_pg_regex(pattern: &str, flags: &str) -> Result<super::regex::LocalReg
         pattern,
         flags,
         super::regex::GlobalFlag::rejected_by("regexp_like"),
+        crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
         &ProductionControl::uncontrolled(),
     )
 }

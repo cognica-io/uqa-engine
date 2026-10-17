@@ -190,6 +190,7 @@ fn copied_bindings_keep_invocation_identity_and_both_error_variants() {
                     ))),
                 })),
                 resolution_error: Some(Box::new(error)),
+                input_collation: None,
             }),
             args: vec![Expr::TypedLiteral {
                 collation_oid: None,

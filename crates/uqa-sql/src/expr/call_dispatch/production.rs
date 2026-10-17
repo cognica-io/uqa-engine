@@ -70,6 +70,7 @@ pub fn eval_builtin_function_call_with_control(
         let evaluated = MovedArguments::new(arguments, control)?;
         return eval_dispatched(binding, dispatch, &evaluated.values, control, context);
     }
+    let collation = FunctionBinding::selected_input_collation(binding);
     let name = binding.map_or(name, |binding| binding.name.as_str());
     let normalized =
         super::super::call_arguments::normalized_function_name_with_control(name, control)?;
@@ -80,10 +81,10 @@ pub fn eval_builtin_function_call_with_control(
                 name, &arguments,
             ));
         };
-        eval_scalar(name, &positional, control, context)?
+        eval_scalar(name, &positional, control, context, collation)?
     } else {
         let evaluated = MovedArguments::new(arguments, control)?;
-        eval_scalar(name, &evaluated.values, control, context)?
+        eval_scalar(name, &evaluated.values, control, context, collation)?
     };
     if matches!(*value, Value::Int(_) | Value::Float(_)) {
         if let Some(binding) = binding {
@@ -143,6 +144,7 @@ fn eval_scalar(
     arguments: &[Value],
     control: &ProductionControl<'_>,
     context: &super::EvalContext<'_>,
+    collation: u32,
 ) -> Result<Produced<Value>> {
     if matches!(name, "coalesce" | "nullif" | "greatest" | "least") {
         return super::super::scalar_core::selection_with_context(
@@ -150,7 +152,7 @@ fn eval_scalar(
         );
     }
     super::super::scalar_dispatch::eval_generated_scalar_function_with_context(
-        name, arguments, control, context,
+        name, arguments, control, context, collation,
     )
 }
 

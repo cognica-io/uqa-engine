@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken, DecimalValue};
 
+const DEFAULT_COLLATION: u32 = crate::catalog::collations::DEFAULT_COLLATION_OID as u32;
+
 fn array(elements: Vec<Value>, lower: i32) -> Value {
     Value::Array(ArrayValue::with_lower_bounds(elements, vec![lower]).unwrap())
 }
@@ -46,6 +48,7 @@ fn array_transformations_keep_physical_element_identity_and_the_output_owner() {
     let replaced = crate::expr::eval_scalar_function(
         "array_replace",
         &[source.clone(), Value::Int(1), Value::Int(3)],
+        DEFAULT_COLLATION,
     )
     .unwrap();
     assert_eq!(replaced.array_view().unwrap().element_type_oid(), Some(23));
@@ -211,7 +214,11 @@ fn array_record_comparisons_preserve_reached_types_and_operand_order() {
         ),
     ] {
         let error = crate::expr::scalar_dispatch::eval_generated_scalar_function_with_context(
-            name, &args, &control, &context,
+            name,
+            &args,
+            &control,
+            &context,
+            DEFAULT_COLLATION,
         )
         .unwrap_err();
         assert_eq!(error.sqlstate(), Some("42804"));

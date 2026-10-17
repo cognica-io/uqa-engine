@@ -57,6 +57,8 @@ pub(in crate::expr) struct LocalRegex {
     regex: regex::Regex,
     _pattern: Produced<String>,
     global: bool,
+    /// The calling expression's input collation (`PostgreSQL`'s `inputcollid`, zero when indeterminate), under which `PostgreSQL` compiles the pattern's character classification and case folding.
+    _collation: u32,
 }
 
 impl LocalRegex {
@@ -78,6 +80,7 @@ pub(in crate::expr) fn compile(
     pattern: &str,
     flags: &str,
     global_flag: GlobalFlag,
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<LocalRegex> {
     let prepared = preparation::prepare(pattern, flags, global_flag, control)?;
@@ -95,22 +98,27 @@ pub(in crate::expr) fn compile(
         regex,
         _pattern: prepared.pattern,
         global: prepared.global,
+        _collation: collation,
     };
     control.check()?;
     Ok(output)
 }
 
-/// A scalar regular-expression kernel, selected by function name.
-type Kernel = fn(&str, &[Value], &ProductionControl<'_>) -> Result<Produced<Value>>;
+/// A scalar regular-expression kernel, selected by function name, with the call's input collation.
+type Kernel = fn(&str, &[Value], u32, &ProductionControl<'_>) -> Result<Produced<Value>>;
 
+/// Evaluate a scalar regular-expression function or operator. `collation` is the call's input collation, `PostgreSQL`'s `inputcollid`: the selected collation OID, or zero when it is indeterminate.
 pub(super) fn evaluate(
     name: &str,
     args: &[Value],
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
     let evaluate: Kernel = match name {
-        "regexp_match" => |_, args, control| query::captures(args, control),
-        "regexp_split_to_array" => |_, args, control| split::array(args, control),
+        "regexp_match" => |_, args, collation, control| query::captures(args, collation, control),
+        "regexp_split_to_array" => {
+            |_, args, collation, control| split::array(args, collation, control)
+        }
         "regexp_replace" => replacement::evaluate,
         "regexp_count" | "regexp_instr" | "regexp_like" | "regexp_substr" | "similar_to"
         | "regex_match_op" | "regex_imatch_op" => query::evaluate,
@@ -120,7 +128,7 @@ pub(super) fn evaluate(
         control
             .check()
             .map_err(SQLError::from)
-            .and_then(|()| evaluate(name, args, control)),
+            .and_then(|()| evaluate(name, args, collation, control)),
     )
 }
 

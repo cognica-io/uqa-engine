@@ -111,12 +111,21 @@ pub(super) fn eval_sequence_function(
     Ok(Value::Int(value))
 }
 
-pub(super) fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
+/// `collation` is the call's input collation (`PostgreSQL`'s `inputcollid`), which collation-dependent built-ins consume.
+pub(super) fn eval_scalar_function(name: &str, args: &[Value], collation: u32) -> Result<Value> {
     let name = name.strip_prefix("pg_catalog.").unwrap_or(name);
     if super::builtin_scalar_function_strictness(name, args.len()) == Some(true)
         && args.iter().any(|argument| matches!(argument, Value::Null))
     {
         return Ok(Value::Null);
+    }
+    if let Some(result) = super::scalar_core::eval_collated_functions_with_control(
+        name,
+        args,
+        collation,
+        &ProductionControl::uncontrolled(),
+    ) {
+        return result.map(|value| value.into_uncontrolled().expect("ordinary collated result"));
     }
     for family in FAMILIES {
         if let Some(result) = (family.ordinary)(name, args) {
@@ -130,6 +139,7 @@ pub(super) fn eval_scalar_function_with_context(
     name: &str,
     args: &[Value],
     context: &EvalContext<'_>,
+    collation: u32,
 ) -> Result<Value> {
     if name.strip_prefix("pg_catalog.").unwrap_or(name) == "uuidv7" {
         return super::uuid::eval_uuid_v7(args, Some(context));
@@ -146,7 +156,7 @@ pub(super) fn eval_scalar_function_with_context(
     ) {
         return result.map(|value| value.into_uncontrolled().expect("ordinary array result"));
     }
-    eval_scalar_function(name, args)
+    eval_scalar_function(name, args, collation)
 }
 
 fn eval_array_comparison_with_context(
@@ -177,6 +187,7 @@ pub(super) fn eval_generated_scalar_function_with_context(
     args: &[Value],
     control: &ProductionControl<'_>,
     context: &EvalContext<'_>,
+    collation: u32,
 ) -> Result<Produced<Value>> {
     if name.strip_prefix("pg_catalog.").unwrap_or(name) == "timezone" {
         return super::time::eval_timezone(args, Some(context), control);
@@ -189,7 +200,7 @@ pub(super) fn eval_generated_scalar_function_with_context(
     ) {
         return result;
     }
-    eval_generated_scalar_function(name, args, control)
+    eval_generated_scalar_function(name, args, control, collation)
 }
 
 /// Built-in families accepted by generated expressions use their existing admitted kernels in the same dispatch order. Stateful dispatch remains outside this interface.
@@ -197,6 +208,7 @@ pub(super) fn eval_generated_scalar_function(
     name: &str,
     args: &[Value],
     control: &ProductionControl<'_>,
+    collation: u32,
 ) -> Result<Produced<Value>> {
     control.check()?;
     let name = name.strip_prefix("pg_catalog.").unwrap_or(name);
@@ -206,6 +218,11 @@ pub(super) fn eval_generated_scalar_function(
         return control
             .finish(Value::Null, control.empty_reservation())
             .map_err(Into::into);
+    }
+    if let Some(result) =
+        super::scalar_core::eval_collated_functions_with_control(name, args, collation, control)
+    {
+        return result;
     }
     for family in FAMILIES {
         if let Some(result) = (family.retained)(name, args, control) {

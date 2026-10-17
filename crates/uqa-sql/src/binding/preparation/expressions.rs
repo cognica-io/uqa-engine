@@ -558,10 +558,9 @@ impl Preparation<'_> {
         }
         let result =
             self.coerce_function_arguments(name, binding, args, &mut arguments, &selected)?;
+        let input_collation = arguments.input_collation(args.len(), selected.kind, within_group)?;
         let mut selected = selected.overload;
-        if let Some(selected) = &mut selected {
-            arguments.retain_collation_observer(&mut selected.binding);
-        }
+        self.keep_call_selection(expression, &arguments, input_collation, selected.as_mut());
         // Keep the result selected from the observed occurrences: a later sibling can determine a parameter's type after an earlier COLLATE operand was admitted as unknown, so retyping that syntax loses its state.
         let ty = match (result, &selected) {
             (super::function_calls::FunctionResult::Selected(ty), _) => ty,

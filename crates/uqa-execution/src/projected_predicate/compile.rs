@@ -107,6 +107,11 @@ pub(super) fn compile(
             if !operator.is_like() {
                 return Ok(None);
             }
+            // An indeterminate input collation is reported for each row the canonical operator evaluates.
+            let collation = uqa_sql::ast::FunctionBinding::selected_input_collation(Some(binding));
+            if collation == 0 {
+                return Ok(None);
+            }
             let [expression, pattern] = args.as_slice() else {
                 return Ok(None);
             };
@@ -122,6 +127,7 @@ pub(super) fn compile(
                     &pattern,
                     operator.case_insensitive(),
                     None,
+                    collation,
                     &uqa_core::memory::ProductionControl::uncontrolled(),
                 )?,
             };

@@ -207,6 +207,7 @@ impl EventAnalysisContext<'_> {
             invocation: None,
             composite_field: None,
             resolution_error: None,
+            input_collation: None,
         };
         let candidates = self
             .routines
@@ -437,8 +438,12 @@ impl EventAnalysisContext<'_> {
         }
         let mut condition_routine_bindings_changed = false;
         if let Some(mut condition) = definition.when.take() {
-            condition_routine_bindings_changed =
-                self.validate_trigger_condition(definition, &columns, &mut condition)?;
+            condition_routine_bindings_changed = self.validate_trigger_condition(
+                definition,
+                &columns,
+                &mut condition,
+                lookup_mode == RelationLookupMode::Dynamic,
+            )?;
             definition.when = Some(condition);
         }
         Ok((relation, condition_routine_bindings_changed))
@@ -495,11 +500,13 @@ impl EventAnalysisContext<'_> {
         Ok(())
     }
 
+    /// A new condition also records each call's input collation; a restored condition keeps the selections it was stored with.
     fn validate_trigger_condition(
         &self,
         definition: &CreateTrigger,
         columns: &[crate::ast::ColumnDef],
         condition: &mut Expr,
+        created: bool,
     ) -> Result<bool, SQLError> {
         validate_trigger_condition_references(definition, columns, condition)?;
         let bound = bind_expr(condition, &mut TriggerConditionTypeResolver { columns })?;
@@ -510,6 +517,10 @@ impl EventAnalysisContext<'_> {
         let ty =
             self.stored_routines
                 .bind_expression(&mut plan, &[], &crate::RowSchema::default())?;
+        if created {
+            self.stored_routines
+                .assign_input_collations(&mut plan, &crate::RowSchema::default())?;
+        }
         // Bound identities and constants belong to the syntax as written, before a boolean coercion rewrites it.
         let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, &plan)?;
         let changed = crate::catalog::stored_ast::bind_stored_expression_sites(condition, &sites)?;

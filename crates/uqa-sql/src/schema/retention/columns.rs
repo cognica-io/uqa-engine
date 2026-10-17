@@ -205,6 +205,7 @@ impl<'a> Walker<'a> {
             invocation,
             composite_field,
             resolution_error,
+            input_collation: _,
         } = binding;
         self.text(name)?;
         self.texts(argument_types)?;

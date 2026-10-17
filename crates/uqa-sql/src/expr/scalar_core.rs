@@ -34,26 +34,56 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
     }
 }
 
+/// Whether a built-in call by this name reads its input collation without a registered catalog signature that would bind it: the regular-expression functions. Analysis keeps such a call bound by name, so its selection reaches execution; the case-mapping functions and pattern operators already keep their selected bindings.
+pub(crate) fn binds_input_collation_by_name(name: &str) -> bool {
+    matches!(
+        name.strip_prefix("pg_catalog.").unwrap_or(name),
+        "regexp_count"
+            | "regexp_instr"
+            | "regexp_like"
+            | "regexp_match"
+            | "regexp_matches"
+            | "regexp_replace"
+            | "regexp_split_to_array"
+            | "regexp_split_to_table"
+            | "regexp_substr"
+    )
+}
+
+/// Built-ins whose results depend on the call's input collation (`PostgreSQL`'s `inputcollid`): case mapping, LIKE and ILIKE, and the regular-expression family. `collation` is zero when analysis found the input collation indeterminate.
+pub(super) fn eval_collated_functions_with_control(
+    name: &str,
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Option<Result<Produced<Value>>> {
+    if matches!(
+        name,
+        "upper" | "lower" | "casefold" | "initcap" | "like" | "ilike"
+    ) {
+        return Some(
+            control
+                .check()
+                .map_err(SQLError::from)
+                .and_then(|()| text::evaluate_collated(name, args, collation, control)),
+        );
+    }
+    super::regex::evaluate(name, args, collation, control)
+}
+
 pub(super) fn eval_core_functions_with_control(
     name: &str,
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
-    if matches!(
-        name,
-        "regexp_match" | "regexp_replace" | "regexp_split_to_array"
-    ) {
-        return super::regex::evaluate(name, args, control);
-    }
     let evaluate = match name {
         "coalesce" | "nullif" | "greatest" | "least" => selection,
         "abs" | "round" | "ceil" | "ceiling" | "floor" | "power" | "pow" | "sqrt" | "mod"
         | "div" | "gcd" | "lcm" => numeric::evaluate,
-        "upper" | "lower" | "casefold" | "length" | "char_length" | "character_length"
-        | "octet_length" | "trim" | "btrim" | "ltrim" | "rtrim" | "initcap" | "reverse"
-        | "concat_op" | "replace" | "substring" | "substr" | "left" | "right" | "starts_with"
-        | "position" | "strpos" | "ascii" | "like" | "ilike" | "chr" | "like_escape"
-        | "similar_to_escape" => text::evaluate,
+        "length" | "char_length" | "character_length" | "octet_length" | "trim" | "btrim"
+        | "ltrim" | "rtrim" | "reverse" | "concat_op" | "replace" | "substring" | "substr"
+        | "left" | "right" | "starts_with" | "position" | "strpos" | "ascii" | "chr"
+        | "like_escape" | "similar_to_escape" => text::evaluate,
         _ => return None,
     };
     Some(

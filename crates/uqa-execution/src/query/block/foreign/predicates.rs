@@ -100,6 +100,7 @@ pub fn fdw_predicate(expr: &ScalarExpr, params: &[SQLParam]) -> Option<uqa_fdw::
     }
 }
 
+/// A LIKE or NOT LIKE call with a determinate input collation. LIKE compares characters exactly under every built-in collation, so a handler keeps the rows the canonical operator keeps. ILIKE stays in the canonical evaluator: it lowercases through the provider of its input collation, while a handler folds case by its own rules, and a row a handler rejects is never evaluated again. The canonical operator likewise reports an indeterminate collation for each row it evaluates.
 pub fn fdw_like_predicate(
     binding: Option<&uqa_sql::ast::FunctionBinding>,
     args: &[ScalarExpr],
@@ -112,14 +113,16 @@ pub fn fdw_like_predicate(
     let uqa_sql::ast::FunctionDispatch::Pattern { operator, .. } = binding?.dispatch? else {
         return None;
     };
-    if !operator.is_like() {
+    if !operator.is_like()
+        || operator.case_insensitive()
+        || uqa_sql::ast::FunctionBinding::selected_input_collation(binding) == 0
+    {
         return None;
     }
-    let operator = match (operator.case_insensitive(), operator.negated() != negated) {
-        (false, false) => uqa_fdw::PredicateOp::Like,
-        (false, true) => uqa_fdw::PredicateOp::NotLike,
-        (true, false) => uqa_fdw::PredicateOp::ILike,
-        (true, true) => uqa_fdw::PredicateOp::NotILike,
+    let operator = if operator.negated() == negated {
+        uqa_fdw::PredicateOp::Like
+    } else {
+        uqa_fdw::PredicateOp::NotLike
     };
     let value = fdw_const_value(&args[1], params)?;
     let Value::Str(pattern) = &value else {
@@ -173,3 +176,6 @@ pub fn fdw_reversed_binary_op(op: BinaryOp) -> Option<uqa_fdw::PredicateOp> {
         BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => return None,
     })
 }
+
+#[cfg(test)]
+mod tests;

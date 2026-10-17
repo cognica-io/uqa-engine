@@ -184,12 +184,14 @@ fn build_table_function_value_row_stream_with_row(
             "regexp_matches" => {
                 return super::regular_expressions::regexp_matches_row_stream(
                     &evaluated,
+                    uqa_sql::ast::FunctionBinding::selected_input_collation(binding),
                     default_col,
                 );
             }
             "regexp_split_to_table" => {
                 return super::regular_expressions::regexp_split_to_table_row_stream(
                     &evaluated,
+                    uqa_sql::ast::FunctionBinding::selected_input_collation(binding),
                     default_col,
                 );
             }

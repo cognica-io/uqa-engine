@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::ArrayValue;
 
+const DEFAULT_COLLATION: u32 = uqa_sql::catalog::collations::DEFAULT_COLLATION_OID as u32;
+
 fn text(value: &str) -> Value {
     Value::Str(value.into())
 }
@@ -47,7 +49,7 @@ fn regexp_matches_streams_one_row_per_match_and_none_for_null_inputs() {
         (vec![text("a"), Value::Null], Vec::new()),
         (vec![text("a"), text("a"), Value::Null], Vec::new()),
     ] {
-        let output = regexp_matches_row_stream(&arguments, "m".into()).unwrap();
+        let output = regexp_matches_row_stream(&arguments, DEFAULT_COLLATION, "m".into()).unwrap();
         assert_eq!(output.columns, ["m"]);
         let rows = output.rows.collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(rows, expected, "{arguments:?}");
@@ -60,9 +62,11 @@ fn regexp_matches_reports_flag_errors_before_the_first_row() {
         ("z", "invalid regular expression option: \"z\""),
         ("gz", "invalid regular expression option: \"z\""),
     ] {
-        let Err(error) =
-            regexp_matches_row_stream(&[text("abc"), text("b"), text(flags)], "m".into())
-        else {
+        let Err(error) = regexp_matches_row_stream(
+            &[text("abc"), text("b"), text(flags)],
+            DEFAULT_COLLATION,
+            "m".into(),
+        ) else {
             panic!("flags {flags} must be rejected");
         };
         assert_eq!(error.sqlstate(), Some("22023"));
@@ -90,14 +94,17 @@ fn regexp_split_to_table_streams_pieces_and_none_for_null_inputs() {
         (vec![Value::Null, text(",")], Vec::new()),
         (vec![text("a"), text(","), Value::Null], Vec::new()),
     ] {
-        let output = regexp_split_to_table_row_stream(&arguments, "p".into()).unwrap();
+        let output =
+            regexp_split_to_table_row_stream(&arguments, DEFAULT_COLLATION, "p".into()).unwrap();
         assert_eq!(output.columns, ["p"]);
         let rows = output.rows.collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(rows, expected, "{arguments:?}");
     }
-    let Err(error) =
-        regexp_split_to_table_row_stream(&[text("abc"), text("b"), text("g")], "p".into())
-    else {
+    let Err(error) = regexp_split_to_table_row_stream(
+        &[text("abc"), text("b"), text("g")],
+        DEFAULT_COLLATION,
+        "p".into(),
+    ) else {
         panic!("g must be rejected");
     };
     assert_eq!(

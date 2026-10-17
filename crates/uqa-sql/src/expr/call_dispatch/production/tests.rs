@@ -140,6 +140,7 @@ fn bound_generated_dispatch_keeps_structural_identity_and_fixed_integer_overflow
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     };
     assert_eq!(
         eval_generated_function_call_with_control(

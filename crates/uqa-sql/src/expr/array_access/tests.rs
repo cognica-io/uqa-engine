@@ -8,6 +8,8 @@ use super::*;
 use crate::ast::{Expr, Statement};
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken};
 
+const DEFAULT_COLLATION: u32 = crate::catalog::collations::DEFAULT_COLLATION_OID as u32;
+
 fn syntax(sql: &str) -> (Expr, ArrayAccess) {
     let Statement::Select(mut query) = crate::compile(sql).unwrap().remove(0) else {
         panic!("SELECT expression");
@@ -169,6 +171,7 @@ fn pre_evaluated_array_bounds_coerce_without_copying_unselected_input() {
         let result = crate::expr::scalar_postgres::eval_dispatched_postgres_function_with_control(
             binding.dispatch.unwrap(),
             &arguments,
+            DEFAULT_COLLATION,
             &control,
         )
         .unwrap()
@@ -195,6 +198,7 @@ fn pre_evaluated_array_bounds_coerce_without_copying_unselected_input() {
         let error = crate::expr::scalar_postgres::eval_dispatched_postgres_function_with_control(
             binding.dispatch.unwrap(),
             &[input.clone(), Value::Null, upper],
+            DEFAULT_COLLATION,
             &control,
         )
         .unwrap()

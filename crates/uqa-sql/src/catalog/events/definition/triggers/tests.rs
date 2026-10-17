@@ -74,7 +74,7 @@ fn trigger_condition_input_collations_match_postgresql_event_variables() {
         let mut condition = trigger.when.clone().unwrap();
         catalog
             .context()
-            .validate_trigger_condition(&trigger, &columns, &mut condition)
+            .validate_trigger_condition(&trigger, &columns, &mut condition, true)
             .unwrap();
         for variable in case.variables {
             let side = match variable.relation {

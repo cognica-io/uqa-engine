@@ -54,6 +54,7 @@ pub fn call_range_canonical(
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     };
     let matched = context
         .overloads

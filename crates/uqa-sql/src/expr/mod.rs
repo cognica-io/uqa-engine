@@ -74,6 +74,7 @@ pub(crate) mod interval_style;
 mod pattern;
 mod scalar_array;
 mod scalar_core;
+pub(crate) use scalar_core::binds_input_collation_by_name;
 mod scalar_dispatch;
 mod scalar_geospatial;
 mod scalar_helpers;

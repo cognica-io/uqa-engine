@@ -33,9 +33,11 @@ impl Lowering<'_> {
             invocation,
             composite_field,
             resolution_error,
+            input_collation,
         } = binding;
         Ok(FunctionBinding {
             object_id: *object_id,
+            input_collation: *input_collation,
             name: self.copy_text(name)?,
             argument_types: self.map(argument_types.iter(), |this, text| this.copy_text(text))?,
             builtin: *builtin,

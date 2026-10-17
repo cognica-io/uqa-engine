@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken};
 
+const DEFAULT_COLLATION: u32 = crate::catalog::collations::DEFAULT_COLLATION_OID as u32;
+
 mod match_rows;
 mod search_loop;
 mod split_pieces;
@@ -17,7 +19,7 @@ fn text(value: &str) -> Value {
 }
 
 fn run(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
-    evaluate(name, args, control).expect("known regular-expression family")
+    evaluate(name, args, DEFAULT_COLLATION, control).expect("known regular-expression family")
 }
 
 #[test]

@@ -55,6 +55,7 @@ pub fn finish_routine_rename_target(
             invocation: None,
             composite_field: None,
             resolution_error: None,
+            input_collation: None,
         },
     })
 }

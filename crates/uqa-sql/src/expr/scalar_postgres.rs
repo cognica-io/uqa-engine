@@ -54,10 +54,7 @@ pub(super) fn eval_postgres_functions_with_control(
     if let Some(result) = eval_postgres_immutable_with_control(name, args, control) {
         return Some(result);
     }
-    if let Some(result) = eval_postgres_arrays_with_control(name, args, control) {
-        return Some(result);
-    }
-    super::regex::evaluate(name, args, control)
+    eval_postgres_arrays_with_control(name, args, control)
 }
 
 #[cfg(test)]
@@ -68,6 +65,7 @@ pub(super) fn eval_dispatched_postgres_function(
     eval_dispatched_postgres_function_with_control(
         dispatch,
         args,
+        crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
         &ProductionControl::uncontrolled(),
     )
     .map(|result| {
@@ -79,9 +77,11 @@ pub(super) fn eval_dispatched_postgres_function(
     })
 }
 
+/// `collation` is the dispatched call's input collation, which the regular-expression forms receive.
 pub(super) fn eval_dispatched_postgres_function_with_control(
     dispatch: FunctionDispatch,
     args: &[Value],
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
     if let Some(result) = eval_postgres_subscript_with_control(dispatch, args, control) {
@@ -90,7 +90,9 @@ pub(super) fn eval_dispatched_postgres_function_with_control(
     if let Some(result) = eval_postgres_integer_base_with_control(dispatch, args, control) {
         return Some(result);
     }
-    if let Some(result) = super::regex::eval_dispatched_substring(dispatch, args, control) {
+    if let Some(result) =
+        super::regex::eval_dispatched_substring(dispatch, args, collation, control)
+    {
         return Some(result);
     }
     comparison::evaluate(dispatch, args, control)

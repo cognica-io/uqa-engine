@@ -318,7 +318,7 @@ impl super::SchemaScope {
                 &types,
             )?;
             self.record_routine_dependency(&selected.binding);
-            *binding = Some(selected.binding);
+            FunctionBinding::rebind(binding, selected.binding);
             if within_group && *order_syntax == FunctionOrderSyntax::Legacy {
                 *order_syntax = FunctionOrderSyntax::WithinGroup;
             }

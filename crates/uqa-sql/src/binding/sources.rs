@@ -219,11 +219,7 @@ impl SchemaScope {
                 });
             }
             SourcePlan::Function {
-                name,
-                binding,
-                relations,
-                args,
-                ..
+                name, relations, ..
             } => {
                 let lower = crate::semantics::builtin_function_dispatch_name(name);
                 if crate::registry::is_operator_join_table_function(&lower) {
@@ -234,21 +230,9 @@ impl SchemaScope {
                     )?;
                     return self.bind_source(routines, source, subqueries, params, outer);
                 }
-                let input = outer.cloned().unwrap_or_default();
-                let resolver = self.query_function_type_resolver_for_subqueries(
-                    routines, args, &input, subqueries, params,
+                self.bind_table_function_for_execution(
+                    routines, source, subqueries, params, outer,
                 )?;
-                if let Some(selected) = crate::semantics::resolve_table_function_binding(
-                    routines,
-                    name,
-                    binding.as_ref(),
-                    args,
-                    &input,
-                    params,
-                    &resolver,
-                )? {
-                    *binding = Some(selected);
-                }
             }
             SourcePlan::FunctionGroup { functions, .. } => {
                 for function in functions {
@@ -269,5 +253,53 @@ impl SchemaScope {
             SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Subquery { .. } => {}
         }
         self.bind_source(routines, source, subqueries, params, outer)
+    }
+
+    /// Select a table function's binding against the row it reads. A built-in that reads its input collation also records the collation of its arguments, as analysis records every other call's.
+    fn bind_table_function_for_execution(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        source: &mut SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<(), SQLError> {
+        let SourcePlan::Function {
+            name,
+            binding,
+            args,
+            ..
+        } = source
+        else {
+            unreachable!("table-function source");
+        };
+        let input = outer.cloned().unwrap_or_default();
+        let resolver = self.query_function_type_resolver_for_subqueries(
+            routines, args, &input, subqueries, params,
+        )?;
+        let Some(mut selected) = crate::semantics::resolve_table_function_binding(
+            routines,
+            name,
+            binding.as_ref(),
+            args,
+            &input,
+            params,
+            &resolver,
+        )?
+        else {
+            return Ok(());
+        };
+        if binding.is_none()
+            && selected.builtin
+            && crate::expr::binds_input_collation_by_name(
+                &crate::semantics::builtin_function_dispatch_name(name),
+            )
+        {
+            selected.input_collation = super::preparation::call_input_collation(
+                self, routines, name, args, &input, subqueries, params,
+            )?;
+        }
+        *binding = Some(selected);
+        Ok(())
     }
 }

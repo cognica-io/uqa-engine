@@ -16,23 +16,26 @@ use uqa_sql::{
     SQLError,
 };
 
-/// Stream `regexp_matches(string, pattern [, flags])` as one `text[]` column.
+/// Stream `regexp_matches(string, pattern [, flags])` as one `text[]` column under the call's input collation.
 pub(super) fn regexp_matches_row_stream(
     evaluated: &[Value],
+    collation: u32,
     column: String,
 ) -> Result<TableFunctionRows, SQLError> {
-    let cursor = RegexMatches::new(evaluated, &ProductionControl::uncontrolled())?;
+    let cursor = RegexMatches::new(evaluated, collation, &ProductionControl::uncontrolled())?;
     Ok(one_column_rows(cursor, column))
 }
 
-/// Stream `regexp_split_to_table(string, pattern [, flags])` as one `text` column.
+/// Stream `regexp_split_to_table(string, pattern [, flags])` as one `text` column under the call's input collation.
 pub(super) fn regexp_split_to_table_row_stream(
     evaluated: &[Value],
+    collation: u32,
     column: String,
 ) -> Result<TableFunctionRows, SQLError> {
     let cursor = RegexSplit::new(
         "regexp_split_to_table",
         evaluated,
+        collation,
         &ProductionControl::uncontrolled(),
     )?;
     Ok(one_column_rows(cursor, column))
