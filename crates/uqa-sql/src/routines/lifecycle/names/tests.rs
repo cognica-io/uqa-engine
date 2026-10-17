@@ -32,6 +32,34 @@ impl RoutineNameCatalog for Names {
 }
 
 #[test]
+fn routine_signature_diagnostics_match_postgresql_identifiers() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("tests/quoted-names-postgresql.json")).unwrap();
+    let cases = fixture["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 2);
+    let catalog = Names(vec!["public".into()]);
+    for case in cases {
+        let sql = case["sql"].as_str().unwrap();
+        let Some(crate::ast::Statement::DropFunction(statement)) =
+            crate::compiler::compile(sql).unwrap().pop()
+        else {
+            panic!("DROP FUNCTION fixture");
+        };
+        let item = &statement.items[0];
+        let error =
+            exact_function(&catalog, &[], &item.name, &[23], &["integer".into()]).unwrap_err();
+        assert_eq!(error.sqlstate(), case["error"]["sqlstate"].as_str());
+        assert_eq!(
+            error.to_string(),
+            case["error"]["message"].as_str().unwrap()
+        );
+        let identity = uqa_core::RelationIdentity::parse_reference(&item.name).unwrap();
+        assert_eq!(identity.0, None);
+        assert!(matches!(identity.1.as_str(), "Mixed Name" | "a.b"));
+    }
+}
+
+#[test]
 fn exact_catalog_lookup_excludes_coercions_defaults_and_procedures() {
     let mut identities = vec![];
     for (oid, schema, types, kind) in [
