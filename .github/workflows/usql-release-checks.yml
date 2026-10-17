@@ -4,6 +4,7 @@ on:
   pull_request:
     types: [ready_for_review]
     paths:
+      - .gitattributes
       - .github/actions/package-usql/**
       - .github/workflows/usql-release-checks.yml
       - .github/workflows/javascript-packages.yml

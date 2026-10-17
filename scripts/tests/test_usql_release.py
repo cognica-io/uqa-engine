@@ -41,6 +41,17 @@ class CLIReleaseTest(unittest.TestCase):
             self.assertNotIn(b"@UQA_VERSION@", (self.assets / name).read_bytes())
         self.assertEqual(CLI.FEATURES, ["arrow", "duckdb", "kuromoji", "nori"])
 
+    def test_windows_checkout_retains_cross_platform_asset_bytes(self):
+        paths = ["scripts/" + name for name in CLI.INSTALLERS]
+        paths += [str(path.relative_to(ROOT)) for path in (ROOT / "scripts/usql-release/licenses").glob("*.txt")]
+        paths += ["scripts/fixtures/usql-release/rows.arrow"]
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = pathlib.Path(temporary)
+            subprocess.run(["git", "-c", "core.autocrlf=true", "checkout-index",
+                            "--prefix=" + destination.as_posix() + "/", "--", *paths], cwd=ROOT, check=True)
+            for path in paths:
+                self.assertEqual((destination / path).read_bytes(), (ROOT / path).read_bytes(), path)
+
     def test_archive_damage_and_wrong_source_metadata_are_rejected(self):
         for target in (CLI.TARGETS[0], CLI.TARGETS[-1]):
             with tempfile.TemporaryDirectory() as temporary:
