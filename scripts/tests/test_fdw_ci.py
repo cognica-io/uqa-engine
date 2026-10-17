@@ -84,7 +84,29 @@ class ForeignHandlerHistoryTests(unittest.TestCase):
         return self.git("rev-parse", "HEAD")
 
     def pr(self, base, revision):
-        return select(self.root, {"pull_request": {"base": {"sha": base}}}, "pull_request", revision)
+        return select(self.root, {"action": "ready_for_review", "pull_request": {
+            "draft": False, "base": {"sha": base}}}, "pull_request", revision)
+
+    def test_product_pushes_wait_until_the_final_ready_transition(self):
+        first = self.commit("crates/uqa-fdw/src/lib.rs", "first correction\n")
+        final = self.commit("crates/uqa-fdw/src/lib.rs", "reviewed correction\n")
+        for revision in (first, final):
+            for action in ("opened", "synchronize", "reopened", "edited", "labeled"):
+                for draft in (True, False):
+                    with self.subTest(action=action, draft=draft, revision=revision):
+                        event = {"action": action, "pull_request": {
+                            "draft": draft, "base": {"sha": self.base}}}
+                        self.assertFalse(select(self.root, event, "pull_request", revision)["required"])
+        accepted = self.pr(self.base, final)
+        self.assertTrue(accepted["required"])
+        self.assertEqual(accepted["fingerprint"], fingerprint(self.root, final))
+        self.assertNotEqual(accepted["fingerprint"], fingerprint(self.root, first))
+
+    def test_a_draft_does_not_admit_validation_even_with_a_ready_event(self):
+        revision = self.commit("crates/uqa-fdw/src/lib.rs", "unfinished\n")
+        event = {"action": "ready_for_review", "pull_request": {
+            "draft": True, "base": {"sha": self.base}}}
+        self.assertFalse(select(self.root, event, "pull_request", revision)["required"])
 
     def test_pull_request_retains_earlier_product_change_after_documentation_commit(self):
         product = self.commit("crates/uqa-fdw/src/lib.rs", "corrected\n")
@@ -147,6 +169,17 @@ class ForeignHandlerHistoryTests(unittest.TestCase):
 
 
 class ForeignHandlerWorkflowTests(unittest.TestCase):
+    def test_only_readiness_starts_the_pr_matrix_and_main_does_not_repeat_it(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/fdw-features.yml").read_text()
+        self.assertEqual(workflow.split("on:\n", 1)[1].split("\npermissions:", 1)[0].strip(),
+                         "pull_request:\n    types: [ready_for_review]\n  workflow_call:")
+        main = (root / ".github/workflows/ci.yml").read_text()
+        self.assertNotIn("uses: ./.github/workflows/fdw-features.yml", main)
+        self.assertNotIn("test-fdw-linux", main)
+        full = (root / ".github/workflows/full-ci.yml").read_text()
+        self.assertIn("uses: ./.github/workflows/fdw-features.yml", full)
+
     def test_reuse_is_exact_and_evidence_is_saved_only_after_the_complete_matrix(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/fdw-features.yml").read_text()
         self.assertNotIn('      - "crates/**"', workflow)
