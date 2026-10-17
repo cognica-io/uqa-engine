@@ -23,8 +23,9 @@
  *
  * - pg_set_regex_collation() receives a locale token that the Rust wrapper
  *	 chose after applying PostgreSQL's collation checks, including the
- *	 rejection of invalid and nondeterministic collations, so it raises no
- *	 error of its own.
+ *	 rejection of invalid and nondeterministic collations.  A value that is
+ *	 not one of the four tokens is an internal error, raised through the
+ *	 operation's error frame.
  *
  * - The C, builtin and ICU strategies are provided.  UQA defines no libc
  *	 collation other than C and POSIX, which use the C strategy, so the
@@ -34,10 +35,10 @@
  *	 ICU4C-compatible u_is*() and u_to*() functions implemented by the Rust
  *	 wrapper over ICU4X data.
  *
- * - PostgreSQL caches the member lists of each ctype class per backend in
- *	 malloc'd memory.  Here the Rust wrapper keeps them once per process in
- *	 immutable storage, and only the cvec header is allocated in the
- *	 operation's memory context.
+ * - PostgreSQL caches the cvec of each ctype class per backend in malloc'd
+ *	 memory.  Here the Rust wrapper keeps each complete cvec once per process
+ *	 in immutable storage, so a class reference allocates nothing, as on a
+ *	 hit in PostgreSQL's cache.
  *
  *-------------------------------------------------------------------------
  */
@@ -433,10 +434,9 @@ pg_wc_tolower(pg_wchar c)
 
 /*
  * These functions provide the results of probing the ctype behavior for all
- * character codes of interest in the active locale.  The result is provided
- * as a "struct cvec" whose chrs[] and ranges[] arrays point into immutable
- * process-wide storage; the cvec header itself is allocated in the current
- * memory context.  Callers must not free or modify the result.
+ * character codes of interest in the active locale, as a "struct cvec" that
+ * the Rust wrapper keeps in immutable process-wide storage.  Callers must not
+ * free or modify the result.
  */
 
 typedef int (*pg_wc_probefunc) (pg_wchar c);
@@ -444,7 +444,9 @@ typedef int (*pg_wc_probefunc) (pg_wchar c);
 /*
  * Given a probe function (e.g., pg_wc_isalpha) get a struct cvec for all
  * chrs satisfying the probe function.  The active collation is the one
- * previously set by pg_set_regex_collation.  Return NULL if out of memory.
+ * previously set by pg_set_regex_collation.  The lists are built once per
+ * process, in storage outside any operation's memory context, as PostgreSQL
+ * builds its cache with malloc.
  */
 static struct cvec *
 pg_ctype_get_cache(pg_wc_probefunc probefunc, int cclasscode)
@@ -452,11 +454,6 @@ pg_ctype_get_cache(pg_wc_probefunc probefunc, int cclasscode)
 	Oid			locale = uqa_pg_regex_current_locale();
 	pg_wchar	max_chr;
 	int			result_cclasscode = cclasscode;
-	const pg_wchar *chrs;
-	const pg_wchar *ranges;
-	int			nchrs;
-	int			nranges;
-	struct cvec *cv;
 
 	/*
 	 * Decide how many character codes we ought to look through.  In general
@@ -487,18 +484,45 @@ pg_ctype_get_cache(pg_wc_probefunc probefunc, int cclasscode)
 			uqa_pg_regex_invalid_locale_state();
 	}
 
-	uqa_pg_regex_class_members(locale, cclasscode, probefunc, max_chr,
-							   &chrs, &nchrs, &ranges, &nranges);
+	return (struct cvec *) uqa_pg_regex_class_cvec(locale, cclasscode,
+												   result_cclasscode,
+												   probefunc, max_chr);
+}
 
-	cv = (struct cvec *) MALLOC(sizeof(struct cvec));
-	if (cv == NULL)
-		return NULL;
+/* The size and alignment of the process-wide cvecs that Rust allocates. */
+size_t
+uqa_pg_regex_cvec_size(void)
+{
+	return sizeof(struct cvec);
+}
+
+size_t
+uqa_pg_regex_cvec_alignment(void)
+{
+	struct alignment_probe
+	{
+		char		leading;
+		struct cvec cv;
+	};
+
+	return offsetof(struct alignment_probe, cv);
+}
+
+/*
+ * Fill a process-wide cvec.  Its arrays have exactly the needed length, as
+ * PostgreSQL trims its cached arrays, and empty arrays are NULL.
+ */
+void
+uqa_pg_regex_fill_cvec(void *storage, const pg_wchar *chrs, int nchrs,
+					   const pg_wchar *ranges, int nranges, int cclasscode)
+{
+	struct cvec *cv = (struct cvec *) storage;
+
 	cv->nchrs = nchrs;
 	cv->chrspace = nchrs;
 	cv->chrs = (chr *) chrs;
 	cv->nranges = nranges;
 	cv->rangespace = nranges;
 	cv->ranges = (chr *) ranges;
-	cv->cclasscode = result_cclasscode;
-	return cv;
+	cv->cclasscode = cclasscode;
 }

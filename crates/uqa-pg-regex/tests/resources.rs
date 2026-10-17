@@ -77,7 +77,13 @@ fn every_refused_compile_reservation_reports_out_of_memory_without_leaking() {
         let error = compile(COMPILE_PATTERN, &mut budget)
             .err()
             .unwrap_or_else(|| panic!("compilation ignored refused reservation {index}"));
-        assert_eq!(error.code(), Some(REG_ESPACE), "reservation {index}");
+        // The expression's memory context and the converted pattern come first; PostgreSQL's context creation and palloc raise "out of memory" for them, while the engine reports REG_ESPACE.
+        if index < 2 {
+            assert_eq!(error, RegexError::OutOfMemory, "reservation {index}");
+            assert_eq!(error.sqlstate(), Some("53200"));
+        } else {
+            assert_eq!(error.code(), Some(REG_ESPACE), "reservation {index}");
+        }
         assert_eq!(error.message(), "out of memory");
         assert_eq!(budget.live, 0, "reservation {index}");
     }
@@ -214,6 +220,52 @@ fn a_panicking_hook_unwinds_after_the_operation_frees_its_memory() {
     assert!(regex.exec(&input, 0, &mut []).unwrap());
     drop(regex);
     assert_eq!(shared.0.borrow().live, 0);
+}
+
+/// Hooks whose release panics, after accounting the returned bytes, when the last reserved byte comes back; only dropping an expression returns it.
+#[derive(Default)]
+struct PanickingRelease {
+    budget: Budget,
+}
+
+impl RegexResources for PanickingRelease {
+    fn reserve(&mut self, bytes: usize) -> bool {
+        self.budget.reserve(bytes)
+    }
+
+    fn release(&mut self, bytes: usize) {
+        self.budget.release(bytes);
+        assert!(self.budget.live != 0, "release hook panic");
+    }
+
+    fn cancel_requested(&mut self) -> bool {
+        false
+    }
+
+    fn stack_too_deep(&mut self, depth: usize) -> bool {
+        self.budget.stack_too_deep(depth)
+    }
+}
+
+#[test]
+fn dropping_resumes_a_release_panic_unless_the_thread_is_unwinding() {
+    let mut hooks = PanickingRelease::default();
+    let regex =
+        Regex::compile("[[:alpha:]]+", REG_ADVANCED, RegexCollation::C, &mut hooks).unwrap();
+    let payload = panic::catch_unwind(AssertUnwindSafe(|| drop(regex))).unwrap_err();
+    assert_eq!(panic_message(payload.as_ref()), "release hook panic");
+    assert_eq!(hooks.budget.live, 0);
+
+    // Dropping during unwinding would otherwise panic twice and abort the process.
+    let mut hooks = PanickingRelease::default();
+    let payload = panic::catch_unwind(AssertUnwindSafe(|| {
+        let _regex =
+            Regex::compile("[[:alpha:]]+", REG_ADVANCED, RegexCollation::C, &mut hooks).unwrap();
+        panic!("operation panic");
+    }))
+    .unwrap_err();
+    assert_eq!(panic_message(payload.as_ref()), "operation panic");
+    assert_eq!(hooks.budget.live, 0);
 }
 
 #[test]

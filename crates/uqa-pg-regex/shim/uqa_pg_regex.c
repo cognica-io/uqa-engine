@@ -11,13 +11,22 @@
  * is canceled or an allocation request is invalid, and it relies on the
  * error handler to reset the memory context of the failed operation.  This
  * file keeps that structure: each operation function establishes an error
- * frame with setjmp before it enters the engine, and the failure paths below
- * longjmp to the innermost frame.  The frame belongs to C code called
+ * frame with sigsetjmp before it enters the engine, and the failure paths
+ * below siglongjmp to the innermost frame.  The frame belongs to C code called
  * directly by Rust, and the Rust callbacks return before any longjmp starts,
  * so no Rust frame lies between a longjmp and its frame.  Frames form a
  * per-thread stack, so a resource hook may itself run another operation, and
  * operations on different threads never share state.
  */
+
+/*
+ * sigsetjmp and siglongjmp are POSIX interfaces, which C library headers hide
+ * in strict ISO C modes unless POSIX is requested.
+ */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "postgres.h"
 
 #include <setjmp.h>
@@ -31,9 +40,29 @@
 #define UQA_PG_REGEX_THREAD_LOCAL _Thread_local
 #endif
 
+/*
+ * Non-local jumps as PostgreSQL's c.h selects them: sigsetjmp without saving
+ * the signal mask, which on BSD-derived systems would otherwise cost a system
+ * call on every operation; plain setjmp on Windows, which has no sigsetjmp;
+ * and the compiler builtins on MinGW-w64, whose setjmp support is unreliable.
+ */
+#if defined(_WIN32) && defined(__MINGW64__)
+typedef intptr_t uqa_pg_regex_jmp_buf[5];
+#define uqa_pg_regex_sigsetjmp(env) __builtin_setjmp(env)
+#define uqa_pg_regex_siglongjmp(env) __builtin_longjmp(env, 1)
+#elif defined(_WIN32)
+typedef jmp_buf uqa_pg_regex_jmp_buf;
+#define uqa_pg_regex_sigsetjmp(env) setjmp(env)
+#define uqa_pg_regex_siglongjmp(env) longjmp(env, 1)
+#else
+typedef sigjmp_buf uqa_pg_regex_jmp_buf;
+#define uqa_pg_regex_sigsetjmp(env) sigsetjmp(env, 0)
+#define uqa_pg_regex_siglongjmp(env) siglongjmp(env, 1)
+#endif
+
 typedef struct UQAPgRegexFrame
 {
-	jmp_buf		env;			/* error frame of the operation */
+	uqa_pg_regex_jmp_buf env;	/* error frame of the operation */
 	void	   *operation;		/* Rust operation serving the callbacks */
 	UQAPgRegexThrown *thrown;	/* failure report, owned by the caller */
 	uintptr_t	stack_base;		/* stack position at operation entry */
@@ -98,7 +127,7 @@ throw_failure(int kind, size_t first, size_t second)
 	frame->thrown->kind = kind;
 	frame->thrown->first = first;
 	frame->thrown->second = second;
-	longjmp(frame->env, 1);
+	uqa_pg_regex_siglongjmp(frame->env);
 }
 
 static void
@@ -125,7 +154,7 @@ uqa_pg_regex_compile(void *operation, const pg_wchar *pattern, size_t length,
 
 	*result = NULL;
 	enter_frame(&frame, operation, thrown);
-	if (setjmp(frame.env) != 0)
+	if (uqa_pg_regex_sigsetjmp(frame.env) != 0)
 	{
 		leave_frame(&frame);
 		return UQA_PG_REGEX_THROWN;
@@ -158,7 +187,7 @@ uqa_pg_regex_execute(void *operation, regex_t *re, const pg_wchar *data,
 	int			code;
 
 	enter_frame(&frame, operation, thrown);
-	if (setjmp(frame.env) != 0)
+	if (uqa_pg_regex_sigsetjmp(frame.env) != 0)
 	{
 		leave_frame(&frame);
 		return UQA_PG_REGEX_THROWN;
@@ -177,7 +206,7 @@ uqa_pg_regex_release(void *operation, regex_t *re, UQAPgRegexThrown *thrown)
 	UQAPgRegexFrame frame;
 
 	enter_frame(&frame, operation, thrown);
-	if (setjmp(frame.env) != 0)
+	if (uqa_pg_regex_sigsetjmp(frame.env) != 0)
 	{
 		leave_frame(&frame);
 		return UQA_PG_REGEX_THROWN;
@@ -369,8 +398,8 @@ uqa_pg_regex_current_locale(void)
 /*
  * The character functions of regc_pg_locale.c run only after
  * uqa_pg_regex_select_locale() has accepted a token, and they can run below
- * the Rust class-member cache, where no longjmp may start.  An unknown token
- * there is therefore an internal defect that stops the process.
+ * the Rust character-class cache, where no longjmp may start.  An unknown
+ * token there is therefore an internal defect that stops the process.
  */
 void
 uqa_pg_regex_invalid_locale_state(void)

@@ -9748,7 +9748,7 @@
       "source": "crates/uqa-pg-regex/tests/resources.rs",
       "capability": "PostgreSQL regular expression memory",
       "workload": "Each reservation of a representative compilation refused in turn.",
-      "invariant": "Every refusal reports REG_ESPACE and leaves no reserved byte."
+      "invariant": "Refusing the expression's memory context or converted pattern fails with out of memory (53200) as PostgreSQL's context creation and palloc do, every refused engine allocation reports REG_ESPACE, and no reserved byte remains."
     },
     {
       "package": "uqa-pg-regex",

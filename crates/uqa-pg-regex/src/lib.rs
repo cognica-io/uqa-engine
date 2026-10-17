@@ -42,7 +42,7 @@
 //! assert_eq!(spans[0].range(), Some(0..2));
 //! ```
 
-mod class_members;
+mod class_cache;
 mod collation;
 mod error;
 mod ffi;

@@ -17,6 +17,9 @@ use crate::resources::RegexResources;
 /// Payload alignment of every chunk, at least `max_align_t` on supported targets.
 const ALIGNMENT: usize = 16;
 
+/// `PostgreSQL`'s `MaxAllocSize`: `palloc` rejects larger requests unless they are huge allocations.
+pub(crate) const MAX_ALLOC_SIZE: usize = 0x3fff_ffff;
+
 #[repr(C)]
 struct ChunkHeader {
     previous: *mut ChunkHeader,

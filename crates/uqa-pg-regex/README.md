@@ -8,7 +8,7 @@
 - `Regex::exec(input, search_start, matches)` runs `pg_regexec` on code points from a search start and fills `MatchSpan` slots, slot 0 for the whole match and slot `n` for subexpression `n`; `Regex::subexpression_count` is `re_nsub`.
 - `RegexCollation::from_oid` and `RegexCollation::from_locale` apply `pg_set_regex_collation`'s rules and errors to UQA's predefined collations and to collations described by their catalog properties.
 - `RegexError` carries the engine's `REG_*` code with `pg_regerror`'s exact explanation, a cancellation, or an error PostgreSQL raises with its own SQLSTATE, message and hint.
-- `RegexResources` admits every engine allocation, chunk headers included, before it happens and receives every byte back after it is freed. The same hooks answer the engine's interrupt and stack-depth checks. Dropping a `Regex` releases every reserved byte.
+- `RegexResources` admits every engine allocation, chunk headers included, before it happens and receives every byte back after it is freed. The same hooks answer the engine's interrupt and stack-depth checks. Dropping a `Regex` releases every reserved byte. On `wasm32` targets the stack-depth check sees only the stack in linear memory, not the WebAssembly call stack that the engine's recursion uses, so it does not bound that recursion there.
 
 Character classes, case-insensitive matching and word boundaries follow PostgreSQL's strategy for the collation: the ASCII table for `C`, PostgreSQL's own Unicode 16 tables for the builtin provider, and ICU's character functions, evaluated over ICU4X Unicode 16 data, for ICU collations. Engine state is kept per operation and per thread, so operations on different threads are independent.
 

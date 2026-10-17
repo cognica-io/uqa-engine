@@ -97,3 +97,17 @@ fn case_insensitive_matching_follows_the_collation() {
     }
     assert_eq!(resources.reserved, resources.released);
 }
+
+#[test]
+fn pattern_conversion_requests_follow_re_compile_and_cache() {
+    // One code point slot per pattern byte plus one, validated against MaxAllocSize as palloc does.
+    assert_eq!(pattern_buffer_bytes(0), Ok(4));
+    assert_eq!(pattern_buffer_bytes(268_435_454), Ok(1_073_741_820));
+    let error = pattern_buffer_bytes(268_435_455).unwrap_err();
+    assert_eq!(error, RegexError::InvalidAllocationSize(1_073_741_824));
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert_eq!(
+        error.message(),
+        "invalid memory alloc request size 1073741824"
+    );
+}

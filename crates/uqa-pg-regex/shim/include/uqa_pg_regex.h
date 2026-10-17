@@ -101,15 +101,21 @@ extern pg_wchar uqa_pg_regex_icu_toupper(pg_wchar c);
 extern pg_wchar uqa_pg_regex_icu_tolower(pg_wchar c);
 
 /*
- * Process-wide character-class member lists, kept by the Rust wrapper.  The
- * lists are immutable once built and are never freed.
+ * Process-wide character-class cvecs, kept by the Rust wrapper.  Like
+ * PostgreSQL's per-backend ctype cache, each is built on first use, never
+ * freed and never modified, so the engine may share it between operations
+ * and threads.  The Rust wrapper owns the storage and the C side fills it.
  */
 typedef int (*uqa_pg_regex_probe) (pg_wchar c);
 
-extern void uqa_pg_regex_class_members(Oid locale, int cclasscode,
-									   uqa_pg_regex_probe probe,
-									   pg_wchar max_chr,
-									   const pg_wchar **chrs, int *nchrs,
-									   const pg_wchar **ranges, int *nranges);
+extern void *uqa_pg_regex_class_cvec(Oid locale, int cclasscode,
+									 int result_cclasscode,
+									 uqa_pg_regex_probe probe,
+									 pg_wchar max_chr);
+extern size_t uqa_pg_regex_cvec_size(void);
+extern size_t uqa_pg_regex_cvec_alignment(void);
+extern void uqa_pg_regex_fill_cvec(void *storage, const pg_wchar *chrs,
+								   int nchrs, const pg_wchar *ranges,
+								   int nranges, int cclasscode);
 
 #endif							/* UQA_PG_REGEX_H */

@@ -15,7 +15,7 @@ use std::ptr::{self, NonNull};
 use crate::collation::RegexCollation;
 use crate::error::RegexError;
 use crate::ffi::{self, RegexT, Thrown};
-use crate::flags::{CompileFlags, REG_ESPACE, REG_INVARG, REG_NOMATCH, REG_OKAY};
+use crate::flags::{CompileFlags, REG_INVARG, REG_NOMATCH, REG_OKAY};
 use crate::memory::{self, MemoryContext, OwnedContext};
 use crate::operation::Operation;
 use crate::resources::RegexResources;
@@ -51,19 +51,22 @@ impl Stop {
 impl<'r> Regex<'r> {
     /// Compile `pattern` with `flags` under `collation`, as `pg_regcomp` does for `PostgreSQL`'s SQL functions.
     ///
-    /// The pattern is converted to code points in memory charged to `resources`, as `RE_compile_and_cache` converts it before compiling. Compilation failures return [`RegexError::Engine`]; `PostgreSQL` reports them as `invalid regular expression: <explanation>`.
+    /// Like `RE_compile_and_cache`, the wrapper converts the pattern into a buffer of one code point slot per pattern byte plus one and gives the compiled expression its own memory context, both in memory charged to `resources`. Their requests fail as `palloc` and context creation fail in `PostgreSQL`: a pattern of 268,435,455 bytes or more with [`RegexError::InvalidAllocationSize`] before anything is allocated, and a refused reservation with [`RegexError::OutOfMemory`].
+    ///
+    /// The engine's own failures return [`RegexError::Engine`], which `PostgreSQL` reports as `invalid regular expression: <explanation>`, including `REG_ESPACE` when `resources` refuse an engine allocation; [`RegexError::Cancelled`] when `resources` request cancellation; and [`RegexError::InvalidAllocationSize`] or [`RegexError::InvalidAllocationProduct`] when the engine requests an invalid size.
     pub fn compile(
         pattern: &str,
         flags: CompileFlags,
         collation: RegexCollation,
         resources: &'r mut dyn RegexResources,
     ) -> Result<Self, RegexError> {
+        let bytes = pattern_buffer_bytes(pattern.len())?;
         let Some(context) = OwnedContext::new(resources) else {
-            return Err(RegexError::Engine(REG_ESPACE));
+            return Err(RegexError::OutOfMemory);
         };
         // A hook called directly from Rust may panic as well; the context is freed before the panic continues.
         let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
-            compile_into(&context, pattern, flags, collation, &mut *resources)
+            compile_into(&context, pattern, bytes, flags, collation, &mut *resources)
         }));
         match outcome {
             Ok(Ok(expression)) => {
@@ -180,37 +183,60 @@ impl Drop for Regex<'_> {
             )
         };
         let stop = (code == ffi::THROWN).then(|| stopped(thrown, operation.take_panic()));
-        // Every chunk the release did not reach is freed with the context.
-        context.release(&mut *self.resources);
-        if let Some(stop) = stop {
-            // Release frees memory only, so only a panicking hook can stop it.
-            let error = stop.resume();
-            unreachable!("releasing a compiled expression failed: {error}");
+        // Every chunk the release did not reach is freed with the context before its release hook runs.
+        let released = panic::catch_unwind(AssertUnwindSafe(|| {
+            context.release(&mut *self.resources);
+        }));
+        let payload = match stop {
+            // Releasing frees memory only, so only a panicking hook can stop it.
+            Some(Stop::Error(error)) => {
+                unreachable!("releasing a compiled expression failed: {error}")
+            }
+            Some(Stop::Panic(payload)) => Some(payload),
+            None => released.err(),
+        };
+        // During unwinding from another panic, a second panic would abort the process, so the hook's panic ends here; every byte has been freed either way.
+        if let Some(payload) = payload {
+            if !std::thread::panicking() {
+                panic::resume_unwind(payload);
+            }
         }
     }
+}
+
+/// The size of `RE_compile_and_cache`'s code point buffer for a pattern of `length` bytes, which `palloc` validates before allocating.
+fn pattern_buffer_bytes(length: usize) -> Result<usize, RegexError> {
+    // A string's length is at most `isize::MAX`, so one more slot cannot overflow.
+    let slots = length + 1;
+    let bytes = slots
+        .checked_mul(size_of::<u32>())
+        .ok_or(RegexError::InvalidAllocationProduct(
+            slots,
+            size_of::<u32>(),
+        ))?;
+    if bytes > memory::MAX_ALLOC_SIZE {
+        return Err(RegexError::InvalidAllocationSize(bytes));
+    }
+    Ok(bytes)
 }
 
 fn compile_into(
     context: &OwnedContext,
     pattern: &str,
+    bytes: usize,
     flags: CompileFlags,
     collation: RegexCollation,
     resources: &mut dyn RegexResources,
 ) -> Result<NonNull<RegexT>, Stop> {
-    let refused = || Stop::Error(RegexError::Engine(REG_ESPACE));
-    let length = pattern.chars().count();
-    // Like RE_compile_and_cache, allocate one slot more than the pattern needs.
-    let bytes = length
-        .checked_add(1)
-        .and_then(|slots| slots.checked_mul(size_of::<u32>()))
-        .ok_or_else(refused)?;
     // SAFETY: the context is initialized and owned by the caller.
     let buffer = unsafe { MemoryContext::allocate(context.as_ptr(), resources, bytes) }
-        .ok_or_else(refused)?;
+        .ok_or(Stop::Error(RegexError::OutOfMemory))?;
     let code_points = memory::code_point_slots(buffer);
-    for (index, character) in pattern.chars().enumerate() {
-        // SAFETY: the 16-byte aligned buffer holds `length + 1` u32 slots.
-        unsafe { code_points.add(index).write(u32::from(character)) };
+    let mut length = 0;
+    for character in pattern.chars() {
+        // SAFETY: the 16-byte aligned buffer holds one slot per pattern byte plus one, at least one per character.
+        unsafe { code_points.add(length).write(u32::from(character)) };
+        length += 1;
     }
     let mut thrown = Thrown::default();
     let mut result: *mut RegexT = ptr::null_mut();
