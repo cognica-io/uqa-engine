@@ -58,8 +58,9 @@ use lateral_source::QueryLateralSource;
 use source_operator::build_join_operator_with_ctes_at_path;
 use source_qualification::shape_join_using_output;
 use source_qualification::{
-    attach_qualifier_filter, execute_view_plan_output_with_parent_cache, filter_qualified_source,
-    null_row_for_schema,
+    attach_closed_qualifier_filter, attach_qualifier_filter,
+    execute_view_plan_output_with_parent_cache, filter_closed_source, null_row_for_schema,
+    unproduced_column,
 };
 use streaming_subquery::try_build_streaming_subquery_operator;
 use subquery_source::build_subquery_source_operator;

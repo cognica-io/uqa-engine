@@ -17,11 +17,16 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) context: SourceContext<'a, S>,
     pub(super) right: SourcePlan,
     pub(super) on: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
-    /// The planner's predicates on the right relation's qualifiers, bound to `right_schema`. The planner removes them from the query block's residual filter, so every produced right row must satisfy them.
-    pub(super) right_filter: Option<(
-        crate::scalar::PreparedExpressions<ScalarExpr>,
-        crate::SharedExpressionEvaluator<'a>,
-    )>,
+    /// The planner's predicates on the right relation's qualifiers, bound to `right_schema`. The planner removes them from the query block's residual filter, so every produced right row must satisfy them. An error names a column they read that the relation does not produce.
+    pub(super) right_filter: Option<
+        Result<
+            (
+                crate::scalar::PreparedExpressions<ScalarExpr>,
+                crate::SharedExpressionEvaluator<'a>,
+            ),
+            String,
+        >,
+    >,
     pub(super) function_arguments: Option<crate::scalar::PreparedExpressions<Vec<ScalarExpr>>>,
     pub(super) params: &'a [SQLParam],
     pub(super) ctes: CteScope<S>,
@@ -31,9 +36,14 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
 
 impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSource<'_, S> {
     fn admits(&mut self, right: &crate::OwnedPhysicalRow) -> crate::ExecResult<bool> {
-        let Some((predicate, evaluator)) = self.right_filter.as_ref() else {
+        let Some(filter) = self.right_filter.as_ref() else {
             return Ok(true);
         };
+        let (predicate, evaluator) = filter.as_ref().map_err(|column| {
+            crate::ExecError::SQL(SQLError::Internal(format!(
+                "a predicate placed on a lateral relation reads {column}, which the relation does not produce"
+            )))
+        })?;
         Ok(uqa_sql::expr::truthy(
             &evaluator.evaluate_physical_with_function_states(
                 predicate,

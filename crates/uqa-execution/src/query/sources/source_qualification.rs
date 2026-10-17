@@ -8,7 +8,8 @@
 
 use super::{
     physical_exec_error, qualifier_filter, BTreeSet, CteScope, JoinKind, PhysicalOperator,
-    QualifierFilters, QueryOutput, QueryPlan, RowSchema, SQLError, SQLParam, SourceContext, Value,
+    QualifierFilters, QueryOutput, QueryPlan, RowSchema, SQLError, SQLParam, ScalarExpr,
+    SourceContext, Value,
 };
 use uqa_sql::ResultRow;
 
@@ -33,13 +34,32 @@ pub(super) fn attach_qualifier_filter<'a, S: Clone + 'static>(
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
 ) -> Box<dyn PhysicalOperator + 'a> {
-    filter_qualified_source(operator, qualifier, filters, || {
+    let Some(predicate) = qualifier_filter(filters, qualifier) else {
+        return operator;
+    };
+    Box::new(crate::Filter::with_evaluator(
+        operator,
+        predicate,
+        context.relational.evaluator(params, ctes),
+    ))
+}
+
+/// Attach the predicates placed on a source whose row carries every column of its qualifier; see [`filter_closed_source`].
+pub(super) fn attach_closed_qualifier_filter<'a, S: Clone + 'static>(
+    operator: Box<dyn PhysicalOperator + 'a>,
+    qualifier: &str,
+    filters: Option<&QualifierFilters>,
+    context: &SourceContext<'a, S>,
+    params: &'a [SQLParam],
+    ctes: &CteScope<S>,
+) -> Box<dyn PhysicalOperator + 'a> {
+    filter_closed_source(operator, qualifier, filters, || {
         context.relational.evaluator(params, ctes)
     })
 }
 
-/// Apply the predicates placed on one source qualifier, evaluated by the caller's expression scope.
-pub(super) fn filter_qualified_source<'a>(
+/// Apply the predicates placed on a source whose row carries every column of its qualifier, such as a VALUES list, a table function or a derived table. A placed predicate that reads another column of that qualifier would read NULL for every row, so the filter fails with an internal error when it receives a row instead.
+pub(super) fn filter_closed_source<'a>(
     operator: Box<dyn PhysicalOperator + 'a>,
     qualifier: &str,
     filters: Option<&QualifierFilters>,
@@ -48,11 +68,40 @@ pub(super) fn filter_qualified_source<'a>(
     let Some(predicate) = qualifier_filter(filters, qualifier) else {
         return operator;
     };
+    if let Some(column) = unproduced_column(&predicate, qualifier, operator.row_schema()) {
+        return Box::new(crate::Filter::unresolved(operator, column));
+    }
     Box::new(crate::Filter::with_evaluator(
         operator,
         predicate,
         evaluator(),
     ))
+}
+
+/// The first `qualifier.column` reference of `predicate` that `schema` does not produce.
+pub(super) fn unproduced_column(
+    predicate: &ScalarExpr,
+    qualifier: &str,
+    schema: &RowSchema,
+) -> Option<String> {
+    let mut unproduced = None;
+    predicate.visit(&mut |node| {
+        if let ScalarExpr::QualifiedColumn {
+            qualifier: reference,
+            column,
+        } = node
+        {
+            if unproduced.is_none()
+                && reference == qualifier
+                && schema.qualified_position(reference, column).is_none()
+                && schema.qualified_slot(reference, column).is_none()
+                && !schema.qualified_column_is_ambiguous(reference, column)
+            {
+                unproduced = Some(format!("{reference}.{column}"));
+            }
+        }
+    });
+    unproduced
 }
 
 pub(super) fn null_row_for_schema(schema: &[String]) -> ResultRow {

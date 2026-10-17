@@ -7,7 +7,7 @@
 
 /// Build the physical operator for a subquery source.
 use super::{
-    attach_qualifier_filter, execute_view_plan_output_with_parent_cache,
+    attach_closed_qualifier_filter, execute_view_plan_output_with_parent_cache,
     qualify_source_operator_with_columns, query_cte_names, try_build_streaming_subquery_operator,
     ColumnPrune, CteScope, PhysicalOperator, QualifierFilters, SQLError, SQLParam, SourceContext,
     SourcePlan,
@@ -44,7 +44,7 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
                     column_aliases,
                     ctes.lock_identities.emit,
                 );
-                return Ok(attach_qualifier_filter(
+                return Ok(attach_closed_qualifier_filter(
                     operator, qualifier, filters, context, params, ctes,
                 ));
             }
@@ -67,7 +67,7 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
                 column_aliases,
                 ctes.lock_identities.emit,
             );
-            Ok(attach_qualifier_filter(
+            Ok(attach_closed_qualifier_filter(
                 operator, qualifier, filters, context, params, ctes,
             ))
         }

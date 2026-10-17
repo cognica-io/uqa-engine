@@ -11,9 +11,9 @@ use uqa_sql::semantics::volatility::{
     expr_contains_volatile_function, query_contains_volatile_function,
 };
 use uqa_sql::semantics::{
-    expr_contains_function, expr_contains_subquery, expr_has_unqualified_column, expr_qualifiers,
-    flatten_and_filter_parts, from_qualifier_set, projection_columns, qualify_unqualified_columns,
-    TABLE_OID_COLUMN, XMIN_COLUMN,
+    expr_contains_function, expr_contains_subquery, expr_qualifiers, flatten_and_filter_parts,
+    from_qualifier_set, projection_columns, qualify_unqualified_columns, TABLE_OID_COLUMN,
+    XMIN_COLUMN,
 };
 use uqa_sql::{
     plan::{
@@ -26,7 +26,7 @@ pub mod context;
 use context::{FilterPushdownContext, FilterPushdownScope};
 mod source_columns;
 
-use source_columns::{has_unqualified_relation, source_column_owners, ColumnOwners};
+use source_columns::{ColumnOwners, SourceColumns};
 
 pub fn qualifier_filters_for_stmt(
     context: FilterPushdownContext<'_>,
@@ -51,19 +51,13 @@ pub fn qualifier_filters_for_stmt(
     if from_quals.is_empty() {
         return Ok(None);
     }
-    let single_qualifier = sole_column_owner(from, &from_quals);
-    let column_owners = source_column_owners(scope, from)?;
+    let columns = SourceColumns::new(scope, from, &from_quals)?;
     let nullable_qualifiers = outer_join_nullable_qualifiers(from);
     let mut filters = QualifierFilters::new();
     for part in flatten_and_filter_parts(filter) {
-        if let Some((qualifier, filter)) = qualifier_filter_for_part(
-            context,
-            part,
-            &from_quals,
-            single_qualifier.as_deref(),
-            &column_owners,
-            &stmt.subqueries,
-        ) {
+        if let Some((qualifier, filter)) =
+            qualifier_filter_for_part(context, part, &from_quals, &columns, &stmt.subqueries)
+        {
             if !nullable_qualifiers.contains(&qualifier) {
                 filters.entry(qualifier).or_default().push(filter);
             }
@@ -72,8 +66,7 @@ pub fn qualifier_filters_for_stmt(
                 context,
                 part,
                 &from_quals,
-                single_qualifier.as_deref(),
-                &column_owners,
+                &columns,
                 &stmt.subqueries,
             ) {
                 if !nullable_qualifiers.contains(&qualifier) {
@@ -87,14 +80,6 @@ pub fn qualifier_filters_for_stmt(
 
 pub use uqa_sql::semantics::outer_join_nullable_qualifiers;
 
-/// The qualifier that owns every unqualified column of a FROM clause: its only named relation, unless an unaliased VALUES list or subquery also exposes columns without a qualifier.
-fn sole_column_owner(from: &SourcePlan, from_quals: &BTreeSet<String>) -> Option<String> {
-    if from_quals.len() != 1 || has_unqualified_relation(from) {
-        return None;
-    }
-    from_quals.iter().next().cloned()
-}
-
 /// Project a multi-relation disjunction onto each relation as a necessary
 /// predicate. For `(A1 AND B1) OR (A2 AND B2)`, `A1 OR A2` is safe to apply to
 /// A before the join, and likewise for B. The original disjunction remains as
@@ -104,8 +89,7 @@ fn derived_disjunctive_qualifier_filters(
     context: FilterPushdownContext<'_>,
     part: &ScalarExpr,
     from_quals: &BTreeSet<String>,
-    single_qualifier: Option<&str>,
-    column_owners: &ColumnOwners,
+    columns: &SourceColumns,
     subqueries: &[QueryPlan],
 ) -> Vec<(String, ScalarExpr)> {
     let ScalarExpr::Or(disjuncts) = part else {
@@ -127,12 +111,7 @@ fn derived_disjunctive_qualifier_filters(
                 .into_iter()
                 .filter_map(|conjunct| {
                     let (owner, predicate) = qualifier_filter_for_part(
-                        context,
-                        conjunct,
-                        from_quals,
-                        single_qualifier,
-                        column_owners,
-                        subqueries,
+                        context, conjunct, from_quals, columns, subqueries,
                     )?;
                     (owner == *qualifier).then_some(predicate)
                 })
@@ -159,8 +138,7 @@ fn qualifier_filter_for_part(
     context: FilterPushdownContext<'_>,
     part: &ScalarExpr,
     from_quals: &BTreeSet<String>,
-    single_qualifier: Option<&str>,
-    column_owners: &ColumnOwners,
+    columns: &SourceColumns,
     subqueries: &[QueryPlan],
 ) -> Option<(String, ScalarExpr)> {
     if expression_contains_internal_column(part) {
@@ -177,30 +155,54 @@ fn qualifier_filter_for_part(
         return None;
     }
     let qualifiers = expr_qualifiers(part);
-    let has_unqualified = expr_has_unqualified_column(part);
-    if qualifiers.len() == 1 && (!has_unqualified || single_qualifier.is_some()) {
-        let qualifier = qualifiers.iter().next()?;
-        if from_quals.contains(qualifier) {
-            return Some((qualifier.clone(), part.clone()));
+    let unqualified = unqualified_column_names(part);
+    // Every unqualified name must read a column of the receiving relation. A name it does not expose, such as the relation's own name used as a whole-row value, an outer column or another relation's column, keeps the conjunct in the residual filter.
+    let reads_columns_of = |qualifier: &str| {
+        unqualified
+            .iter()
+            .all(|column| columns.reads_column_of(column, qualifier))
+    };
+    let placed = |qualifier: &str| {
+        Some((
+            qualifier.to_string(),
+            qualify_unqualified_columns(part, qualifier),
+        ))
+    };
+    match qualifiers.len() {
+        1 => {
+            let qualifier = qualifiers.iter().next()?;
+            (from_quals.contains(qualifier) && reads_columns_of(qualifier))
+                .then(|| placed(qualifier))
+                .flatten()
         }
-    }
-    if qualifiers.is_empty() && (has_unqualified || crate::optimizer::contains_retrieval(part)) {
-        if let Some(qualifier) = unique_unqualified_column_owner(part, column_owners) {
-            if from_quals.contains(qualifier) {
-                return Some((
-                    qualifier.to_string(),
-                    qualify_unqualified_columns(part, qualifier),
-                ));
+        0 if unqualified.is_empty() => crate::optimizer::contains_retrieval(part)
+            .then(|| columns.only_relation())
+            .flatten()
+            .and_then(placed),
+        0 => {
+            if let Some(qualifier) = unique_unqualified_column_owner(part, columns.owners()) {
+                if from_quals.contains(qualifier) {
+                    return placed(qualifier);
+                }
             }
+            let qualifier = columns.only_relation()?;
+            reads_columns_of(qualifier)
+                .then(|| placed(qualifier))
+                .flatten()
         }
-        if let Some(qualifier) = single_qualifier {
-            return Some((
-                qualifier.to_string(),
-                qualify_unqualified_columns(part, qualifier),
-            ));
-        }
+        _ => None,
     }
-    None
+}
+
+/// The distinct names of a conjunct's unqualified column references.
+fn unqualified_column_names(expression: &ScalarExpr) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    expression.visit(&mut |node| {
+        if let ScalarExpr::Column(name) = node {
+            names.insert(name.clone());
+        }
+    });
+    names
 }
 
 fn expression_contains_internal_column(expression: &ScalarExpr) -> bool {
@@ -225,8 +227,7 @@ pub fn final_filter_after_qualifier_pushdown(
         return Ok(Some(filter.clone()));
     }
     let from_quals = from_qualifier_set(from);
-    let single_qualifier = sole_column_owner(from, &from_quals);
-    let column_owners = source_column_owners(scope, from)?;
+    let columns = SourceColumns::new(scope, from, &from_quals)?;
     let mut guaranteed = Vec::new();
     collect_guaranteed_join_filters(from, &mut guaranteed);
     let residual: Vec<ScalarExpr> = flatten_and_filter_parts(filter)
@@ -237,8 +238,7 @@ pub fn final_filter_after_qualifier_pushdown(
                     context,
                     part,
                     &from_quals,
-                    single_qualifier.as_deref(),
-                    &column_owners,
+                    &columns,
                     &stmt.subqueries,
                 )
                 .is_some();
@@ -318,18 +318,12 @@ pub fn cte_output_filters(
     }
 
     let from_qualifiers = from_qualifier_set(from);
-    let single_qualifier = sole_column_owner(from, &from_qualifiers);
-    let column_owners = source_column_owners(scope, from)?;
+    let columns = SourceColumns::new(scope, from, &from_qualifiers)?;
     let mut grouped: BTreeMap<String, (String, Vec<ScalarExpr>)> = BTreeMap::new();
     for part in flatten_and_filter_parts(filter) {
-        let Some((qualifier, predicate)) = qualifier_filter_for_part(
-            context,
-            part,
-            &from_qualifiers,
-            single_qualifier.as_deref(),
-            &column_owners,
-            &block.subqueries,
-        ) else {
+        let Some((qualifier, predicate)) =
+            qualifier_filter_for_part(context, part, &from_qualifiers, &columns, &block.subqueries)
+        else {
             continue;
         };
         let Some(cte_name) = qualifier_to_cte.get(&qualifier) else {

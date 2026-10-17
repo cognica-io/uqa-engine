@@ -40,7 +40,7 @@ fn values_where_predicates_match_postgresql_and_reopen(#[case] provider: usize) 
         return;
     }
     drop(engine);
-    // Stored views and SQL routine bodies keep the predicates on their VALUES, function and unaliased sources across reopening, and the modified rows persist.
+    // Stored views and SQL routine bodies keep the predicates on their VALUES, function, unaliased and join-alias sources and their whole-row references across reopening, and the modified rows persist.
     let engine = open(provider, &path);
     let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
     restored["cases"].as_array_mut().unwrap().retain(|case| {
@@ -49,11 +49,13 @@ fn values_where_predicates_match_postgresql_and_reopen(#[case] provider: usize) 
             "values_view_rows"
                 | "lateral_view_rows"
                 | "unaliased_view_rows"
+                | "alias_view_rows"
+                | "whole_row_view_rows"
                 | "routine_call"
                 | "table_rows"
                 | "target_rows"
         )
     });
-    assert_eq!(restored["cases"].as_array().unwrap().len(), 6);
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 8);
     crate::pg18_oracle::verify(&engine, &restored.to_string());
 }

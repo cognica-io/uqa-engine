@@ -10,9 +10,9 @@ use super::{
     alias_join_operator, bind_source_plan_schema, build_join_operator_with_ctes_at_path,
     combine_filters, join_using_predicate, null_row_for_schema, physical_exec_error,
     physical_work_mem_bytes, qualifier_filter, resolve_join_using, shape_join_using_output,
-    validate_join_on_schema, ColumnPrune, CteScope, JoinExecutionStrategy, PhysicalOperator,
-    QualifierFilters, QueryLateralSource, RowSchemaExecution, SQLError, SQLParam, SourceContext,
-    SourcePlan,
+    unproduced_column, validate_join_on_schema, ColumnPrune, CteScope, JoinExecutionStrategy,
+    PhysicalOperator, QualifierFilters, QueryLateralSource, RowSchemaExecution, SQLError, SQLParam,
+    SourceContext, SourcePlan,
 };
 use crate::{HashJoin, LateralJoin, NestedLoopJoin};
 use uqa_sql::semantics::from_qualifier_set;
@@ -43,6 +43,12 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
             lateral,
             strategy,
         } => {
+            // A join alias hides the joined relations from the enclosing query block. The projections and predicates that block placed by relation name therefore cannot address any relation inside the alias, including one that reuses an outer name; conjuncts on the alias itself stay in the block's residual filter.
+            let (prune, filters) = if alias.is_some() {
+                (None, None)
+            } else {
+                (prune, filters)
+            };
             let left_recheck_path = recheck_path.as_ref().map(|path| {
                 let mut path = path.clone();
                 path.push(0);
@@ -135,19 +141,25 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                             .map_err(physical_exec_error)
                     })
                     .transpose()?;
-                // The right relation is evaluated per left row, so the predicates placed on its qualifiers are applied to each produced row instead of being passed to a source builder.
+                // The right relation is evaluated per left row, so the predicates placed on its qualifiers are applied to each produced row instead of being passed to a source builder. Its row carries every column of those qualifiers, so a placed predicate that reads another one is reported when a row is admitted, as for any closed source.
+                let right_qualifiers = from_qualifier_set(right);
                 let right_filter = combine_filters(
-                    from_qualifier_set(right)
+                    right_qualifiers
                         .iter()
                         .filter_map(|qualifier| qualifier_filter(right_filter_ref, qualifier)),
                 )
                 .map(|predicate| {
+                    if let Some(column) = right_qualifiers.iter().find_map(|qualifier| {
+                        unproduced_column(&predicate, qualifier, &right_schema)
+                    }) {
+                        return Err(column);
+                    }
                     let evaluator = context.relational.evaluator(params, ctes);
                     let predicate = evaluator.bind_type_introspection(predicate, &right_schema);
-                    (
+                    Ok((
                         crate::scalar::PreparedExpressions::scalar(predicate),
                         evaluator,
-                    )
+                    ))
                 });
                 let source = QueryLateralSource {
                     context: *context,

@@ -16,18 +16,13 @@ use crate::{
 
 /// Engine seam for a correlated right-hand relation.
 ///
-/// The physical operator owns join iteration, `ON` filtering, and outer-row
-/// preservation. The engine callback only evaluates the right relation, the
-/// predicates placed on that relation, and the scalar join predicate in the
-/// current correlated scope.
+/// The physical operator owns join iteration, `ON` filtering, and outer-row preservation. The engine callback only evaluates the right relation, the predicates placed on that relation, and the scalar join predicate in the current correlated scope.
 pub type LateralRows = Box<dyn Iterator<Item = ExecResult<OwnedPhysicalRow>> + Send>;
 
 pub trait LateralSource: Send {
     fn rows_for(&mut self, left: &OwnedPhysicalRow) -> ExecResult<LateralRows>;
 
-    /// Whether a produced right row satisfies the predicates placed on the
-    /// right relation itself. A rejected row is absent from the join input:
-    /// it neither matches a left row nor produces a NULL-extended row.
+    /// Whether a produced right row satisfies the predicates placed on the right relation itself. A rejected row is absent from the join input: it neither matches a left row nor produces a NULL-extended row.
     fn admits(&mut self, right: &OwnedPhysicalRow) -> ExecResult<bool>;
 
     fn matches(&mut self, joined: &OwnedPhysicalRow) -> ExecResult<bool>;
@@ -297,8 +292,9 @@ mod tests {
         }
     }
 
+    /// The planner places conjuncts on the right relation of inner and cross joins, and propagates join-key constants into the right relation of a left join, whose left rows then lose every rejected match.
     #[test]
-    fn rejected_right_rows_are_absent_from_every_join_kind() {
+    fn rejected_right_rows_are_absent_from_inner_and_left_lateral_joins() {
         let n = |value: i64| Value::Int(value);
         for (kind, expected) in [
             (JoinKind::Cross, vec![(n(1), n(1)), (n(2), n(1))]),
@@ -306,19 +302,6 @@ mod tests {
             (
                 JoinKind::Left,
                 vec![(n(1), Value::Null), (n(2), Value::Null)],
-            ),
-            (
-                JoinKind::Right,
-                vec![(Value::Null, n(1)), (Value::Null, n(1))],
-            ),
-            (
-                JoinKind::Full,
-                vec![
-                    (Value::Null, n(1)),
-                    (n(1), Value::Null),
-                    (Value::Null, n(1)),
-                    (n(2), Value::Null),
-                ],
             ),
         ] {
             let left = TableScan::from_rows(

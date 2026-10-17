@@ -12557,8 +12557,8 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/query/sources/values_source/tests.rs",
       "capability": "Source predicate placement",
-      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening.",
-      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join; an unqualified column is never attributed to the only named relation while an unaliased VALUES list or subquery is in scope.",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
       "case_names": [
         ""
       ]
@@ -12566,12 +12566,25 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "rejected_right_rows_are_absent_from_every_join_kind",
+      "test": "values_sources_fail_instead_of_reading_an_unproduced_column",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/values_source/tests.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rejected_right_rows_are_absent_from_inner_and_left_lateral_joins",
       "cases": 1,
       "source": "crates/uqa-execution/src/lateral_join.rs",
       "capability": "Source predicate placement",
-      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening.",
-      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join; an unqualified column is never attributed to the only named relation while an unaliased VALUES list or subquery is in scope.",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
       "case_names": [
         ""
       ]
@@ -12583,8 +12596,60 @@
       "cases": 1,
       "source": "crates/uqa-planner/src/filter_pushdown/tests.rs",
       "capability": "Source predicate placement",
-      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening.",
-      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join; an unqualified column is never attributed to the only named relation while an unaliased VALUES list or subquery is in scope.",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "whole_row_references_of_values_lists_stay_in_the_residual",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/relation_columns.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "derived_and_function_relations_receive_only_their_columns",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/relation_columns.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "column_free_retrieval_predicates_keep_the_only_named_relation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/relation_columns.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "aliased_and_nested_joins_expose_only_their_visible_relations",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/relation_columns.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
       "case_names": [
         ""
       ]
@@ -12596,13 +12661,26 @@
       "cases": 4,
       "source": "crates/uqa-engine/tests/queries/values_where_predicates_oracle.rs",
       "capability": "Source predicate placement",
-      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening.",
-      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join; an unqualified column is never attributed to the only named relation while an unaliased VALUES list or subquery is in scope.",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite",
         "case_3_sqlite_key_value",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "column_free_graph_retrieval_beside_an_unaliased_relation_reads_the_named_table",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_graph_functions.rs",
+      "capability": "Source predicate placement",
+      "workload": "Independent PostgreSQL 18.4 predicates over VALUES lists alone, joined with each other, tables and functions, beside unaliased VALUES lists and subqueries, under parenthesized join aliases that reuse outer relation names, as whole-row references to VALUES lists, derived tables, tables and record-returning functions, in aggregates, windows, subqueries, CTEs, set operations, LATERAL and implicit lateral function sources, join-key propagation into LEFT JOIN LATERAL, stored views, SQL routines, prepared statements and INSERT, UPDATE FROM, DELETE USING and MERGE, with provider reopening, plus column-free graph retrieval beside an unaliased relation.",
+      "invariant": "Every conjunct the planner places on a source qualifier and removes from the residual WHERE filter is applied to that source's rows, including VALUES lists and the right relation of a lateral join, and never to a relation that an enclosing join alias hides; an unqualified name is placed only on a relation that exposes it as a column, so whole-row references, outer columns and the columns of an unaliased relation stay in the residual filter, while a column-free retrieval predicate keeps the only named relation; a source with a closed column set fails with an internal error instead of reading NULL for a placed column it does not produce.",
+      "case_names": [
+        ""
       ]
     }
   ]

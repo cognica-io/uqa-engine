@@ -143,3 +143,53 @@ fn values_sources_apply_only_the_predicates_placed_on_their_qualifier() {
         [uqa_core::Value::Int(2)]
     );
 }
+
+#[test]
+fn values_sources_fail_instead_of_reading_an_unproduced_column() {
+    let UnifiedPlan::Query(plan) =
+        UnifiedPlan::lower(uqa_sql::compile("VALUES (1, 2), (3, 4)").unwrap().remove(0))
+    else {
+        panic!("query")
+    };
+    let RelationalPlan::Values { rows, .. } = plan.root else {
+        panic!("VALUES")
+    };
+    let source = SourcePlan::Values {
+        rows,
+        alias: Some("v".into()),
+        column_aliases: vec!["x".into()],
+        internal_relation: None,
+        internal_column_types: Vec::new(),
+        internal_column_collations: Vec::new(),
+    };
+    let comparison = |column: &str| ScalarExpr::Binary {
+        op: uqa_sql::ast::BinaryOp::Greater,
+        lhs: Box::new(ScalarExpr::qualified_column("v", column)),
+        rhs: Box::new(ScalarExpr::Literal(uqa_core::Value::Int(1))),
+    };
+    let run = |column: &str| {
+        let filters = uqa_sql::plan::source_projection::QualifierFilters::from([(
+            "v".to_string(),
+            vec![comparison(column)],
+        )]);
+        let mut operator = build_values_source(
+            &Services,
+            &Services,
+            &source,
+            &[],
+            &crate::catalog::test_support::empty_scope(),
+            || Arc::new(Services),
+            None,
+            Some(&filters),
+            || crate::relational::DefaultExpressionEvaluator::shared(Vec::new()),
+        )
+        .unwrap();
+        crate::physical::run_to_rows(operator.as_mut()).map(|(_, rows)| rows.len())
+    };
+    // An aliased column and the default name of an unaliased column are both produced.
+    assert_eq!(run("x").unwrap(), 1);
+    assert_eq!(run("column2").unwrap(), 2);
+    // A whole-row name qualified into a column reads nothing the list produces.
+    let error = run("v").unwrap_err().to_string();
+    assert!(error.contains("reads v.v"), "{error}");
+}

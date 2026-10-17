@@ -87,6 +87,7 @@ fn unique_unqualified_owner_enables_safe_filter_pushdown() {
         ("shared".into(), None),
     ]);
     let qualifiers = BTreeSet::from(["part".into(), "lineitem".into()]);
+    let columns = SourceColumns::listed(owners, qualifiers.clone());
     let predicate = ScalarExpr::Binary {
         op: BinaryOp::Equal,
         lhs: Box::new(ScalarExpr::Column("p_name".into())),
@@ -94,7 +95,7 @@ fn unique_unqualified_owner_enables_safe_filter_pushdown() {
     };
 
     let (qualifier, pushed) =
-        qualifier_filter_for_part(context, &predicate, &qualifiers, None, &owners, &[]).unwrap();
+        qualifier_filter_for_part(context, &predicate, &qualifiers, &columns, &[]).unwrap();
     assert_eq!(qualifier, "part");
     let ScalarExpr::Binary { lhs, .. } = pushed else {
         panic!("pushdown changed the predicate shape");
@@ -106,9 +107,7 @@ fn unique_unqualified_owner_enables_safe_filter_pushdown() {
     ));
 
     let ambiguous = ScalarExpr::Column("shared".into());
-    assert!(
-        qualifier_filter_for_part(context, &ambiguous, &qualifiers, None, &owners, &[]).is_none()
-    );
+    assert!(qualifier_filter_for_part(context, &ambiguous, &qualifiers, &columns, &[]).is_none());
 }
 
 #[test]
@@ -123,7 +122,8 @@ fn table_range_aliases_are_the_filter_ownership_names() {
         column_aliases: vec!["key".into(), "value".into()],
         include_descendants: true,
     };
-    let owners = source_column_owners(scope, &source).unwrap();
+    let columns = SourceColumns::new(scope, &source, &BTreeSet::from(["source".into()])).unwrap();
+    let owners = columns.owners();
     assert_eq!(owners.get("key"), Some(&Some("source".into())));
     assert_eq!(owners.get("value"), Some(&Some("source".into())));
     assert!(!owners.contains_key("id"));
@@ -181,7 +181,10 @@ fn unaliased_relations_keep_their_columns_from_the_only_named_relation() {
             strategy: JoinExecutionStrategy::Auto,
         };
         assert_eq!(
-            source_column_owners(scope, &from).unwrap().get("column1"),
+            SourceColumns::new(scope, &from, &from_qualifier_set(&from))
+                .unwrap()
+                .owners()
+                .get("column1"),
             Some(&None)
         );
         let unqualified = greater(ScalarExpr::Column("column1".into()), one());
@@ -233,8 +236,7 @@ fn internal_relation_attributes_never_push_into_catalog_sources() {
         context,
         &predicate,
         &qualifiers,
-        Some("source"),
-        &BTreeMap::new(),
+        &SourceColumns::listed(BTreeMap::new(), qualifiers.clone()),
         &[],
     )
     .is_none());
@@ -260,8 +262,7 @@ fn disjunction_derives_a_necessary_filter_for_every_complete_source_projection()
         context,
         &predicate,
         &qualifiers,
-        None,
-        &BTreeMap::new(),
+        &SourceColumns::listed(BTreeMap::new(), qualifiers.clone()),
         &[],
     );
     assert_eq!(derived.len(), 2);
@@ -291,8 +292,7 @@ fn disjunction_does_not_push_a_projection_missing_from_any_branch() {
             context,
             &predicate,
             &qualifiers,
-            None,
-            &BTreeMap::new(),
+            &SourceColumns::listed(BTreeMap::new(), qualifiers.clone()),
             &[],
         )
         .len(),
@@ -393,3 +393,4 @@ fn outer_join_marks_only_null_extended_qualifiers_as_unsafe_for_pushdown() {
 
 mod fixture;
 use fixture::Fixture;
+mod relation_columns;

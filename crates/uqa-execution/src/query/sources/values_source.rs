@@ -7,9 +7,9 @@
 
 /// Build the physical operator for a VALUES source.
 use super::{
-    eval_scalar, filter_qualified_source, qualify_source_operator_with_columns, ColumnPrune,
-    CteScope, PhysicalOperator, PlanSubqueryArena, QualifierFilters, SQLError, SQLParam,
-    ScalarEvalContext, ScalarExpr, SourceContext, SourcePlan,
+    eval_scalar, filter_closed_source, qualify_source_operator_with_columns, ColumnPrune, CteScope,
+    PhysicalOperator, PlanSubqueryArena, QualifierFilters, SQLError, SQLParam, ScalarEvalContext,
+    ScalarExpr, SourceContext, SourcePlan,
 };
 use std::sync::Arc;
 
@@ -109,7 +109,7 @@ fn build_values_source<'a, S: Clone + 'static>(
                 ctes.lock_identities.emit,
             );
             Ok(match alias.as_deref() {
-                Some(qualifier) => filter_qualified_source(operator, qualifier, filters, evaluator),
+                Some(qualifier) => filter_closed_source(operator, qualifier, filters, evaluator),
                 None => operator,
             })
         }

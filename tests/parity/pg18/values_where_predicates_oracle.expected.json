@@ -9,7 +9,7 @@
       "--notices"
     ],
     "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "f4941dbc3c22255fc8aefd8c1b12f4e3d92a550183eb2e8a36c71a54991b2228"
+    "input_sha256": "0ffe6f9b7d3eac94711d2bb4dc29c984d0aa7fd2c22c500b49cc628e3e6eb8e7"
   },
   "cases": [
     {
@@ -1347,6 +1347,784 @@
       "notices": []
     },
     {
+      "id": "alias_values_outer",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) JOIN ((VALUES (1), (2)) v(x) CROSS JOIN (VALUES (3)) b(y)) AS j ON true WHERE v.x > 1 ORDER BY 1, 2, 3",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "2",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "alias_values_outer_last",
+      "sql": "SELECT * FROM ((VALUES (1), (2)) v(x) CROSS JOIN (VALUES (3)) b(y)) AS j CROSS JOIN (VALUES (1), (2)) v(x) WHERE v.x > 1 ORDER BY 1, 2, 3",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3",
+              "2"
+            ],
+            [
+              "2",
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "alias_conjunct_on_alias",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) JOIN ((VALUES (1), (2)) v(x) CROSS JOIN (VALUES (3)) b(y)) AS j ON true WHERE j.x > 1 AND v.x = 1 ORDER BY 1, 2, 3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "alias_function_name",
+      "sql": "SELECT count(*) FROM generate_series(1, 2) g, ((VALUES (1), (2)) v(x) CROSS JOIN generate_series(1, v.x) g) AS j WHERE g.g > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "alias_lateral_name",
+      "sql": "SELECT * FROM ((VALUES (1)) r(z) CROSS JOIN (VALUES (2)) b(y)) AS j, LATERAL (SELECT j.y AS z) r WHERE r.z > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z",
+            "y",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "alias_table_name",
+      "sql": "SELECT * FROM (VALUES (1), (2)) t(a) CROSS JOIN (t CROSS JOIN (VALUES (3)) b(y)) AS j WHERE t.a > 1 ORDER BY 1, 2, 3, 4",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "a",
+            "b",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23,
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "1",
+              "one",
+              "3"
+            ],
+            [
+              "2",
+              "2",
+              "two",
+              "3"
+            ],
+            [
+              "2",
+              "3",
+              "three",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "alias_table_inner_values",
+      "sql": "SELECT j.a, j.y FROM t CROSS JOIN ((VALUES (5), (6)) t(a) CROSS JOIN (VALUES (3)) b(y)) AS j WHERE t.a > 2 ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "5",
+              "3"
+            ],
+            [
+              "6",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_values_equality",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE v = ROW(3, 4)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_values_count",
+      "sql": "SELECT count(*) FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE v = ROW(3, 4)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_values_star",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE v.* = ROW(3, 4)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_values_is_null",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, NULL)) v(x, y) WHERE v IS NULL",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_values_is_not_null",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, NULL)) v(x, y) WHERE v IS NOT NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_values_not_is_not_null",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, NULL)) v(x, y) WHERE NOT (v IS NOT NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_values_json",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE row_to_json(v)::text LIKE '%3%'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_values_field",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE (v).x = 3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_values_with_column",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE v IS NOT NULL AND v.x > 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_derived_equality",
+      "sql": "SELECT * FROM (SELECT 1 AS x, 2 AS y UNION ALL SELECT 3, 4) s WHERE s = ROW(3, 4)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_derived_is_null",
+      "sql": "SELECT * FROM (SELECT 1 AS x, 2 AS y UNION ALL SELECT 3, NULL) s WHERE s IS NULL",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_derived_is_not_null",
+      "sql": "SELECT * FROM (SELECT 1 AS x, 2 AS y UNION ALL SELECT 3, NULL) s WHERE s IS NOT NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_derived_json",
+      "sql": "SELECT * FROM (SELECT 1 AS x, 2 AS y UNION ALL SELECT 3, 4) s WHERE row_to_json(s)::text LIKE '%3%'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_derived_field",
+      "sql": "SELECT * FROM (SELECT 1 AS x, 2 AS y UNION ALL SELECT 3, 4) s WHERE (s).y = 4",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_table_is_not_null",
+      "sql": "SELECT a FROM t AS w WHERE w IS NOT NULL AND w.a > 1 ORDER BY a",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_table_json",
+      "sql": "SELECT a FROM t AS w WHERE row_to_json(w)::text LIKE '%two%'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_table_equality",
+      "sql": "SELECT a FROM t AS w WHERE w = ROW(2, 'two'::text)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_rows_from",
+      "sql": "SELECT * FROM ROWS FROM (generate_series(1, 3), generate_series(1, 2)) g(a, b) WHERE g = ROW(2, 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_function_record",
+      "sql": "SELECT key FROM jsonb_each_text('{\"k\": \"1\", \"m\": \"2\"}') e WHERE e IS NOT NULL ORDER BY key",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "key"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "k"
+            ],
+            [
+              "m"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "function_unlisted_column",
+      "sql": "SELECT key FROM jsonb_each_text('{\"k\": \"1\", \"m\": \"2\"}') e WHERE value = '2'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "key"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "m"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_lateral",
+      "sql": "SELECT * FROM (VALUES (1), (2)) a(x), LATERAL (SELECT a.x AS z, 'q' AS t) r WHERE r = ROW(2, 'q'::text)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "z",
+            "t"
+          ],
+          "type_oids": [
+            23,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "2",
+              "q"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
       "id": "values_group_having",
       "sql": "SELECT x % 2 AS k, count(*) FROM (VALUES (1), (2), (3), (4), (5)) v(x) WHERE x > 1 GROUP BY x % 2 HAVING count(*) > 1 ORDER BY k",
       "command_tags": [
@@ -2231,6 +3009,145 @@
       "notices": []
     },
     {
+      "id": "left_lateral_propagation_matches",
+      "sql": "SELECT * FROM (VALUES (1), (20)) a(n) LEFT JOIN LATERAL (SELECT 20 AS z UNION ALL SELECT a.n) r ON r.z = a.n WHERE a.n = 20 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "20",
+              "20"
+            ],
+            [
+              "20",
+              "20"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "left_lateral_propagation_rejects",
+      "sql": "SELECT * FROM (VALUES (1), (20)) a(n) LEFT JOIN LATERAL (SELECT 20 AS z UNION ALL SELECT a.n) r ON a.n = r.z WHERE a.n = 1 ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "left_lateral_propagation_null_extends",
+      "sql": "SELECT * FROM (VALUES (1), (2)) a(x) LEFT JOIN LATERAL (SELECT 5 AS k) r ON r.k = a.x WHERE a.x = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "k"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "left_lateral_values_propagation",
+      "sql": "SELECT a, x FROM t LEFT JOIN LATERAL (VALUES (1), (2), (3)) v(x) ON v.x = t.a WHERE t.a = 2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "left_lateral_values_null_extends",
+      "sql": "SELECT a, x FROM t LEFT JOIN LATERAL (VALUES (1), (3)) v(x) ON v.x = t.a WHERE t.a = 2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
       "id": "function_source",
       "sql": "SELECT a, x FROM t, generate_series(1, 3) g(x) WHERE g.x > 2 ORDER BY 1, 2",
       "command_tags": [
@@ -2634,6 +3551,96 @@
             [
               "3",
               "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "alias_view",
+      "sql": "CREATE VIEW alias_view AS SELECT v.x, j.x AS inner_x FROM (VALUES (1), (2)) v(x) JOIN ((VALUES (1), (2)) v(x) CROSS JOIN (VALUES (3)) b(y)) AS j ON true WHERE v.x > 1",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "alias_view_rows",
+      "sql": "SELECT * FROM alias_view ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "inner_x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_view",
+      "sql": "CREATE VIEW whole_row_view AS SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE v = ROW(3, 4)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "whole_row_view_rows",
+      "sql": "SELECT * FROM whole_row_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "4"
             ]
           ]
         }

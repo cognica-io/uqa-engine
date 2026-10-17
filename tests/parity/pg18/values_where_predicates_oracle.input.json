@@ -213,6 +213,118 @@
       "sql": "SELECT * FROM amb, (VALUES (1)) WHERE column1 > 0"
     },
     {
+      "id": "alias_values_outer",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) JOIN ((VALUES (1), (2)) v(x) CROSS JOIN (VALUES (3)) b(y)) AS j ON true WHERE v.x > 1 ORDER BY 1, 2, 3"
+    },
+    {
+      "id": "alias_values_outer_last",
+      "sql": "SELECT * FROM ((VALUES (1), (2)) v(x) CROSS JOIN (VALUES (3)) b(y)) AS j CROSS JOIN (VALUES (1), (2)) v(x) WHERE v.x > 1 ORDER BY 1, 2, 3"
+    },
+    {
+      "id": "alias_conjunct_on_alias",
+      "sql": "SELECT * FROM (VALUES (1), (2)) v(x) JOIN ((VALUES (1), (2)) v(x) CROSS JOIN (VALUES (3)) b(y)) AS j ON true WHERE j.x > 1 AND v.x = 1 ORDER BY 1, 2, 3"
+    },
+    {
+      "id": "alias_function_name",
+      "sql": "SELECT count(*) FROM generate_series(1, 2) g, ((VALUES (1), (2)) v(x) CROSS JOIN generate_series(1, v.x) g) AS j WHERE g.g > 1"
+    },
+    {
+      "id": "alias_lateral_name",
+      "sql": "SELECT * FROM ((VALUES (1)) r(z) CROSS JOIN (VALUES (2)) b(y)) AS j, LATERAL (SELECT j.y AS z) r WHERE r.z > 1"
+    },
+    {
+      "id": "alias_table_name",
+      "sql": "SELECT * FROM (VALUES (1), (2)) t(a) CROSS JOIN (t CROSS JOIN (VALUES (3)) b(y)) AS j WHERE t.a > 1 ORDER BY 1, 2, 3, 4"
+    },
+    {
+      "id": "alias_table_inner_values",
+      "sql": "SELECT j.a, j.y FROM t CROSS JOIN ((VALUES (5), (6)) t(a) CROSS JOIN (VALUES (3)) b(y)) AS j WHERE t.a > 2 ORDER BY 1"
+    },
+    {
+      "id": "whole_row_values_equality",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE v = ROW(3, 4)"
+    },
+    {
+      "id": "whole_row_values_count",
+      "sql": "SELECT count(*) FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE v = ROW(3, 4)"
+    },
+    {
+      "id": "whole_row_values_star",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE v.* = ROW(3, 4)"
+    },
+    {
+      "id": "whole_row_values_is_null",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, NULL)) v(x, y) WHERE v IS NULL"
+    },
+    {
+      "id": "whole_row_values_is_not_null",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, NULL)) v(x, y) WHERE v IS NOT NULL"
+    },
+    {
+      "id": "whole_row_values_not_is_not_null",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, NULL)) v(x, y) WHERE NOT (v IS NOT NULL)"
+    },
+    {
+      "id": "whole_row_values_json",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE row_to_json(v)::text LIKE '%3%'"
+    },
+    {
+      "id": "whole_row_values_field",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE (v).x = 3"
+    },
+    {
+      "id": "whole_row_values_with_column",
+      "sql": "SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE v IS NOT NULL AND v.x > 1"
+    },
+    {
+      "id": "whole_row_derived_equality",
+      "sql": "SELECT * FROM (SELECT 1 AS x, 2 AS y UNION ALL SELECT 3, 4) s WHERE s = ROW(3, 4)"
+    },
+    {
+      "id": "whole_row_derived_is_null",
+      "sql": "SELECT * FROM (SELECT 1 AS x, 2 AS y UNION ALL SELECT 3, NULL) s WHERE s IS NULL"
+    },
+    {
+      "id": "whole_row_derived_is_not_null",
+      "sql": "SELECT * FROM (SELECT 1 AS x, 2 AS y UNION ALL SELECT 3, NULL) s WHERE s IS NOT NULL"
+    },
+    {
+      "id": "whole_row_derived_json",
+      "sql": "SELECT * FROM (SELECT 1 AS x, 2 AS y UNION ALL SELECT 3, 4) s WHERE row_to_json(s)::text LIKE '%3%'"
+    },
+    {
+      "id": "whole_row_derived_field",
+      "sql": "SELECT * FROM (SELECT 1 AS x, 2 AS y UNION ALL SELECT 3, 4) s WHERE (s).y = 4"
+    },
+    {
+      "id": "whole_row_table_is_not_null",
+      "sql": "SELECT a FROM t AS w WHERE w IS NOT NULL AND w.a > 1 ORDER BY a"
+    },
+    {
+      "id": "whole_row_table_json",
+      "sql": "SELECT a FROM t AS w WHERE row_to_json(w)::text LIKE '%two%'"
+    },
+    {
+      "id": "whole_row_table_equality",
+      "sql": "SELECT a FROM t AS w WHERE w = ROW(2, 'two'::text)"
+    },
+    {
+      "id": "whole_row_rows_from",
+      "sql": "SELECT * FROM ROWS FROM (generate_series(1, 3), generate_series(1, 2)) g(a, b) WHERE g = ROW(2, 2)"
+    },
+    {
+      "id": "whole_row_function_record",
+      "sql": "SELECT key FROM jsonb_each_text('{\"k\": \"1\", \"m\": \"2\"}') e WHERE e IS NOT NULL ORDER BY key"
+    },
+    {
+      "id": "function_unlisted_column",
+      "sql": "SELECT key FROM jsonb_each_text('{\"k\": \"1\", \"m\": \"2\"}') e WHERE value = '2'"
+    },
+    {
+      "id": "whole_row_lateral",
+      "sql": "SELECT * FROM (VALUES (1), (2)) a(x), LATERAL (SELECT a.x AS z, 'q' AS t) r WHERE r = ROW(2, 'q'::text)"
+    },
+    {
       "id": "values_group_having",
       "sql": "SELECT x % 2 AS k, count(*) FROM (VALUES (1), (2), (3), (4), (5)) v(x) WHERE x > 1 GROUP BY x % 2 HAVING count(*) > 1 ORDER BY k"
     },
@@ -337,6 +449,26 @@
       "sql": "SELECT t.a, s.x FROM t JOIN LATERAL (SELECT t.a + g AS x FROM generate_series(0, 1) g) s ON s.x > t.a WHERE s.x < 4 ORDER BY 1, 2"
     },
     {
+      "id": "left_lateral_propagation_matches",
+      "sql": "SELECT * FROM (VALUES (1), (20)) a(n) LEFT JOIN LATERAL (SELECT 20 AS z UNION ALL SELECT a.n) r ON r.z = a.n WHERE a.n = 20 ORDER BY 1, 2"
+    },
+    {
+      "id": "left_lateral_propagation_rejects",
+      "sql": "SELECT * FROM (VALUES (1), (20)) a(n) LEFT JOIN LATERAL (SELECT 20 AS z UNION ALL SELECT a.n) r ON a.n = r.z WHERE a.n = 1 ORDER BY 1, 2"
+    },
+    {
+      "id": "left_lateral_propagation_null_extends",
+      "sql": "SELECT * FROM (VALUES (1), (2)) a(x) LEFT JOIN LATERAL (SELECT 5 AS k) r ON r.k = a.x WHERE a.x = 1"
+    },
+    {
+      "id": "left_lateral_values_propagation",
+      "sql": "SELECT a, x FROM t LEFT JOIN LATERAL (VALUES (1), (2), (3)) v(x) ON v.x = t.a WHERE t.a = 2"
+    },
+    {
+      "id": "left_lateral_values_null_extends",
+      "sql": "SELECT a, x FROM t LEFT JOIN LATERAL (VALUES (1), (3)) v(x) ON v.x = t.a WHERE t.a = 2"
+    },
+    {
       "id": "function_source",
       "sql": "SELECT a, x FROM t, generate_series(1, 3) g(x) WHERE g.x > 2 ORDER BY 1, 2"
     },
@@ -387,6 +519,22 @@
     {
       "id": "unaliased_view_rows",
       "sql": "SELECT * FROM unaliased_view ORDER BY 1, 2"
+    },
+    {
+      "id": "alias_view",
+      "sql": "CREATE VIEW alias_view AS SELECT v.x, j.x AS inner_x FROM (VALUES (1), (2)) v(x) JOIN ((VALUES (1), (2)) v(x) CROSS JOIN (VALUES (3)) b(y)) AS j ON true WHERE v.x > 1"
+    },
+    {
+      "id": "alias_view_rows",
+      "sql": "SELECT * FROM alias_view ORDER BY 1, 2"
+    },
+    {
+      "id": "whole_row_view",
+      "sql": "CREATE VIEW whole_row_view AS SELECT * FROM (VALUES (1, 2), (3, 4)) v(x, y) WHERE v = ROW(3, 4)"
+    },
+    {
+      "id": "whole_row_view_rows",
+      "sql": "SELECT * FROM whole_row_view"
     },
     {
       "id": "routine",
