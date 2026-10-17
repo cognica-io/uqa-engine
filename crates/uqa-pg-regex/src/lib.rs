@@ -66,6 +66,7 @@ pub use flags::{
     REG_EXTENDED, REG_ICASE, REG_INVARG, REG_MIXED, REG_NEWLINE, REG_NLANCH, REG_NLSTOP,
     REG_NOMATCH, REG_NOSPEC, REG_NOSUB, REG_OKAY, REG_QUOTE,
 };
+pub use memory::MAX_ALLOC_SIZE;
 pub use regex::Regex;
 pub use resources::RegexResources;
 pub use span::MatchSpan;

@@ -152,6 +152,18 @@ fn the_running_statements_cancellation_reaches_the_engine() {
 }
 
 #[test]
+fn code_point_buffers_follow_postgresql_allocation_limit() {
+    // `palloc` admits 1073741823 bytes, so text of 268435454 bytes converts and one more byte does not.
+    assert_eq!(code_point_buffer_bytes(268_435_454).unwrap(), 1_073_741_820);
+    let error = code_point_buffer_bytes(268_435_455).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert_eq!(
+        error.to_string(),
+        "invalid memory alloc request size 1073741824"
+    );
+}
+
+#[test]
 fn collations_are_checked_before_the_pattern() {
     let control = ProductionControl::uncontrolled();
     let call = RegexCall::new(&control);

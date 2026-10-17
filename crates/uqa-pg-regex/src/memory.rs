@@ -17,8 +17,8 @@ use crate::resources::RegexResources;
 /// Payload alignment of every chunk, at least `max_align_t` on supported targets.
 const ALIGNMENT: usize = 16;
 
-/// `PostgreSQL`'s `MaxAllocSize`: `palloc` rejects larger requests unless they are huge allocations.
-pub(crate) const MAX_ALLOC_SIZE: usize = 0x3fff_ffff;
+/// `PostgreSQL`'s `MaxAllocSize`: `palloc` rejects larger requests unless they are huge allocations, which the regular-expression functions never request. Callers that convert text to code points for the engine apply the same limit to their buffers, as `regexp.c` does.
+pub const MAX_ALLOC_SIZE: usize = 0x3fff_ffff;
 
 #[repr(C)]
 struct ChunkHeader {

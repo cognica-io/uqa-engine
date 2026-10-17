@@ -10,7 +10,9 @@ use crate::error::{Result, SQLError};
 use std::cell::Cell;
 use std::ops::Range;
 use uqa_core::memory::{MemoryError, Produced, ProductionControl, ProductionString, ProductionVec};
-use uqa_pg_regex::{CompileFlags, MatchSpan, Regex, RegexCollation, RegexError, REG_ESPACE};
+use uqa_pg_regex::{
+    CompileFlags, MatchSpan, Regex, RegexCollation, RegexError, MAX_ALLOC_SIZE, REG_ESPACE,
+};
 
 mod allowance;
 pub(super) use allowance::Allowance;
@@ -43,6 +45,8 @@ impl<'c> RegexCall<'c> {
         allowance: &'r mut Allowance<'_, 'c>,
     ) -> Result<Regex<'r>> {
         self.check()?;
+        // `RE_compile_and_cache` converts the pattern before `pg_regcomp` applies the collation.
+        code_point_buffer_bytes(pattern.len())?;
         let collation = RegexCollation::from_oid(collation)
             .map_err(|error| self.failure(error, "invalid regular expression"))?;
         Regex::compile(pattern, flags, collation, allowance)
@@ -101,14 +105,34 @@ impl<'c> RegexCall<'c> {
                     "the regular expression engine stopped for a cancellation the statement does not report".into(),
                 ),
             },
-            other => SQLError::Diagnostic {
-                sqlstate: other.sqlstate().unwrap_or("XX000").into(),
-                message: other.message().to_string(),
-                detail: None,
-                hint: other.hint().map(Into::into),
-            },
+            other => diagnostic(other),
         }
     }
+}
+
+/// An error `PostgreSQL` raises with its own SQLSTATE, message and hint.
+fn diagnostic(error: RegexError) -> SQLError {
+    SQLError::Diagnostic {
+        sqlstate: error.sqlstate().unwrap_or("XX000").into(),
+        message: error.message().to_string(),
+        detail: None,
+        hint: error.hint().map(Into::into),
+    }
+}
+
+/// The size of the code point buffer `regexp.c` allocates for text of `length` bytes, one `pg_wchar` per byte and a terminator, which `palloc` rejects beyond `MaxAllocSize` before anything is converted.
+fn code_point_buffer_bytes(length: usize) -> Result<usize> {
+    let slots = length.saturating_add(1);
+    let bytes = slots.checked_mul(size_of::<u32>()).ok_or_else(|| {
+        diagnostic(RegexError::InvalidAllocationProduct(
+            slots,
+            size_of::<u32>(),
+        ))
+    })?;
+    if bytes > MAX_ALLOC_SIZE {
+        return Err(diagnostic(RegexError::InvalidAllocationSize(bytes)));
+    }
+    Ok(bytes)
 }
 
 fn engine_error(error: RegexError, context: &str) -> SQLError {
@@ -123,6 +147,7 @@ pub(super) fn code_points(
     text: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<u32>>> {
+    code_point_buffer_bytes(text.len())?;
     let mut points = ProductionVec::new(*control);
     points.reserve(text.chars().count())?;
     for character in text.chars() {
