@@ -131,10 +131,16 @@ impl TemporalValue {
             return Ok(infinity.date());
         }
         let days = match fields.date {
-            Some(DatePart::Calendar(calendar)) => calendar_days(calendar)?,
+            Some(DatePart::Calendar(calendar)) => {
+                super::calendar::from_calendar(calendar.year, calendar.month, calendar.day)
+                    .ok_or(TemporalInputError::OutOfRange)?
+            }
             Some(DatePart::Special(special)) => special_days(special, now_micros)?,
             None => return Err(TemporalInputError::InvalidSyntax),
         };
+        if !Self::date_days_in_range(days) {
+            return Err(TemporalInputError::OutOfRange);
+        }
         Ok(Self::Date { days })
     }
 

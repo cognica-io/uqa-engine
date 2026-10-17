@@ -38,6 +38,9 @@ pub(super) fn eval_range_functions_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
+    if let Some(result) = super::range::subtype_distance::evaluate(name, args, control) {
+        return Some(result);
+    }
     if let Some(subtype) = SUBTYPES
         .iter()
         .copied()

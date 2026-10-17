@@ -7,9 +7,8 @@
 //! Temporal producers use admitted text and borrowed parser tokens.
 
 use super::{
-    epoch_date, wall_clock_micros, DateTime, Duration, ProductionControl, ProductionString,
-    TemporalDateOrder, TemporalInputError, TemporalValue, ValueRetentionError, MICROS_PER_DAY,
-    MICROS_PER_SECOND,
+    wall_clock_micros, DateTime, ProductionControl, ProductionString, TemporalDateOrder,
+    TemporalInputError, TemporalValue, ValueRetentionError, MICROS_PER_DAY, MICROS_PER_SECOND,
 };
 use crate::memory::Produced;
 use chrono::{Datelike, NaiveDate, NaiveTime};
@@ -276,15 +275,14 @@ impl TemporalValue {
         }
         match self {
             Self::Date { days } => {
-                match epoch_date().checked_add_signed(Duration::days(i64::from(*days))) {
-                    Some(date) => {
-                        let mut out = ProductionString::new(*control);
-                        push_date(&mut out, date, control)?;
-                        push_era(&mut out, date)?;
-                        out.finish()
-                    }
-                    None => control.format(format_args!("{days}")),
+                let (year, month, day) = super::calendar::to_calendar(*days);
+                let displayed = if year > 0 { year } else { 1 - year };
+                let mut out = ProductionString::new(*control);
+                out.push_str(&control.format(format_args!("{displayed:04}-{month:02}-{day:02}"))?)?;
+                if year <= 0 {
+                    out.push_str(" BC")?;
                 }
+                out.finish()
             }
             Self::Time { micros } => format_time(*micros, control),
             Self::TimeTz {

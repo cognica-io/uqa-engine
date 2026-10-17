@@ -1,0 +1,93 @@
+{
+  "provenance": {
+    "source_revision": "f5cc81719e6da4cbdb1f797c48b693e91018153a",
+    "environment": "Docker PostgreSQL 18.4",
+    "query": "SELECT json_agg(json_build_object('oid',oid::text,'proname',proname,'prosrc',prosrc,'prorettype',prorettype::text,'proargtypes',proargtypes::text,'proisstrict',proisstrict,'provolatile',provolatile::text,'proparallel',proparallel::text,'proleakproof',proleakproof,'prokind',prokind::text,'proretset',proretset,'prolang',prolang::text) ORDER BY oid) FROM pg_proc WHERE oid IN (3922,3923,3924,3925,3929,3930)"
+  },
+  "routines": [
+    {
+      "oid": "3922",
+      "proname": "int4range_subdiff",
+      "prosrc": "int4range_subdiff",
+      "prorettype": "701",
+      "proargtypes": "23 23",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prokind": "f",
+      "proretset": false,
+      "prolang": "12"
+    },
+    {
+      "oid": "3923",
+      "proname": "int8range_subdiff",
+      "prosrc": "int8range_subdiff",
+      "prorettype": "701",
+      "proargtypes": "20 20",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prokind": "f",
+      "proretset": false,
+      "prolang": "12"
+    },
+    {
+      "oid": "3924",
+      "proname": "numrange_subdiff",
+      "prosrc": "numrange_subdiff",
+      "prorettype": "701",
+      "proargtypes": "1700 1700",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prokind": "f",
+      "proretset": false,
+      "prolang": "12"
+    },
+    {
+      "oid": "3925",
+      "proname": "daterange_subdiff",
+      "prosrc": "daterange_subdiff",
+      "prorettype": "701",
+      "proargtypes": "1082 1082",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prokind": "f",
+      "proretset": false,
+      "prolang": "12"
+    },
+    {
+      "oid": "3929",
+      "proname": "tsrange_subdiff",
+      "prosrc": "tsrange_subdiff",
+      "prorettype": "701",
+      "proargtypes": "1114 1114",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prokind": "f",
+      "proretset": false,
+      "prolang": "12"
+    },
+    {
+      "oid": "3930",
+      "proname": "tstzrange_subdiff",
+      "prosrc": "tstzrange_subdiff",
+      "prorettype": "701",
+      "proargtypes": "1184 1184",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prokind": "f",
+      "proretset": false,
+      "prolang": "12"
+    }
+  ]
+}

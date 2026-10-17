@@ -443,6 +443,54 @@ pub const ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
         source: "uuidv7_interval",
     },
     range_routine!(
+        3922,
+        "int4range_subdiff",
+        true,
+        701,
+        [23, 23],
+        "int4range_subdiff"
+    ),
+    range_routine!(
+        3923,
+        "int8range_subdiff",
+        true,
+        701,
+        [20, 20],
+        "int8range_subdiff"
+    ),
+    range_routine!(
+        3924,
+        "numrange_subdiff",
+        true,
+        701,
+        [1700, 1700],
+        "numrange_subdiff"
+    ),
+    range_routine!(
+        3925,
+        "daterange_subdiff",
+        true,
+        701,
+        [1082, 1082],
+        "daterange_subdiff"
+    ),
+    range_routine!(
+        3929,
+        "tsrange_subdiff",
+        true,
+        701,
+        [1114, 1114],
+        "tsrange_subdiff"
+    ),
+    range_routine!(
+        3930,
+        "tstzrange_subdiff",
+        true,
+        701,
+        [1184, 1184],
+        "tstzrange_subdiff"
+    ),
+    range_routine!(
         3840,
         "int4range",
         false,

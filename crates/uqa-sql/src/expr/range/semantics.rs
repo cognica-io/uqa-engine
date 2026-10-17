@@ -205,8 +205,12 @@ impl DiscreteCanonicalizer {
                 .ok_or_else(|| overflow("bigint")),
             (Self::Date, Value::Temporal(TemporalValue::Date { days })) => days
                 .checked_add(1)
+                .filter(|days| TemporalValue::date_days_in_range(*days))
                 .map(|days| Value::Temporal(TemporalValue::Date { days }))
-                .ok_or_else(|| overflow("date")),
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "22008".into(),
+                    message: "date out of range".into(),
+                }),
             _ => {
                 let subtype = match self {
                     Self::Integer => RangeSubtype::Integer,

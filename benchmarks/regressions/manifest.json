@@ -12147,6 +12147,178 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "full_date_input_and_output_match_postgresql_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/temporal/calendar/tests.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Independent PostgreSQL distance bits and date boundaries, selected call and catalog identities, owned physical bytes, bounded numeric intermediates and cancellation.",
+      "invariant": "Preserve PostgreSQL conversion order, full finite date input/output, exact diagnostics and fixed routine signatures without exceeding the original production allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "full_date_output_preserves_memory_and_both_cancellation_limits",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/temporal/calendar/tests.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Independent PostgreSQL distance bits and date boundaries, selected call and catalog identities, owned physical bytes, bounded numeric intermediates and cancellation.",
+      "invariant": "Preserve PostgreSQL conversion order, full finite date input/output, exact diagnostics and fixed routine signatures without exceeding the original production allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "gregorian_day_conversion_roundtrips_the_integer_carrier",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/temporal/calendar/tests.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Independent PostgreSQL distance bits and date boundaries, selected call and catalog identities, owned physical bytes, bounded numeric intermediates and cancellation.",
+      "invariant": "Preserve PostgreSQL conversion order, full finite date input/output, exact diagnostics and fixed routine signatures without exceeding the original production allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_subtype_distances_match_postgresql_float_bits_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/range/subtype_distance/tests.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Independent PostgreSQL distance bits and date boundaries, selected call and catalog identities, owned physical bytes, bounded numeric intermediates and cancellation.",
+      "invariant": "Preserve PostgreSQL conversion order, full finite date input/output, exact diagnostics and fixed routine signatures without exceeding the original production allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_subtype_distances_read_only_owned_physical_endpoint_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/range/subtype_distance/tests.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Independent PostgreSQL distance bits and date boundaries, selected call and catalog identities, owned physical bytes, bounded numeric intermediates and cancellation.",
+      "invariant": "Preserve PostgreSQL conversion order, full finite date input/output, exact diagnostics and fixed routine signatures without exceeding the original production allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "numeric_range_distance_keeps_intermediates_within_the_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/range/subtype_distance/tests.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Independent PostgreSQL distance bits and date boundaries, selected call and catalog identities, owned physical bytes, bounded numeric intermediates and cancellation.",
+      "invariant": "Preserve PostgreSQL conversion order, full finite date input/output, exact diagnostics and fixed routine signatures without exceeding the original production allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_subtype_distance_metadata_matches_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/builtin_routines/tests/range_subtype_distance.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Independent PostgreSQL distance bits and date boundaries, selected call and catalog identities, owned physical bytes, bounded numeric intermediates and cancellation.",
+      "invariant": "Preserve PostgreSQL conversion order, full finite date input/output, exact diagnostics and fixed routine signatures without exceeding the original production allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "wide_date_inputs_and_output_match_postgresql_before_distance_evaluation",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_subtype_distance.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Independent PostgreSQL distance bits and date boundaries, selected call and catalog identities, owned physical bytes, bounded numeric intermediates and cancellation.",
+      "invariant": "Preserve PostgreSQL conversion order, full finite date input/output, exact diagnostics and fixed routine signatures without exceeding the original production allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "range_subtype_distance_calls_match_postgresql_values_types_and_errors",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_subtype_distance.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Independent PostgreSQL distance bits and date boundaries, selected call and catalog identities, owned physical bytes, bounded numeric intermediates and cancellation.",
+      "invariant": "Preserve PostgreSQL conversion order, full finite date input/output, exact diagnostics and fixed routine signatures without exceeding the original production allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "range_subtype_distance_binding_keeps_schema_precedence_and_explicit_signatures",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_subtype_distance.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Independent PostgreSQL distance bits and date boundaries, selected call and catalog identities, owned physical bytes, bounded numeric intermediates and cancellation.",
+      "invariant": "Preserve PostgreSQL conversion order, full finite date input/output, exact diagnostics and fixed routine signatures without exceeding the original production allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "wide_date_values_and_distance_calls_survive_provider_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_subtype_distance.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Maximum finite dates in primary keys, arrays and retained SQL routine defaults, exercised on memory, native SQLite, SQLite Key/Value and redb with actual persistent close/reopen.",
+      "invariant": "Retain date identity, full output and native distance bits across durable provider restoration without changing the date carrier format.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "date_range_successors_preserve_postgresql_finite_bounds_and_empty_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/range/production/tests/date_bounds.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Fourteen independently captured PostgreSQL finite-date range and multirange boundary cases, including empty-before-successor ordering and infinite endpoints.",
+      "invariant": "Reject a finite date successor beyond the PostgreSQL bound with 22008 while preserving valid output, emptiness, infinity and original allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "date_range_calls_preserve_postgresql_finite_bounds_and_empty_order",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_subtype_distance.rs",
+      "capability": "Native range subtype distance and date bounds",
+      "workload": "Fourteen independently captured PostgreSQL finite-date range and multirange boundary cases, including empty-before-successor ordering and infinite endpoints.",
+      "invariant": "Reject a finite date successor beyond the PostgreSQL bound with 22008 while preserving valid output, emptiness, infinity and original allowance release.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

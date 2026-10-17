@@ -396,6 +396,14 @@ User SQL and PL/pgSQL routines may declare `anyrange`, `anymultirange`, `anycomp
 | `range_merge(multirange)` | Return the smallest range covering every member |
 | `multirange(range)`, family multirange constructors | Construct the paired normalized multirange |
 
+The subtype distance functions `int4range_subdiff(integer, integer)`, `int8range_subdiff(bigint, bigint)`, `numrange_subdiff(numeric, numeric)`, `daterange_subdiff(date, date)`, `tsrange_subdiff(timestamp, timestamp)` and `tstzrange_subdiff(timestamptz, timestamptz)` return `double precision` without changing state. A NULL input returns NULL after type validation. Dates report a difference in days and timestamps in seconds. Integer and temporal functions convert each PostgreSQL internal value to `double precision` before subtracting; numeric subtracts before converting. Distinct large bigint values can therefore have zero distance, and infinite date/time endpoints follow the native sentinel arithmetic. These functions do not define range equality or ordering. Numeric conversion overflow or underflow reports `22003`; incompatible argument types report `42883`.
+
+```sql execute
+SELECT int4range_subdiff(7, 2) AS integer_distance,
+       numrange_subdiff(1.25, 0.5) AS numeric_distance,
+       daterange_subdiff(DATE '2000-01-02', DATE '2000-01-01') AS days;
+```
+
 The implemented range and multirange operators are `&&` for overlap, `@>` for containment, `<@` for contained-by, and `-|-` for adjacency. Two range or multirange operands must have the same built-in subtype. `range @> element`, `multirange @> element` and their reversed `<@` forms require the element's declared type to match that subtype; integer widths, numeric and temporal types remain distinct. Numeric precision and temporal precision do not change the selected type. A domain over the container is accepted, but a domain over the element is a distinct polymorphic type and requires an explicit cast to the subtype. Complete ordering and arithmetic operators, user-defined range families, and index-backed operator classes remain open compatibility bugs.
 
 Containment returns a boolean and does not change state. Included endpoints belong to a range, excluded endpoints do not, an empty range contains no element, and a multirange contains an element if any member does. A NULL operand returns NULL after type validation; incompatible types report `42883` even when their values are NULL. An untyped literal opposite a known range or multirange is read as that container type, so a scalar spelling such as `'2'` reports `22P02`; write `2` or `'2'::integer` to select an integer element. An untyped container opposite an element is ambiguous (`42725`).

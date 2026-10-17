@@ -1,0 +1,628 @@
+{
+  "provenance": {
+    "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "source_revision": "f5cc81719e6da4cbdb1f797c48b693e91018153a",
+    "source_file": "src/backend/utils/adt/rangetypes.c",
+    "collector": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "query_template": "SELECT encode(float8send(<expression>),'hex')",
+    "environment": "Docker PostgreSQL 18.4, UTC, disposable database; no timing measurements"
+  },
+  "cases": [
+    {
+      "function": "int4range_subdiff",
+      "type": "integer",
+      "arguments": [
+        "3",
+        "5"
+      ],
+      "expression": "int4range_subdiff('3'::integer,'5'::integer)",
+      "expected": {
+        "hex": "c000000000000000"
+      }
+    },
+    {
+      "function": "int4range_subdiff",
+      "type": "integer",
+      "arguments": [
+        "2147483647",
+        "-2147483648"
+      ],
+      "expression": "int4range_subdiff('2147483647'::integer,'-2147483648'::integer)",
+      "expected": {
+        "hex": "41efffffffe00000"
+      }
+    },
+    {
+      "function": "int4range_subdiff",
+      "type": "integer",
+      "arguments": [
+        "-2147483648",
+        "2147483647"
+      ],
+      "expression": "int4range_subdiff('-2147483648'::integer,'2147483647'::integer)",
+      "expected": {
+        "hex": "c1efffffffe00000"
+      }
+    },
+    {
+      "function": "int4range_subdiff",
+      "type": "integer",
+      "arguments": [
+        "0",
+        "0"
+      ],
+      "expression": "int4range_subdiff('0'::integer,'0'::integer)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "int4range_subdiff",
+      "type": "integer",
+      "arguments": [
+        null,
+        "1"
+      ],
+      "expression": "int4range_subdiff(NULL::integer,'1'::integer)",
+      "expected": {
+        "hex": null
+      }
+    },
+    {
+      "function": "int8range_subdiff",
+      "type": "bigint",
+      "arguments": [
+        "9223372036854775807",
+        "9223372036854775806"
+      ],
+      "expression": "int8range_subdiff('9223372036854775807'::bigint,'9223372036854775806'::bigint)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "int8range_subdiff",
+      "type": "bigint",
+      "arguments": [
+        "9223372036854775807",
+        "-9223372036854775808"
+      ],
+      "expression": "int8range_subdiff('9223372036854775807'::bigint,'-9223372036854775808'::bigint)",
+      "expected": {
+        "hex": "43f0000000000000"
+      }
+    },
+    {
+      "function": "int8range_subdiff",
+      "type": "bigint",
+      "arguments": [
+        "9007199254740993",
+        "9007199254740992"
+      ],
+      "expression": "int8range_subdiff('9007199254740993'::bigint,'9007199254740992'::bigint)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "int8range_subdiff",
+      "type": "bigint",
+      "arguments": [
+        "-9007199254740993",
+        "-9007199254740992"
+      ],
+      "expression": "int8range_subdiff('-9007199254740993'::bigint,'-9007199254740992'::bigint)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "int8range_subdiff",
+      "type": "bigint",
+      "arguments": [
+        "-3",
+        "5"
+      ],
+      "expression": "int8range_subdiff('-3'::bigint,'5'::bigint)",
+      "expected": {
+        "hex": "c020000000000000"
+      }
+    },
+    {
+      "function": "int8range_subdiff",
+      "type": "bigint",
+      "arguments": [
+        null,
+        "1"
+      ],
+      "expression": "int8range_subdiff(NULL::bigint,'1'::bigint)",
+      "expected": {
+        "hex": null
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "1.25",
+        "0.5"
+      ],
+      "expression": "numrange_subdiff('1.25'::numeric,'0.5'::numeric)",
+      "expected": {
+        "hex": "3fe8000000000000"
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "9007199254740993",
+        "9007199254740992"
+      ],
+      "expression": "numrange_subdiff('9007199254740993'::numeric,'9007199254740992'::numeric)",
+      "expected": {
+        "hex": "3ff0000000000000"
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "NaN",
+        "1"
+      ],
+      "expression": "numrange_subdiff('NaN'::numeric,'1'::numeric)",
+      "expected": {
+        "hex": "7ff8000000000000"
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "Infinity",
+        "Infinity"
+      ],
+      "expression": "numrange_subdiff('Infinity'::numeric,'Infinity'::numeric)",
+      "expected": {
+        "hex": "7ff8000000000000"
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "-Infinity",
+        "Infinity"
+      ],
+      "expression": "numrange_subdiff('-Infinity'::numeric,'Infinity'::numeric)",
+      "expected": {
+        "hex": "fff0000000000000"
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "Infinity",
+        "-Infinity"
+      ],
+      "expression": "numrange_subdiff('Infinity'::numeric,'-Infinity'::numeric)",
+      "expected": {
+        "hex": "7ff0000000000000"
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "1e1000",
+        "1e1000"
+      ],
+      "expression": "numrange_subdiff('1e1000'::numeric,'1e1000'::numeric)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "1e1000",
+        "0"
+      ],
+      "expression": "numrange_subdiff('1e1000'::numeric,'0'::numeric)",
+      "expected": {
+        "error": {
+          "sqlstate": "22003",
+          "message": "\"10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\" is out of range for type double precision",
+          "detail": null,
+          "hint": null
+        }
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "1e-1000",
+        "0"
+      ],
+      "expression": "numrange_subdiff('1e-1000'::numeric,'0'::numeric)",
+      "expected": {
+        "error": {
+          "sqlstate": "22003",
+          "message": "\"0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\" is out of range for type double precision",
+          "detail": null,
+          "hint": null
+        }
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "1e-1000",
+        "1e-1000"
+      ],
+      "expression": "numrange_subdiff('1e-1000'::numeric,'1e-1000'::numeric)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "5e-324",
+        "0"
+      ],
+      "expression": "numrange_subdiff('5e-324'::numeric,'0'::numeric)",
+      "expected": {
+        "hex": "0000000000000001"
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "1e-324",
+        "0"
+      ],
+      "expression": "numrange_subdiff('1e-324'::numeric,'0'::numeric)",
+      "expected": {
+        "error": {
+          "sqlstate": "22003",
+          "message": "\"0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\" is out of range for type double precision",
+          "detail": null,
+          "hint": null
+        }
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        "1e-320",
+        "0"
+      ],
+      "expression": "numrange_subdiff('1e-320'::numeric,'0'::numeric)",
+      "expected": {
+        "hex": "00000000000007e8"
+      }
+    },
+    {
+      "function": "numrange_subdiff",
+      "type": "numeric",
+      "arguments": [
+        null,
+        "1"
+      ],
+      "expression": "numrange_subdiff(NULL::numeric,'1'::numeric)",
+      "expected": {
+        "hex": null
+      }
+    },
+    {
+      "function": "daterange_subdiff",
+      "type": "date",
+      "arguments": [
+        "2000-01-02",
+        "2000-01-01"
+      ],
+      "expression": "daterange_subdiff('2000-01-02'::date,'2000-01-01'::date)",
+      "expected": {
+        "hex": "3ff0000000000000"
+      }
+    },
+    {
+      "function": "daterange_subdiff",
+      "type": "date",
+      "arguments": [
+        "1970-01-01",
+        "2000-01-01"
+      ],
+      "expression": "daterange_subdiff('1970-01-01'::date,'2000-01-01'::date)",
+      "expected": {
+        "hex": "c0c5668000000000"
+      }
+    },
+    {
+      "function": "daterange_subdiff",
+      "type": "date",
+      "arguments": [
+        "infinity",
+        "infinity"
+      ],
+      "expression": "daterange_subdiff('infinity'::date,'infinity'::date)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "daterange_subdiff",
+      "type": "date",
+      "arguments": [
+        "-infinity",
+        "-infinity"
+      ],
+      "expression": "daterange_subdiff('-infinity'::date,'-infinity'::date)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "daterange_subdiff",
+      "type": "date",
+      "arguments": [
+        "infinity",
+        "2000-01-01"
+      ],
+      "expression": "daterange_subdiff('infinity'::date,'2000-01-01'::date)",
+      "expected": {
+        "hex": "41dfffffffc00000"
+      }
+    },
+    {
+      "function": "daterange_subdiff",
+      "type": "date",
+      "arguments": [
+        "-infinity",
+        "2000-01-01"
+      ],
+      "expression": "daterange_subdiff('-infinity'::date,'2000-01-01'::date)",
+      "expected": {
+        "hex": "c1e0000000000000"
+      }
+    },
+    {
+      "function": "daterange_subdiff",
+      "type": "date",
+      "arguments": [
+        "infinity",
+        "-infinity"
+      ],
+      "expression": "daterange_subdiff('infinity'::date,'-infinity'::date)",
+      "expected": {
+        "hex": "41efffffffe00000"
+      }
+    },
+    {
+      "function": "daterange_subdiff",
+      "type": "date",
+      "arguments": [
+        "5874897-12-31",
+        "4713-01-01 BC"
+      ],
+      "expression": "daterange_subdiff('5874897-12-31'::date,'4713-01-01 BC'::date)",
+      "expected": {
+        "hex": "41dfffffcfc00000"
+      }
+    },
+    {
+      "function": "daterange_subdiff",
+      "type": "date",
+      "arguments": [
+        null,
+        "2000-01-01"
+      ],
+      "expression": "daterange_subdiff(NULL::date,'2000-01-01'::date)",
+      "expected": {
+        "hex": null
+      }
+    },
+    {
+      "function": "tsrange_subdiff",
+      "type": "timestamp",
+      "arguments": [
+        "2000-01-01 00:00:01.000001",
+        "2000-01-01"
+      ],
+      "expression": "tsrange_subdiff('2000-01-01 00:00:01.000001'::timestamp,'2000-01-01'::timestamp)",
+      "expected": {
+        "hex": "3ff000010c6f7a0b"
+      }
+    },
+    {
+      "function": "tsrange_subdiff",
+      "type": "timestamp",
+      "arguments": [
+        "2000-01-01 00:00:00.000001",
+        "2000-01-01"
+      ],
+      "expression": "tsrange_subdiff('2000-01-01 00:00:00.000001'::timestamp,'2000-01-01'::timestamp)",
+      "expected": {
+        "hex": "3eb0c6f7a0b5ed8d"
+      }
+    },
+    {
+      "function": "tsrange_subdiff",
+      "type": "timestamp",
+      "arguments": [
+        "2300-01-01 00:00:00.000001",
+        "2300-01-01"
+      ],
+      "expression": "tsrange_subdiff('2300-01-01 00:00:00.000001'::timestamp,'2300-01-01'::timestamp)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "tsrange_subdiff",
+      "type": "timestamp",
+      "arguments": [
+        "infinity",
+        "infinity"
+      ],
+      "expression": "tsrange_subdiff('infinity'::timestamp,'infinity'::timestamp)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "tsrange_subdiff",
+      "type": "timestamp",
+      "arguments": [
+        "-infinity",
+        "-infinity"
+      ],
+      "expression": "tsrange_subdiff('-infinity'::timestamp,'-infinity'::timestamp)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "tsrange_subdiff",
+      "type": "timestamp",
+      "arguments": [
+        "infinity",
+        "2000-01-01"
+      ],
+      "expression": "tsrange_subdiff('infinity'::timestamp,'2000-01-01'::timestamp)",
+      "expected": {
+        "hex": "42a0c6f7a0b5ed8d"
+      }
+    },
+    {
+      "function": "tsrange_subdiff",
+      "type": "timestamp",
+      "arguments": [
+        "infinity",
+        "-infinity"
+      ],
+      "expression": "tsrange_subdiff('infinity'::timestamp,'-infinity'::timestamp)",
+      "expected": {
+        "hex": "42b0c6f7a0b5ed8d"
+      }
+    },
+    {
+      "function": "tsrange_subdiff",
+      "type": "timestamp",
+      "arguments": [
+        null,
+        "2000-01-01"
+      ],
+      "expression": "tsrange_subdiff(NULL::timestamp,'2000-01-01'::timestamp)",
+      "expected": {
+        "hex": null
+      }
+    },
+    {
+      "function": "tstzrange_subdiff",
+      "type": "timestamptz",
+      "arguments": [
+        "2000-01-01 00:00:01.000001+00",
+        "2000-01-01+00"
+      ],
+      "expression": "tstzrange_subdiff('2000-01-01 00:00:01.000001+00'::timestamptz,'2000-01-01+00'::timestamptz)",
+      "expected": {
+        "hex": "3ff000010c6f7a0b"
+      }
+    },
+    {
+      "function": "tstzrange_subdiff",
+      "type": "timestamptz",
+      "arguments": [
+        "2000-01-01 00:00:00.000001+00",
+        "2000-01-01+00"
+      ],
+      "expression": "tstzrange_subdiff('2000-01-01 00:00:00.000001+00'::timestamptz,'2000-01-01+00'::timestamptz)",
+      "expected": {
+        "hex": "3eb0c6f7a0b5ed8d"
+      }
+    },
+    {
+      "function": "tstzrange_subdiff",
+      "type": "timestamptz",
+      "arguments": [
+        "2300-01-01 00:00:00.000001+00",
+        "2300-01-01+00"
+      ],
+      "expression": "tstzrange_subdiff('2300-01-01 00:00:00.000001+00'::timestamptz,'2300-01-01+00'::timestamptz)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "tstzrange_subdiff",
+      "type": "timestamptz",
+      "arguments": [
+        "infinity",
+        "infinity"
+      ],
+      "expression": "tstzrange_subdiff('infinity'::timestamptz,'infinity'::timestamptz)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "tstzrange_subdiff",
+      "type": "timestamptz",
+      "arguments": [
+        "-infinity",
+        "-infinity"
+      ],
+      "expression": "tstzrange_subdiff('-infinity'::timestamptz,'-infinity'::timestamptz)",
+      "expected": {
+        "hex": "0000000000000000"
+      }
+    },
+    {
+      "function": "tstzrange_subdiff",
+      "type": "timestamptz",
+      "arguments": [
+        "infinity",
+        "2000-01-01+00"
+      ],
+      "expression": "tstzrange_subdiff('infinity'::timestamptz,'2000-01-01+00'::timestamptz)",
+      "expected": {
+        "hex": "42a0c6f7a0b5ed8d"
+      }
+    },
+    {
+      "function": "tstzrange_subdiff",
+      "type": "timestamptz",
+      "arguments": [
+        "infinity",
+        "-infinity"
+      ],
+      "expression": "tstzrange_subdiff('infinity'::timestamptz,'-infinity'::timestamptz)",
+      "expected": {
+        "hex": "42b0c6f7a0b5ed8d"
+      }
+    },
+    {
+      "function": "tstzrange_subdiff",
+      "type": "timestamptz",
+      "arguments": [
+        null,
+        "2000-01-01+00"
+      ],
+      "expression": "tstzrange_subdiff(NULL::timestamptz,'2000-01-01+00'::timestamptz)",
+      "expected": {
+        "hex": null
+      }
+    }
+  ]
+}

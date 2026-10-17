@@ -6,7 +6,7 @@
 
 //! SQL temporal values, parsing, formatting, and total ordering.
 
-use super::{DateTime, Duration, NaiveDate, Ordering};
+use super::{DateTime, NaiveDate, Ordering};
 use crate::{
     memory::{ProductionControl, ProductionString},
     ValueRetentionError,
@@ -21,6 +21,7 @@ mod production;
 mod timezone;
 
 pub use infinite::TemporalInfinity;
+mod calendar;
 pub use input::{TemporalDateOrder, TemporalInputError};
 pub use interval_style::TemporalIntervalStyle;
 pub use timezone::TemporalTimeZone;
@@ -61,6 +62,12 @@ pub enum TemporalValue {
 }
 
 impl TemporalValue {
+    /// Test a finite Unix-day date against `PostgreSQL`'s Julian range, excluding infinity sentinels.
+    #[must_use]
+    pub fn date_days_in_range(days: i32) -> bool {
+        calendar::valid_date(days)
+    }
+
     /// Test a finite Unix-microsecond timestamp against `PostgreSQL`'s Julian range. The epoch conversion uses a wider integer because `PostgreSQL`'s upper bound lies beyond this carrier's largest Unix-microsecond value.
     #[must_use]
     pub const fn timestamp_micros_in_range(micros: i64) -> bool {
