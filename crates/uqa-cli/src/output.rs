@@ -9,66 +9,10 @@
 use super::{ColumnType, PathBuf, SQLResult, Value, Write, HISTORY_FILE};
 use uqa_sql::{expr::EngineHook, SQLError};
 
-/// Render the result one column per line per row -- mirrors
-/// `PostgreSQL` `psql`'s `\x` expanded display mode.
-pub(super) fn print_result_expanded_with_engine(
-    result: &SQLResult,
-    engine: &dyn EngineHook,
-    out: &mut (impl Write + ?Sized),
-) -> Result<(), SQLError> {
-    print_result_expanded_impl(result, Some(engine), out)
-}
-
-fn print_result_expanded_impl(
-    result: &SQLResult,
-    engine: Option<&dyn EngineHook>,
-    out: &mut (impl Write + ?Sized),
-) -> Result<(), SQLError> {
-    if result.rows.is_empty() && result.columns.is_empty() {
-        if result.affected_rows > 0 {
-            let _ = writeln!(out, "{} row(s) affected", result.affected_rows);
-        }
-        return Ok(());
-    }
-    let columns: Vec<String> = if result.columns.is_empty() {
-        let mut keys: std::collections::BTreeSet<&String> = std::collections::BTreeSet::new();
-        for row in &result.rows {
-            for k in row.keys() {
-                keys.insert(k);
-            }
-        }
-        keys.into_iter().cloned().collect()
-    } else {
-        result.columns.clone()
-    };
-    let label_width = columns.iter().map(String::len).max().unwrap_or(0);
-    for (idx, _) in result.rows.iter().enumerate() {
-        let _ = writeln!(out, "-[ RECORD {} ]-", idx + 1);
-        for (column, col) in columns.iter().enumerate() {
-            let value = value_to_display_typed(
-                result.value_at(idx, column),
-                result.column_types.get(column).and_then(Option::as_ref),
-                engine,
-            )?;
-            let _ = writeln!(out, "{col:<label_width$} | {value}");
-        }
-    }
-    let _ = writeln!(out, "({} row(s))", result.rows.len());
-    Ok(())
-}
-
 pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) {
     if let Err(error) = print_result_impl(result, None, out) {
         let _ = writeln!(out, "ERROR: {}", super::diagnostics::sql_error_text(&error));
     }
-}
-
-pub(super) fn print_result_with_engine(
-    result: &SQLResult,
-    engine: &dyn EngineHook,
-    out: &mut (impl Write + ?Sized),
-) -> Result<(), SQLError> {
-    print_result_impl(result, Some(engine), out)
 }
 
 fn print_result_impl(
@@ -76,67 +20,12 @@ fn print_result_impl(
     engine: Option<&dyn EngineHook>,
     out: &mut (impl Write + ?Sized),
 ) -> Result<(), SQLError> {
-    if result.rows.is_empty() && result.columns.is_empty() {
-        if result.affected_rows > 0 {
-            let _ = writeln!(out, "{} row(s) affected", result.affected_rows);
-        }
-        return Ok(());
-    }
-    let columns: Vec<String> = if result.columns.is_empty() {
-        let mut keys: std::collections::BTreeSet<&String> = std::collections::BTreeSet::new();
-        for row in &result.rows {
-            for k in row.keys() {
-                keys.insert(k);
-            }
-        }
-        keys.into_iter().cloned().collect()
-    } else {
-        result.columns.clone()
-    };
-
-    // Compute column widths for fixed-width pretty-printing.
-    let mut widths: Vec<usize> = columns.iter().map(String::len).collect();
-    let stringified_rows: Vec<Vec<String>> = result
-        .rows
-        .iter()
-        .enumerate()
-        .map(|(row_index, _)| {
-            columns
-                .iter()
-                .enumerate()
-                .map(|(column_index, _)| {
-                    value_to_display_typed(
-                        result.value_at(row_index, column_index),
-                        result
-                            .column_types
-                            .get(column_index)
-                            .and_then(Option::as_ref),
-                        engine,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .collect::<Result<_, _>>()?;
-    for row in &stringified_rows {
-        for (i, cell) in row.iter().enumerate() {
-            if cell.len() > widths[i] {
-                widths[i] = cell.len();
-            }
-        }
-    }
-
-    // Header.
-    write_row(out, &columns, &widths);
-    let separator: String = widths
-        .iter()
-        .map(|w| "-".repeat(*w))
-        .collect::<Vec<_>>()
-        .join("-+-");
-    let _ = writeln!(out, "{separator}");
-    for row in &stringified_rows {
-        write_row(out, row, &widths);
-    }
-    let _ = writeln!(out, "({} row(s))", result.rows.len());
+    let table = super::printing::DisplayTable::from_result(result, engine)?;
+    let _ = write!(
+        out,
+        "{}",
+        super::printing::PrintOptions::default().render_terminal(&table, false)
+    );
     Ok(())
 }
 
@@ -222,23 +111,13 @@ fn copy_text_cell_typed(
     Ok(escaped)
 }
 
-fn value_to_display_typed(
+pub(super) fn value_to_display_typed(
     value: Option<&Value>,
     ty: Option<&ColumnType>,
     engine: Option<&dyn EngineHook>,
 ) -> Result<String, SQLError> {
-    if let Some(text) = value
-        .zip(ty)
-        .map(|(value, ty)| uqa_sql::expr::format_regtype_value(value, ty, engine))
-        .transpose()?
-        .flatten()
-    {
-        return Ok(text);
-    }
     if let Some((value, ty)) = value.zip(ty) {
-        if !matches!(value, Value::Null)
-            && uqa_sql::assignment::conversion::contains_legacy_vectors(ty)
-        {
+        if !matches!(value, Value::Null) {
             return uqa_sql::result::format_postgres_text(value, ty, engine);
         }
     }
@@ -257,15 +136,6 @@ fn value_to_display_typed(
         };
     }
     value_to_display(value)
-}
-
-pub(super) fn write_row(out: &mut (impl Write + ?Sized), cells: &[String], widths: &[usize]) {
-    let line: Vec<String> = cells
-        .iter()
-        .zip(widths.iter())
-        .map(|(c, w)| format!("{c:width$}", c = c, width = *w))
-        .collect();
-    let _ = writeln!(out, "{}", line.join(" | "));
 }
 
 pub(super) fn history_path() -> Option<PathBuf> {

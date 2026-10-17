@@ -46,6 +46,7 @@ impl VirtualRelation {
                 | Self::PgEnum
                 | Self::PgProc
                 | Self::PgLanguage
+                | Self::PgExtension
                 | Self::PgForeignDataWrapper
                 | Self::PgForeignServer
                 | Self::PgForeignTable
@@ -540,6 +541,16 @@ impl VirtualRelation {
                 "laninline" => ColumnType::Oid,
                 "lanvalidator" => ColumnType::Oid,
                 "lanacl" => array(ColumnType::AclItem),
+            ],
+            Self::PgExtension => columns![
+                "oid" => ColumnType::Oid,
+                "extname" => ColumnType::Name,
+                "extowner" => ColumnType::Oid,
+                "extnamespace" => ColumnType::Oid,
+                "extrelocatable" => ColumnType::Boolean,
+                "extversion" => ColumnType::Text,
+                "extconfig" => array(ColumnType::Oid),
+                "extcondition" => array(ColumnType::Text),
             ],
             Self::PgDatabase => columns![
                 "oid" => ColumnType::Oid,

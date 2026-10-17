@@ -133,6 +133,7 @@ pub(crate) fn build_requested_catalog_rows(
             pg_proc::build_requested_pg_proc(context, catalog, resolution, request)?
         }
         VirtualRelation::PgLanguage => build_pg_language(),
+        VirtualRelation::PgExtension => pg_catalog::build_pg_extension(catalog),
         VirtualRelation::PgForeignDataWrapper => pg_catalog::foreign::wrappers(catalog)?,
         VirtualRelation::PgForeignServer => pg_catalog::foreign::servers(catalog)?,
         VirtualRelation::PgForeignTable => pg_catalog::foreign::tables(catalog)?,

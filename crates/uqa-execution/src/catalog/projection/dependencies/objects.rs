@@ -12,8 +12,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::RelationIdentity;
 use uqa_sql::ast::{ColumnDef, ColumnType};
 use uqa_sql::catalog::dependencies::{
-    ObjectAddress, DATABASE_CLASS, LANGUAGE_CLASS, NAMESPACE_CLASS, PROCEDURE_CLASS,
-    RELATION_CLASS, REWRITE_CLASS, ROLE_CLASS, TYPE_CLASS,
+    ObjectAddress, DATABASE_CLASS, EXTENSION_CLASS, LANGUAGE_CLASS, NAMESPACE_CLASS,
+    PROCEDURE_CLASS, RELATION_CLASS, REWRITE_CLASS, ROLE_CLASS, TYPE_CLASS,
 };
 use uqa_sql::SQLError;
 
@@ -179,6 +179,10 @@ impl CatalogObjects {
             catalog_oid(uqa_sql::catalog::DATABASE_OID)?,
         ));
         objects.unpin(ObjectAddress::whole(LANGUAGE_CLASS, PLPGSQL_LANGUAGE));
+        objects.unpin(ObjectAddress::whole(
+            EXTENSION_CLASS,
+            uqa_sql::catalog::languages::PLPGSQL_EXTENSION,
+        ));
         Ok(objects)
     }
 

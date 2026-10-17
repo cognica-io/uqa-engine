@@ -12,29 +12,9 @@ use super::{
 
 pub(super) fn print_backslash_help(out: &mut impl Write) {
     let _ = writeln!(out, "Backslash commands:");
-    let _ = writeln!(out, "  \\dt             List tables");
-    let _ = writeln!(out, "  \\d  <table>     Describe table schema");
-    let _ = writeln!(out, "  \\di             List inverted-index fields");
-    let _ = writeln!(out, "  \\ds [sequence]  List sequences");
-    let _ = writeln!(out, "  \\dF             List foreign tables");
-    let _ = writeln!(out, "  \\dS             List foreign servers");
-    let _ = writeln!(out, "  \\dg             List named graphs");
-    let _ = writeln!(out, "  \\stats <table>  Show column statistics");
-    let _ = writeln!(out, "  \\x              Toggle expanded display");
-    let _ = writeln!(out, "  \\o  [file]      Redirect output to file");
-    let _ = writeln!(out, "  \\timing         Toggle query timing");
-    let _ = writeln!(out, "  \\reset          Reset engine");
-    let _ = writeln!(out, "  \\run <file>     Execute SQL from a file");
-    let _ = writeln!(
-        out,
-        "  \\open <path>    Switch to persistent storage (prompts for the key of encrypted databases)"
-    );
-    let _ = writeln!(
-        out,
-        "  \\new            Switch to a fresh in-memory database"
-    );
-    let _ = writeln!(out, "  \\where          Show current database");
-    let _ = writeln!(out, "  \\q              Quit");
+    for (command, description) in super::completion::BACKSLASH_COMMANDS {
+        let _ = writeln!(out, "  {command:16} {description}");
+    }
 }
 
 pub(super) fn result_row(entries: Vec<(&str, Value)>) -> BTreeMap<String, Value> {

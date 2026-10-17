@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Extend the Rust `usql` shell with query-buffer commands, variables and conditionals, script includes, native file COPY, printing formats, pager/editor integration, query cancellation and idle LISTEN notifications.
+
 - Build standalone `usql` release archives for Linux, macOS and Windows on x86_64 and ARM64, with bundled Nori, Kuromoji, Arrow and DuckDB, SHA-256 checksums, user-directory installers and `cargo binstall` installation without compilation.
 
 - Support PostgreSQL's six native range subtype-distance functions, preserving floating conversion order, temporal infinity values and numeric range diagnostics.
@@ -29,6 +31,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Upgrade persistent databases to SQLite record format 65 and redb record format 61 for declared range definitions, shell type identities and transactional descriptions, including packed bit values and their type descriptors. Close all owners, retain a pre-upgrade backup and update every owner together; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).
 
 ### Fixed
+
+- Correct `usql` quoted-input validation, multiline syntax highlighting, live qualified-name completion, explicit timing/expanded settings, Unicode alignment, terminal-control escaping and PostgreSQL typed output. Catalog commands honor patterns and read relation ACLs and bundled PL/pgSQL extension metadata; `\dg` and `\da` inspect roles and aggregates, with UQA graphs and analyzers retained under their explicit commands.
 
 - Evaluate the POSIX and SQL regular-expression forms of `substring`, including `SIMILAR ... ESCAPE` and `FROM ... FOR` with text arguments, by their resolved PostgreSQL signature instead of reporting `42804` or returning a positional slice for a pattern that parses as an integer, with PostgreSQL's NULL handling and planning-time translation errors for the SQL form. The `substring` and `substr` overloads now have PostgreSQL's catalog identities, so CHECK constraints, defaults, `regprocedure` input and routine privileges accept them instead of reporting an internal error.
 

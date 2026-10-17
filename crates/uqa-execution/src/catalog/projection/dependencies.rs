@@ -16,6 +16,7 @@ mod defaults;
 mod descriptions;
 mod events;
 mod expressions;
+mod extensions;
 mod foreign;
 mod indexes;
 mod objects;
@@ -71,6 +72,7 @@ impl CatalogDependencies {
             shared: Vec::new(),
         };
         builder.record_types()?;
+        builder.record_bundled_extensions();
         builder.record_relations()?;
         builder.record_foreign()?;
         builder.record_constraints()?;
