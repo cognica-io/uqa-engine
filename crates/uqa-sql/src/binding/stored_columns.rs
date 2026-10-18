@@ -11,6 +11,8 @@ mod helpers;
 mod lifecycle;
 mod sources;
 mod statements;
+#[cfg(test)]
+mod tests;
 
 pub use lifecycle::{
     bind_rule_action_column_dependencies, bind_rule_condition_column_dependencies,
@@ -321,6 +323,12 @@ impl<'a> StoredColumnBinder<'a> {
     ) -> Result<(), SQLError> {
         match statement {
             Statement::Select(select) => self.bind_select(select, outer, context),
+            Statement::Values { rows } => {
+                for expression in rows.iter_mut().flatten() {
+                    self.bind_expr(expression, outer, context)?;
+                }
+                Ok(())
+            }
             Statement::Insert(insert) => self.bind_insert(insert, outer, context),
             Statement::Update(update) => self.bind_update(update, outer, context),
             Statement::Delete(delete) => self.bind_delete(delete, outer, context),
