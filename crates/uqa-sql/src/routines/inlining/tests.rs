@@ -13,6 +13,7 @@ use std::sync::{atomic::Ordering, Arc};
 use uqa_core::Value;
 mod concatenation;
 mod fixture;
+mod table;
 use fixture::Catalog;
 
 fn integer(value: i64) -> ScalarExpr {

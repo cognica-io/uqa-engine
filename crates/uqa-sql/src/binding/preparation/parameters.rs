@@ -167,6 +167,7 @@ pub(super) struct InputConstants(
     BTreeMap<NonNull<ScalarExpr>, ColumnType>,
     /// Each analyzed call's input collation, recorded on the binding the call keeps.
     BTreeMap<NonNull<ScalarExpr>, Option<crate::catalog::collations::CollationSelection>>,
+    BTreeMap<NonNull<Option<crate::ast::FunctionBinding>>, crate::ast::FunctionBinding>,
 );
 
 impl InputConstants {
@@ -245,6 +246,9 @@ impl InputConstants {
         expression: &mut ScalarExpr,
         subqueries: &mut Vec<crate::plan::QueryPlan>,
     ) -> Result<(), SQLError> {
+        for query in subqueries.iter_mut() {
+            query.visit_sources_mut(&mut |source| self.apply_source(source));
+        }
         let mut result = Ok(());
         let mut apply = |node: &mut ScalarExpr| {
             if result.is_ok() {
@@ -273,6 +277,8 @@ impl InputConstants {
     }
 
     pub(super) fn apply(mut self, plan: &mut UnifiedPlan) -> Result<(), SQLError> {
+        // Source selections are consumed before expression rewrites can move their enclosing nodes.
+        plan.visit_sources_mut(&mut |source| self.apply_source(source));
         // Children are rewritten before their enclosing clauses move them; every retained identity is consumed at its original address.
         let mut result = Ok(());
         plan.rewrite_scalar_expressions(&mut |expression| {
@@ -303,6 +309,24 @@ impl InputConstants {
             && self.4.is_empty()
             && self.5.is_empty()
             && self.6.is_empty()
+            && self.7.is_empty()
+    }
+
+    fn apply_source(&mut self, source: &mut crate::plan::SourcePlan) {
+        let mut apply = |binding: &mut Option<crate::ast::FunctionBinding>| {
+            if let Some(selected) = self.7.remove(&NonNull::from(&*binding)) {
+                *binding = Some(selected);
+            }
+        };
+        match source {
+            crate::plan::SourcePlan::Function { binding, .. } => apply(binding),
+            crate::plan::SourcePlan::FunctionGroup { functions, .. } => {
+                for function in functions {
+                    apply(&mut function.binding);
+                }
+            }
+            _ => {}
+        }
     }
 
     fn apply_membership(
@@ -434,6 +458,17 @@ impl<'a> ParameterTypes<'a> {
                     .1
                     .insert(NonNull::from(expression), selected.clone());
             }
+        }
+    }
+
+    /// Keep the FROM call's selected identity and invocation for planning without resolving it again outside its row scope.
+    pub(super) fn retain_source_binding(
+        &mut self,
+        original: NonNull<Option<crate::ast::FunctionBinding>>,
+        selected: crate::ast::FunctionBinding,
+    ) {
+        if let Some(constants) = &mut self.input_constants {
+            constants.7.insert(original, selected);
         }
     }
 

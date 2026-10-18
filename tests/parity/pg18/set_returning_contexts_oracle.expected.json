@@ -9,7 +9,7 @@
       "--notices"
     ],
     "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "5bad490121bf43d3c6554dafc16f86f4d9f51ab0f34071a794e721acdbcb2a0c"
+    "input_sha256": "71efa6bb85405976196f987f19294ad441c704ee38ee3da9053175da311436ef"
   },
   "cases": [
     {
@@ -5255,6 +5255,1647 @@
           "columns": [],
           "type_oids": [],
           "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_scalar_not_left",
+      "sql": "SELECT generate_series(1,2) IS NOT DISTINCT FROM 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ],
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_scalar_not_right",
+      "sql": "SELECT 1 IS NOT DISTINCT FROM generate_series(1,2)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ],
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_row_set",
+      "sql": "SELECT ROW(generate_series(1,2), 1) IS DISTINCT FROM ROW(1, 1)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ],
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_row_not_set",
+      "sql": "SELECT ROW(generate_series(1,2), 1) IS NOT DISTINCT FROM ROW(1, 1)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ],
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_row_table_set",
+      "sql": "SELECT ROW(a, generate_series(1,2)) IS DISTINCT FROM ROW(b, 1) FROM (VALUES (1,1)) t(a,b)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ],
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_written_not_set",
+      "sql": "SELECT NOT (generate_series(1,2) IS DISTINCT FROM 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of NOT must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "distinct_written_or_set",
+      "sql": "SELECT (ROW(generate_series(1,2), 1) IS DISTINCT FROM ROW(1,1)) OR false",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of OR must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "distinct_written_and_set",
+      "sql": "SELECT (generate_series(1,2) IS NOT DISTINCT FROM 1) AND true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of AND must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "distinct_row_short_circuit",
+      "sql": "SELECT ROW(1, 1/0) IS DISTINCT FROM ROW(2, 0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_row_short_circuit_set",
+      "sql": "SELECT ROW(1, generate_series(1,2)) IS DISTINCT FROM ROW(2,0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_setup",
+      "sql": "CREATE FUNCTION review_one() RETURNS SETOF int LANGUAGE sql AS 'SELECT 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_fetch",
+      "sql": "SELECT * FROM review_one() AS x(a,b)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 1 columns available but 2 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_unfetched",
+      "sql": "SELECT * FROM review_one() AS x(a,b) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 1 columns available but 2 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_projection",
+      "sql": "SELECT a,b FROM review_one() AS x(a,b)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 1 columns available but 2 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_ordinality",
+      "sql": "SELECT * FROM review_one() WITH ORDINALITY AS x(a,b,c)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 2 columns available but 3 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_lateral",
+      "sql": "SELECT * FROM generate_series(1,1) g, LATERAL review_one() AS x(a,b)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 1 columns available but 2 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_group",
+      "sql": "SELECT * FROM ROWS FROM(review_one()) AS x(a,b) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 1 columns available but 2 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_role",
+      "sql": "CREATE ROLE review_reader",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_plpgsql",
+      "sql": "CREATE FUNCTION review_g() RETURNS int LANGUAGE plpgsql AS 'BEGIN RETURN 1; END'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_sql",
+      "sql": "CREATE FUNCTION review_gs(x int) RETURNS int LANGUAGE sql AS 'SELECT x'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_lateral",
+      "sql": "CREATE FUNCTION review_g2(x int) RETURNS int LANGUAGE plpgsql AS 'BEGIN RETURN x; END'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_revoke_g",
+      "sql": "REVOKE EXECUTE ON FUNCTION review_g() FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_revoke_gs",
+      "sql": "REVOKE EXECUTE ON FUNCTION review_gs(int) FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_revoke_g2",
+      "sql": "REVOKE EXECUTE ON FUNCTION review_g2(int) FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_view_setup",
+      "sql": "CREATE VIEW review_v AS SELECT * FROM generate_series(1,review_g())",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_view_grant",
+      "sql": "GRANT SELECT ON review_v TO review_reader",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_lazy_setup",
+      "sql": "CREATE FUNCTION review_lazy() RETURNS int LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'not fetched'; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_set_role",
+      "sql": "SET ROLE review_reader",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_plpgsql_unfetched",
+      "sql": "SELECT * FROM generate_series(1,review_g()) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_g",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_sql_unfetched",
+      "sql": "SELECT * FROM generate_series(1,review_gs(2)) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_gs",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_view_unfetched",
+      "sql": "SELECT * FROM review_v LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_g",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_lateral_unfetched",
+      "sql": "SELECT * FROM (VALUES (1)) v(x), generate_series(1,review_g2(x)) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_g2",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_group_unfetched",
+      "sql": "SELECT * FROM ROWS FROM(generate_series(1,review_g())) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_g",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_nested_unfetched",
+      "sql": "SELECT * FROM generate_series(1,abs(review_g())) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_g",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_lazy_unfetched",
+      "sql": "SELECT * FROM generate_series(1,review_lazy()) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "generate_series"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_reset_role",
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_jsonb_unknown_input",
+      "sql": "SELECT * FROM jsonb_each('{bad') LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "Token \"bad\" is invalid.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_json_unknown_input",
+      "sql": "SELECT * FROM json_each('{bad') LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "Token \"bad\" is invalid.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_jsonb_array_unknown_input",
+      "sql": "SELECT * FROM jsonb_array_elements('[1,') LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "The input string ended unexpectedly.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_jsonb_keys_unknown_input",
+      "sql": "SELECT * FROM jsonb_object_keys('{\"a\":1') LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "The input string ended unexpectedly.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_record_type_before_setof",
+      "sql": "SELECT * FROM rf() AS (a nosuchtype,b setof int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_record_duplicate_column",
+      "sql": "SELECT * FROM rf() AS (a int,a int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column name \"a\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_record_pseudo_type",
+      "sql": "SELECT * FROM rf() AS (a int,b anyelement)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "column \"b\" has pseudo-type anyelement",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_record_duplicate_before_pseudo",
+      "sql": "SELECT * FROM rf() AS (a anyelement,a int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column name \"a\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_record_nested_unfetched",
+      "sql": "SELECT * FROM rf() AS (a record,b int) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            2249,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_poly_out_setup",
+      "sql": "CREATE FUNCTION review_p(x anyelement,OUT y anyelement) RETURNS SETOF anyelement LANGUAGE sql AS 'SELECT x'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_poly_out_columns",
+      "sql": "SELECT * FROM review_p(ROW(1,2)) AS (a int,b int)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_procedural_record_setup",
+      "sql": "CREATE FUNCTION review_r() RETURNS SETOF record LANGUAGE plpgsql AS 'BEGIN RETURN NEXT ROW(1,2); END'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_procedural_record_width",
+      "sql": "SELECT * FROM review_r() AS (a int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "returned record type does not match expected record type",
+        "detail": "Number of returned columns (2) does not match expected column count (1).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_setup",
+      "sql": "CREATE FUNCTION review_plan_set(x int) RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT x/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_limit",
+      "sql": "SELECT * FROM review_plan_set(1) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_exists",
+      "sql": "SELECT EXISTS (SELECT * FROM review_plan_set(1) LIMIT 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_ordinality",
+      "sql": "SELECT * FROM review_plan_set(1) WITH ORDINALITY LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_set",
+            "ordinality"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_group",
+      "sql": "SELECT * FROM ROWS FROM(review_plan_set(1),review_one()) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_set",
+            "review_one"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_table_setup",
+      "sql": "CREATE FUNCTION review_plan_table() RETURNS TABLE(a int) LANGUAGE sql STABLE AS 'SELECT 1/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_table_limit",
+      "sql": "SELECT * FROM review_plan_table() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_atomic_setup",
+      "sql": "CREATE FUNCTION review_plan_atomic() RETURNS SETOF int LANGUAGE sql STABLE BEGIN ATOMIC SELECT 1/0; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_atomic_limit",
+      "sql": "SELECT * FROM review_plan_atomic() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_scalar_setup",
+      "sql": "CREATE FUNCTION review_plan_scalar(x int) RETURNS int LANGUAGE sql AS 'SELECT x/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_scalar_limit",
+      "sql": "SELECT * FROM review_plan_scalar(1) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_scalar_ordinality",
+      "sql": "SELECT * FROM review_plan_scalar(1) WITH ORDINALITY LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_immutable_setup",
+      "sql": "CREATE FUNCTION review_plan_immutable(x int) RETURNS int IMMUTABLE LANGUAGE plpgsql AS 'BEGIN RETURN x/0; END'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_immutable_limit",
+      "sql": "SELECT * FROM review_plan_immutable(1) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_argument_limit",
+      "sql": "SELECT * FROM generate_series(1,review_plan_immutable(1)) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_volatile_setup",
+      "sql": "CREATE FUNCTION review_plan_volatile() RETURNS SETOF int LANGUAGE sql VOLATILE AS 'SELECT 1/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_volatile_limit",
+      "sql": "SELECT * FROM review_plan_volatile() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_volatile"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_strict_setup",
+      "sql": "CREATE FUNCTION review_plan_strict(x int) RETURNS SETOF int LANGUAGE sql STABLE STRICT AS 'SELECT x/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_strict_limit",
+      "sql": "SELECT * FROM review_plan_strict(1) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_strict"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_definer_setup",
+      "sql": "CREATE FUNCTION review_plan_definer() RETURNS SETOF int LANGUAGE sql STABLE SECURITY DEFINER AS 'SELECT 1/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_definer_limit",
+      "sql": "SELECT * FROM review_plan_definer() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_definer"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_identity_setup",
+      "sql": "CREATE FUNCTION review_plan_identity(x int) RETURNS int LANGUAGE sql AS 'SELECT x+1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_identity_value",
+      "sql": "SELECT f.a,f.b FROM review_plan_identity(2) WITH ORDINALITY AS f(a,b)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_identity_null",
+      "sql": "SELECT * FROM review_plan_identity(NULL::int) AS f(a)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_rows_setup",
+      "sql": "CREATE FUNCTION review_plan_rows(x int) RETURNS TABLE(a int,b text) LANGUAGE sql STABLE AS 'SELECT x,v FROM (VALUES (''a''),(''b'')) t(v)'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_rows_value",
+      "sql": "SELECT * FROM review_plan_rows(2) AS f(n,s) ORDER BY s",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "a"
+            ],
+            [
+              "2",
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_cast_setup",
+      "sql": "CREATE FUNCTION review_plan_cast(x int) RETURNS SETOF bigint LANGUAGE sql STABLE AS 'SELECT x'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_cast_value",
+      "sql": "SELECT * FROM review_plan_cast(4) AS f(n)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_json_expected_array",
+      "sql": "SELECT '[1,]'::json",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "Expected JSON value, but found \"]\".",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_json_expected_colon",
+      "sql": "SELECT '{\"a\" 1}'::jsonb",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "Expected \":\", but found \"1\".",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_json_invalid_keyword",
+      "sql": "SELECT '[nope]'::json",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "Token \"nope\" is invalid.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_setup",
+      "sql": "CREATE SEQUENCE review_plan_sequence",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_next_setup",
+      "sql": "CREATE FUNCTION review_plan_next() RETURNS bigint LANGUAGE sql AS $$SELECT nextval('review_plan_sequence')$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_next_unfetched",
+      "sql": "SELECT * FROM review_plan_next() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_next_unfetched_state",
+      "sql": "SELECT last_value,is_called FROM review_plan_sequence",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_next_first",
+      "sql": "SELECT * FROM review_plan_next()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_next_second",
+      "sql": "SELECT * FROM review_plan_next()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_identity_lateral",
+      "sql": "SELECT f.a FROM (VALUES (1),(2)) t(x), review_plan_identity(x) AS f(a) ORDER BY a",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_lateral_setup",
+      "sql": "CREATE FUNCTION review_plan_add(x int) RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT x+1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_lateral",
+      "sql": "SELECT f.a FROM (VALUES (1),(2)) t(x), review_plan_add(x) AS f(a) ORDER BY a",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_set_setup",
+      "sql": "CREATE FUNCTION review_plan_sequence_set() RETURNS SETOF bigint LANGUAGE sql STABLE AS $$SELECT nextval('review_plan_sequence')$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_set_unfetched",
+      "sql": "SELECT * FROM review_plan_sequence_set() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_sequence_set"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_set_state",
+      "sql": "SELECT last_value,is_called FROM review_plan_sequence",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "2",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_set_first",
+      "sql": "SELECT * FROM review_plan_sequence_set()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_sequence_set"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_set_second",
+      "sql": "SELECT * FROM review_plan_sequence_set()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_sequence_set"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
         }
       ],
       "notices": []

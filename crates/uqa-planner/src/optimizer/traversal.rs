@@ -224,6 +224,7 @@ pub(super) fn optimize_source(
             for expression in args {
                 optimize_scalar_slot(expression, config)?;
             }
+            super::function_source::optimize(source, config, aggregates)?;
         }
         SourcePlan::FunctionGroup { functions, .. } => {
             for function in functions {

@@ -188,3 +188,74 @@ fn set_returning_calls_expand_where_postgresql_processes_a_target_list() {
         analyze(sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
     }
 }
+
+#[test]
+fn distinct_predicates_keep_set_inputs_outside_written_boolean_contexts() {
+    for sql in [
+        "SELECT generate_series(1,2) IS NOT DISTINCT FROM 1",
+        "SELECT 1 IS NOT DISTINCT FROM generate_series(1,2)",
+        "SELECT ROW(generate_series(1,2), 1) IS DISTINCT FROM ROW(1, 1)",
+        "SELECT ROW(generate_series(1,2), 1) IS NOT DISTINCT FROM ROW(1, 1)",
+    ] {
+        analyze(sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    for (sql, context) in [
+        (
+            "SELECT NOT (generate_series(1,2) IS DISTINCT FROM 1)",
+            "NOT",
+        ),
+        (
+            "SELECT (ROW(generate_series(1,2), 1) IS DISTINCT FROM ROW(1, 1)) OR false",
+            "OR",
+        ),
+        (
+            "SELECT (generate_series(1,2) IS NOT DISTINCT FROM 1) AND true",
+            "AND",
+        ),
+    ] {
+        assert_rejected(
+            sql,
+            "42804",
+            &format!("argument of {context} must not return a set"),
+            None,
+        );
+    }
+}
+
+#[test]
+fn from_functions_coerce_unknown_inputs_before_fetching() {
+    for sql in [
+        "SELECT * FROM jsonb_each('{bad') LIMIT 0",
+        "SELECT * FROM json_each('{bad') LIMIT 0",
+        "SELECT * FROM jsonb_array_elements('[1,') LIMIT 0",
+        "SELECT * FROM jsonb_object_keys('{\"a\":1') LIMIT 0",
+    ] {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        let UnifiedPlan::Query(query) = &mut plan else {
+            panic!("query");
+        };
+        query.visit_sources_mut(&mut |source| {
+            if let crate::plan::SourcePlan::Function { name, binding, .. } = source {
+                *binding = Some(FunctionBinding {
+                    object_id: None,
+                    name: format!("pg_catalog.{name}"),
+                    argument_types: vec![if name.starts_with("jsonb") {
+                        "jsonb"
+                    } else {
+                        "json"
+                    }
+                    .into()],
+                    builtin: true,
+                    dispatch: None,
+                    invocation: None,
+                    composite_field: None,
+                    resolution_error: None,
+                    input_collation: None,
+                });
+            }
+        });
+        let error = read_prepared_inputs(&NoRoutines, &mut plan, &[], &assignment_context(), None)
+            .expect_err(sql);
+        assert_eq!(error.sqlstate(), Some("22P02"), "{sql}: {error}");
+    }
+}

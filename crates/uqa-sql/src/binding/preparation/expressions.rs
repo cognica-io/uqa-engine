@@ -633,22 +633,23 @@ impl Preparation<'_> {
         args: &[ScalarExpr],
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<(), SQLError> {
-        self.call_binding(name, binding, args, input, subqueries)
-            .map(|_| ())
-    }
-
-    fn call_binding(
-        &mut self,
-        name: &str,
-        binding: Option<&FunctionBinding>,
-        args: &[ScalarExpr],
-        input: &RowSchema,
-        subqueries: &[QueryPlan],
-    ) -> Result<Option<crate::type_resolution::ResolvedFunctionOverload>, SQLError> {
+    ) -> Result<Option<FunctionBinding>, SQLError> {
+        let mut selected = crate::semantics::resolve_table_function_binding(
+            self.routines,
+            name,
+            binding,
+            args,
+            input,
+            &self.parameters.values(),
+            self.routines,
+        )?;
+        let chosen = selected.as_ref().or(binding);
         let mut arguments = self.observe_function_arguments(name, args, &[], input, subqueries)?;
-        let selected = self.select_function_arguments(name, binding, args, &arguments)?;
-        self.coerce_function_arguments(name, binding, args, &mut arguments, &selected)?;
-        Ok(selected.overload)
+        let signature = self.select_function_arguments(name, chosen, args, &arguments)?;
+        self.coerce_function_arguments(name, chosen, args, &mut arguments, &signature)?;
+        if let Some(selected) = &mut selected {
+            selected.input_collation = arguments.input_collation(args.len(), None, false)?;
+        }
+        Ok(selected)
     }
 }

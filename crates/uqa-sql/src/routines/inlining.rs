@@ -10,6 +10,8 @@
 mod arguments;
 mod operators;
 mod properties;
+mod table;
+pub use table::InlineRoutineQuery;
 #[cfg(test)]
 mod tests;
 
@@ -195,6 +197,55 @@ impl RoutineInliningContext<'_> {
         function: &super::SQLUserFunction,
         definition: &CreateFunction,
     ) -> Result<Option<(ScalarExpr, Vec<crate::SQLParam>)>, SQLError> {
+        let Some((plan, result, parameters)) = self.analyze_plan(function, definition)? else {
+            return Ok(None);
+        };
+        let UnifiedPlan::Query(query) = plan else {
+            return Ok(None);
+        };
+        if !query.ctes.is_empty() {
+            return Ok(None);
+        }
+        let RelationalPlan::QueryBlock(mut block) = query.root else {
+            return Ok(None);
+        };
+        if !simple_select(&block) {
+            return Ok(None);
+        }
+        let layout = sql_function_result_layout(self.types, definition, Some(&result))?;
+        if layout.kind == SQLFunctionResultKind::Tuple {
+            return Ok(None);
+        }
+        let mut expression = block.projections.remove(0).expr;
+        let actual = result
+            .column_types()
+            .and_then(|types| types.first())
+            .and_then(Option::as_ref);
+        if layout.kind == SQLFunctionResultKind::Void && actual != Some(&ColumnType::Void) {
+            return Ok(None);
+        }
+        if actual != Some(&layout.declared_type) {
+            expression = ScalarExpr::Cast {
+                implicit: true,
+                expr: Box::new(expression),
+                ty: layout.declared_type.catalog_name(),
+            };
+        }
+        Ok(Some((expression, parameters)))
+    }
+
+    fn analyze_plan(
+        &self,
+        function: &super::SQLUserFunction,
+        definition: &CreateFunction,
+    ) -> Result<
+        Option<(
+            UnifiedPlan,
+            crate::binding::statements::AnalyzedResult,
+            Vec<crate::SQLParam>,
+        )>,
+        SQLError,
+    > {
         let Some(mut plan) = self.body_plan(function)? else {
             return Ok(None);
         };
@@ -228,38 +279,7 @@ impl RoutineInliningContext<'_> {
                 names,
             )?;
         }
-        let UnifiedPlan::Query(query) = plan else {
-            return Ok(None);
-        };
-        if !query.ctes.is_empty() {
-            return Ok(None);
-        }
-        let RelationalPlan::QueryBlock(mut block) = query.root else {
-            return Ok(None);
-        };
-        if !simple_select(&block) {
-            return Ok(None);
-        }
-        let layout = sql_function_result_layout(self.types, definition, Some(&result))?;
-        if layout.kind == SQLFunctionResultKind::Tuple {
-            return Ok(None);
-        }
-        let mut expression = block.projections.remove(0).expr;
-        let actual = result
-            .column_types()
-            .and_then(|types| types.first())
-            .and_then(Option::as_ref);
-        if layout.kind == SQLFunctionResultKind::Void && actual != Some(&ColumnType::Void) {
-            return Ok(None);
-        }
-        if actual != Some(&layout.declared_type) {
-            expression = ScalarExpr::Cast {
-                implicit: true,
-                expr: Box::new(expression),
-                ty: layout.declared_type.catalog_name(),
-            };
-        }
-        Ok(Some((expression, parameters)))
+        Ok(Some((plan, result, parameters)))
     }
 
     /// Expand defaults, named arguments and implicit casts before the planner
@@ -384,6 +404,19 @@ impl RoutineInliningContext<'_> {
                         })
                     });
             });
+        });
+        plan.visit_sources(&mut |source| {
+            if let crate::plan::SourcePlan::Function {
+                binding: Some(binding),
+                ..
+            } = source
+            {
+                required |= self.selected_function(binding).is_some_and(|function| {
+                    eligible_definition(&function.def)
+                        || table::eligible_definition(&function.def)
+                        || function.def.volatility == crate::ast::FunctionVolatility::Immutable
+                });
+            }
         });
         required
     }

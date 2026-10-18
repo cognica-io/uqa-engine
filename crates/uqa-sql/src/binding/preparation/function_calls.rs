@@ -452,7 +452,7 @@ impl Preparation<'_> {
             }
             return Ok(FunctionResult::Unselected);
         }
-        let targets = self.function_argument_targets(name, selection, types)?;
+        let targets = self.function_argument_targets(name, binding, selection, types)?;
         for (index, value) in arguments.values.iter_mut().enumerate() {
             let position = selection
                 .positions
@@ -498,6 +498,7 @@ impl Preparation<'_> {
     fn function_argument_targets(
         &mut self,
         name: &str,
+        binding: Option<&FunctionBinding>,
         selection: &SelectedFunctionArguments,
         types: Vec<Option<ColumnType>>,
     ) -> Result<Vec<Option<ColumnType>>, SQLError> {
@@ -510,6 +511,20 @@ impl Preparation<'_> {
                     &invocation.argument_targets
                 });
             types
+                .iter()
+                .map(|name| {
+                    if super::super::ordered_calls::is_polymorphic(name) {
+                        Ok(None)
+                    } else {
+                        self.type_name(name).map(Some)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else if let Some(binding) = binding.filter(|binding| {
+            binding.builtin && binding.dispatch.is_none() && !binding.argument_types.is_empty()
+        }) {
+            binding
+                .argument_types
                 .iter()
                 .map(|name| {
                     if super::super::ordered_calls::is_polymorphic(name) {

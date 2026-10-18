@@ -61,14 +61,17 @@ impl Preparation<'_> {
                 args,
                 ..
             } => {
-                self.source_function(
+                if let Some(selected) = self.source_function(
                     name,
                     binding.as_ref(),
                     relations.as_ref(),
                     args,
                     subqueries,
                     outer,
-                )?;
+                )? {
+                    self.parameters
+                        .retain_source_binding(std::ptr::NonNull::from(binding), selected);
+                }
             }
             SourcePlan::FunctionGroup { functions, .. } => {
                 self.source_functions(functions, subqueries, outer)?;
@@ -144,14 +147,17 @@ impl Preparation<'_> {
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         for function in functions {
-            self.source_function(
+            if let Some(selected) = self.source_function(
                 &function.name,
                 function.binding.as_ref(),
                 function.relations.as_ref(),
                 &function.args,
                 subqueries,
                 outer,
-            )?;
+            )? {
+                self.parameters
+                    .retain_source_binding(std::ptr::NonNull::from(&function.binding), selected);
+            }
         }
         Ok(())
     }
@@ -165,12 +171,13 @@ impl Preparation<'_> {
         args: &[ScalarExpr],
         subqueries: &[QueryPlan],
         outer: Option<&RowSchema>,
-    ) -> Result<(), SQLError> {
+    ) -> Result<Option<FunctionBinding>, SQLError> {
         let calls = self.set_calls();
-        self.in_placement(SetPlacement::FromFunction, |analysis| {
+        let selected = self.in_placement(SetPlacement::FromFunction, |analysis| {
             analysis.source_function_inputs(name, binding, relations, args, subqueries, outer)
         })?;
-        self.reject_set_inputs(calls, crate::semantics::sets::placement::top_level_from)
+        self.reject_set_inputs(calls, crate::semantics::sets::placement::top_level_from)?;
+        Ok(selected)
     }
 
     fn source_function_inputs(
@@ -181,7 +188,7 @@ impl Preparation<'_> {
         args: &[ScalarExpr],
         subqueries: &[QueryPlan],
         outer: Option<&RowSchema>,
-    ) -> Result<(), SQLError> {
+    ) -> Result<Option<FunctionBinding>, SQLError> {
         let local = crate::semantics::builtin_function_dispatch_name(name);
         if crate::registry::is_operator_join_table_function(&local) {
             let (left, right) = operator_join_relation_schemas(
@@ -198,7 +205,7 @@ impl Preparation<'_> {
                 };
                 self.expression(argument, input, subqueries)?;
             }
-            return Ok(());
+            return Ok(None);
         }
         let input = outer.cloned().unwrap_or_default();
         self.call(name, binding, args, &input, subqueries)
