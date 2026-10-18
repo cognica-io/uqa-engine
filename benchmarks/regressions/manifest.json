@@ -13787,6 +13787,61 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "generated_distinct_expressions_keep_postgresql_boolean_syntax",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/view_definition/expressions/tests.rs",
+      "capability": "Retained DISTINCT expression reconstruction",
+      "workload": "Generated row DISTINCT disjunctions and DISTINCT negation in stored views and trigger definitions, with nested Boolean precedence and persistent reopening.",
+      "invariant": "PostgreSQL reference definitions and reconstructed query results agree; internal dispatch labels never become ordinary function calls.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "composite_expression_comparisons_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/sql_composites/expression_comparisons.rs",
+      "capability": "Retained DISTINCT expression reconstruction",
+      "workload": "Generated row DISTINCT disjunctions and DISTINCT negation in stored views and trigger definitions, with nested Boolean precedence and persistent reopening.",
+      "invariant": "PostgreSQL reference definitions and reconstructed query results agree; internal dispatch labels never become ordinary function calls.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "event_definitions_match_postgresql_memory",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/event_definitions.rs",
+      "capability": "Retained DISTINCT expression reconstruction",
+      "workload": "Generated row DISTINCT disjunctions and DISTINCT negation in stored views and trigger definitions, with nested Boolean precedence and persistent reopening.",
+      "invariant": "PostgreSQL reference definitions and reconstructed query results agree; internal dispatch labels never become ordinary function calls.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "event_definitions_match_postgresql_sqlite",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/event_definitions.rs",
+      "capability": "Retained DISTINCT expression reconstruction",
+      "workload": "Generated row DISTINCT disjunctions and DISTINCT negation in stored views and trigger definitions, with nested Boolean precedence and persistent reopening.",
+      "invariant": "PostgreSQL reference definitions and reconstructed query results agree; internal dispatch labels never become ordinary function calls.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

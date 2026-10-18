@@ -52,9 +52,12 @@ impl Deparser<'_> {
             ScalarExpr::Collated { expr, .. } => self.expression(expr, scope, subqueries),
             ScalarExpr::Param(index) => Ok(self.parameter(*index, scope)),
             ScalarExpr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, scope, subqueries),
-            ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-                self.boolean_expression(expression, items, scope, subqueries)
-            }
+            ScalarExpr::And(items) | ScalarExpr::Or(items) => self.boolean_expression(
+                items,
+                matches!(expression, ScalarExpr::And(_)),
+                scope,
+                subqueries,
+            ),
             ScalarExpr::Not(inner) => self.negation(inner, scope, subqueries),
             ScalarExpr::UnaryMinus(inner) => self.unary_minus(inner, scope, subqueries),
             ScalarExpr::IsNull { expr, negated } => Ok(self.parenthesize(format!(
@@ -149,19 +152,19 @@ impl Deparser<'_> {
 
     fn boolean_expression(
         &self,
-        expression: &ScalarExpr,
         items: &[ScalarExpr],
+        conjunction: bool,
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
-        let operator = if matches!(expression, ScalarExpr::And(_)) {
-            " AND "
+        let (operator, precedence) = if conjunction {
+            (" AND ", 20)
         } else {
-            " OR "
+            (" OR ", 10)
         };
         let expressions = items
             .iter()
-            .map(|item| self.operand(item, precedence(expression), false, scope, subqueries))
+            .map(|item| self.operand(item, precedence, false, scope, subqueries))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(self.parenthesize(expressions.join(operator)))
     }
@@ -441,6 +444,15 @@ impl Deparser<'_> {
             return self.json_operator(symbol, args, scope, subqueries);
         }
         match binding.and_then(|binding| binding.dispatch) {
+            Some(FunctionDispatch::DistinctNot) => {
+                let [argument] = args else {
+                    return Err(SQLError::Internal("invalid distinct negation".into()));
+                };
+                return self.negation(argument, scope, subqueries);
+            }
+            Some(FunctionDispatch::RowDistinct) => {
+                return self.boolean_expression(args, false, scope, subqueries);
+            }
             Some(FunctionDispatch::BooleanTest(test)) => {
                 return self.boolean_test(args, test, scope, subqueries);
             }
@@ -870,6 +882,14 @@ fn precedence(expression: &ScalarExpr) -> u8 {
         {
             0
         }
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if binding.dispatch == Some(FunctionDispatch::RowDistinct) => 10,
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if binding.dispatch == Some(FunctionDispatch::DistinctNot) => 30,
         ScalarExpr::Func { binding, args, .. } if args.len() == 2 => {
             binary_function_operator(binding.as_ref()).map_or(100, |(_, precedence)| precedence)
         }
