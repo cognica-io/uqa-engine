@@ -14040,6 +14040,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "contextual_sigma_ignores_case_ignorable_characters_on_both_sides",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/token_filter/lowercase/tests.rs",
+      "capability": "Stable analyzer Unicode semantics",
+      "workload": "Explicit sigma, Unicode-version boundaries and expanding lowercase mappings.",
+      "invariant": "Output retains Unicode 16 semantics and releases every output reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "every_scalar_preserves_unicode_16_lowercase_and_whitespace",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/token_filter/lowercase/tests.rs",
+      "capability": "Stable analyzer Unicode semantics",
+      "workload": "All 1,112,064 Unicode scalars in three sigma contexts and all whitespace classifications.",
+      "invariant": "All 3,336,192 results and whitespace classifications match an independently captured Rust 1.90 digest; live output owns its reservation and dropping it releases the budget.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "raw_units_separate_context_and_valid_pairs_remain_scalar_elements",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/token_filter/lowercase/tests.rs",
+      "capability": "Stable analyzer Unicode semantics",
+      "workload": "All 65,536 UTF-16 units in two contexts, plus valid supplementary pairs.",
+      "invariant": "Unpaired units remain exact context boundaries while valid pairs retain full Unicode 16 mappings.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "case_expansion_limits_release_every_output_buffer",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/token_filter/lowercase/tests.rs",
+      "capability": "Stable analyzer Unicode semantics",
+      "workload": "Scalar and raw UTF-16 terms with expanding lowercase mappings at every insufficient allowance.",
+      "invariant": "Expansion charges every buffer and failures preserve unrelated reservations without leaks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "long_ignorable_context_uses_bounded_forward_scans_and_interruptible_output",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/token_filter/lowercase/tests.rs",
+      "capability": "Stable analyzer Unicode semantics",
+      "workload": "Long case-ignorable runs in scalar and raw UTF-16 input, cancelling at each poll.",
+      "invariant": "Forward-only scans retain bounded poll counts and every cancellation releases owned memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "test",
+      "test": "contextual_lowercase_preserves_stored_unicode_16_analyzer_identities",
+      "cases": 1,
+      "source": "crates/uqa-analysis/tests/analysis/descriptor.rs",
+      "capability": "Stable analyzer Unicode semantics",
+      "workload": "Restore previously stored keyword, whitespace and standard lowercase descriptors.",
+      "invariant": "All three existing fingerprints and restored token outputs are unchanged across compiler versions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "test",
+      "test": "profiles_track_only_the_character_tables_used_by_the_pipeline",
+      "cases": 1,
+      "source": "crates/uqa-analysis/tests/analysis/descriptor.rs",
+      "capability": "Stable analyzer Unicode semantics",
+      "workload": "Resolve lowercase, whitespace, gram, regex and normalization pipelines.",
+      "invariant": "Only used character tables enter the descriptor and fixed Unicode 16 ownership remains distinct from regex and normalization profiles.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "word_highlighting_preserves_unicode_16_sigma_context",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/highlight/tests.rs",
+      "capability": "Stable analyzer Unicode semantics",
+      "workload": "Highlight words with U+0295 before and after capital sigma using existing Unicode 16 query terms.",
+      "invariant": "Native output and the allocating reference preserve both word matches across compiler versions.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

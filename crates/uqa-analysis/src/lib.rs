@@ -34,6 +34,7 @@ pub mod term;
 pub mod token;
 pub mod token_filter;
 pub mod tokenizer;
+mod unicode;
 
 pub use analyzer::{
     keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,

@@ -7,42 +7,34 @@
 //! Contextual lowercase with forward-only source traversal and reserved output.
 
 use std::iter::Peekable;
-use std::sync::OnceLock;
 
-use regex_syntax::hir::ClassUnicode;
+use icu_casemap::CaseMapper;
+use icu_properties::CodePointSetDataBorrowed;
 use uqa_core::memory::{Budgeted, BudgetedString, MemoryBudget};
+use writeable::Writeable;
 
-use crate::character_class::{class, contains};
 use crate::{term::TermBuffer, AnalysisError, AnalysisResult, TokenTerm};
 
 #[derive(Debug)]
 pub(crate) struct CaseProperties {
-    cased: ClassUnicode,
-    ignorable: ClassUnicode,
+    cased: CodePointSetDataBorrowed<'static>,
+    ignorable: CodePointSetDataBorrowed<'static>,
 }
 
-pub(crate) fn prepare() -> AnalysisResult<&'static CaseProperties> {
-    static PROPERTIES: OnceLock<Result<CaseProperties, String>> = OnceLock::new();
-    PROPERTIES
-        .get_or_init(|| {
-            Ok(CaseProperties {
-                cased: class(r"\p{Cased}")?,
-                ignorable: class(r"\p{Case_Ignorable}")?,
-            })
-        })
-        .as_ref()
-        .map_err(|message| AnalysisError::BuiltInRegex {
-            component: "lowercase context properties",
-            message: message.clone(),
-        })
+pub(crate) fn prepare() -> &'static CaseProperties {
+    static PROPERTIES: CaseProperties = CaseProperties {
+        cased: crate::unicode::CASED,
+        ignorable: crate::unicode::CASE_IGNORABLE,
+    };
+    &PROPERTIES
 }
 
 impl CaseProperties {
     fn cased(&self, character: char) -> bool {
-        contains(&self.cased, character)
+        self.cased.contains(character)
     }
     fn ignorable(&self, character: char) -> bool {
-        contains(&self.ignorable, character)
+        self.ignorable.contains(character)
     }
 }
 
@@ -98,15 +90,51 @@ fn lower(
         {
             output.push(Ok('ς'))?;
         } else {
-            for lowered in character.to_lowercase() {
-                output.push(Ok(lowered))?;
-            }
+            lower_character(character, &mut output)?;
         }
         if !properties.ignorable(character) {
             preceded_cased = properties.cased(character);
         }
     }
     output.finish(poll)
+}
+
+fn lower_character(character: char, output: &mut TermBuffer) -> AnalysisResult<()> {
+    // Stream full mappings (including expansions) into the caller's admitted buffer.
+    struct Writer<'a> {
+        output: &'a mut TermBuffer,
+        error: Option<AnalysisError>,
+    }
+    impl std::fmt::Write for Writer<'_> {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            for character in text.chars() {
+                self.output.push(Ok(character)).map_err(|error| {
+                    self.error = Some(error);
+                    std::fmt::Error
+                })?;
+            }
+            Ok(())
+        }
+    }
+    if character.is_ascii() {
+        return output.push(Ok(character.to_ascii_lowercase()));
+    }
+    let mut writer = Writer {
+        output,
+        error: None,
+    };
+    let mut bytes = [0; 4];
+    let result = CaseMapper::new()
+        .lowercase(
+            character.encode_utf8(&mut bytes),
+            &icu_locale_core::LanguageIdentifier::UNKNOWN,
+        )
+        .write_to(&mut writer);
+    result.map_err(|_| {
+        writer
+            .error
+            .expect("lowercase output failed its reservation")
+    })
 }
 
 fn following_cased(

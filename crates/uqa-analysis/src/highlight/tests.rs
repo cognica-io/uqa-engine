@@ -19,6 +19,19 @@ fn wraps_matched_terms_with_default_tags() {
 }
 
 #[test]
+fn word_highlighting_preserves_unicode_16_sigma_context() {
+    let options = HighlightOptions::default();
+    let text = "AʕΣ AΣʕ";
+    let terms = ["aʕς".into(), "aσʕ".into()];
+    let expected = "<b>AʕΣ</b> <b>AΣʕ</b>";
+    assert_eq!(highlight(text, &terms, None, &options).unwrap(), expected);
+    assert_eq!(
+        reference::highlight(text, &terms, None, &options).unwrap(),
+        expected
+    );
+}
+
+#[test]
 fn returns_text_unchanged_when_no_query_terms() {
     let out = highlight("untouched", &[], None, &HighlightOptions::default()).unwrap();
     assert_eq!(out, "untouched");

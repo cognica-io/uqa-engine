@@ -20,6 +20,16 @@ use crate::{AnalysisError, AnalysisResult, Analyzer, CompiledAnalyzer, TokenTerm
 use regex::Regex;
 use std::collections::{BTreeSet, HashSet};
 
+fn lowercase(text: &str) -> String {
+    icu_casemap::CaseMapper::new()
+        .lowercase_to_string(text, &icu_locale_core::LanguageIdentifier::UNKNOWN)
+        .into_owned()
+}
+
+fn whitespace(character: char) -> bool {
+    icu_properties::CodePointSetData::new::<icu_properties::props::WhiteSpace>().contains(character)
+}
+
 fn word_regex() -> AnalysisResult<&'static Regex> {
     use std::sync::OnceLock;
     static RE: OnceLock<Result<Regex, String>> = OnceLock::new();
@@ -71,7 +81,7 @@ pub fn highlight_words(
             }
             analyzed
         }
-        None => query_terms.iter().map(|qt| qt.to_lowercase()).collect(),
+        None => query_terms.iter().map(|qt| lowercase(qt)).collect(),
     };
 
     if analyzed.is_empty() {
@@ -119,7 +129,7 @@ pub fn highlight_words(
                 let toks = a.analyze(token)?;
                 !toks.is_empty() && toks.iter().any(|t| analyzed.contains(t))
             }
-            None => analyzed.contains(&token.to_lowercase()),
+            None => analyzed.contains(&lowercase(token)),
         };
         if hit {
             match_spans.push((to_char(m.start()), to_char(m.end())));
@@ -265,7 +275,7 @@ fn build_fragments(text: &str, match_spans: &[(usize, usize)], opts: &HighlightO
             while probe < limit {
                 if chars
                     .get(probe)
-                    .map(|(_, c)| c.is_whitespace())
+                    .map(|(_, c)| whitespace(*c))
                     .unwrap_or(false)
                 {
                     frag_start = probe + 1;
@@ -280,7 +290,7 @@ fn build_fragments(text: &str, match_spans: &[(usize, usize)], opts: &HighlightO
             while probe > lower {
                 if chars
                     .get(probe - 1)
-                    .map(|(_, c)| c.is_whitespace())
+                    .map(|(_, c)| whitespace(*c))
                     .unwrap_or(false)
                 {
                     frag_end = probe - 1;

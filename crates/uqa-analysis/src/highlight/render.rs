@@ -363,7 +363,7 @@ fn window(
             let Some((_, _, character)) = starts.next(poll)? else {
                 break;
             };
-            if character.is_whitespace() {
+            if crate::unicode::is_whitespace(character) {
                 start = starts.position;
                 start_byte = starts.byte;
                 break;
@@ -380,7 +380,7 @@ fn window(
             let Some((position, byte, character)) = ends.next(poll)? else {
                 break;
             };
-            if character.is_whitespace() {
+            if crate::unicode::is_whitespace(character) {
                 whitespace = Some((position, byte));
             }
         }

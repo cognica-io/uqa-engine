@@ -198,10 +198,7 @@ fn profiles_track_only_the_character_tables_used_by_the_pipeline() {
     );
     let mut config = keyword();
     config.token_filters.push(TokenFilter::Lowercase);
-    assert_eq!(
-        profile(&config)["rust_unicode"],
-        json!(char::UNICODE_VERSION)
-    );
+    assert_eq!(profile(&config)["rust_unicode"], json!([16, 0, 0]));
     config.token_filters = vec![TokenFilter::ASCIIFolding];
     assert_eq!(
         profile(&config)["normalization_unicode"],
@@ -231,10 +228,7 @@ fn profiles_track_only_the_character_tables_used_by_the_pipeline() {
         },
     ] {
         config = Analyzer::new(tokenizer, Vec::new(), Vec::new());
-        assert_eq!(
-            profile(&config)["rust_unicode"],
-            json!(char::UNICODE_VERSION)
-        );
+        assert_eq!(profile(&config)["rust_unicode"], json!([16, 0, 0]));
     }
     config = Analyzer::new(Tokenizer::Standard, Vec::new(), vec![CharFilter::HTMLStrip]);
     let standard = profile(&config);

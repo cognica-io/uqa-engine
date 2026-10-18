@@ -59,7 +59,7 @@ pub fn highlight_words_budgeted<'a>(
         } else {
             terms.push(lowercase::lower_text_budgeted(
                 query,
-                lowercase::prepare()?,
+                lowercase::prepare(),
                 budget,
                 &mut poll,
             )?)?;
@@ -113,7 +113,7 @@ fn hit(
         }
         Ok(false)
     } else {
-        let term = lowercase::lower_text_budgeted(word, lowercase::prepare()?, budget, poll)?;
+        let term = lowercase::lower_text_budgeted(word, lowercase::prepare(), budget, poll)?;
         terms.contains(&term, poll)
     }
 }
