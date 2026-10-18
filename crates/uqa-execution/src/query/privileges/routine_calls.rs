@@ -52,6 +52,13 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
     let mut lookup = scope.enter_relation_lookup_mode(plan.relations_bound)?;
     let mut visible = lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     let scope = &mut *visible;
+    for scheduled in crate::query::cte::strategy::schedule_plan_ctes(context.volatility, plan)? {
+        if !scheduled.deferred {
+            if let Some(query) = scheduled.plan.body.query() {
+                initialize(context, permissions, query, params, scope, outer)?;
+            }
+        }
+    }
     match &plan.root {
         RelationalPlan::QueryBlock(block) => {
             let schema = block.from.as_ref().map_or_else(
@@ -189,6 +196,31 @@ pub(crate) fn source_calls<S: Clone + Send + Sync + 'static>(
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     match source {
+        SourcePlan::Table {
+            name,
+            executable_query: Some(query),
+            ..
+        } => {
+            let catalog = ctes.catalog_read_view()?;
+            let resolution = ctes.relation_name_resolution()?;
+            let view = if ctes.is_visible_cte(name) {
+                None
+            } else {
+                catalog.view_resolved(&resolution, name)?.cloned()
+            };
+            let mut scope = ctes.clone();
+            if let Some(view) = view {
+                let subject = if view.security_invoker() {
+                    scope.privilege_subject()?.clone()
+                } else {
+                    catalog.view_owner(&view)?
+                };
+                let scope = scope.enter_privilege_subject(subject);
+                initialize(context, permissions, query, params, &scope, outer)?;
+            } else {
+                initialize(context, permissions, query, params, &scope, outer)?;
+            }
+        }
         SourcePlan::Subquery { body, .. } => {
             initialize(context, permissions, body, params, ctes, outer)?;
         }

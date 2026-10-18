@@ -29,6 +29,34 @@ fn table_source_aliases(
     aliases
 }
 
+pub(super) fn output_aliases(catalog_aliases: &[String], range_aliases: &[String]) -> Vec<String> {
+    let mut aliases = range_aliases.to_vec();
+    aliases.extend(catalog_aliases.iter().skip(aliases.len()).cloned());
+    aliases
+}
+
+pub(super) fn prune_query_outputs<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    query: &mut uqa_sql::plan::QueryPlan,
+    aliases: &[String],
+    projection: &uqa_sql::plan::source_projection::SourceProjection,
+    params: &[SQLParam],
+    scope: &CteScope<S>,
+) -> Result<(), SQLError> {
+    let schema = crate::query::binding::bind_query_plan_schema(
+        context.ctes.routines,
+        query,
+        params,
+        scope,
+        scope.row_lock_outer_row().map(|row| &row.schema),
+    )?;
+    context
+        .ctes
+        .rewrites
+        .prune_query_outputs(query, aliases, projection, &schema);
+    Ok(())
+}
+
 /// Build the physical operator for a table source.
 #[expect(
     clippy::too_many_lines,
@@ -45,6 +73,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
     match from {
         SourcePlan::Table {
             name,
+            executable_query,
             qualifier,
             alias,
             column_aliases,
@@ -90,7 +119,18 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 ));
             }
 
-            if let Some(plan) = ctes.deferred_for_scan(name) {
+            if let Some(mut plan) = ctes.deferred_for_scan(name) {
+                if let (Some(query), Some(prepared)) =
+                    (plan.body.query_mut(), executable_query.as_deref())
+                {
+                    *query = prepared.clone();
+                } else if let (Some(query), Some(projection)) = (
+                    plan.body.query_mut(),
+                    prune.and_then(|prune| prune.get(&qualifier)),
+                ) {
+                    let aliases = output_aliases(&plan.columns, column_aliases);
+                    prune_query_outputs(context, query, &aliases, projection, params, ctes)?;
+                }
                 let streamed = {
                     let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
                     match plan.body.query() {
@@ -241,7 +281,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let ctes: &mut CteScope<S> = &mut privilege_scope;
                 // A view runs its stored query as it was created; its set-returning calls are not placed again.
                 let _stored = SetPlacementScope::stored_definition();
-                let plan = &view.query;
+                let plan = executable_query.as_deref().unwrap_or(&view.query);
                 let output_columns = view.output_columns.as_deref().unwrap_or(&[]);
                 let inherited_lock = ctes.source_row_lock_for_view(&qualifier, name);
                 // During a tuple-local recheck, a view named as the lock target pins every base scan of its storage inside this subtree to the candidate's tuples.
@@ -279,10 +319,29 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .as_ref()
                     .or(specialized_plan.as_ref())
                     .unwrap_or(plan);
-                let optimized = context
-                    .ctes
-                    .rewrites
-                    .optimize_retained_query(execution_plan)?;
+                let mut execution_plan = execution_plan.clone();
+                if let Some(projection) = prune
+                    .and_then(|prune| prune.get(&qualifier))
+                    .filter(|_| executable_query.is_none())
+                {
+                    let aliases = output_aliases(output_columns, column_aliases);
+                    prune_query_outputs(
+                        context,
+                        &mut execution_plan,
+                        &aliases,
+                        projection,
+                        params,
+                        ctes,
+                    )?;
+                }
+                let optimized = if executable_query.is_some() {
+                    execution_plan
+                } else {
+                    context
+                        .ctes
+                        .rewrites
+                        .optimize_retained_query(&execution_plan)?
+                };
                 let execution_plan = &optimized;
                 if let Some(operator) =
                     try_build_streaming_subquery_operator(context, execution_plan, params, ctes)?

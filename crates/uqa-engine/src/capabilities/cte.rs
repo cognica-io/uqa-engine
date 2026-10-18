@@ -76,6 +76,22 @@ impl CteBodyExecutor<StatementReadSnapshot> for Engine {
     }
 }
 impl QueryOutputRewriter for Engine {
+    fn prune_query_outputs(
+        &self,
+        query: &mut QueryPlan,
+        aliases: &[String],
+        projection: &uqa_sql::plan::source_projection::SourceProjection,
+        schema: &uqa_sql::RowSchema,
+    ) {
+        uqa_planner::optimizer::prune_query_outputs(
+            query,
+            aliases,
+            &|name| projection.contains(name),
+            Some(schema),
+            self,
+        );
+    }
+
     fn optimize_retained_query(&self, query: &QueryPlan) -> Result<QueryPlan, SQLError> {
         super::statement_planning::optimize_engine_query(self, query)
     }

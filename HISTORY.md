@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Check view and folded CTE routine privileges against the selected executable expressions before row production, including `LIMIT 0`, `EXPLAIN`, and preceding sequence effects; retain materialized CTE and set-returning function requirements.
+
 ## [0.6.0] - 2026-10-18
 
 ### Added

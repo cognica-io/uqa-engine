@@ -39,6 +39,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
     params: &[SQLParam],
 ) -> Result<Option<StreamingLocalTableScan<'a>>, SQLError> {
     let SourcePlan::Table {
+        executable_query: _,
         name,
         qualifier,
         alias,

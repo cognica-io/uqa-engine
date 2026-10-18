@@ -239,7 +239,13 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 .statement_scope(self.privilege_subject.as_ref());
             crate::query::privileges::routine_calls::query(
                 &self.context.queries.query_context().source,
-                query,
+                crate::query::sources::prepared_queries::prepare(
+                    &self.context.queries.query_context().source,
+                    query,
+                    self.params,
+                    &ctes,
+                )?
+                .as_ref(),
                 self.params,
                 &ctes,
             )?;

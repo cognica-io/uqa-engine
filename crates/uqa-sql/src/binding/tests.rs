@@ -259,6 +259,7 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
         crate::binding::fixture::resolution(vec!["app".into()], "pg_temp_fixture".into());
     let source = SourcePlan::Join {
         left: Box::new(SourcePlan::Table {
+            executable_query: None,
             bound_columns: None,
             name: "documents".into(),
             qualifier: "documents".into(),
@@ -267,6 +268,7 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
             include_descendants: true,
         }),
         right: Box::new(SourcePlan::Table {
+            executable_query: None,
             bound_columns: None,
             name: "rankings".into(),
             qualifier: "rankings".into(),

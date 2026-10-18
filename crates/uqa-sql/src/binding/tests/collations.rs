@@ -44,6 +44,7 @@ fn declared_collations_follow_native_foreign_and_bound_source_aliases() {
     for table in ["local", "remote"] {
         for bound in [false, true] {
             let mut source = SourcePlan::Table {
+                executable_query: None,
                 name: table.into(),
                 qualifier: table.into(),
                 alias: Some("q".into()),

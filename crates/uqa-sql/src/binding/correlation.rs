@@ -903,6 +903,7 @@ mod tests {
             resolution: &resolution,
         };
         let source = SourcePlan::Table {
+            executable_query: None,
             bound_columns: None,
             name: "correlation_alias_source".into(),
             qualifier: "correlation_alias_source".into(),

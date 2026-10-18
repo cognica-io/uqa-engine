@@ -33,6 +33,7 @@ impl CompositeFieldRename<'_> {
         super::sources::analyze_source_plan_schema(
             self.routines,
             &crate::plan::SourcePlan::Table {
+                executable_query: None,
                 name: name.to_owned(),
                 qualifier,
                 alias: None,
