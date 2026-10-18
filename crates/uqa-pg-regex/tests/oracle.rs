@@ -413,24 +413,30 @@ fn class_members_over_every_code_point_equal_postgresql() {
         .filter(|(case, _)| field(case, "kind") == "members")
         .collect();
     assert_eq!(cases.len(), 64);
-    let threads = std::thread::available_parallelism().map_or(4, usize::from);
-    let chunk = cases.len().div_ceil(threads);
-    // Different collations run concurrently, which also exercises the per-thread locale state.
-    std::thread::scope(|scope| {
-        for group in cases.chunks(chunk) {
-            scope.spawn(move || {
-                for (case, result) in group {
-                    assert!(expected_failure(result).is_none());
-                    assert_eq!(
-                        class_members(case).as_deref(),
-                        expected_value(result),
-                        "{}",
-                        field(case, "name")
-                    );
-                }
-            });
+    let verify = |group: &[(Value, Value)]| {
+        for (case, result) in group {
+            assert!(expected_failure(result).is_none());
+            assert_eq!(
+                class_members(case).as_deref(),
+                expected_value(result),
+                "{}",
+                field(case, "name")
+            );
         }
-    });
+    };
+    #[cfg(target_family = "wasm")]
+    verify(&cases);
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let threads = std::thread::available_parallelism().map_or(4, usize::from);
+        let chunk = cases.len().div_ceil(threads);
+        // Native collations also exercise independent per-thread locale state.
+        std::thread::scope(|scope| {
+            for group in cases.chunks(chunk) {
+                scope.spawn(move || verify(group));
+            }
+        });
+    }
 }
 
 /// Patterns whose recursion approaches `PostgreSQL`'s default `max_stack_depth` of 2 MB, which `PostgreSQL` accepts below it and rejects beyond it as too complex. The hooks apply no limit, so the engine's own budget decides. WebAssembly runs the engine on a call stack that these depths would exhaust, so the comparison runs on native targets only.

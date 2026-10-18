@@ -10,7 +10,7 @@
 //!
 //! An operation whose stack lacks that headroom but still has a useful amount runs there first, limited to the depth that leaves [`STACK_DEPTH_SLOP`] free. If it needs more, the engine abandons it at that depth check as it abandons a canceled operation, and the operation runs again from the start on a separate stack. Ordinary operations on threads with a few megabytes of stack therefore never allocate one, and no result depends on the thread's stack.
 //!
-//! Under Emscripten the engine's calls run on the WebAssembly call stack, which can be neither measured nor switched. There the C shim counts the engine's live frames exactly, across every operation on the thread, and each frame is charged a fixed depth calibrated so that [`MAX_STACK_DEPTH`] corresponds to half of V8's default stack at the largest engine frame measured. Every compilation and execution therefore fails with `REG_ETOOBIG` before it can exhaust the call stack, whatever its pattern and input.
+//! Under Emscripten the engine's calls run on the WebAssembly call stack, which can be neither measured nor switched. There the C shim maintains a conservative upper bound on the engine's live frames, across every operation on the thread, and each frame is charged a fixed depth calibrated so that [`MAX_STACK_DEPTH`] corresponds to half of V8's default stack at the largest engine frame measured. Every compilation and execution therefore fails with `REG_ETOOBIG` before it can exhaust the call stack, whatever its pattern and input.
 
 /// `PostgreSQL`'s default `max_stack_depth` of 2 MB: the deepest engine stack, measured from the start of an operation, that an operation may use.
 ///
@@ -51,29 +51,65 @@ impl<T> Attempt<T> {
 
 /// Run one engine operation with stack headroom. `attempt` receives the depth its engine stack may reach, at most [`MAX_STACK_DEPTH`], and must leave nothing behind when it asks for a restart.
 ///
-/// Returns `None` when the operation needs more stack than the thread can provide, which happens only on a target whose stack `stacker` cannot switch; the engine reports that as `REG_ETOOBIG`, as `PostgreSQL` does at its stack limit.
+/// Returns `None` when the operation needs more stack than the thread can provide, which happens only on a target whose stack `stacker` cannot switch; the engine reports that as `REG_ETOOBIG`, as `PostgreSQL` does at its stack limit. A failed stack allocation returns `OutOfMemory`; an operation panic propagates only after the caller has released its compilation resources.
 #[cfg(not(target_family = "wasm"))]
-pub(crate) fn run<T>(mut attempt: impl FnMut(usize) -> Attempt<T>) -> Option<T> {
+pub(crate) fn run<T>(
+    mut attempt: impl FnMut(usize) -> Attempt<T>,
+) -> Result<Option<T>, crate::RegexError> {
     let depth = usable_depth();
     // An attempt allowed the full depth is never restarted: the engine fails beyond MAX_STACK_DEPTH instead.
     if depth >= MIN_ATTEMPT_DEPTH {
         if let Attempt::Finished(outcome) = attempt(depth) {
-            return Some(outcome);
+            return Ok(Some(outcome));
         }
     }
-    stacker::grow(SEGMENT_SIZE, || match attempt(usable_depth()) {
+    grow(|| match attempt(usable_depth()) {
         Attempt::Finished(outcome) => Some(outcome),
         Attempt::Restart => None,
     })
 }
 
+/// Stacker reports stack allocation failures by panicking before calling the operation. Preserve an operation's own panic, but expose allocation failure through the resource error contract.
+#[cfg(not(target_family = "wasm"))]
+fn grow<T>(operation: impl FnOnce() -> T) -> Result<T, crate::RegexError> {
+    let mut entered = false;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        assert!(
+            !FAIL_ALLOCATION.with(|failure| failure.replace(false)),
+            "injected stack allocation failure"
+        );
+        stacker::grow(SEGMENT_SIZE, || {
+            entered = true;
+            operation()
+        })
+    }));
+    match result {
+        Ok(value) => Ok(value),
+        Err(payload) if entered => std::panic::resume_unwind(payload),
+        Err(_) => Err(crate::RegexError::OutOfMemory),
+    }
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+std::thread_local! {
+    static FAIL_ALLOCATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+pub(crate) fn fail_next_allocation() {
+    FAIL_ALLOCATION.with(|failure| failure.set(true));
+}
+
 /// WebAssembly runs the engine's calls on its own call stack, which cannot be switched, so the operation runs where it is; under Emscripten the depth checks count the engine's live frames, see [`depth`].
 #[cfg(target_family = "wasm")]
-pub(crate) fn run<T>(mut attempt: impl FnMut(usize) -> Attempt<T>) -> Option<T> {
-    match attempt(MAX_STACK_DEPTH) {
+pub(crate) fn run<T>(
+    mut attempt: impl FnMut(usize) -> Attempt<T>,
+) -> Result<Option<T>, crate::RegexError> {
+    Ok(match attempt(MAX_STACK_DEPTH) {
         Attempt::Finished(outcome) => Some(outcome),
         Attempt::Restart => None,
-    }
+    })
 }
 
 /// The engine stack depth of a measure that the C shim reports at a depth check: the bytes of stack used since the operation entered the engine.
@@ -82,7 +118,7 @@ pub(crate) fn depth(measure: usize) -> usize {
     measure
 }
 
-/// Under Emscripten the C shim reports the live engine frames of the thread, which it counts exactly, and each frame is charged [`WASM_FRAME_BYTES`], so that [`WASM_FRAME_BUDGET`] frames reach [`MAX_STACK_DEPTH`].
+/// Under Emscripten the C shim reports the conservative upper bound on live engine frames of the thread, and each frame is charged [`WASM_FRAME_BYTES`], so that [`WASM_FRAME_BUDGET`] frames reach [`MAX_STACK_DEPTH`].
 #[cfg(target_os = "emscripten")]
 pub(crate) fn depth(measure: usize) -> usize {
     measure.saturating_mul(WASM_FRAME_BYTES)

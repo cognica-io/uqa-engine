@@ -6,7 +6,7 @@
 
 //! The engine's call depth under Emscripten.
 //!
-//! The engine recurses on the WebAssembly call stack there, which the depth checks bound by counting the engine's live frames against a budget of half of V8's default stack. Every shape below recurses in proportion to its size; beyond the budget it fails with `REG_ETOOBIG` and leaves the module usable, and within it it succeeds.
+//! The engine recurses on the WebAssembly call stack there, which the depth checks bound by bounding the engine's live frames against a budget of half of V8's default stack. Every shape below recurses in proportion to its size; beyond the budget it fails with `REG_ETOOBIG` and leaves the module usable, and within it it succeeds.
 #![cfg(target_os = "emscripten")]
 
 use uqa_pg_regex::{

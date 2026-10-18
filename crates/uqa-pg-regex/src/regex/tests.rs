@@ -111,3 +111,43 @@ fn pattern_conversion_requests_follow_re_compile_and_cache() {
         "invalid memory alloc request size 1073741824"
     );
 }
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn failed_stack_allocation_releases_compilation_and_preserves_compiled_state() {
+    for (size, pattern) in [
+        (256 * 1024, String::from("a")),
+        (
+            1024 * 1024,
+            format!("{}a{}", "(?:".repeat(5000), ")".repeat(5000)),
+        ),
+    ] {
+        let mut resources = Counting::default();
+        let error = stacker::grow(size, || {
+            crate::stack::fail_next_allocation();
+            Regex::compile(&pattern, REG_ADVANCED, RegexCollation::C, &mut resources)
+                .err()
+                .expect("the stack allocation must fail")
+        });
+        assert_eq!(error, RegexError::OutOfMemory);
+        assert!(resources.reserved > 0);
+        assert_eq!(resources.reserved, resources.released);
+    }
+
+    let mut resources = Counting::default();
+    let mut regex = Regex::compile("a", REG_ADVANCED, RegexCollation::C, &mut resources).unwrap();
+    let retained = regex.reserved_bytes();
+    let input = code_points("a");
+    let mut spans = [MatchSpan::UNSET];
+    assert_eq!(regex.exec(&input, 0, &mut spans), Ok(true));
+    let outcome = stacker::grow(256 * 1024, || {
+        crate::stack::fail_next_allocation();
+        regex.exec(&input, 0, &mut spans)
+    });
+    assert_eq!(outcome, Err(RegexError::OutOfMemory));
+    assert_eq!(spans, [MatchSpan::UNSET]);
+    assert_eq!(regex.reserved_bytes(), retained);
+    assert_eq!(regex.exec(&input, 0, &mut spans), Ok(true));
+    drop(regex);
+    assert_eq!(resources.reserved, resources.released);
+}

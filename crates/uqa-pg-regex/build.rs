@@ -48,7 +48,7 @@ fn main() {
     }
     let mut recursive = engine_build(&root);
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("emscripten") {
-        // The engine's recursion runs on the WebAssembly call stack, which C cannot measure. The shim counts the live engine frames instead: every engine function reports its entry, and every one gets a frame of its own on the stack in linear memory, which shows when a counted frame has returned. Native builds measure their stack directly and stay uninstrumented.
+        // The engine's recursion runs on the WebAssembly call stack, which C cannot measure. The shim bounds the live engine frames conservatively instead: every engine function reports its entry, and every one gets a frame of its own on the stack in linear memory, which shows when a counted frame has returned. Native builds measure their stack directly and stay uninstrumented.
         recursive
             .flag("-finstrument-function-entry-bare")
             .flag("-fstack-protector-all");

@@ -98,10 +98,11 @@ static UQA_PG_REGEX_THREAD_LOCAL UQAPgRegexFrame *current_frame = NULL;
  * of its own on the stack in linear memory.  A live frame therefore always
  * lies strictly below its caller there, and a frame entered at or above a
  * recorded position means that the recorded frame has returned.  The engine
- * calls stack_is_too_deep() through rstacktoodeep(), whose frame has the
- * smallest size, so by then every returned frame has been discarded and the
- * count is exact.  Clang's exit hook is not used because it computes a return
- * address, which Emscripten derives from a JavaScript stack trace.
+ * may retain a returned frame when the next entered frame is larger and lies
+ * below its recorded position.  This is a conservative upper bound, not an
+ * exact live-frame count: a live frame cannot be discarded by a deeper call.
+ * Clang's exit hook is not used because it computes a return address, which
+ * Emscripten derives from a JavaScript stack trace.
  *
  * The count spans every operation on the thread, because nested operations
  * share one call stack.  An operation restores the count of its entry when it

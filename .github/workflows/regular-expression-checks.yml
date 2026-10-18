@@ -1,0 +1,56 @@
+name: Regular expression WASM checks
+
+on:
+  pull_request:
+    paths:
+      - "crates/uqa-pg-regex/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/regular-expression-checks.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/uqa-pg-regex/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/regular-expression-checks.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wasm:
+    name: Emscripten frame and memory bounds
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_INCREMENTAL: "0"
+      RUSTFLAGS: "-D warnings -C link-arg=-sALLOW_MEMORY_GROWTH=1"
+      CFLAGS_wasm32_unknown_emscripten: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: "6.0.3"
+      - uses: dtolnay/rust-toolchain@1.90.0
+        with:
+          targets: wasm32-unknown-emscripten
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: regex-emscripten
+      - name: Verify baseline V8 tier
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUNNER: "node --liftoff --no-wasm-tier-up"
+        run: cargo test --locked --release -p uqa-pg-regex --target wasm32-unknown-emscripten
+      - name: Verify optimizing V8 tier using the same test binaries
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUNNER: "node --no-liftoff"
+        run: cargo test --locked --release -p uqa-pg-regex --target wasm32-unknown-emscripten

@@ -65,9 +65,9 @@ impl<'r> Regex<'r> {
         let Some(context) = OwnedContext::new(resources) else {
             return Err(RegexError::OutOfMemory);
         };
-        let outcome = stack::run(|depth_limit| {
-            // A hook called directly from Rust may panic as well; the chunks are freed with the context before the panic continues.
-            panic::catch_unwind(AssertUnwindSafe(|| {
+        // Cover the complete operation, including a restart and the stack switch. Every failure releases the context before a caller's panic continues.
+        let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+            stack::run(|depth_limit| {
                 compile_into(
                     &context,
                     pattern,
@@ -77,11 +77,13 @@ impl<'r> Regex<'r> {
                     &mut *resources,
                     depth_limit,
                 )
-            }))
-            .unwrap_or_else(|payload| Attempt::Finished(Err(Stop::Panic(payload))))
-        });
+            })
+            .map_err(Stop::Error)?
+            .unwrap_or(Err(Stop::Error(RegexError::Code(REG_ETOOBIG))))
+        }))
+        .unwrap_or_else(|payload| Err(Stop::Panic(payload)));
         match outcome {
-            Some(Ok(expression)) => {
+            Ok(expression) => {
                 // SAFETY: a successful compilation returns a live regex_t.
                 let subexpressions =
                     unsafe { ffi::uqa_pg_regex_subexpressions(expression.as_ptr()) };
@@ -92,13 +94,9 @@ impl<'r> Regex<'r> {
                     subexpressions,
                 })
             }
-            Some(Err(stop)) => {
+            Err(stop) => {
                 context.release(resources);
                 Err(stop.resume())
-            }
-            None => {
-                context.release(resources);
-                Err(RegexError::Code(REG_ETOOBIG))
             }
         }
     }
@@ -140,11 +138,12 @@ impl<'r> Regex<'r> {
             )
         });
         let result = match outcome {
-            Some(Ok(REG_OKAY)) => return Ok(true),
-            Some(Ok(REG_NOMATCH)) => Ok(false),
-            Some(Ok(code)) => Err(Stop::Error(RegexError::Code(code))),
-            Some(Err(stop)) => Err(stop),
-            None => Err(Stop::Error(RegexError::Code(REG_ETOOBIG))),
+            Ok(Some(Ok(REG_OKAY))) => return Ok(true),
+            Ok(Some(Ok(REG_NOMATCH))) => Ok(false),
+            Ok(Some(Ok(code))) => Err(Stop::Error(RegexError::Code(code))),
+            Ok(Some(Err(stop))) => Err(stop),
+            Ok(None) => Err(Stop::Error(RegexError::Code(REG_ETOOBIG))),
+            Err(error) => Err(Stop::Error(error)),
         };
         matches.fill(MatchSpan::UNSET);
         result.map_err(Stop::resume)

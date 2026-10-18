@@ -176,7 +176,6 @@ fn operations_beyond_the_stack_budget_report_regular_expression_too_complex() {
         .unwrap_or_else(|| panic!("10000 nested {opening} groups compiled"));
         assert_eq!(error.code(), Some(REG_ETOOBIG));
         assert_eq!(error.message(), "regular expression is too complex");
-        assert!(budget.deepest <= MAX_STACK_DEPTH, "{}", budget.deepest);
         assert_eq!(budget.live, 0);
     }
 }

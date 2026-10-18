@@ -364,6 +364,7 @@ fn a_hook_may_run_another_operation_with_its_own_locale() {
     assert_eq!(hooks.budget.live, 0);
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[test]
 fn concurrent_operations_on_different_threads_are_independent() {
     let expectations = [

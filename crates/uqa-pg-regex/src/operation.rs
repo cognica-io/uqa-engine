@@ -164,3 +164,6 @@ extern "C" fn uqa_pg_regex_callback_stack(operation: *mut c_void, measure: usize
     }
     status(operation.guard(|operation| !operation.resources.stack_too_deep(depth)))
 }
+
+#[cfg(test)]
+mod tests;
