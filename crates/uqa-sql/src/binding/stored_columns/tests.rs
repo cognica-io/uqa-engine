@@ -46,7 +46,11 @@ fn stored_values_bind_parameters_and_preserve_column_identity_across_rename() {
         })
         .unwrap();
         let reference = stored_statement_references(original.context(), &statement).unwrap();
-        assert_eq!(reference.unresolved, vec![(None, "argument".into())], "{sql}");
+        assert_eq!(
+            reference.unresolved,
+            vec![(None, "argument".into())],
+            "{sql}"
+        );
         assert_eq!(
             reference.dependencies,
             BTreeSet::from([RuleColumnDependency {
@@ -67,7 +71,11 @@ fn stored_values_bind_parameters_and_preserve_column_identity_across_rename() {
         let encoded = serde_json::to_string(&statement).unwrap();
         let restored: Statement = serde_json::from_str(&encoded).unwrap();
         let reference = stored_statement_references(renamed.context(), &restored).unwrap();
-        assert_eq!(reference.unresolved, vec![(None, "argument".into())], "{sql}");
+        assert_eq!(
+            reference.unresolved,
+            vec![(None, "argument".into())],
+            "{sql}"
+        );
         assert_eq!(
             reference.dependencies,
             BTreeSet::from([RuleColumnDependency {
