@@ -96,7 +96,7 @@ impl Resolver<'_> {
         )?)
     }
 
-    fn validate_cluster(
+    pub(super) fn validate_cluster(
         &self,
         cluster: u64,
         key: &[u8],
@@ -237,9 +237,11 @@ impl Resolver<'_> {
         )?;
         let merged = self.select_postings(&base, &evaluated, &current, mutation, write)?;
         if merged.is_empty() {
-            self.replace(write.key(), None)?;
             if let Some(peer) = peer {
+                self.replace(write.key(), None)?;
                 self.replace(peer.key(), None)?;
+            } else {
+                self.replace_current(write, None)?;
             }
         } else {
             let template = write
@@ -257,8 +259,8 @@ impl Resolver<'_> {
                     Value::Positions(&positions),
                 )?;
             } else {
-                self.encode_replace(
-                    write.key(),
+                self.encode_current(
+                    write,
                     template,
                     Value::Cluster {
                         score: &score,

@@ -83,6 +83,45 @@ impl CommittedRecordSnapshot for WindowSnapshot {
         self.inner.metadata(key, control)
     }
 
+    fn visit_values(
+        &self,
+        keys: &mut RecordKeyIterator<'_>,
+        control: &StorageReadControl,
+        visit: &mut RecordPointVisitor<'_>,
+    ) -> VersionResult<()> {
+        control.check()?;
+        let Some(first) = keys.next() else {
+            return Ok(());
+        };
+        let first = first?;
+        assert!(!self.active.swap(true, Ordering::Relaxed));
+        self.windows.fetch_add(1, Ordering::Relaxed);
+        let result = (|| {
+            let mut next = Some(first);
+            while let Some(key) = next {
+                control.check()?;
+                let count = self.requests.fetch_add(1, Ordering::Relaxed) + 1;
+                let mut more = true;
+                self.inner.visit_value(&key, control, &mut |record| {
+                    more = visit(&key, record)?;
+                    Ok(())
+                })?;
+                if self.cancel_after == Some(count) {
+                    control.cancellation().cancel();
+                }
+                control.check()?;
+                if !more {
+                    break;
+                }
+                drop(key);
+                next = keys.next().transpose()?;
+            }
+            Ok(())
+        })();
+        self.active.store(false, Ordering::Relaxed);
+        result
+    }
+
     fn visit_metadata(
         &self,
         requests: &mut dyn RecordMetadataRequests,

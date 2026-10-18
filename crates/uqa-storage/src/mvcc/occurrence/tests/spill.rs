@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 
 type Records = BTreeMap<Vec<u8>, (RecordWriteKind, Vec<u8>)>;
 
+mod combined;
+
 fn spill(records: &Records, control: &StorageReadControl) -> Arc<SpilledRun> {
     let key_bytes = records.keys().map(|key| key.len() as u64).sum();
     let mut writer =
