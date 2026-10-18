@@ -99,7 +99,7 @@ jobs:
         run: bash scripts/package-publishable-crates.sh
 
   msrv:
-    name: cargo check (Rust 1.90)
+    name: cargo check (minimum Rust versions)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -110,7 +110,10 @@ jobs:
         with:
           cache-bin: false
           cache-targets: false
-      - run: cargo check --workspace --locked
+      - run: cargo check --workspace --exclude uqa-cli --exclude uqa-python --locked
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Check terminal consumers on their minimum Rust version
+        run: cargo check -p uqa-cli -p uqa-python --locked
 
   clippy:
     name: cargo clippy

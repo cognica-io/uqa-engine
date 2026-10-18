@@ -48,7 +48,7 @@ python -m pip install uqa==0.6.0
 usql
 ```
 
-To build from this repository, you need Rust 1.90 or newer and the native build tools required by Cargo dependencies.
+Building the full workspace requires Rust 1.95 or newer and native build tools. Embedded Rust crates support Rust 1.90; the CLI and Python source builds require Rust 1.95.
 
 Start the interactive `usql` shell from the repository:
 

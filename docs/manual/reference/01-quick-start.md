@@ -11,7 +11,7 @@ usql
 
 The source-based commands below require:
 
-- Rust 1.90 or newer
+- Rust 1.90 or newer for embedded Rust crates; Rust 1.95 for CLI, Python or full-workspace source builds
 - Cargo and the native build tools required by workspace dependencies
 - A checkout of this repository
 
