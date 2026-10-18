@@ -167,7 +167,7 @@ fn parsed_analytical_ranges_read_each_needed_field_once() {
         let predicate = ProjectedPredicate::compile_with_schema(&expression(source), &schema, &[])
             .unwrap().unwrap();
         for id in 0..20_000 {
-            let sample = id ^ 20_260_802;
+            let sample = id ^ 0x0135_27c2;
             let (day, discount, quantity) = (sample % 2_500, sample % 11, 1 + sample % 50);
             let day_matches = (365..=2190).contains(&day);
             let discount_matches = (2..=8).contains(&discount);

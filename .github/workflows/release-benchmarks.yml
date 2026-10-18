@@ -11,6 +11,7 @@ permissions:
   contents: read
 
 env:
+  RUSTUP_TOOLCHAIN: "1.90.0"
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_BENCH_DEBUG: "0"

@@ -11,6 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  RUSTUP_TOOLCHAIN: "1.95.0"
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
   CARGO_PROFILE_TEST_DEBUG: "0"
@@ -51,7 +52,7 @@ jobs:
         run: python3 scripts/sync-uqa-pg-regex.py --check
       - name: Check crate legal file copies
         run: python3 scripts/sync-crate-legal-files.py --check
-      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt
       - name: Test repository policy and benchmark reports

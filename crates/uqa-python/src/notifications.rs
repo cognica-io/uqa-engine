@@ -12,7 +12,7 @@ mod options;
 mod registration;
 mod subscription;
 
-pub(crate) use errors::{NotificationError, PyNotificationFailure, _invalid_notification};
+pub(crate) use errors::{_invalid_notification, NotificationError, PyNotificationFailure};
 pub(crate) use events::PyNotificationEvent;
 pub(crate) use options::{
     PyHttpNotificationOptions, PyNotificationOptions, PyNotificationRetryOptions,

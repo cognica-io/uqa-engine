@@ -140,11 +140,11 @@ jobs:
           cache-bin: false
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo check --workspace --exclude uqa-cli --exclude uqa-python --locked
-      - run: cargo check -p uqa-analysis --features nori-tools,kuromoji-tools --all-targets --locked
+      - run: cargo +1.90.0 check --workspace --exclude uqa-cli --exclude uqa-python --locked
+      - run: cargo +1.90.0 check -p uqa-analysis --features nori-tools,kuromoji-tools --all-targets --locked
       - uses: dtolnay/rust-toolchain@1.95.0
       - name: Check terminal consumers on their minimum Rust version
-        run: cargo check -p uqa-cli -p uqa-python --locked
+        run: cargo +1.95.0 check -p uqa-cli -p uqa-python --locked
 
   doc:
     name: doc
