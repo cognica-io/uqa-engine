@@ -101,6 +101,10 @@ impl VectorIndex for SQLiteIVFIndex {
         "sqlite-ivf"
     }
 
+    fn physical_configuration(&self) -> Option<uqa_storage::VectorIndexSpec> {
+        Some(uqa_storage::VectorIndexSpec::IVF(self.params))
+    }
+
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
         self.replace_document(doc_id, vec![vector])
     }

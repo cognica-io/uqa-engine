@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Keep persistent IVF and HNSW writers bound to their completed index definitions when another session commits during index creation, preventing canonical vectors from being written without the corresponding index metadata.
+
 - Bind column dependencies inside SQL-standard `VALUES` bodies so unrelated view deletion and column changes retain their PostgreSQL behavior, including after reopening persistent stores.
 
 ## [0.6.0] - 2026-10-18

@@ -63,3 +63,30 @@ pub(super) fn build(
     )
     .map_err(|error| StorageBackendError::backend("partition index build", error))
 }
+
+/// A name or identity reservation can refresh the catalog between a physical build and its registry publication. Only the completed registry can select the live writer's final binding.
+pub(super) fn rebind(
+    context: &IndexRegistryContext<'_>,
+    row: &CatalogIndexRow,
+) -> StorageBackendResult<()> {
+    if !row.index_type.eq_ignore_ascii_case("ivf") && !row.index_type.eq_ignore_ascii_case("hnsw") {
+        return Ok(());
+    }
+    let statement = uqa_sql::catalog::index::stored::declaration(row)?;
+    let target = uqa_sql::schema::indexes::vectors::resolve_vector_index_columns(
+        context.vectors,
+        &statement,
+        &row.index_type,
+    )
+    .map_err(|error| StorageBackendError::backend("bind published vector index", error))?;
+    for (field, dimensions) in target.fields {
+        let spec = crate::catalog::index::vectors::stored_spec(row, dimensions)?;
+        context.publication.rebind_persistent_vector_field(
+            &target.table,
+            field,
+            dimensions,
+            spec,
+        )?;
+    }
+    Ok(())
+}

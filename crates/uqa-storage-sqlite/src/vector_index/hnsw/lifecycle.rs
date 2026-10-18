@@ -27,6 +27,10 @@ impl VectorIndex for SQLiteHNSWIndex {
         "hnsw"
     }
 
+    fn physical_configuration(&self) -> Option<uqa_storage::VectorIndexSpec> {
+        Some(uqa_storage::VectorIndexSpec::HNSW(self.params))
+    }
+
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
         self.add_many(doc_id, vec![vector])
     }

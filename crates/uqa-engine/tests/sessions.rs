@@ -28,6 +28,8 @@ mod concurrent_inserts;
 mod concurrent_writes;
 #[path = "sessions/identifiers.rs"]
 mod identifiers;
+#[path = "sessions/ivf_publication.rs"]
+mod ivf_publication;
 #[path = "sessions/latest_reads.rs"]
 mod latest_reads;
 #[path = "sessions/native_publication.rs"]

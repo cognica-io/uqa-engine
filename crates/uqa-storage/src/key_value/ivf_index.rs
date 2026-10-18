@@ -252,6 +252,9 @@ impl VectorIndex for KeyValueIVFIndex {
     fn index_kind(&self) -> &'static str {
         "ivf"
     }
+    fn physical_configuration(&self) -> Option<crate::VectorIndexSpec> {
+        Some(crate::VectorIndexSpec::IVF(self.params))
+    }
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
         self.add_many(doc_id, vec![vector])
     }

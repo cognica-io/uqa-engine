@@ -156,6 +156,10 @@ pub trait VectorIndex: Send + Sync {
     fn index_kind(&self) -> &'static str {
         "vector"
     }
+    /// The handle's declared physical method and parameters, without loading index state. This is not a generation or freshness check; providers without this metadata return `None`.
+    fn physical_configuration(&self) -> Option<VectorIndexSpec> {
+        None
+    }
     /// Metadata from the actual selected physical/canonical view, without executing a logical vector query. Unsupported methods return None.
     fn diskann_query_metadata(
         &self,

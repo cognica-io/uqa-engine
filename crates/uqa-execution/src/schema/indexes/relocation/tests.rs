@@ -50,6 +50,16 @@ impl IndexRegistryPublication for Publication {
     fn refresh_index_table(&self, _: &str) -> StorageBackendResult<()> {
         panic!("a retained namespace move must not reload the partly moved catalog")
     }
+
+    fn rebind_persistent_vector_field(
+        &self,
+        _: &str,
+        _: &str,
+        _: u32,
+        _: uqa_storage::VectorIndexSpec,
+    ) -> StorageBackendResult<()> {
+        panic!("ordinary index names have no vector handle")
+    }
 }
 
 #[test]
