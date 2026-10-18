@@ -44,7 +44,11 @@ impl CallCollations {
         for query in subqueries.iter_mut() {
             query.rewrite_scalar_expressions(&mut apply);
         }
-        self.finish()
+        self.finish()?;
+        for query in subqueries {
+            query.normalize_window_definitions()?;
+        }
+        Ok(())
     }
 
     pub(in crate::binding::preparation) fn apply_query(
@@ -52,7 +56,8 @@ impl CallCollations {
         query: &mut crate::plan::QueryPlan,
     ) -> Result<(), SQLError> {
         query.rewrite_scalar_expressions(&mut |node| self.apply_node(node));
-        self.finish()
+        self.finish()?;
+        query.normalize_window_definitions()
     }
 
     fn apply_node(&mut self, node: &mut ScalarExpr) {

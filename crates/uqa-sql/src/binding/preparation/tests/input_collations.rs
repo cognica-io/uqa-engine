@@ -124,3 +124,30 @@ fn calls_in_filters_and_commands_record_their_selections() {
         ]
     );
 }
+
+#[test]
+fn stored_window_copies_keep_the_derived_input_collations() {
+    for sql in [
+        "SELECT sum(1) OVER (ROWS length(lower('A' COLLATE \"C\")) PRECEDING)",
+        "SELECT sum(1) OVER w FROM t WINDOW w AS (PARTITION BY lower(c) ORDER BY lower(p))",
+    ] {
+        let UnifiedPlan::Query(mut query) =
+            UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query");
+        };
+        super::super::assign_stored_query_input_collations(&NoRoutines, &mut query, &context())
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        assert!(
+            !crate::binding::legacy_collations::query_lacks_input_collation(&query),
+            "{sql}: a stored execution copy still requires migration"
+        );
+        let retained = serde_json::to_value(&query).unwrap();
+        query.normalize_window_definitions().unwrap();
+        assert_eq!(
+            serde_json::to_value(&query).unwrap(),
+            retained,
+            "{sql}: execution copies were stale"
+        );
+    }
+}

@@ -136,8 +136,9 @@ fn legacy_set_returning_placements_load_and_keep_the_catalog_usable() {
         let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
         let raw = factory.open_session().unwrap();
         store_legacy_definitions(raw.catalog.as_ref());
-        drop((first, second));
-        let reopened = Engine::from_persistent_provider(factory).unwrap();
+        drop((raw, first, second));
+        let reopened = Engine::from_persistent_provider(factory)
+            .unwrap_or_else(|error| panic!("provider {provider}: {error}"));
         let placements = uqa_core::Value::Int(i64::try_from(PLACEMENTS.len()).unwrap());
         for statement in [
             "SELECT count(*) AS n FROM pg_class WHERE relkind = 'v' AND relname LIKE 'v\\_%'",
