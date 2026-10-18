@@ -10,6 +10,40 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
+fn runtime_column_binding_preserves_deferred_closed_descriptors() {
+    for open in [false, true] {
+        let calls = AtomicUsize::new(0);
+        let runtime = RowSchema::with_types(
+            vec!["value".into()],
+            vec![Some(uqa_sql::ColumnType::Integer)],
+        );
+        let bound = if open {
+            RowSchema::with_open_columns(&RowSchema::default(), None)
+        } else {
+            runtime.clone()
+        };
+        let mut scan = DeferredOperator::from_bound_schema(
+            bound,
+            Box::new(|| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(Box::new(TableScan::from_physical_rows(
+                    runtime,
+                    vec![crate::PhysicalRow::from_values(vec![uqa_core::Value::Int(
+                        7,
+                    )])],
+                )))
+            }),
+        )
+        .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), usize::from(open));
+        assert_eq!(scan.schema(), &["value".to_string()]);
+        let (_, rows) = crate::physical::run_to_rows(scan.as_mut()).unwrap();
+        assert_eq!(rows[0]["value"], uqa_core::Value::Int(7));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[test]
 fn deferred_sources_run_once_on_pull_and_remain_unused_when_closed_without_rows() {
     for pull in [false, true] {
         let calls = AtomicUsize::new(0);

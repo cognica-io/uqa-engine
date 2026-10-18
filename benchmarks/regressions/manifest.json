@@ -13459,6 +13459,48 @@
       "capability": "Routine planning, demand and diagnostic preservation",
       "workload": "Overloaded FROM routines with typed scalar subqueries across UPDATE, DELETE, MERGE and a correlated lateral source.",
       "invariant": "The analyzed bigint invocation and declared output column survive planning and execution without unknown-type reselection."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "result_assignment_follows_body_distinct_grouping_and_ordering",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/inlining/tests/table.rs",
+      "capability": "SQL set-function result assignment",
+      "workload": "Noninjective numeric-to-integer result assignment around DISTINCT, DISTINCT ON, GROUP BY, grouping sets and ORDER BY bodies.",
+      "invariant": "Assignment applies after the original body operators without evaluating the body during typed expansion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "runtime_column_binding_preserves_deferred_closed_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/deferred/tests.rs",
+      "capability": "Derived source row descriptors",
+      "workload": "Open and closed metadata descriptors share a one-row producer with an invocation counter.",
+      "invariant": "Runtime columns are available before consumer binding; closed sources remain unexecuted until pulled and each producer runs once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "derived_runtime_columns_survive_qualification_aliases_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_subquery/runtime_schema.rs",
+      "capability": "Runtime-derived SQL columns",
+      "workload": "DISTINCT and CTE subqueries over schemaless documents and registered table functions on memory, SQLite, SQLite Key/Value and redb, including persistent reopening.",
+      "invariant": "Qualified and wildcard projections retain all runtime columns, aliases retain positional values, and callback schema discovery executes once even with LIMIT 0.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

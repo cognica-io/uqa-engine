@@ -55,11 +55,10 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
                 ctes,
                 ctes.row_lock_outer_row().map(|row| &row.schema),
             )?;
-            let source_columns = schema.columns().to_vec();
             let context_copy = *context;
             let body = body.clone();
             let mut scope = ctes.clone();
-            let operator = Box::new(crate::query::deferred::DeferredOperator::new(
+            let operator = crate::query::deferred::DeferredOperator::from_bound_schema(
                 schema,
                 Box::new(move || {
                     let local_cte_names = query_cte_names(&body);
@@ -85,7 +84,8 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
                         .preserving_lock_origins(),
                     ))
                 }),
-            ));
+            )?;
+            let source_columns = operator.schema().to_vec();
             let qualifier = alias.as_deref().unwrap_or_default();
             let operator = qualify_source_operator_with_columns(
                 operator,
