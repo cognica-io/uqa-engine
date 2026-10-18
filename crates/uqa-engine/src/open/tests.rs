@@ -25,6 +25,7 @@ mod read_view;
 mod resource_lifetime;
 mod session_indexes;
 mod session_stores;
+mod vector_publication;
 
 fn sqlite_data_version(engine: &Engine) -> u64 {
     engine

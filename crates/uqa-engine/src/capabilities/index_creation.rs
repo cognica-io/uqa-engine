@@ -157,6 +157,37 @@ impl IndexRegistryPublication for Engine {
     fn refresh_index_table(&self, table: &str) -> StorageBackendResult<()> {
         self.refresh_value_indexes_for_table(table)
     }
+
+    fn rebind_persistent_vector_field(
+        &self,
+        table: &str,
+        field: &str,
+        dimensions: u32,
+        spec: VectorIndexSpec,
+    ) -> StorageBackendResult<()> {
+        let relation = uqa_core::RelationIdentity::from_legacy_name(table)
+            .map_err(StorageBackendError::Other)?;
+        let state = self
+            .storage
+            .tables
+            .read()
+            .get(&relation)
+            .cloned()
+            .ok_or_else(|| {
+                StorageBackendError::Other(format!("published index table `{table}` disappeared"))
+            })?;
+        if self.storage.backend.is_some()
+            && state.persistence != uqa_sql::ast::RelationPersistence::Temporary
+        {
+            let index = self.build_vector_index_for_restore(table, field, dimensions, spec)?;
+            state
+                .vector_indexes
+                .write()
+                .live_mut()?
+                .insert(field.into(), index);
+        }
+        Ok(())
+    }
 }
 
 impl IndexRenameTransactions for Engine {
