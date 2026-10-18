@@ -338,6 +338,30 @@ fn catalog_patterns_and_role_alias_do_not_ignore_arguments() {
 }
 
 #[test]
+fn catalog_name_patterns_preserve_non_ascii_identifiers() {
+    let mut session = session();
+    session.engine.sql(
+        "CREATE TABLE \"꟎_case\"(id int); CREATE TABLE \"Ω_case\"(id int); CREATE TABLE ascii_case(id int)",
+        &[],
+    ).unwrap();
+    // PostgreSQL 18.4 psql under UTF-8 preserves non-ASCII pattern characters.
+    for (pattern, name) in [
+        ("*.꟎_case", "꟎_case"),
+        ("*.Ω_case", "Ω_case"),
+        ("*.ASCII_CASE", "ascii_case"),
+    ] {
+        let (output, failed) = script(&mut session, &format!("\\dt {pattern}\n"));
+        assert!(!failed, "{output}");
+        assert!(output.contains(name), "pattern {pattern}: {output}");
+        for other in ["꟎_case", "Ω_case", "ascii_case"] {
+            if other != name {
+                assert!(!output.contains(other), "pattern {pattern}: {output}");
+            }
+        }
+    }
+}
+
+#[test]
 fn autocommit_and_gset_preserve_multi_statement_transaction_boundaries() {
     let mut session = session();
     let (output,failed)=script(&mut session,"\\set AUTOCOMMIT off\nCREATE TABLE pending(id int);\nINSERT INTO pending VALUES (1);\nROLLBACK;\n");

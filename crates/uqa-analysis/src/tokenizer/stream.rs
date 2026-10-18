@@ -205,7 +205,7 @@ fn for_each_word(
         if index % 1024 == 0 {
             poll()?;
         }
-        if character.is_whitespace() {
+        if crate::unicode::is_whitespace(character) {
             if let Some(start) = start.take() {
                 emit(start..offset, poll)?;
             }

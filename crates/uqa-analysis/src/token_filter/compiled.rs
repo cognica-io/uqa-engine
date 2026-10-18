@@ -97,7 +97,7 @@ impl TokenFilter {
                     "missing Unicode profile provider",
                 ));
             }
-            Self::Lowercase => PreparedCommonFilter::Lowercase(super::lowercase::prepare()?),
+            Self::Lowercase => PreparedCommonFilter::Lowercase(super::lowercase::prepare()),
             Self::Stop {
                 language,
                 custom_words,

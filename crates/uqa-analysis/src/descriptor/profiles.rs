@@ -58,10 +58,10 @@ impl RuntimeProfiles {
             .any(|filter| matches!(filter, TokenFilter::Lowercase));
         if rust_lower {
             let context = [
-                expression(r"\p{Cased}", "lowercase cased property")?,
-                expression(r"\p{Case_Ignorable}", "lowercase ignorable property")?,
+                property_expression(crate::unicode::CASED),
+                property_expression(crate::unicode::CASE_IGNORABLE),
             ];
-            extend_lowercase_context(&mut expressions, char::UNICODE_VERSION, context);
+            extend_lowercase_context(&mut expressions, crate::unicode::VERSION, context);
         }
         let normalization = config
             .token_filters
@@ -76,14 +76,14 @@ impl RuntimeProfiles {
                 .as_ref()
                 .is_some_and(crate::NormalizationConfig::width);
         Ok(Self {
-            rust_unicode: (rust_tokenizer || rust_lower).then_some(char::UNICODE_VERSION),
+            rust_unicode: (rust_tokenizer || rust_lower).then_some(crate::unicode::VERSION),
             normalization_unicode: normalization.then_some(unicode_normalization::UNICODE_VERSION),
             expressions,
         })
     }
 }
 
-// These exact context tables already belong to the Rust Unicode 16 profile. Scalar and contextual differentials verify their equivalence to str::to_lowercase. Any other version or table content must contribute its own expression identity.
+// Preserve the stored Rust Unicode 16 identity only for its exact contextual property sets. The exhaustive reference digest verifies mappings and context independently of the active compiler.
 const RUST_UNICODE_16_CONTEXT: [&str; 2] = [
     "0609b22ae1ba741f6ae6cf515ce9ba758a6ebcf7fe80b2d2e7726b25750c2f62",
     "5af2b098843fc4e94e45a5bde9e52611f461730f85ddedca2ab9fce2f7727a82",
@@ -118,6 +118,20 @@ fn expression(pattern: &str, component: &'static str) -> AnalysisResult<String> 
         hash_hir(&word, &mut hash);
     }
     Ok(format!("{:x}", hash.finalize()))
+}
+
+fn property_expression(property: icu_properties::CodePointSetDataBorrowed<'_>) -> String {
+    // Use the same encoding as a parsed Unicode class, hashing the actual runtime data.
+    let mut hash = Sha256::new();
+    hash.update(b"UQA regex expression\0v1\0");
+    hash.update([2]);
+    length(&mut hash, property.iter_ranges().count());
+    for range in property.iter_ranges() {
+        hash.update(range.start().to_le_bytes());
+        hash.update(range.end().to_le_bytes());
+    }
+    hash.update([0]);
+    format!("{:x}", hash.finalize())
 }
 
 fn length(hash: &mut Sha256, length: usize) {

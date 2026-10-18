@@ -3750,6 +3750,9 @@ name = "uqa-analysis"
 version = "0.6.0"
 dependencies = [
  "allocation-counter",
+ "icu_casemap",
+ "icu_locale_core",
+ "icu_properties",
  "miniz_oxide",
  "parking_lot",
  "regex",
@@ -3764,6 +3767,7 @@ dependencies = [
  "uqa-core",
  "uqa-kuromoji-data",
  "uqa-nori-data",
+ "writeable",
 ]
 
 [[package]]
