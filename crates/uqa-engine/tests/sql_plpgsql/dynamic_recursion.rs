@@ -80,6 +80,7 @@ fn recursive_factorial() {
          $$ LANGUAGE plpgsql",
     );
     assert_eq!(scalar(&eng, "SELECT fact(10) AS v"), Value::Int(3_628_800));
+    assert_eq!(scalar(&eng, "SELECT fact(11) AS v"), Value::Int(39_916_800));
 }
 
 #[test]

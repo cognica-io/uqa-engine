@@ -42,7 +42,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Consume complete buffered terminal input after `LISTEN` instead of stopping after the first character and waiting for more input, preserving asynchronous notification delivery and UTF-8 commands.
 
-- Reduce the native stack retained by PL/pgSQL statement locations so finite recursive functions execute in unoptimized builds, while preserving routine CONTEXT, cancellation and the existing frame-count and native stack limits.
+- Fix stack-depth errors for finite PL/pgSQL recursion in unoptimized builds by releasing query-construction scratch before row evaluation and keeping temporary SQL results off the common statement dispatcher, while preserving CONTEXT, cancellation and the existing frame-count and native stack limits.
 
 - Preserve the declared retrieval score type during metadata-only query binding, so positive-evidence pooling and text/vector results compose through derived tables, joins, CTEs and UNION branches without an output descriptor mismatch.
 
