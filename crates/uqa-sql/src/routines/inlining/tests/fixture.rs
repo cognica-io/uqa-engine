@@ -74,6 +74,7 @@ impl Catalog {
             types: self,
             parsers: self,
             catalog: self,
+            relations: self,
             authority: self,
             volatility: self,
             expressions: self,
@@ -137,7 +138,10 @@ impl RoutineCompilationCatalog for Catalog {
         Ok(crate::binding::fixture::empty_binding_context().into())
     }
     fn stored_query_namespace(&self) -> StoredQueryNamespace {
-        panic!("inline candidate never publishes dependencies")
+        StoredQueryNamespace {
+            temporary_schema: "pg_temp".into(),
+            transition_relations: std::collections::BTreeSet::default(),
+        }
     }
 }
 impl RoutineSupportAuthority for Catalog {
@@ -283,5 +287,29 @@ impl RoutineResolution for Catalog {
         name: &str,
     ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
         self.lookup_sql_routine_candidates(name)
+    }
+}
+
+impl crate::binding::stored_relations::StoredRelationCatalog for Catalog {
+    fn resolve_age_label_relation_name(&self, _: &str) -> Result<Option<String>, SQLError> {
+        Ok(None)
+    }
+    fn resolve_visible_relation_kind(
+        &self,
+        _: &str,
+    ) -> Result<crate::catalog::resolution::RelationResolution, SQLError> {
+        Ok(crate::catalog::resolution::RelationResolution::MissingRelation)
+    }
+    fn resolve_loaded_visible_relation_kind(
+        &self,
+        name: &str,
+    ) -> Result<crate::catalog::resolution::RelationResolution, SQLError> {
+        self.resolve_visible_relation_kind(name)
+    }
+    fn resolve_bound_relation_kind(
+        &self,
+        name: &str,
+    ) -> Result<crate::catalog::resolution::RelationResolution, SQLError> {
+        self.resolve_visible_relation_kind(name)
     }
 }

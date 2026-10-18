@@ -37,7 +37,7 @@ pub trait StoredRelationCatalog {
     fn resolve_bound_relation_kind(&self, reference: &str) -> Result<RelationResolution, SQLError>;
 }
 
-fn bind_catalog_relation_reference(
+pub(crate) fn bind_catalog_relation_reference(
     catalog: &dyn StoredRelationCatalog,
     reference: &mut String,
     lookup_mode: RelationLookupMode,

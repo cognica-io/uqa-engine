@@ -199,6 +199,7 @@ impl uqa_planner::statement_planning::executable::StatementOptimizationContexts 
             types: compilation.types,
             parsers: compilation.parsers,
             catalog: compilation.catalog,
+            relations: compilation.relations,
             authority: self,
             volatility: self,
             expressions: self,

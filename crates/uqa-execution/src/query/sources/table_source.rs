@@ -367,7 +367,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     &columns, &aliases, &qualifier, prune, filters,
                 );
                 let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(crate::query::scored_input::DeferredTableScan::new(
+                    Box::new(crate::query::deferred::DeferredOperator::from_rows(
                         schema.clone(),
                         Box::new(move || {
                             let rows = crate::catalog::projection::build_requested_catalog_rows(

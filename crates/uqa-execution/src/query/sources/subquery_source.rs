@@ -48,16 +48,44 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
                     operator, qualifier, filters, context, params, ctes,
                 ));
             }
-            let local_cte_names = query_cte_names(body);
-            let output = execute_view_plan_output_with_parent_cache(
-                context,
+            let schema = crate::query::binding::bind_query_plan_schema(
+                context.ctes.routines,
                 body,
                 params,
                 ctes,
-                &local_cte_names,
+                ctes.row_lock_outer_row().map(|row| &row.schema),
             )?;
-            let source_columns = output.internal_schema.columns().to_vec();
-            let operator = output.into_operator();
+            let source_columns = schema.columns().to_vec();
+            let context_copy = *context;
+            let body = body.clone();
+            let mut scope = ctes.clone();
+            let operator = Box::new(crate::query::deferred::DeferredOperator::new(
+                schema,
+                Box::new(move || {
+                    let local_cte_names = query_cte_names(&body);
+                    let output = execute_view_plan_output_with_parent_cache(
+                        &context_copy,
+                        &body,
+                        params,
+                        &mut scope,
+                        &local_cte_names,
+                    )?;
+                    let columns = output
+                        .columns
+                        .iter()
+                        .cloned()
+                        .enumerate()
+                        .map(|(position, name)| (name, position))
+                        .collect();
+                    Ok(Box::new(
+                        crate::ColumnSelection::compacting_with_positions(
+                            output.into_operator(),
+                            columns,
+                        )
+                        .preserving_lock_origins(),
+                    ))
+                }),
+            ));
             let qualifier = alias.as_deref().unwrap_or_default();
             let operator = qualify_source_operator_with_columns(
                 operator,

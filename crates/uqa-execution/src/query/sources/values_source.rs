@@ -62,15 +62,17 @@ fn build_values_source<'a, S: Clone + 'static>(
             internal_column_types,
             ..
         } => {
-            let internal_schema = from.internal_values_schema()?;
+            let outer = ctes.row_lock_outer_row();
             let schema = crate::query::binding::values_schema_in_scope(
                 routines,
                 rows,
                 &ctes.scalar_subqueries,
-                None,
+                outer.map(|row| &row.schema),
                 params,
                 ctes,
             )?;
+            let internal_schema = from.internal_values_schema_with_inference(Some(&schema))?;
+            let internal_types;
             let column_types = if internal_relation.is_some() {
                 if !alias.is_none() || !column_aliases.is_empty() {
                     return Err(SQLError::Internal(
@@ -87,14 +89,28 @@ fn build_values_source<'a, S: Clone + 'static>(
                             .into(),
                     ));
                 }
-                internal_column_types.as_slice()
+                internal_types = (0..internal_column_types.len())
+                    .map(|position| {
+                        internal_schema
+                            .as_ref()
+                            .and_then(|schema| schema.physical_type(position))
+                            .cloned()
+                    })
+                    .collect::<Vec<_>>();
+                internal_types.as_slice()
             } else {
                 schema.column_types()
             };
             let source_columns = schema.columns().to_vec();
             let hook = expression_scope();
-            let rows =
-                build_values_physical_rows(types, hook.as_ref(), params, rows, column_types)?;
+            let rows = build_values_physical_rows(
+                types,
+                hook.as_ref(),
+                params,
+                rows,
+                column_types,
+                outer,
+            )?;
             if let Some(schema) = internal_schema {
                 return Ok(Box::new(crate::TableScan::from_physical_rows(schema, rows)));
             }
@@ -123,21 +139,27 @@ fn build_values_physical_rows(
     params: &[SQLParam],
     rows: &[Vec<ScalarExpr>],
     column_types: &[Option<uqa_sql::ast::ColumnType>],
+    outer: Option<&crate::OwnedPhysicalRow>,
 ) -> Result<Vec<crate::PhysicalRow>, SQLError> {
     if rows.is_empty() {
         return Ok(Vec::new());
     }
     let subquery_arena = PlanSubqueryArena::new(hook.subquery_plans(), Some(hook));
-    let ctx = ScalarEvalContext::new(None, params)
+    let ctx = outer
+        .map_or_else(
+            || ScalarEvalContext::new(None, params),
+            |row| ScalarEvalContext::from_row_lookup(row, params).with_row_schema(&row.schema),
+        )
         .with_function_hook(hook)
         .with_subquery_runner(&subquery_arena);
     let empty_schema = crate::RowSchema::default();
+    let source_schema = outer.map_or(&empty_schema, |row| &row.schema);
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let mut values = Vec::with_capacity(row.len());
         for (i, expr) in row.iter().enumerate() {
             let source_type =
-                crate::common_context_expression_type(expr, &empty_schema, params, Some(types))?;
+                crate::common_context_expression_type(expr, source_schema, params, Some(types))?;
             let v = uqa_sql::coerce_common_context_value(
                 eval_scalar(expr, &ctx)?,
                 source_type.as_ref(),

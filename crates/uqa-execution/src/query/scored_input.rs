@@ -11,7 +11,7 @@ mod deferred;
 mod hierarchy;
 mod materialize;
 
-pub(in crate::query) use deferred::{defer_entries, DeferredTableScan};
+pub(in crate::query) use deferred::defer_entries;
 pub use hierarchy::HierarchyScoredDocumentSource;
 
 /// One execution of already-bound retrieval work under the retained statement inputs.

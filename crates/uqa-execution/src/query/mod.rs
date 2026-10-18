@@ -10,6 +10,7 @@ pub mod scope;
 pub use scope::CteScope;
 
 pub mod binding;
+mod deferred;
 pub mod diagnostics;
 pub mod notice_queue;
 pub mod runtime;

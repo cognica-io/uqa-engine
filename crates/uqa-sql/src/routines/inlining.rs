@@ -27,7 +27,7 @@ use super::{
 use crate::{
     ast::{CreateFunction, FunctionBinding, FunctionBody, FunctionReturns},
     binding::{bind_routine_parameter_references, prepare_routine_body_inputs},
-    plan::{ComputePlan, QueryBlockPlan, RelationalPlan, UnifiedPlan},
+    plan::{RelationalPlan, UnifiedPlan},
     semantics::{sets::placement_scope::SetPlacementScope, volatility::VolatilityCatalog},
     ColumnType, SQLError, ScalarExpr,
 };
@@ -48,6 +48,7 @@ pub struct RoutineInliningContext<'a> {
     pub types: &'a dyn RoutineTypeCatalog,
     pub parsers: &'a dyn RoutineParserCatalog,
     pub catalog: &'a dyn RoutineCompilationCatalog,
+    pub relations: &'a dyn crate::binding::stored_relations::StoredRelationCatalog,
     pub authority: &'a dyn RoutineExecutionAuthority,
     pub volatility: &'a dyn VolatilityCatalog,
     pub expressions: &'a dyn RoutinePlanExpressions,
@@ -66,6 +67,7 @@ impl std::fmt::Debug for RoutineInliningContext<'_> {
 pub struct InlineRoutineExpression {
     pub identity: [u8; 16],
     pub expression: ScalarExpr,
+    pub error_context: Option<String>,
 }
 
 impl RoutineInliningContext<'_> {
@@ -110,6 +112,7 @@ impl RoutineInliningContext<'_> {
             return Ok(Some(InlineRoutineExpression {
                 identity,
                 expression,
+                error_context: None,
             }));
         }
         if !eligible_definition(definition) || active.contains(&identity) {
@@ -120,7 +123,14 @@ impl RoutineInliningContext<'_> {
             Err(error) if error.sqlstate() == Some("42501") => return Ok(None),
             Err(error) => return Err(error),
         }
-        let Some((mut expression, parameters)) = self.analyze_body(&function, definition)? else {
+        let error_context = super::diagnostics::sql_context(
+            definition,
+            super::diagnostics::SQLRoutineStage::Inlining,
+        );
+        let Some((mut expression, parameters)) = self
+            .analyze_body(&function, definition)
+            .map_err(|error| error.with_context(&error_context))?
+        else {
             return Ok(None);
         };
         let properties = properties::inspect(self, &expression, &parameters)?;
@@ -140,6 +150,7 @@ impl RoutineInliningContext<'_> {
         Ok(Some(InlineRoutineExpression {
             identity,
             expression,
+            error_context: Some(error_context),
         }))
     }
 
@@ -209,7 +220,7 @@ impl RoutineInliningContext<'_> {
         let RelationalPlan::QueryBlock(mut block) = query.root else {
             return Ok(None);
         };
-        if !simple_select(&block) {
+        if !block.is_single_expression() {
             return Ok(None);
         }
         let layout = sql_function_result_layout(self.types, definition, Some(&result))?;
@@ -253,7 +264,15 @@ impl RoutineInliningContext<'_> {
         let names = matches!(definition.body, FunctionBody::Source(_))
             .then(|| sql_body_parameter_scope(definition, &parameters))
             .transpose()?;
-        let snapshot = self.catalog.binding_snapshot()?;
+        let mut snapshot = self.catalog.binding_snapshot()?;
+        let namespace = self.catalog.stored_query_namespace();
+        // A function body is parsed independently of the caller's WITH names. Trigger transition relations retain their activation scope.
+        snapshot
+            .ctes
+            .retain(|name, _| namespace.transition_relations.contains(name));
+        snapshot.deferred_ctes.clear();
+        snapshot.non_returning_ctes.clear();
+        snapshot.scalar_subqueries.clear();
         let result = {
             // A SQL-standard body is inlined as it was stored; a body compiled from source text places its set-returning calls as a new statement does.
             let _placement = if matches!(definition.body, FunctionBody::Statements(_)) {
@@ -463,24 +482,6 @@ fn eligible_definition(definition: &CreateFunction) -> bool {
         && definition.output_params().len() <= 1
         && !matches!(&definition.returns, FunctionReturns::Scalar { type_name }
             if crate::type_resolution::canonical_routine_type_name(type_name) == "record")
-}
-
-fn simple_select(block: &QueryBlockPlan) -> bool {
-    matches!(block.compute, ComputePlan::Project)
-        && block.from.is_none()
-        && block.r#where.is_none()
-        && block.group_by.is_empty()
-        && block.grouping_sets.is_empty()
-        && block.having.is_none()
-        && block.windows.is_empty()
-        && !block.distinct
-        && block.distinct_on.is_empty()
-        && block.order_by.is_empty()
-        && block.limit.is_none()
-        && block.offset.is_none()
-        && block.locking.is_empty()
-        && block.subqueries.is_empty()
-        && block.projections.len() == 1
 }
 
 fn is_constant(expression: &ScalarExpr) -> bool {

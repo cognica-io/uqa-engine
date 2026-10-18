@@ -312,6 +312,13 @@ impl<'a> ColumnSelection<'a> {
         self
     }
 
+    /// A derived-table demand boundary changes its physical layout without retiring row-lock identities needed by an enclosing locking clause.
+    #[must_use]
+    pub fn preserving_lock_origins(mut self) -> Self {
+        self.discard_lock_origins = false;
+        self
+    }
+
     fn select_batch(&self, batch: Batch) -> Batch {
         let mut rows = match self.compact_slots.as_ref() {
             Some(slots) => batch
