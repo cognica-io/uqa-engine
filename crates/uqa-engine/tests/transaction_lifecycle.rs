@@ -11,6 +11,9 @@ use uqa_engine::Engine;
 use uqa_sql::ast::ColumnType;
 use uqa_storage::document_store::Document;
 
+#[path = "transaction_lifecycle/text_commit.rs"]
+mod text_commit;
+
 fn shown(engine: &Engine, name: &str) -> String {
     let result = engine.sql(&format!("SHOW {name}"), &[]).unwrap();
     let uqa_core::Value::Str(value) = &result.rows[0][name] else {

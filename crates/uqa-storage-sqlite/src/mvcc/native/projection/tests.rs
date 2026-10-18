@@ -15,6 +15,8 @@ use super::*;
 use crate::{Catalog, ManagedConnection, SQLiteRecordStore};
 use uqa_storage::mvcc::{PrivateRecordChanges, RecordWrite, VersionedPersistence};
 
+mod occurrences;
+
 #[test]
 fn unchanged_native_btree_writes_keep_history_conflicts_and_reopen() {
     use crate::mvcc::native::tests::materialization::{initialize, records, replace, with};

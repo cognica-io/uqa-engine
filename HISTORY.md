@@ -36,6 +36,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Share unchanged-snapshot reads for combined and split text occurrence records in native SQLite, SQLite Key/Value and redb, and retain ordered spill output for own-key replacements, removing per-cluster read admission and repeated spill rewrites during commit while preserving atomic snapshot publication.
+
 - Evaluate `~`, `~*`, `!~`, `!~*`, `SIMILAR TO`, the `regexp_*` functions and the pattern forms of `substring` with PostgreSQL 18.4's own regular expression engine instead of translating patterns for the Rust `regex` crate. Match selection, back-references, lookahead and lookbehind constraints, word-boundary and class escapes, embedded options and directors, every flag including the basic syntax that `e` selects, character classes and case-insensitive matching under each input collation, `regexp_replace` escapes and PostgreSQL's error messages now agree with PostgreSQL 18. A compilation or search may use PostgreSQL's 2 MB stack budget and reports `regular expression is too complex` beyond it, its working memory is charged to the statement's allowance, and cancellation and `statement_timeout` interrupt it.
 
 - Resolve the special date and time inputs `now`, `today`, `tomorrow` and `yesterday` in the `UNION ALL` branches of scroll cursors against the transaction start, as PostgreSQL and the rest of the statement do, instead of the wall clock.

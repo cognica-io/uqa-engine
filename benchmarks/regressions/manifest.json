@@ -2372,8 +2372,8 @@
       "cases": 1,
       "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill.rs",
       "capability": "Bounded occurrence delta spill reads",
-      "workload": "128/512/1024 distinct paired occurrence clusters in an immutable spill under 2 MiB, with unchanged and advanced snapshots through command refresh and publication.",
-      "invariant": "Authenticated source reads stay within eight passes over the source blocks; exact keys, payloads, original conditions, write kinds and full allowance release remain intact.",
+      "workload": "128/512/1024 distinct paired occurrence clusters in an immutable spill under 256 KiB, with unchanged and advanced snapshots through command refresh and publication.",
+      "invariant": "Authenticated source reads stay within eight source-block passes; unchanged-boundary pairs share one base read window and write one payload pass without recopy. Exact records, original conditions, write kinds and allowance release remain intact.",
       "case_names": [
         ""
       ]
@@ -13391,6 +13391,175 @@
       "capability": "PostgreSQL regular expression bounded work",
       "workload": "Direct callback checks at the hard stack limit, above the limit, and across a stack restart.",
       "invariant": "The hard depth bound is enforced before the resource hook; a permitted callback observes its exact depth and restarting releases operation state."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "combined_occurrence_resolution_writes_ordered_spill_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill/combined.rs",
+      "capability": "Combined occurrence publication",
+      "workload": "128, 512 and 1024 combined clusters in authenticated spill under 256 KiB, in command and publication modes at unchanged and advanced snapshots.",
+      "invariant": "Exactly one output payload pass, no copied spill values, at most eight source-block read passes, one base read window at an unchanged sequence, exact records and zero retained reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "combined_occurrence_validation_closes_before_other_committed_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill/combined.rs",
+      "capability": "Occurrence read-window ownership",
+      "workload": "Resident and spilled combined clusters interleaved with canonical records, followed by derived marker work.",
+      "invariant": "Canonical command validation and derived reads run outside the base value window; exact values, preconditions, kinds and final reservation release survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "combined_occurrence_validation_releases_failed_read_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill/combined.rs",
+      "capability": "Occurrence failure atomicity",
+      "workload": "Resident and spilled batches with corrupt stored/evaluated graphs, an invalid write kind, cancellation after one value, and exhausted admission.",
+      "invariant": "Failure closes the read window and releases all resolution memory without publishing a result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_occurrence_commit_batches_unchanged_snapshot_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests/occurrences.rs",
+      "capability": "Native occurrence commit admission",
+      "workload": "64, 256 and 1024 indexed terms in a disposable persistent native SQLite database with a second document committed at the same snapshot.",
+      "invariant": "Commit uses at most 32 physical read admissions independent of term count and preserves exact frequencies, retained snapshots, rollback and reopened values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "native_text_upserts_publish_atomic_snapshots",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/transaction_lifecycle/text_commit.rs",
+      "capability": "Native text commit visibility",
+      "workload": "Explicit GIN and unindexed native SQLite tables with 64/4096 distinct terms per row; unchanged, single and four-value upserts with independent readers and retained snapshots. The large multi-value transaction spills its prepared commit.",
+      "invariant": "Readers observe complete before/after values; fixed snapshots retain old values, search matches the committed rows, and rollback/reopen preserve results. Diagnostic timings impose no uncontrolled latency threshold.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "split_occurrence_windows_preserve_canonical_peer_validation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill/split.rs",
+      "capability": "Split occurrence read-window ownership",
+      "workload": "Resident/spilled split clusters with one canonical peer, in command and publication modes.",
+      "invariant": "Complete records and original conditions remain exact; committed reads never reenter an active window and failures release buffered scores and all temporary output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "split_occurrence_windows_release_buffered_scores_after_failure",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill/split.rs",
+      "capability": "Split occurrence read-window ownership",
+      "workload": "Resident/spilled split clusters with stored score bytes, corrupt evaluated score/positions, a missing peer, or cancellation after one base record.",
+      "invariant": "Complete records and original conditions remain exact; committed reads never reenter an active window and failures release buffered scores and all temporary output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_kv_occurrence_commit_batches_unchanged_snapshot_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/occurrence_commits.rs",
+      "capability": "Split occurrence commit admission",
+      "workload": "64/256/1024 terms with a second document committed at the same snapshot in a disposable persistent database.",
+      "invariant": "Commit uses at most 32 physical read admissions independent of term count; exact frequencies, retained snapshots, rollback and reopened values survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_occurrence_commit_batches_unchanged_snapshot_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/occurrence_commits.rs",
+      "capability": "Split occurrence commit admission",
+      "workload": "64/256/1024 terms with a second document committed at the same snapshot in a disposable persistent database.",
+      "invariant": "Commit uses at most 32 physical read admissions independent of term count; exact frequencies, retained snapshots, rollback and reopened values survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "point_read_windows_are_lazy_borrowed_and_stop_before_another_key",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/read.rs",
+      "capability": "redb point-value read admission",
+      "workload": "A 100000-byte value under a 64-byte request allowance, with empty input, stopping visitors, cancellation, visitor failure and producer failure.",
+      "invariant": "Empty input opens no physical window; nonempty input opens one, borrows the full exact value, stops before requesting another key and releases request memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "sqlite_kv_text_upserts_publish_atomic_snapshots",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/transaction_lifecycle/text_commit.rs",
+      "capability": "Text commit visibility",
+      "workload": "sqlite_kv explicit GIN/unindexed tables with 64/4096 distinct terms per row; unchanged/single/four-value writes and independent readers.",
+      "invariant": "Readers observe complete before/after values, fixed snapshots retain old values, search matches the committed rows, and rollback/reopen preserve results. Timings remain diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "redb_text_upserts_publish_atomic_snapshots",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/transaction_lifecycle/text_commit.rs",
+      "capability": "Text commit visibility",
+      "workload": "redb explicit GIN/unindexed tables with 64/4096 distinct terms per row; unchanged/single/four-value writes and independent readers.",
+      "invariant": "Readers observe complete before/after values, fixed snapshots retain old values, search matches the committed rows, and rollback/reopen preserve results. Timings remain diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "memory_text_upserts_preserve_values",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/transaction_lifecycle/text_commit.rs",
+      "capability": "In-memory text transaction values",
+      "workload": "Default Engine with explicit GIN/unindexed tables, 64/4096 distinct terms per row and unchanged/single/four-value writes.",
+      "invariant": "Committed values, exact text matches and rollback remain correct. This Engine has no independent persistent sessions or database reopen; neither is claimed.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -10,8 +10,9 @@ use std::sync::Arc;
 
 use redb::{Database, ReadableDatabase, ReadableTable};
 use uqa_storage::mvcc::{
-    BorrowedRecord, CommitSequence, CommittedRecordSnapshot, DatabaseId, RecordPage, RecordVersion,
-    ScannedRecord, SharedRecordValue, VersionError, VersionResult,
+    BorrowedRecord, CommitSequence, CommittedRecordSnapshot, DatabaseId, RecordKeyIterator,
+    RecordPage, RecordPointVisitor, RecordVersion, ScannedRecord, SharedRecordValue, VersionError,
+    VersionResult,
 };
 use uqa_storage::read_control::StorageReadControl;
 
@@ -20,6 +21,11 @@ use super::{
     HEADS, METADATA, VERSIONS,
 };
 use crate::error::redb_error;
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static READ_WINDOWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 pub(super) struct Snapshot {
     pub(super) database: Arc<Database>,
@@ -30,6 +36,8 @@ pub(super) struct Snapshot {
 
 impl Snapshot {
     fn begin_read(&self) -> VersionResult<redb::ReadTransaction> {
+        #[cfg(test)]
+        READ_WINDOWS.with(|count| count.set(count.get() + 1));
         let transaction = self.database.begin_read().map_err(redb_error)?;
         validate_metadata(
             &transaction.open_table(METADATA).map_err(redb_error)?,
@@ -80,6 +88,50 @@ impl CommittedRecordSnapshot for Snapshot {
             }
             visit(record)
         })
+    }
+
+    fn visit_values(
+        &self,
+        keys: &mut RecordKeyIterator<'_>,
+        control: &StorageReadControl,
+        visit: &mut RecordPointVisitor<'_>,
+    ) -> VersionResult<()> {
+        control.check()?;
+        let Some(first) = keys.next() else {
+            return Ok(());
+        };
+        let mut next = Some(first?);
+        let transaction = self.begin_read()?;
+        let heads = transaction.open_table(HEADS).map_err(redb_error)?;
+        let mut versions = None;
+        while let Some(key) = next {
+            control.check()?;
+            let mut more = true;
+            if let Some(head) = heads.get(&*key).map_err(redb_error)? {
+                if versions.is_none() {
+                    versions = Some(transaction.open_table(VERSIONS).map_err(redb_error)?);
+                }
+                visit_visible(
+                    versions.as_ref().expect("selected version table"),
+                    &key,
+                    head.value(),
+                    self.sequence(),
+                    &mut |record| {
+                        more = visit(&key, record)?;
+                        Ok(())
+                    },
+                )?;
+            } else {
+                more = visit(&key, None)?;
+            }
+            control.check()?;
+            if !more {
+                break;
+            }
+            drop(key);
+            next = keys.next().transpose()?;
+        }
+        Ok(())
     }
 
     fn visit_prefix(

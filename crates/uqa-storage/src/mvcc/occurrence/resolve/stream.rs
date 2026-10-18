@@ -4,13 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Consecutive canonical conditions share admission; derived merges close it before provider reads.
+//! Canonical conditions and unchanged clusters share their read windows; other derived merges close them before provider reads.
 
 use super::{
-    PreparedLookup, PreparedRecordCommit, PreparedRecordWrite, RecordWriteKind, ResolutionMode,
-    Resolver, Source, VersionError, VersionResult,
+    Kind, PreparedLookup, PreparedRecordCommit, PreparedRecordWrite, RecordWriteKind,
+    ResolutionMode, Resolver, Source, VersionError, VersionResult,
 };
 use crate::mvcc::{PreparedWriteCursor, RecordMetadata, RecordMetadataRequests};
+
+mod unchanged;
 
 enum Pending {
     Validation(PreparedRecordWrite),
@@ -36,8 +38,26 @@ pub(super) fn apply<'p>(
         let Some(Pending::Merge(write, source)) = stream.pending.take() else {
             return Ok(());
         };
-        resolver.merge_write(stream.mutation, &write, lookup, source)?;
-        stream.mutation += 1;
+        if resolver.base.sequence() == resolver.current.sequence()
+            && write.kind() == RecordWriteKind::Occurrence
+            && matches!(
+                source.kind,
+                Kind::Cluster(_) | Kind::Score(_) | Kind::Positions
+            )
+        {
+            stream.pending = Some(Pending::Merge(write, source));
+            unchanged::apply(&mut stream)?;
+            match stream.pending.take() {
+                Some(Pending::Merge(write, source)) => {
+                    resolver.merge_write(stream.mutation, &write, lookup, source)?;
+                    stream.mutation += 1;
+                }
+                pending => stream.pending = pending,
+            }
+        } else {
+            resolver.merge_write(stream.mutation, &write, lookup, source)?;
+            stream.mutation += 1;
+        }
     }
 }
 
@@ -51,6 +71,11 @@ struct Stream<'a, 'p> {
 
 impl RecordMetadataRequests for Stream<'_, '_> {
     fn advance(&mut self) -> VersionResult<bool> {
+        // An unchanged-cluster visitor can stop before a different derived effect
+        // or a command's canonical validation. Resume that exact pending record.
+        if let Some(pending) = &self.pending {
+            return Ok(matches!(pending, Pending::Validation(_)));
+        }
         while let Some(mut write) = self.input.next(self.resolver.control)? {
             let validate = match write.kind() {
                 RecordWriteKind::Canonical => true,

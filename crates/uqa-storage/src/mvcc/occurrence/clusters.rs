@@ -96,7 +96,7 @@ impl Resolver<'_> {
         )?)
     }
 
-    fn validate_cluster(
+    pub(super) fn validate_cluster(
         &self,
         cluster: u64,
         key: &[u8],
@@ -209,11 +209,8 @@ impl Resolver<'_> {
                 write.value(),
                 peer.map(|peer| (peer.key(), peer.value())),
             )?;
-            self.preserve(write)?;
-            if let Some(peer) = peer {
-                self.preserve(peer)?;
-            }
-            return Ok(());
+            // A split peer is preserved separately at its own input position; validation of the complete pair remains here.
+            return self.preserve(write);
         }
         let (base_value, base_peer) = self.cluster_view(self.base, write, peer)?;
         let (current_value, current_peer) = self.cluster_view(self.current, write, peer)?;
@@ -237,9 +234,11 @@ impl Resolver<'_> {
         )?;
         let merged = self.select_postings(&base, &evaluated, &current, mutation, write)?;
         if merged.is_empty() {
-            self.replace(write.key(), None)?;
             if let Some(peer) = peer {
+                self.replace(write.key(), None)?;
                 self.replace(peer.key(), None)?;
+            } else {
+                self.replace_current(write, None)?;
             }
         } else {
             let template = write
@@ -257,8 +256,8 @@ impl Resolver<'_> {
                     Value::Positions(&positions),
                 )?;
             } else {
-                self.encode_replace(
-                    write.key(),
+                self.encode_current(
+                    write,
                     template,
                     Value::Cluster {
                         score: &score,
