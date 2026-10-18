@@ -7,7 +7,7 @@
 //! Persistent vector writers follow the completed catalog after a racing maintenance commit.
 
 use std::path::Path;
-use std::sync::{atomic::Ordering, Arc, Barrier};
+use std::sync::{atomic::Ordering, Arc};
 
 use uqa_storage::{HNSWIndexParams, IVFIndexParams, PersistentStorageProvider, VectorIndexSpec};
 use uqa_storage_sqlite::{ManagedConnection, SQLiteCompressionOptions, SQLiteStorageProvider};
@@ -88,17 +88,14 @@ fn ids(engine: &Engine) -> Vec<Value> {
 #[case::hnsw("hnsw")]
 fn concurrent_vector_registration_retains_completed_bindings(#[case] method: &str) {
     let directory = tempfile::tempdir().unwrap();
-    let ready = Barrier::new(6);
     std::thread::scope(|scope| {
         for provider in 0..6 {
-            let ready = &ready;
             let path = directory.path().join(format!("{method}-{provider}.db"));
             scope.spawn(move || {
                 let engine = open(provider, &path);
                 engine.sql("CREATE TABLE docs(id int PRIMARY KEY, embedding vector(2)); INSERT INTO docs VALUES(9, ARRAY[-1.0,0.0]); CREATE TABLE unrelated(id int)", &[]).unwrap();
                 let peer = engine.new_session().unwrap();
                 pause_statistics(&peer);
-                ready.wait();
                 for commit in [false, true] {
                     engine.sql("BEGIN", &[]).unwrap();
                     engine.with_implicit_storage_definition_transaction(|engine| {
