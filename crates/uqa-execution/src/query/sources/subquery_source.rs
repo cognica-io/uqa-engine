@@ -58,6 +58,7 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
             let context_copy = *context;
             let body = body.clone();
             let mut scope = ctes.clone();
+            let bound_output = (!schema.columns_are_open(None)).then(|| schema.clone());
             let operator = crate::query::deferred::DeferredOperator::from_bound_schema(
                 schema,
                 Box::new(move || {
@@ -75,14 +76,17 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
                         .cloned()
                         .enumerate()
                         .map(|(position, name)| (name, position))
-                        .collect();
-                    Ok(Box::new(
-                        crate::ColumnSelection::compacting_with_positions(
-                            output.into_operator(),
-                            columns,
-                        )
-                        .preserving_lock_origins(),
-                    ))
+                        .collect::<Vec<_>>();
+                    let source = output.into_operator();
+                    let source = match bound_output {
+                        Some(schema) => {
+                            crate::ColumnSelection::with_bound_output(source, &columns, schema)
+                                .map_err(crate::physical::physical_exec_error)?
+                        }
+                        None => crate::ColumnSelection::compacting_with_positions(source, columns)
+                            .preserving_lock_origins(),
+                    };
+                    Ok(Box::new(source))
                 }),
             )?;
             let source_columns = operator.schema().to_vec();

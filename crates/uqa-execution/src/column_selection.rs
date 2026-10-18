@@ -283,6 +283,50 @@ impl<'a> ColumnSelection<'a> {
         }
     }
 
+    /// Map a query's public outputs to its analyzed descriptor. Analysis owns output collations and record descriptors; the producer owns value slots, including shared slots and hidden execution inputs.
+    pub(crate) fn with_bound_output(
+        child: Box<dyn PhysicalOperator + 'a>,
+        columns: &[(String, usize)],
+        schema: RowSchema,
+    ) -> ExecResult<Self> {
+        if !schema.is_identity_layout()
+            || schema.physical_width() != schema.len()
+            || columns.len() != schema.len()
+            || columns.iter().enumerate().any(|(output, (name, input))| {
+                schema.columns()[output] != *name
+                    || *input >= child.row_schema().len()
+                    || schema.column_type(output) != child.row_schema().column_type(*input)
+            })
+        {
+            return Err(uqa_sql::SQLError::Internal(
+                "query output does not match its analyzed columns and types".into(),
+            )
+            .into());
+        }
+        let input_positions = columns
+            .iter()
+            .map(|(_, position)| Some(*position))
+            .collect::<Vec<_>>();
+        let ordering = remap_ordering(child.output_ordering(), &input_positions);
+        let slots = columns
+            .iter()
+            .map(|(_, position)| child.row_schema().physical_slot(*position))
+            .collect::<Vec<_>>();
+        let identity_layout = child.row_schema().physical_width() == slots.len()
+            && slots
+                .iter()
+                .enumerate()
+                .all(|(position, slot)| *slot == Some(position));
+        Ok(Self {
+            child,
+            schema,
+            ordering,
+            rebind_lock_qualifier: None,
+            discard_lock_origins: false,
+            compact_slots: (!identity_layout).then_some(slots),
+        })
+    }
+
     /// Attribute inner lock origins to this source qualifier so `FOR UPDATE OF` a view, CTE, or subquery does not lock sibling join inputs.
     #[must_use]
     pub fn rebinding_lock_origins(mut self, qualifier: impl Into<String>) -> Self {
@@ -499,5 +543,87 @@ mod tests {
             batch.schema.view(&batch.rows[0]).get("value"),
             Some(&Value::Int(7))
         );
+    }
+
+    #[test]
+    fn bound_output_preserves_metadata_shared_values_and_lock_origins() {
+        use uqa_sql::ColumnType;
+
+        let fields: uqa_sql::schema::RecordFields =
+            Arc::from([Some(ColumnType::SmallInteger), Some(ColumnType::Text)]);
+        let bound = RowSchema::with_types(
+            vec!["first".into(), "second".into(), "record".into()],
+            vec![
+                Some(ColumnType::Text),
+                Some(ColumnType::Text),
+                Some(ColumnType::Record),
+            ],
+        )
+        .with_column_collations([Some(950), Some(951), None])
+        .with_record_fields([(2, Arc::clone(&fields))]);
+        let input = RowSchema::with_types(
+            vec!["hidden".into(), "text".into(), "record".into()],
+            vec![
+                Some(ColumnType::Integer),
+                Some(ColumnType::Text),
+                Some(ColumnType::Record),
+            ],
+        );
+        let row = crate::PhysicalRow::from_values(vec![
+            Value::Int(99),
+            Value::Str("shared".repeat(1_000)),
+            Value::Record(vec![("n".into(), Value::Int(7)), ("s".into(), Value::Null)].into()),
+        ])
+        .with_lock_origin(crate::RowLockOrigin::new("items", "public.items", 1));
+        let retained = row.clone();
+        let mut output = ColumnSelection::with_bound_output(
+            Box::new(TableScan::from_physical_rows(input, vec![row])),
+            &[
+                ("first".into(), 1),
+                ("second".into(), 1),
+                ("record".into(), 2),
+            ],
+            bound.clone(),
+        )
+        .unwrap();
+        assert_eq!(output.row_schema(), &bound);
+        let batches = crate::physical::run_to_batches(&mut output).unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].schema, bound);
+        let result = &batches[0].rows[0];
+        for (output, input) in [(0, 1), (1, 1), (2, 2)] {
+            assert!(std::ptr::eq(
+                result.value(output).unwrap(),
+                retained.value(input).unwrap()
+            ));
+        }
+        assert_eq!(result.lock_origins().len(), 1);
+        assert!(Arc::ptr_eq(
+            batches[0].schema.record_fields(2).unwrap(),
+            &fields
+        ));
+    }
+
+    #[test]
+    fn bound_output_rejects_changed_columns_types_and_nonpositional_descriptors() {
+        use uqa_sql::ColumnType;
+
+        let input = RowSchema::with_types(vec!["value".into()], vec![Some(ColumnType::Integer)]);
+        let other_type = RowSchema::with_types(vec!["value".into()], vec![Some(ColumnType::Text)]);
+        let wider = RowSchema::with_types(
+            vec!["hidden".into(), "value".into()],
+            vec![Some(ColumnType::Integer); 2],
+        );
+        let nonpositional = RowSchema::select(&wider, &[("value".into(), "value".into())]);
+        for (columns, bound) in [
+            (vec![("renamed".into(), 0)], input.clone()),
+            (vec![], input.clone()),
+            (vec![("value".into(), 1)], input.clone()),
+            (vec![("value".into(), 0)], other_type),
+            (vec![("value".into(), 0)], nonpositional),
+        ] {
+            let child = Box::new(TableScan::from_physical_rows(input.clone(), vec![]));
+            assert!(ColumnSelection::with_bound_output(child, &columns, bound).is_err());
+        }
     }
 }

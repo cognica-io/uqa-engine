@@ -13501,6 +13501,45 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bound_output_preserves_metadata_shared_values_and_lock_origins",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/column_selection.rs",
+      "capability": "Declared derived-query output",
+      "workload": "A declared derived output selects one text slot twice and a composite slot from a wider physical row.",
+      "invariant": "Output collations, record fields, column order and lock origins survive; both repeated values share the original payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bound_output_rejects_changed_columns_types_and_nonpositional_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/column_selection.rs",
+      "capability": "Declared derived-query output",
+      "workload": "Malformed output bindings change a name, width, input position, type or positional descriptor.",
+      "invariant": "Each incompatible binding fails before the input can open.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-pg-server",
+      "kind": "test",
+      "test": "routine_planning_and_error_context_match_postgresql_over_tcp",
+      "cases": 1,
+      "source": "crates/uqa-pg-server/tests/server/simple_query.rs",
+      "capability": "Routine planning and PostgreSQL protocol diagnostics",
+      "workload": "The independent 141-statement PostgreSQL routine-planning transcript runs over a real TCP connection.",
+      "invariant": "Rows, types, command completion and ordered error contexts match the independent PostgreSQL reference.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
