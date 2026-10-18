@@ -77,6 +77,9 @@ impl ExpressionContext<'_> {
                     .quantified_operator(args, dispatch == FunctionDispatch::AnyOperator)
                     .map(Some);
             }
+            Some(dispatch @ (FunctionDispatch::DistinctNot | FunctionDispatch::RowDistinct)) => {
+                return self.distinct_boolean(dispatch, args).map(Some);
+            }
             Some(FunctionDispatch::IsDistinct | FunctionDispatch::ValueIsDistinct) => {
                 let [lhs, rhs] = args else {
                     return Err(SQLError::Internal("invalid distinct operands".into()));
@@ -115,6 +118,22 @@ impl ExpressionContext<'_> {
             return Ok(None);
         }
         self.coalesce_or_minmax(expression, name, args).map(Some)
+    }
+
+    fn distinct_boolean(
+        &self,
+        dispatch: FunctionDispatch,
+        args: &[Expr],
+    ) -> Result<TypedNode, SQLError> {
+        let expression = if dispatch == FunctionDispatch::DistinctNot {
+            let [argument] = args else {
+                return Err(SQLError::Internal("invalid distinct negation".into()));
+            };
+            Expr::Not(Box::new(argument.clone()))
+        } else {
+            Expr::Or(args.to_vec())
+        };
+        self.encode(&expression, Some(&ColumnType::Boolean))
     }
 
     fn coalesce_or_minmax(

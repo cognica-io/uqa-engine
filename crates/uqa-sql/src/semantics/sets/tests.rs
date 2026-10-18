@@ -257,3 +257,16 @@ fn execution_validation_processes_window_keys_like_a_target_list() {
         validate(sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
     }
 }
+
+#[test]
+fn generated_distinct_booleans_accept_set_returning_comparisons() {
+    for sql in [
+        "SELECT generate_series(1,2) IS NOT DISTINCT FROM 1",
+        "SELECT ROW(generate_series(1,2), 1) IS DISTINCT FROM ROW(1, 1)",
+        "SELECT ROW(generate_series(1,2), 1) IS NOT DISTINCT FROM ROW(1, 1)",
+    ] {
+        validate(sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    let error = validate("SELECT NOT (generate_series(1,2) IS DISTINCT FROM 1)").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+}

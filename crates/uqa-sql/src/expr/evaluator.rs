@@ -161,6 +161,15 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 if let Some(hook) = ctx.engine {
                     hook.require_builtin_execute(binding)?;
                 }
+                if let Some(dispatch) = binding.dispatch {
+                    if let Some(result) =
+                        super::eval_distinct_boolean(dispatch, args.len(), |index| {
+                            eval(&args[index], ctx)
+                        })
+                    {
+                        return result;
+                    }
+                }
                 if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
                     binding.dispatch
                 {

@@ -278,6 +278,8 @@ pub fn bound_scalar_function_strictness(
             | FunctionDispatch::AllOperator
             | FunctionDispatch::ValueNullTest { .. }
             | FunctionDispatch::BooleanTest(_)
+            | FunctionDispatch::DistinctNot
+            | FunctionDispatch::RowDistinct
             | FunctionDispatch::ValueIsDistinct
             | FunctionDispatch::IsDistinct => Some(false),
             FunctionDispatch::Enum { operation, .. } => Some(operation.is_strict()),

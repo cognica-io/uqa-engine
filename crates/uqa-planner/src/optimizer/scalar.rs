@@ -209,7 +209,15 @@ fn optimize_scalar(
             for order in &mut order_by {
                 optimize_scalar_slot(&mut order.expr, config)?;
             }
-            let args = if constants::is_coalesce(&name, binding.as_ref()) {
+            let args = if binding.as_ref().is_some_and(|binding| {
+                binding.dispatch == Some(uqa_sql::ast::FunctionDispatch::RowDistinct)
+            }) {
+                // PostgreSQL simplifies the generated disjunction in order, including an unreachable set-returning field after a constant true comparison.
+                match optimize_boolean(args, false, config)? {
+                    ScalarExpr::Or(items) => items,
+                    simplified => return Ok(simplified),
+                }
+            } else if constants::is_coalesce(&name, binding.as_ref()) {
                 optimize_coalesce(args, config)?
             } else {
                 optimize_list(args, config)?

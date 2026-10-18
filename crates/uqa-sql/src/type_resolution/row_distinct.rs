@@ -49,7 +49,11 @@ pub(crate) fn expanded(original: &ScalarExpr, bound: &ScalarExpr) -> bool {
     }
     match bound {
         ScalarExpr::Literal(Value::Bool(false)) => left.is_empty(),
-        ScalarExpr::Or(items) => {
+        ScalarExpr::Func {
+            binding: Some(binding),
+            args: items,
+            ..
+        } if binding.dispatch == Some(FunctionDispatch::RowDistinct) => {
             left.len() > 1
                 && items.len() == left.len()
                 && items.iter().all(|item| {
@@ -85,7 +89,18 @@ macro_rules! syntax {
             match comparisons.len() {
                 0 => $ty::Literal(Value::Bool(false)),
                 1 => comparisons.pop().expect("one field comparison"),
-                _ => $ty::Or(comparisons),
+                _ => {
+                    let binding = FunctionBinding::dispatched(FunctionDispatch::RowDistinct);
+                    $ty::Func {
+                        name: binding.name.clone(),
+                        binding: Some(binding),
+                        args: comparisons,
+                        distinct: false,
+                        order_syntax: FunctionOrderSyntax::Ordinary,
+                        order_by: Vec::new(),
+                        filter: None,
+                    }
+                }
             }
         }
 

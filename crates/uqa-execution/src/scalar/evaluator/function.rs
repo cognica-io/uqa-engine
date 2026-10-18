@@ -33,6 +33,15 @@ pub(super) fn evaluate_expression(
     if let Some(clause) = uqa_sql::catalog::collations::expression::scalar_clause(expression)? {
         return eval_scalar_inner(clause.argument, context, control);
     }
+    initialize_call(name, binding, context)?;
+    if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
+        if let Some(result) = uqa_sql::expr::eval_distinct_boolean(dispatch, args.len(), |index| {
+            let value = eval_scalar_inner(&args[index], context, control)?;
+            Ok((*value).clone())
+        }) {
+            return plain(result?, control);
+        }
+    }
     evaluate_function(name, binding, args, context, control)
 }
 
@@ -60,7 +69,6 @@ fn evaluate_function(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    initialize_call(name, binding, context)?;
     if let Some((binding, FunctionDispatch::NumericOperator(operator))) =
         binding.and_then(|binding| binding.dispatch.map(|dispatch| (binding, dispatch)))
     {

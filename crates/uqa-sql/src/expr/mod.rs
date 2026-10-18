@@ -81,6 +81,7 @@ mod scalar_helpers;
 mod scalar_json;
 mod scalar_math;
 mod scalar_postgres;
+pub use scalar_postgres::eval_distinct_boolean;
 mod scalar_range;
 mod scalar_temporal;
 mod session_settings;

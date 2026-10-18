@@ -11,6 +11,7 @@ use crate::ast::FunctionDispatch;
 
 mod arrays;
 mod comparison;
+pub use comparison::eval_distinct_boolean;
 pub(super) use comparison::evaluate_with_context as eval_comparison_with_context;
 mod immutable;
 pub(super) use immutable::{
