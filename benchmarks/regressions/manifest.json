@@ -12863,7 +12863,7 @@
       "source": "crates/uqa-pg-regex/tests/stack.rs",
       "capability": "PostgreSQL regular expression bounded work",
       "workload": "10000 nested capturing and non-capturing groups compiled with hooks that set no stack limit.",
-      "invariant": "Compilation fails with REG_ETOOBIG at the 2 MB budget, the hooks never see a deeper stack, and no reserved byte remains."
+      "invariant": "Compilation fails with REG_ETOOBIG at the 2 MB budget and no reserved byte remains; the separate callback-boundary check verifies that the resource hook never sees a deeper stack."
     },
     {
       "package": "uqa-sql",
@@ -13365,6 +13365,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "lib",
+      "test": "failed_stack_allocation_releases_compilation_and_preserves_compiled_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/src/regex/tests.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "Injected stack allocation failure before initial compilation, after an abandoned compilation, and before execution of a retained expression.",
+      "invariant": "Every failed compilation releases its exact reservation; an execution failure clears output spans and leaves the compiled expression reusable."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "lib",
+      "test": "stack_callback_refuses_the_hard_limit_before_consulting_the_resource_hook",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/src/operation/tests.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "Direct callback checks at the hard stack limit, above the limit, and across a stack restart.",
+      "invariant": "The hard depth bound is enforced before the resource hook; a permitted callback observes its exact depth and restarting releases operation state."
     }
   ]
 }
