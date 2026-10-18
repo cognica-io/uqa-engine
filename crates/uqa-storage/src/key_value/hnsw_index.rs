@@ -227,6 +227,9 @@ impl VectorIndex for KeyValueHNSWIndex {
     fn index_kind(&self) -> &'static str {
         "hnsw"
     }
+    fn physical_configuration(&self) -> Option<crate::VectorIndexSpec> {
+        Some(crate::VectorIndexSpec::HNSW(self.params))
+    }
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
         self.add_many(doc_id, vec![vector])
     }
