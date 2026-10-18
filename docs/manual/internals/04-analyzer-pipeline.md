@@ -6,6 +6,8 @@ Common simple-lowercase configuration belongs to `uqa-analysis::token_filter`; e
 
 Japanese POS/word-stop/completion configuration lives in `kuromoji/config.rs`; `kuromoji/pipeline/configuration.rs` determines required resources and freezes canonical defaults. POS and case-sensitive stops release dictionaries consumed only during expansion. Case-insensitive stops, completion and simple lowercase retain exact runtime profiles. A shared snapshot resolves aliases outside cache locks, and descriptor limits apply after each default-set expansion. `kuromoji/builtins.rs` constructs the complete ordinary and completion pipelines with independent normalization and no resource I/O.
 
+Generic full lowercase and whitespace classification use the pinned Unicode 16 data in `uqa-analysis`, independently of the Rust compiler. Contextual sigma uses forward-only source cursors and full scalar mappings stream directly into the admitted output buffer. Descriptor context hashes describe those actual property sets and preserve the existing Unicode 16 wire identity. The exhaustive scalar/context and whitespace regression checks a digest captured independently from Rust 1.90; raw UTF-16, cancellation and allocation tests cover the same execution kernel.
+
 ## Ownership map
 
 | Concern | Owner | Primary representation |

@@ -40,6 +40,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve Unicode 16 full lowercase, contextual sigma, whitespace tokenization and stored analyzer identities across compiler upgrades, including Rust 1.95, instead of mixing different Unicode versions in one analysis pipeline.
+
 - Consume complete buffered terminal input after `LISTEN` instead of stopping after the first character and waiting for more input, preserving asynchronous notification delivery and UTF-8 commands.
 
 - Fix stack-depth errors for finite PL/pgSQL recursion in unoptimized builds by releasing query-construction scratch before row evaluation and keeping temporary SQL results off the common statement dispatcher, while preserving CONTEXT, cancellation and the existing frame-count and native stack limits.
