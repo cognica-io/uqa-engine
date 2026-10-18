@@ -58,6 +58,13 @@ pub(super) fn require_lateral_function_execute<S: Clone + Send + Sync + 'static>
                 }
             }
         }
+        super::function_source::require_argument_function_execute(
+            context.relational.catalog,
+            hook.as_ref(),
+            args,
+            input_schema,
+            params,
+        )?;
     }
     Ok(())
 }

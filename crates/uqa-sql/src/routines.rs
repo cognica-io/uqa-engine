@@ -229,12 +229,14 @@ pub fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
 }
 
 pub fn routine_returns_anonymous_record(def: &CreateFunction) -> bool {
-    def.output_params().is_empty()
-        && matches!(
-            &def.returns,
-            FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }
-                if canonical_routine_type_name(type_name) == "record"
-        )
+    let outputs = def.output_params();
+    match (outputs.as_slice(), &def.returns) {
+        ([output], _) => canonical_routine_type_name(&output.type_name) == "record",
+        ([], FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }) => {
+            canonical_routine_type_name(type_name) == "record"
+        }
+        _ => false,
+    }
 }
 
 pub struct StaticFunctionMatch {

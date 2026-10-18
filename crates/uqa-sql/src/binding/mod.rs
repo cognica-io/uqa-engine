@@ -609,19 +609,18 @@ impl SchemaScope {
                 } else {
                     None
                 };
-                let columns = user_function
-                    .as_ref()
-                    .map(|resolved| {
-                        crate::semantics::user_function_declared_columns(
-                            routines,
-                            &resolved.function,
-                            resolved.binding.invocation.as_deref(),
-                        )
-                    })
-                    .transpose()?
-                    .flatten()
-                    .or(catalog_columns)
-                    .map_or_else(
+                let columns = if let Some(resolved) = &user_function {
+                    crate::semantics::user_table_function_columns(
+                        routines,
+                        &resolved.function,
+                        resolved.binding.invocation.as_deref(),
+                        output_name,
+                        alias.as_deref(),
+                        column_aliases,
+                        *ordinality,
+                    )?
+                } else {
+                    catalog_columns.map_or_else(
                         || {
                             table_function_empty_schema(
                                 name,
@@ -635,7 +634,8 @@ impl SchemaScope {
                         |columns| {
                             apply_table_function_aliases(columns, column_aliases, *ordinality)
                         },
-                    );
+                    )
+                };
                 validate_table_function_alias_count(
                     alias.as_deref().unwrap_or(output_name),
                     columns.len(),

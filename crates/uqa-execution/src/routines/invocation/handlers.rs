@@ -427,10 +427,10 @@ fn shape_anonymous_record_outcome(
             [Value::Record(fields)] => fields.iter().map(|(_, value)| value.clone()).collect(),
             [Value::Row(values)] => values.values().to_vec(),
             [Value::Null] => vec![Value::Null; columns.len()],
-            _ if row.len() == columns.len() => row,
-            _ => return Err(anonymous_record_shape_error()),
+            _ => row,
         };
         if values.len() != columns.len() {
+            validate_types(&vec![None; values.len()])?;
             return Err(anonymous_record_shape_error());
         }
         if outcome.anonymous_record_column_types.is_none() && !has_runtime_descriptor {

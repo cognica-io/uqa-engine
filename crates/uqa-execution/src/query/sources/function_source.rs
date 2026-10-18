@@ -284,6 +284,16 @@ fn function_rows<'a, S: Clone + Send + Sync + 'static>(
             columns
         }
     };
+    let input_schema = outer_row
+        .as_ref()
+        .map_or_else(crate::RowSchema::default, |row| row.schema.clone());
+    require_argument_function_execute(
+        context.relational.catalog,
+        hook.as_ref(),
+        source.args,
+        &input_schema,
+        params,
+    )?;
     if let Some(columns) = deferred_columns {
         let rows = deferred_function_rows(
             &call,
@@ -299,36 +309,58 @@ fn function_rows<'a, S: Clone + Send + Sync + 'static>(
     Ok((output.columns, rows))
 }
 
+/// Initialize argument calls without evaluating them. Their retained routine identities must pass EXECUTE even when the scan is never fetched.
+pub(super) fn require_argument_function_execute(
+    catalog: &dyn uqa_sql::semantics::sets::SetFunctionCatalog,
+    runtime: &dyn crate::query::set_projection::SetFunctionRuntime,
+    arguments: &[uqa_sql::ScalarExpr],
+    schema: &crate::RowSchema,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    for argument in arguments {
+        argument.try_visit(&mut |expression| {
+            if let uqa_sql::ScalarExpr::Func {
+                name,
+                binding,
+                args,
+                ..
+            } = expression
+            {
+                if let Some(binding) = binding.as_ref().filter(|binding| binding.builtin) {
+                    runtime.require_builtin_execute(binding)?;
+                } else if let Some(resolved) = resolve_user_table_function(
+                    catalog,
+                    name,
+                    binding.as_ref(),
+                    args,
+                    schema,
+                    params,
+                    runtime,
+                )? {
+                    runtime.require_user_function_execute(&resolved.function)?;
+                }
+            }
+            Ok::<_, SQLError>(true)
+        })?;
+    }
+    Ok(())
+}
+
 /// The output columns of a user function in FROM, including an ordinality column, as its declared result and the FROM item's aliases name them.
 fn user_function_columns(
     catalog: &dyn uqa_sql::semantics::sets::SetFunctionCatalog,
     resolved: &uqa_sql::semantics::ResolvedUserTableFunction,
     source: &FunctionSource<'_>,
 ) -> Result<Vec<String>, SQLError> {
-    Ok(uqa_sql::semantics::user_function_declared_columns(
+    uqa_sql::semantics::user_table_function_columns(
         catalog,
         &resolved.function,
         resolved.binding.invocation.as_deref(),
-    )?
-    .map_or_else(
-        || {
-            uqa_sql::semantics::table_function_empty_schema(
-                source.name,
-                source.output_name,
-                source.alias,
-                source.column_aliases,
-                source.args.len(),
-                source.ordinality,
-            )
-        },
-        |columns| {
-            uqa_sql::semantics::apply_table_function_aliases(
-                columns,
-                source.column_aliases,
-                source.ordinality,
-            )
-        },
-    ))
+        source.output_name,
+        source.alias,
+        source.column_aliases,
+        source.ordinality,
+    )
 }
 
 /// The rows of a function call whose `width` columns are known before it runs. The call evaluates its arguments and starts at the first row request, so a consumer that requests none, such as `LIMIT 0`, never evaluates it.

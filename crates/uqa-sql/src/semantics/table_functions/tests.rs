@@ -260,3 +260,104 @@ fn user_functions_declare_their_from_columns_before_aliases() {
         None
     );
 }
+
+#[test]
+fn scalar_from_aliases_do_not_create_columns() {
+    for returns in ["int", "SETOF int", "TABLE (value int)"] {
+        let function = user_function(&format!(
+            "CREATE FUNCTION f() RETURNS {returns} LANGUAGE sql AS 'SELECT 1'"
+        ));
+        for ordinality in [false, true] {
+            let aliases = if ordinality {
+                vec!["a".into(), "b".into(), "c".into()]
+            } else {
+                vec!["a".into(), "b".into()]
+            };
+            let error = super::user_table_function_columns(
+                &NoRoutines,
+                &function,
+                None,
+                "f",
+                Some("x"),
+                &aliases,
+                ordinality,
+            )
+            .unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42P10"));
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "table \"x\" has {} columns available but {} columns specified",
+                    1 + usize::from(ordinality),
+                    aliases.len()
+                )
+            );
+        }
+    }
+    let function =
+        user_function("CREATE FUNCTION f() RETURNS SETOF record LANGUAGE sql AS 'SELECT 1, 2'");
+    assert_eq!(
+        super::user_table_function_columns(
+            &NoRoutines,
+            &function,
+            None,
+            "f",
+            Some("x"),
+            &["a".into(), "b".into()],
+            true
+        )
+        .unwrap(),
+        ["a", "b", "ordinality"]
+    );
+}
+
+#[test]
+fn record_column_definitions_keep_postgresql_validation_order() {
+    let function =
+        user_function("CREATE FUNCTION r() RETURNS SETOF record LANGUAGE sql AS 'SELECT 1, 2'");
+    for (names, types, state, message) in [
+        (
+            ["a", "b"],
+            ["nosuchtype", "setof int"],
+            "42704",
+            "type \"nosuchtype\" does not exist",
+        ),
+        (
+            ["a", "a"],
+            ["int", "int"],
+            "42701",
+            "column name \"a\" specified more than once",
+        ),
+        (
+            ["a", "b"],
+            ["int", "anyelement"],
+            "42P16",
+            "column \"b\" has pseudo-type anyelement",
+        ),
+        (
+            ["a", "a"],
+            ["anyelement", "int"],
+            "42701",
+            "column name \"a\" specified more than once",
+        ),
+    ] {
+        let error = validate_table_function_column_definition(
+            &NoRoutines,
+            ColumnDefinitionRequest {
+                name: "r",
+                binding: None,
+                user_function: Some(&function),
+                user_invocation: None,
+                args: &[],
+                declared_types: &types.map(String::from),
+                column_names: &names.map(String::from),
+            },
+            &RowSchema::default(),
+            &[],
+            &NoRoutines,
+        )
+        .expect_err(message);
+        assert_eq!(error.sqlstate(), Some(state));
+        assert_eq!(error.to_string(), message);
+    }
+}

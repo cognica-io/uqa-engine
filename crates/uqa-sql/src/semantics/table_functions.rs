@@ -125,6 +125,33 @@ pub fn user_function_declared_columns(
     )
 }
 
+/// Derive a user FROM function's width from its result type before applying aliases. Only an anonymous record takes its shape from the column definition list; aliases never add fields to a scalar result.
+pub fn user_table_function_columns(
+    routines: &dyn RoutineResolution,
+    function: &SQLUserFunction,
+    invocation: Option<&RoutineInvocationBinding>,
+    output_name: &str,
+    alias: Option<&str>,
+    column_aliases: &[String],
+    ordinality: bool,
+) -> Result<Vec<String>, SQLError> {
+    let columns = if column_definitions::user_function_result_class(routines, function, invocation)?
+        == column_definitions::ResultClass::Record
+    {
+        column_aliases.to_vec()
+    } else {
+        user_function_declared_columns(routines, function, invocation)?
+            .unwrap_or_else(|| vec![alias.unwrap_or(output_name).to_string()])
+    };
+    let columns = apply_table_function_aliases(columns, column_aliases, ordinality);
+    validate_table_function_alias_count(
+        alias.unwrap_or(output_name),
+        columns.len(),
+        column_aliases.len(),
+    )?;
+    Ok(columns)
+}
+
 pub fn resolve_user_table_function(
     routines: &dyn RoutineResolution,
     name: &str,
