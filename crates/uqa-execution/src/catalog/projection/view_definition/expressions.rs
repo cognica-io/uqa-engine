@@ -52,12 +52,8 @@ impl Deparser<'_> {
             ScalarExpr::Collated { expr, .. } => self.expression(expr, scope, subqueries),
             ScalarExpr::Param(index) => Ok(self.parameter(*index, scope)),
             ScalarExpr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, scope, subqueries),
-            ScalarExpr::And(items) | ScalarExpr::Or(items) => self.boolean_expression(
-                items,
-                matches!(expression, ScalarExpr::And(_)),
-                scope,
-                subqueries,
-            ),
+            ScalarExpr::And(items) => self.boolean_expression(items, true, scope, subqueries),
+            ScalarExpr::Or(items) => self.boolean_expression(items, false, scope, subqueries),
             ScalarExpr::Not(inner) => self.negation(inner, scope, subqueries),
             ScalarExpr::UnaryMinus(inner) => self.unary_minus(inner, scope, subqueries),
             ScalarExpr::IsNull { expr, negated } => Ok(self.parenthesize(format!(
@@ -461,14 +457,7 @@ impl Deparser<'_> {
             }
             // `get_rule_expr` prints a `DistinctExpr` as an operator.
             Some(FunctionDispatch::IsDistinct | FunctionDispatch::ValueIsDistinct) => {
-                let [left, right] = args else {
-                    return Err(SQLError::Internal("invalid distinct operands".into()));
-                };
-                return Ok(self.parenthesize(format!(
-                    "{} IS DISTINCT FROM {}",
-                    self.operand(left, 80, false, scope, subqueries)?,
-                    self.operand(right, 80, false, scope, subqueries)?
-                )));
+                return self.distinct_operator(args, scope, subqueries);
             }
             // A `ScalarArrayOpExpr`: the operator, then `ANY` or `ALL` over the parenthesized array.
             Some(dispatch @ (FunctionDispatch::AnyOperator | FunctionDispatch::AllOperator)) => {
