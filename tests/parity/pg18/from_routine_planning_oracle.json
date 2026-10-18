@@ -1,0 +1,524 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "schema",
+      "sql": "CREATE SCHEMA routine_from"
+    },
+    {
+      "id": "path",
+      "sql": "SET search_path TO routine_from, public"
+    },
+    {
+      "id": "table",
+      "sql": "CREATE TABLE data(x integer, y integer)"
+    },
+    {
+      "id": "rows",
+      "sql": "INSERT INTO data VALUES (2,20),(3,30)"
+    },
+    {
+      "id": "sequence",
+      "sql": "CREATE SEQUENCE calls"
+    },
+    {
+      "id": "create_table",
+      "sql": "CREATE FUNCTION f_table() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT x/0 FROM data'"
+    },
+    {
+      "id": "unfetched_table",
+      "sql": "SELECT * FROM f_table() LIMIT 0"
+    },
+    {
+      "id": "fetched_table",
+      "sql": "SELECT * FROM f_table()"
+    },
+    {
+      "id": "create_aggregate",
+      "sql": "CREATE FUNCTION f_aggregate() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT sum(x/0)::int FROM data'"
+    },
+    {
+      "id": "unfetched_aggregate",
+      "sql": "SELECT * FROM f_aggregate() LIMIT 0"
+    },
+    {
+      "id": "fetched_aggregate",
+      "sql": "SELECT * FROM f_aggregate()"
+    },
+    {
+      "id": "create_constant_aggregate",
+      "sql": "CREATE FUNCTION f_constant_aggregate() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT sum(1/0)::int FROM data'"
+    },
+    {
+      "id": "unfetched_constant_aggregate",
+      "sql": "SELECT * FROM f_constant_aggregate() LIMIT 0"
+    },
+    {
+      "id": "fetched_constant_aggregate",
+      "sql": "SELECT * FROM f_constant_aggregate()"
+    },
+    {
+      "id": "create_distinct",
+      "sql": "CREATE FUNCTION f_distinct() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT DISTINCT 1/0 FROM data'"
+    },
+    {
+      "id": "unfetched_distinct",
+      "sql": "SELECT * FROM f_distinct() LIMIT 0"
+    },
+    {
+      "id": "fetched_distinct",
+      "sql": "SELECT * FROM f_distinct()"
+    },
+    {
+      "id": "create_union",
+      "sql": "CREATE FUNCTION f_union() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT 1/0 UNION ALL SELECT 2'"
+    },
+    {
+      "id": "unfetched_union",
+      "sql": "SELECT * FROM f_union() LIMIT 0"
+    },
+    {
+      "id": "fetched_union",
+      "sql": "SELECT * FROM f_union()"
+    },
+    {
+      "id": "create_cte",
+      "sql": "CREATE FUNCTION f_cte() RETURNS SETOF int LANGUAGE sql STABLE AS 'WITH a AS (SELECT 1/0 AS x) SELECT x FROM a'"
+    },
+    {
+      "id": "unfetched_cte",
+      "sql": "SELECT * FROM f_cte() LIMIT 0"
+    },
+    {
+      "id": "fetched_cte",
+      "sql": "SELECT * FROM f_cte()"
+    },
+    {
+      "id": "create_subquery",
+      "sql": "CREATE FUNCTION f_subquery() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT (SELECT 1/0) FROM data'"
+    },
+    {
+      "id": "unfetched_subquery",
+      "sql": "SELECT * FROM f_subquery() LIMIT 0"
+    },
+    {
+      "id": "fetched_subquery",
+      "sql": "SELECT * FROM f_subquery()"
+    },
+    {
+      "id": "create_window",
+      "sql": "CREATE FUNCTION f_window() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT (sum(1/0) OVER ())::int FROM data'"
+    },
+    {
+      "id": "unfetched_window",
+      "sql": "SELECT * FROM f_window() LIMIT 0"
+    },
+    {
+      "id": "fetched_window",
+      "sql": "SELECT * FROM f_window()"
+    },
+    {
+      "id": "create_values",
+      "sql": "CREATE FUNCTION f_values() RETURNS SETOF int LANGUAGE sql STABLE AS 'VALUES (1/0),(2)'"
+    },
+    {
+      "id": "unfetched_values",
+      "sql": "SELECT * FROM f_values() LIMIT 0"
+    },
+    {
+      "id": "fetched_values",
+      "sql": "SELECT * FROM f_values()"
+    },
+    {
+      "id": "create_correlated",
+      "sql": "CREATE FUNCTION correlate(x int) RETURNS TABLE(a int, b int) LANGUAGE sql STABLE AS $$SELECT correlate.x, data.x FROM data ORDER BY data.x$$"
+    },
+    {
+      "id": "correlated",
+      "sql": "SELECT d.x, f.a, f.b FROM data d CROSS JOIN LATERAL correlate(d.y) f ORDER BY 1,2,3"
+    },
+    {
+      "id": "correlated_implicit",
+      "sql": "SELECT d.x, f.a, f.b FROM data d, correlate(d.y) f ORDER BY 1,2,3"
+    },
+    {
+      "id": "correlated_collision",
+      "sql": "SELECT data.x, f.a, f.b FROM data, correlate(data.y) f ORDER BY 1,2,3"
+    },
+    {
+      "id": "create_arg_error",
+      "sql": "CREATE FUNCTION arg_error(x int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT x + 1/0 FROM data$$"
+    },
+    {
+      "id": "arg_error_unfetched",
+      "sql": "SELECT * FROM data d, arg_error(d.x) f LIMIT 0"
+    },
+    {
+      "id": "create_cte_result",
+      "sql": "CREATE FUNCTION with_cte(x int) RETURNS TABLE(value bigint) LANGUAGE sql STABLE AS $$WITH a AS (SELECT x + 1 AS v) SELECT v FROM a UNION ALL SELECT x + 2$$"
+    },
+    {
+      "id": "cte_rows",
+      "sql": "SELECT * FROM with_cte(4)"
+    },
+    {
+      "id": "cte_correlated_rows",
+      "sql": "SELECT d.x, f.value FROM data d, with_cte(d.y) f ORDER BY 1,2"
+    },
+    {
+      "id": "create_lazy",
+      "sql": "CREATE FUNCTION lazy_rows() RETURNS SETOF bigint LANGUAGE sql STABLE AS $$SELECT DISTINCT nextval('calls') FROM data$$"
+    },
+    {
+      "id": "lazy_unfetched",
+      "sql": "SELECT * FROM lazy_rows() LIMIT 0"
+    },
+    {
+      "id": "lazy_sequence_unset",
+      "sql": "SELECT last_value, is_called FROM calls"
+    },
+    {
+      "id": "lazy_fetched",
+      "sql": "SELECT * FROM lazy_rows() ORDER BY 1"
+    },
+    {
+      "id": "lazy_repeated",
+      "sql": "SELECT * FROM lazy_rows() ORDER BY 1"
+    },
+    {
+      "id": "create_scalar",
+      "sql": "CREATE FUNCTION scalar_error(x int) RETURNS int LANGUAGE sql AS $$SELECT x/0$$"
+    },
+    {
+      "id": "scalar_unfetched",
+      "sql": "SELECT * FROM scalar_error(1) LIMIT 0"
+    },
+    {
+      "id": "scalar_fetched",
+      "sql": "SELECT * FROM scalar_error(1)"
+    },
+    {
+      "id": "create_plpgsql",
+      "sql": "CREATE FUNCTION procedural_error(x int) RETURNS int LANGUAGE plpgsql IMMUTABLE AS $$\nBEGIN\n  RETURN x/0;\nEND\n$$"
+    },
+    {
+      "id": "procedural_unfetched",
+      "sql": "SELECT * FROM procedural_error(1) LIMIT 0"
+    },
+    {
+      "id": "procedural_argument",
+      "sql": "SELECT * FROM generate_series(1, procedural_error(1)) LIMIT 0"
+    },
+    {
+      "id": "create_nested_sql",
+      "sql": "CREATE FUNCTION nested_sql(x int) RETURNS int LANGUAGE sql AS $$SELECT procedural_error(x)$$"
+    },
+    {
+      "id": "nested_sql",
+      "sql": "SELECT * FROM nested_sql(1)"
+    },
+    {
+      "id": "create_nested_plpgsql",
+      "sql": "CREATE FUNCTION nested_procedural(x int) RETURNS int LANGUAGE plpgsql AS $$BEGIN RETURN procedural_error(x); END$$"
+    },
+    {
+      "id": "nested_procedural",
+      "sql": "SELECT * FROM nested_procedural(1)"
+    },
+    {
+      "id": "create_record",
+      "sql": "CREATE FUNCTION record_rows() RETURNS SETOF record LANGUAGE sql AS $$SELECT 1, 2$$"
+    },
+    {
+      "id": "record_width",
+      "sql": "SELECT * FROM record_rows() AS (a int)"
+    },
+    {
+      "id": "create_record_plpgsql",
+      "sql": "CREATE FUNCTION procedural_rows() RETURNS SETOF record LANGUAGE plpgsql AS $$BEGIN RETURN NEXT ROW(1,2); END$$"
+    },
+    {
+      "id": "procedural_width",
+      "sql": "SELECT * FROM procedural_rows() AS (a int)"
+    },
+    {
+      "id": "create_volatile",
+      "sql": "CREATE FUNCTION volatile_rows() RETURNS SETOF int LANGUAGE sql VOLATILE AS $$SELECT 1/0 FROM data$$"
+    },
+    {
+      "id": "volatile_unfetched",
+      "sql": "SELECT * FROM volatile_rows() LIMIT 0"
+    },
+    {
+      "id": "volatile_fetched",
+      "sql": "SELECT * FROM volatile_rows()"
+    },
+    {
+      "id": "create_strict",
+      "sql": "CREATE FUNCTION strict_rows(x int) RETURNS SETOF int LANGUAGE sql STABLE STRICT AS $$SELECT x/0 FROM data$$"
+    },
+    {
+      "id": "strict_unfetched",
+      "sql": "SELECT * FROM strict_rows(1) LIMIT 0"
+    },
+    {
+      "id": "strict_null",
+      "sql": "SELECT * FROM strict_rows(NULL)"
+    },
+    {
+      "id": "create_configured",
+      "sql": "CREATE FUNCTION configured_rows() RETURNS SETOF int LANGUAGE sql STABLE SET work_mem = '4MB' AS $$SELECT 1/0 FROM data$$"
+    },
+    {
+      "id": "configured_unfetched",
+      "sql": "SELECT * FROM configured_rows() LIMIT 0"
+    },
+    {
+      "id": "create_definer",
+      "sql": "CREATE FUNCTION definer_rows() RETURNS SETOF int LANGUAGE sql STABLE SECURITY DEFINER AS $$SELECT 1/0 FROM data$$"
+    },
+    {
+      "id": "definer_unfetched",
+      "sql": "SELECT * FROM definer_rows() LIMIT 0"
+    },
+    {
+      "id": "check_off",
+      "sql": "SET check_function_bodies = off"
+    },
+    {
+      "id": "create_missing",
+      "sql": "CREATE FUNCTION missing_rows() RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT x FROM missing_relation$$"
+    },
+    {
+      "id": "missing_unfetched",
+      "sql": "SELECT * FROM missing_rows() LIMIT 0"
+    },
+    {
+      "id": "create_syntax",
+      "sql": "CREATE FUNCTION syntax_rows() RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT )$$"
+    },
+    {
+      "id": "syntax_unfetched",
+      "sql": "SELECT * FROM syntax_rows() LIMIT 0"
+    },
+    {
+      "id": "check_on",
+      "sql": "SET check_function_bodies = on"
+    },
+    {
+      "id": "create_unused_argument",
+      "sql": "CREATE FUNCTION unused_argument(a int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT 7 FROM data$$"
+    },
+    {
+      "id": "unused_argument",
+      "sql": "SELECT * FROM data d, unused_argument(10/(d.x-2)) f ORDER BY 1,2,3"
+    },
+    {
+      "id": "create_conditional_argument",
+      "sql": "CREATE FUNCTION conditional_argument(a int, flag boolean) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT CASE WHEN flag THEN a ELSE 7 END FROM data$$"
+    },
+    {
+      "id": "conditional_argument",
+      "sql": "SELECT * FROM data d, conditional_argument(10/(d.x-2), false) f ORDER BY 1,2,3"
+    },
+    {
+      "id": "create_collated",
+      "sql": "CREATE FUNCTION collated_arg(a text) RETURNS SETOF boolean LANGUAGE sql STABLE AS $$SELECT a < 'z' FROM data$$"
+    },
+    {
+      "id": "collated_arg",
+      "sql": "SELECT * FROM (VALUES ('a' COLLATE \"C\"),('x' COLLATE \"C\")) v(a), collated_arg(v.a) f ORDER BY 1,2"
+    },
+    {
+      "id": "create_catch",
+      "sql": "CREATE FUNCTION catch_error(x int) RETURNS text LANGUAGE plpgsql AS $$BEGIN IF x = 1 THEN BEGIN RETURN procedural_error(x)::text; EXCEPTION WHEN division_by_zero THEN RETURN SQLSTATE || '|' || SQLERRM; END; END IF; RETURN 'ok'; END$$"
+    },
+    {
+      "id": "catch_error",
+      "sql": "SELECT * FROM catch_error(1)"
+    },
+    {
+      "id": "catch_reused",
+      "sql": "SELECT * FROM catch_error(2)"
+    },
+    {
+      "id": "create_rethrow",
+      "sql": "CREATE FUNCTION rethrow_error(x int) RETURNS int LANGUAGE plpgsql AS $$BEGIN IF x = 1 THEN BEGIN RETURN procedural_error(x); EXCEPTION WHEN division_by_zero THEN RAISE; END; END IF; RETURN 2; END$$"
+    },
+    {
+      "id": "rethrow_error",
+      "sql": "SELECT * FROM rethrow_error(1)"
+    },
+    {
+      "id": "rethrow_reused",
+      "sql": "SELECT * FROM rethrow_error(2)"
+    },
+    {
+      "id": "create_handler_error",
+      "sql": "CREATE FUNCTION handler_error() RETURNS int LANGUAGE plpgsql AS $$BEGIN BEGIN RETURN 1/0; EXCEPTION WHEN division_by_zero THEN RETURN 2/0; END; END$$"
+    },
+    {
+      "id": "handler_error",
+      "sql": "SELECT * FROM handler_error()"
+    },
+    {
+      "id": "shadowed_caller_cte",
+      "sql": "WITH data AS (SELECT 50 AS x, 500 AS y) SELECT f.a, f.b FROM correlate(7) f ORDER BY 1,2"
+    },
+    {
+      "id": "missing_not_caller_cte",
+      "sql": "WITH missing_relation AS (SELECT 42 AS x) SELECT * FROM missing_rows() LIMIT 0"
+    },
+    {
+      "id": "single_rows_from",
+      "sql": "SELECT * FROM ROWS FROM (f_constant_aggregate()) LIMIT 0"
+    },
+    {
+      "id": "multi_rows_from",
+      "sql": "SELECT * FROM ROWS FROM (f_constant_aggregate(), f_values()) LIMIT 0"
+    },
+    {
+      "id": "ordinality_unfetched",
+      "sql": "SELECT * FROM f_constant_aggregate() WITH ORDINALITY LIMIT 0"
+    },
+    {
+      "id": "create_stable_record",
+      "sql": "CREATE FUNCTION stable_record() RETURNS SETOF record LANGUAGE sql STABLE AS $$SELECT 1/0, x FROM data$$"
+    },
+    {
+      "id": "record_unfetched",
+      "sql": "SELECT * FROM stable_record() AS (a int, b int) LIMIT 0"
+    },
+    {
+      "id": "record_wrong_width",
+      "sql": "SELECT * FROM stable_record() AS (a int) LIMIT 0"
+    },
+    {
+      "id": "create_constant_expression",
+      "sql": "CREATE FUNCTION constant_expression() RETURNS int LANGUAGE plpgsql AS $$BEGIN RETURN 1/0; END$$"
+    },
+    {
+      "id": "constant_expression",
+      "sql": "SELECT * FROM constant_expression()"
+    },
+    {
+      "id": "create_assignment",
+      "sql": "CREATE FUNCTION assignment_error(n int) RETURNS int LANGUAGE plpgsql AS $$DECLARE value int; BEGIN value := n/0; RETURN value; END$$"
+    },
+    {
+      "id": "assignment_error",
+      "sql": "SELECT * FROM assignment_error(1)"
+    },
+    {
+      "id": "create_constant_assignment",
+      "sql": "CREATE FUNCTION constant_assignment() RETURNS int LANGUAGE plpgsql AS $$DECLARE value int; BEGIN value := 1/0; RETURN value; END$$"
+    },
+    {
+      "id": "constant_assignment",
+      "sql": "SELECT * FROM constant_assignment()"
+    },
+    {
+      "id": "create_query_error",
+      "sql": "CREATE FUNCTION query_error(n int) RETURNS SETOF int LANGUAGE plpgsql AS $$BEGIN RETURN QUERY SELECT n/0 FROM data; END$$"
+    },
+    {
+      "id": "query_error",
+      "sql": "SELECT * FROM query_error(1)"
+    },
+    {
+      "id": "create_perform_error",
+      "sql": "CREATE FUNCTION perform_error(n int) RETURNS int LANGUAGE plpgsql AS $$BEGIN PERFORM n/0 FROM data; RETURN n; END$$"
+    },
+    {
+      "id": "perform_error",
+      "sql": "SELECT * FROM perform_error(1)"
+    },
+    {
+      "id": "create_correlated_aggregate",
+      "sql": "CREATE FUNCTION correlated_aggregate(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT sum(n + x)::int FROM data$$"
+    },
+    {
+      "id": "correlated_aggregate",
+      "sql": "SELECT d.x, f.v FROM data d, correlated_aggregate(d.y) f(v) ORDER BY 1,2"
+    },
+    {
+      "id": "create_correlated_window",
+      "sql": "CREATE FUNCTION correlated_window(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT (n + row_number() OVER (ORDER BY x))::int FROM data$$"
+    },
+    {
+      "id": "correlated_window",
+      "sql": "SELECT d.x, f.v FROM data d, correlated_window(d.y) f(v) ORDER BY 1,2"
+    },
+    {
+      "id": "create_correlated_distinct",
+      "sql": "CREATE FUNCTION correlated_distinct(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT DISTINCT n + x FROM data$$"
+    },
+    {
+      "id": "correlated_distinct",
+      "sql": "SELECT d.x, f.v FROM data d, correlated_distinct(d.y) f(v) ORDER BY 1,2"
+    },
+    {
+      "id": "create_correlated_union",
+      "sql": "CREATE FUNCTION correlated_union(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT n + 1 UNION ALL SELECT n + 2$$"
+    },
+    {
+      "id": "correlated_union",
+      "sql": "SELECT d.x, f.v FROM data d, correlated_union(d.y) f(v) ORDER BY 1,2"
+    },
+    {
+      "id": "create_correlated_values",
+      "sql": "CREATE FUNCTION correlated_values(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$VALUES (n + 1),(n + 2)$$"
+    },
+    {
+      "id": "correlated_values",
+      "sql": "SELECT d.x, f.v FROM data d, correlated_values(d.y) f(v) ORDER BY 1,2"
+    },
+    {
+      "id": "create_correlated_subquery",
+      "sql": "CREATE FUNCTION correlated_subquery(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT (SELECT n + data.x) FROM data$$"
+    },
+    {
+      "id": "correlated_subquery",
+      "sql": "SELECT d.x, f.v FROM data d, correlated_subquery(d.y) f(v) ORDER BY 1,2"
+    },
+    {
+      "id": "create_correlated_derived",
+      "sql": "CREATE FUNCTION correlated_derived(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT v FROM (SELECT n + x AS v FROM data) nested$$"
+    },
+    {
+      "id": "correlated_derived",
+      "sql": "SELECT d.x, f.v FROM data d, correlated_derived(d.y) f(v) ORDER BY 1,2"
+    },
+    {
+      "id": "create_domain",
+      "sql": "CREATE DOMAIN positive AS int CHECK(VALUE>0)"
+    },
+    {
+      "id": "create_domain_error",
+      "sql": "CREATE FUNCTION domain_error() RETURNS SETOF positive LANGUAGE sql STABLE AS $$SELECT (1/0)::positive$$"
+    },
+    {
+      "id": "domain_unfetched",
+      "sql": "SELECT * FROM domain_error() LIMIT 0"
+    },
+    {
+      "id": "create_domain_values",
+      "sql": "CREATE FUNCTION domain_values(n int) RETURNS SETOF positive LANGUAGE sql STABLE AS $$VALUES (n::positive),((n+1)::positive)$$"
+    },
+    {
+      "id": "domain_rows",
+      "sql": "SELECT * FROM domain_values(2)"
+    },
+    {
+      "id": "domain_constraint_unfetched",
+      "sql": "SELECT * FROM domain_values(-1) LIMIT 0"
+    },
+    {
+      "id": "domain_constraint_fetched",
+      "sql": "SELECT * FROM domain_values(-1)"
+    }
+  ]
+}

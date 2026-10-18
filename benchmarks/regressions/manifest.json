@@ -13391,6 +13391,74 @@
       "capability": "PostgreSQL regular expression bounded work",
       "workload": "Direct callback checks at the hard stack limit, above the limit, and across a stack restart.",
       "invariant": "The hard depth bound is enforced before the resource hook; a permitted callback observes its exact depth and restarting releases operation state."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "from_routine_planning_matches_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/set_returning_contexts.rs",
+      "capability": "Routine planning, demand and diagnostic preservation",
+      "workload": "PostgreSQL 18.4 FROM-routine queries across general and correlated bodies, LIMIT 0, nested errors, exception handlers and persistent reopening.",
+      "invariant": "Rows, types and ordered diagnostic fields match PostgreSQL; sequence observations prove zero execution for unfetched bodies and fresh execution on each consumed call.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_sources_run_once_on_pull_and_remain_unused_when_closed_without_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/deferred/tests.rs",
+      "capability": "Routine planning, demand and diagnostic preservation",
+      "workload": "Open, optional repeated pulls and close of a deferred physical source.",
+      "invariant": "Producer invocations are exactly zero without demand and exactly one across repeated pulls.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "failed_operator_initialization_cannot_be_pulled_and_is_still_closed",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/deferred/tests.rs",
+      "capability": "Routine planning, demand and diagnostic preservation",
+      "workload": "Deferred operator fails during initialization before any row can be produced.",
+      "invariant": "The typed first error is preserved; initialization runs once, subsequent pulls cannot execute the failed input, and close releases it.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "procedural_simple_expressions_keep_parameters_even_with_forced_custom_plans",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/statement_planning/prepared/selection/tests.rs",
+      "capability": "Routine planning, demand and diagnostic preservation",
+      "workload": "Two PL/pgSQL simple-expression executions with different variables under force_custom_plan.",
+      "invariant": "The generic plan is built and costed once, retains runtime parameters and does not create a custom plan.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "table_routine_exact_overload_binding_reaches_dml_and_correlated_lateral_sources",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_routine_identity.rs",
+      "capability": "Routine planning, demand and diagnostic preservation",
+      "workload": "Overloaded FROM routines with typed scalar subqueries across UPDATE, DELETE, MERGE and a correlated lateral source.",
+      "invariant": "The analyzed bigint invocation and declared output column survive planning and execution without unknown-type reselection."
     }
   ]
 }
