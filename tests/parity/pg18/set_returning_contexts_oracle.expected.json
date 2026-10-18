@@ -9,7 +9,7 @@
       "--notices"
     ],
     "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "71efa6bb85405976196f987f19294ad441c704ee38ee3da9053175da311436ef"
+    "input_sha256": "3e9ba68af9d0cebdd002b33c47740b41dd8034525ef21d74b0dbcac07f0937df"
   },
   "cases": [
     {
@@ -6887,6 +6887,78 @@
         {
           "columns": [
             "review_plan_sequence_set"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_cast_source_alias",
+      "sql": "SELECT * FROM review_plan_cast(4) AS scalar_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "scalar_name"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_cast_named_column",
+      "sql": "SELECT scalar_name FROM review_plan_cast(4) AS scalar_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "scalar_name"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_cast_qualified_column",
+      "sql": "SELECT scalar_name.scalar_name FROM review_plan_cast(4) AS scalar_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "scalar_name"
           ],
           "type_oids": [
             20

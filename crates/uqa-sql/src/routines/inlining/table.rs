@@ -17,7 +17,8 @@ use crate::plan::QueryPlan;
 pub struct InlineRoutineQuery {
     pub identity: [u8; 16],
     pub query: Box<QueryPlan>,
-    pub columns: Vec<String>,
+    /// Declared OUT names or composite attributes; a scalar result is named by its FROM alias.
+    pub declared_columns: Option<Vec<String>>,
 }
 
 impl RoutineInliningContext<'_> {
@@ -115,13 +116,11 @@ impl RoutineInliningContext<'_> {
         if !coerce_result(block, &layout, &result) {
             return Ok(None);
         }
-        let local_name = crate::routines::routine_local_name(&definition.name)?;
-        let columns = crate::semantics::user_function_declared_columns(
+        let declared_columns = crate::semantics::user_function_declared_columns(
             self.routines,
             &function,
             Some(invocation),
-        )?
-        .unwrap_or_else(|| vec![local_name]);
+        )?;
         let mut invalid = false;
         query.rewrite_scalar_expressions(&mut |node| {
             if let ScalarExpr::Param(index) = node {
@@ -140,7 +139,7 @@ impl RoutineInliningContext<'_> {
         Ok(Some(InlineRoutineQuery {
             identity,
             query,
-            columns,
+            declared_columns,
         }))
     }
 }

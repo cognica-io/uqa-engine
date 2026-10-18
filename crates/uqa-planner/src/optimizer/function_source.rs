@@ -43,7 +43,9 @@ pub(super) fn optimize(
             nested.active_inline_routines.push(inlined.identity);
             super::traversal::optimize_query(&mut inlined.query, &nested, aggregates)?;
             let columns = uqa_sql::semantics::apply_table_function_aliases(
-                inlined.columns,
+                inlined
+                    .declared_columns
+                    .unwrap_or_else(|| vec![alias.as_deref().unwrap_or(output_name).to_string()]),
                 column_aliases,
                 false,
             );

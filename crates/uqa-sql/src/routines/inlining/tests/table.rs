@@ -15,7 +15,7 @@ fn table_inlining_retains_result_assignment_and_external_parameters() {
         .prepare_table(&binding, &[ScalarExpr::Param(3)], &[])
         .unwrap()
         .unwrap();
-    assert_eq!(replacement.columns, ["widened"]);
+    assert!(replacement.declared_columns.is_none());
     let RelationalPlan::QueryBlock(block) = &replacement.query.root else {
         panic!("SELECT body")
     };
@@ -92,4 +92,16 @@ fn ordinary_table_calls_replan_without_caching_function_body_results() {
         });
         assert!(catalog.context().requires_replanning(&plan), "{sql}");
     }
+}
+
+#[test]
+fn table_inlining_preserves_declared_names_for_out_parameters() {
+    let catalog = Catalog::new("CREATE FUNCTION named(x integer) RETURNS TABLE(result bigint) LANGUAGE sql STABLE AS $$SELECT x$$");
+    let binding = catalog.binding("named", &[Some(ColumnType::Integer)]);
+    let replacement = catalog
+        .context()
+        .prepare_table(&binding, &[integer(4)], &[])
+        .unwrap()
+        .unwrap();
+    assert_eq!(replacement.declared_columns.unwrap(), ["result"]);
 }
