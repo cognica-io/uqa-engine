@@ -132,9 +132,12 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
         folded.remove(&cte.name);
         scope.insert_deferred(cte.clone());
     }
+    let mut materialized = BTreeSet::new();
     for scheduled in crate::query::cte::strategy::schedule_plan_ctes(context.volatility, query)? {
         if scheduled.deferred {
             folded.insert(scheduled.plan.name.clone());
+        } else {
+            materialized.insert(scheduled.plan.name.clone());
         }
     }
     let mut lookup = scope.enter_relation_lookup_mode(query.relations_bound)?;
@@ -145,6 +148,10 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
         .collect::<Vec<_>>();
     let mut scope = lookup.enter_visible_ctes(names.iter().map(String::as_str));
     for cte in &mut query.ctes {
+        // Folded inputs are prepared at each selected reference; unused inputs never execute.
+        if !materialized.contains(&cte.name) {
+            continue;
+        }
         if let Some(body) = cte.body.query_mut() {
             prepare_query(context, body, params, &scope, &folded)?;
         }

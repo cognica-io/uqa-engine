@@ -14191,7 +14191,7 @@
       "cases": 4,
       "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
       "capability": "Named query routine initialization",
-      "workload": "152 independent PostgreSQL 18.4 messages covering views, folded and materialized CTEs, aliases, LIMIT 0, EXPLAIN, set calls and sequence-observed planning/execution on memory, SQLite, SQLite K/V and redb.",
+      "workload": "164 independent PostgreSQL 18.4 messages covering views, folded and materialized CTEs, aliases, LIMIT 0, EXPLAIN, set calls and sequence-observed planning/execution on memory, SQLite, SQLite K/V and redb.",
       "invariant": "Selected expressions preserve exact rows and privilege errors, constant preparation runs once per occurrence, and denied routines prevent preceding row-production effects.",
       "case_names": [
         "case_1_memory",
