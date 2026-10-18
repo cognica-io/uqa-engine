@@ -17,6 +17,7 @@ on:
       - "!scripts/fdw_ci.py"
       - "!scripts/tests/test_fdw_ci.py"
       - "!scripts/tests/test_premerge_ci.py"
+      - "!scripts/tests/test_registry_workflows.py"
       - "!scripts/usql-release.py"
       - "!scripts/usql-release/**"
       - "!scripts/install-usql.*"

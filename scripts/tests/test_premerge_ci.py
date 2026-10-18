@@ -44,6 +44,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             '      - "!scripts/fdw_ci.py"\n'
             '      - "!scripts/tests/test_fdw_ci.py"\n'
             '      - "!scripts/tests/test_premerge_ci.py"\n'
+            '      - "!scripts/tests/test_registry_workflows.py"\n'
             '      - "!scripts/usql-release.py"\n'
             '      - "!scripts/usql-release/**"\n'
             '      - "!scripts/install-usql.*"\n'
