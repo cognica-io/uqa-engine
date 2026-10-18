@@ -37,14 +37,10 @@ fn error(engine: &Engine, statement: &str) -> SQLError {
 
 /// The SQLSTATE, message and detail of an error.
 fn reported(error: &SQLError) -> (String, String, Option<String>) {
-    let detail = match error {
-        SQLError::Diagnostic { detail, .. } => detail.clone(),
-        _ => None,
-    };
     (
         error.sqlstate().unwrap_or_default().to_string(),
         error.to_string(),
-        detail,
+        error.detail().map(str::to_string),
     )
 }
 
