@@ -298,6 +298,20 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "catalog_publication_retains_completed_persistent_handles",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/open/tests/vector_publication.rs",
+      "capability": "Persistent vector build retention",
+      "workload": "Build IVF and HNSW over existing rows across all four native SQLite file modes, SQLite Key/Value and redb, publish the catalog and insert another row.",
+      "invariant": "Publication retains the completed handle and its populated cache when its physical configuration already matches, without reopening or rematerializing the index.",
+      "case_names": [
+        "case_1_ivf",
+        "case_2_hnsw"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "catalog_publication_retains_memory_vector_contents",
       "cases": 2,
       "source": "crates/uqa-engine/src/open/tests/vector_publication.rs",

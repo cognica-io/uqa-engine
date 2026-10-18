@@ -179,6 +179,11 @@ impl IndexRegistryPublication for Engine {
         if self.storage.backend.is_some()
             && state.persistence != uqa_sql::ast::RelationPersistence::Temporary
         {
+            if state.vector_indexes.read().get(field).is_some_and(|index| {
+                index.dimensions() == dimensions && index.physical_configuration() == Some(spec)
+            }) {
+                return Ok(());
+            }
             let index = self.build_vector_index_for_restore(table, field, dimensions, spec)?;
             state
                 .vector_indexes

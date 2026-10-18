@@ -622,7 +622,7 @@ The reserve preserves publication ordering: its watermark and Pending rows commi
 
 For a cross-store mutation, the engine prepares candidate row, catalog, index, graph, model, and cache state inside the transaction. Persistence succeeds before in-memory published registries advance. Rollback restores transaction-owned registries and discards provider changes.
 
-Index address reservations can refresh a session's catalog after an IVF or HNSW physical build but before its definition is registered. Execution completes registry publication before selecting the affected fields' final bindings; Engine attaches those fields to the existing persistent build through the provider's strict restore path. This does not rebuild the index or relax metadata validation. Memory and temporary indexes retain their populated handles, and rollback restores the previous definition and data together.
+Index address reservations can refresh a session's catalog after an IVF or HNSW physical build but before its definition is registered. Execution completes registry publication before selecting the affected fields' final bindings; Engine attaches displaced fields to the existing persistent build through the provider's strict restore path. A matching handle retains its populated cache: Storage's optional `VectorIndex::physical_configuration` exposes its declared method and parameters without loading index state, while ordinary provider generation checks still establish freshness. This does not rebuild the index or relax metadata validation. Memory and temporary indexes retain their populated handles, and rollback restores the previous definition and data together.
 
 ```mermaid
 sequenceDiagram

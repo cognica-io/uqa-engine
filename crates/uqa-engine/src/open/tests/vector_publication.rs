@@ -132,6 +132,47 @@ fn concurrent_vector_registration_retains_completed_bindings(#[case] method: &st
 }
 
 #[rstest::rstest]
+#[case::ivf("ivf")]
+#[case::hnsw("hnsw")]
+fn catalog_publication_retains_completed_persistent_handles(#[case] method: &str) {
+    let directory = tempfile::tempdir().unwrap();
+    for provider in 0..6 {
+        let engine = open(
+            provider,
+            &directory.path().join(format!("{method}-{provider}.db")),
+        );
+        engine.sql("CREATE TABLE docs(id int PRIMARY KEY, embedding vector(2)); INSERT INTO docs VALUES(9, ARRAY[-1.0,0.0])", &[]).unwrap();
+        engine
+            .with_implicit_storage_definition_transaction(|engine| {
+                let (spec, options) = spec(method);
+                engine.rebuild_vector_field_in_transaction("docs", "embedding", 2, spec)?;
+                let table = engine.try_table("docs")?.unwrap();
+                let built =
+                    std::ptr::from_ref(&table.vector_indexes.read()["embedding"]).cast::<()>();
+                engine.register_catalog_index(
+                    "docs_embedding",
+                    method,
+                    "docs",
+                    &["embedding".into()],
+                    &options,
+                )?;
+                let published = engine.try_table("docs")?.unwrap();
+                assert_eq!(
+                    built,
+                    std::ptr::from_ref(&published.vector_indexes.read()["embedding"]).cast::<()>(),
+                    "provider {provider} needlessly reopened the completed {method} build"
+                );
+                Ok(())
+            })
+            .unwrap();
+        engine
+            .sql("INSERT INTO docs VALUES(1, ARRAY[1.0,0.0])", &[])
+            .unwrap();
+        assert_eq!(ids(&engine), [Value::Int(1), Value::Int(9)]);
+    }
+}
+
+#[rstest::rstest]
 #[case::memory(false)]
 #[case::temporary(true)]
 fn catalog_publication_retains_memory_vector_contents(#[case] temporary: bool) {
