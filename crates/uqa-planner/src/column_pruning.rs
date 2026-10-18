@@ -107,20 +107,10 @@ pub fn column_prune_for_stmt_with_filter(
     collect_from_prune_columns(from, scope, &mut prune, &mut valid);
     collect_join_binding_prune_columns(catalog, resolution, from, &mut prune)?;
     collect_query_block_prune_columns(stmt, filter, scope, &mut prune, &mut valid);
-    let metadata_requested = prune
-        .values()
-        .any(|projection| !projection.metadata().is_empty());
-    if requires_full_projection {
-        return Ok(metadata_requested.then_some(prune));
-    }
     if !valid {
-        if metadata_requested {
-            for projection in prune.values_mut() {
-                projection.retain_all();
-            }
-            return Ok(Some(prune));
+        for projection in prune.values_mut() {
+            projection.retain_all();
         }
-        return Ok(None);
     }
     Ok(Some(prune))
 }

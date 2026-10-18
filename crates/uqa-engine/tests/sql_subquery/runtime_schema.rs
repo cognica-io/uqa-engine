@@ -12,6 +12,50 @@ use std::sync::{
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLTableFunctionResult};
 
+fn verify_streamed_document_fields(engine: &Engine) {
+    let direct = engine.sql("SELECT value, tag FROM docs", &[]).unwrap();
+    assert_eq!(direct.value_at(0, 0), Some(&Value::Int(7)));
+    assert_eq!(direct.value_at(0, 1), Some(&Value::Str("seven".into())));
+    for sql in [
+        "WITH rows AS (SELECT value, tag FROM docs) SELECT * FROM rows",
+        "WITH rows AS MATERIALIZED (SELECT value, tag FROM docs) SELECT * FROM rows",
+        "WITH rows AS NOT MATERIALIZED (SELECT value, tag FROM docs) SELECT * FROM rows",
+        "SELECT d.value, d.tag FROM (SELECT value, tag FROM docs) d",
+        "SELECT d.value, d.tag FROM (WITH rows AS (SELECT value, tag FROM docs) SELECT * FROM rows) d",
+    ] {
+        let actual = engine.sql(sql, &[]).unwrap_or_else(|error| panic!("{sql}: {error}"));
+        assert_eq!(actual.columns, direct.columns, "{sql}");
+        assert_eq!(actual.rows, direct.rows, "{sql}");
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn streamed_document_fields_survive_ctes_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("streamed-fields.db");
+    let engine = open(provider, &path);
+    engine.create_default_table("docs", Vec::new()).unwrap();
+    engine
+        .add_document(
+            "docs",
+            1,
+            std::collections::BTreeMap::from([
+                ("value".into(), Value::Int(7)),
+                ("tag".into(), Value::Str("seven".into())),
+            ]),
+        )
+        .unwrap();
+    verify_streamed_document_fields(&engine);
+    if provider != 0 {
+        drop(engine);
+        verify_streamed_document_fields(&open(provider, &path));
+    }
+}
+
 fn open(provider: usize, path: &std::path::Path) -> Engine {
     match provider {
         0 => Engine::new(),

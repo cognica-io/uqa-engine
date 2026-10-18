@@ -102,7 +102,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
         .as_ref()
         .map(SourceProjection::metadata)
         .unwrap_or_default();
-    let table_columns = uqa_sql::semantics::bound_source_column_names(
+    let mut table_columns = uqa_sql::semantics::bound_source_column_names(
         root_table
             .columns
             .iter()
@@ -119,6 +119,23 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
                 column_aliases.len()
             ),
         });
+    }
+    let open_document = root_table.columns.is_empty() && !root_table.columns_declared;
+    if open_document {
+        if let Some(wanted) = &wanted {
+            table_columns.extend(
+                wanted
+                    .requested_columns()
+                    .filter(|column| {
+                        !matches!(*column, XMIN_COLUMN | TABLE_OID_COLUMN)
+                            && !(*column == uqa_sql::semantics::DOC_ID_COLUMN
+                                && metadata.includes_doc_id())
+                            && !(*column == uqa_sql::semantics::SCORE_COLUMN
+                                && metadata.includes_score())
+                    })
+                    .map(str::to_owned),
+            );
+        }
     }
     // The name a filter writes for each column of the table: its alias, or its own name.
     let visible_names = table_columns
@@ -150,12 +167,16 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
         })
         .collect::<Vec<_>>();
     let (mut columns, mut schema): (Vec<_>, Vec<_>) = selected_columns.into_iter().unzip();
-    let include_table_oid = wanted
-        .as_ref()
-        .is_some_and(|wanted| wanted.contains(TABLE_OID_COLUMN));
-    let include_xmin = wanted
-        .as_ref()
-        .is_some_and(|wanted| wanted.contains(XMIN_COLUMN));
+    let include_table_oid = wanted.as_ref().is_some_and(|wanted| {
+        wanted
+            .requested_columns()
+            .any(|column| column == TABLE_OID_COLUMN)
+    });
+    let include_xmin = wanted.as_ref().is_some_and(|wanted| {
+        wanted
+            .requested_columns()
+            .any(|column| column == XMIN_COLUMN)
+    });
     if include_xmin {
         columns.push(XMIN_COLUMN.into());
         schema.push(XMIN_COLUMN.into());
@@ -174,6 +195,10 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
                 .map_err(SQLError::Internal)?,
         ),
     )?;
+    if open_document {
+        physical_schema =
+            crate::RowSchema::with_wildcard_hidden_positions(&physical_schema, 0..schema.len());
+    }
     let metadata_relation = uqa_sql::ast::InternalRelationId::allocate();
     let mut metadata_attributes = Vec::with_capacity(2);
     if metadata.includes_doc_id() {

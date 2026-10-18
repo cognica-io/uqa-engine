@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve explicitly requested schemaless document fields in streaming derived tables and CTEs instead of returning NULL after source projection.
+
 ## [0.6.0] - 2026-10-18
 
 ### Added

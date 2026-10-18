@@ -299,6 +299,22 @@
     {
       "package": "uqa-engine",
       "kind": "test",
+      "test": "streamed_document_fields_survive_ctes_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_subquery/runtime_schema.rs",
+      "capability": "Streaming schemaless document projection",
+      "workload": "Read explicit document fields directly, through derived tables and folded/materialized CTEs on memory, native SQLite, SQLite Key/Value and redb, including durable reopen.",
+      "invariant": "Every source shape preserves the requested field values and result columns instead of replacing the payload with NULL.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
       "test": "absent_temporal_unique_updates_keep_postgresql_equality",
       "cases": 42,
       "source": "crates/uqa-engine/tests/sessions/serializable_observations/temporal.rs",
