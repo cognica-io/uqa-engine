@@ -1,0 +1,56 @@
+name: Browser WASM build checks
+
+on:
+  pull_request:
+    types: [ready_for_review]
+    paths:
+      - rust-toolchain.toml
+      - crates/uqa-wasm/build.rs
+      - scripts/build-wasm.sh
+      - scripts/emscripten-flags.py
+      - tests/wasm/**
+      - .github/workflows/wasm-build-checks.yml
+
+permissions:
+  contents: read
+
+jobs:
+  wasm:
+    name: Build and execute the browser binding
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+      - name: Install the target for the workspace-selected Rust toolchain
+        run: rustup target add wasm32-unknown-emscripten
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+      - name: Build the browser WASM bundle
+        run: bash scripts/build-wasm.sh
+      - name: Verify browser binding behavior and error recovery
+        run: node --test tests/wasm/test_uqa_wasm.mjs
+      - name: Run Browser WASM examples
+        run: |
+          set -euo pipefail
+          for name in unified-search vector-knn graph-cypher storage-transactions extensibility; do
+            node "examples/browser/${name}.mjs"
+          done
