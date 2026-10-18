@@ -66,6 +66,12 @@ pub trait RoutineStatements {
         entry: &uqa_sql::prepared::entry::PreparedStatementPlan,
         params: &[SQLParam],
     ) -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError>;
+    /// Select the generic plan of an analyzed PL/pgSQL simple expression, preserving runtime parameters.
+    fn select_simple_expression_plan(
+        &self,
+        entry: &uqa_sql::prepared::entry::PreparedStatementPlan,
+        params: &[SQLParam],
+    ) -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError>;
     /// Execute an already selected plan under the current statement scope.
     fn execute_selected_body_plan(
         &self,

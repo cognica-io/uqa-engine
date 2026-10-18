@@ -113,7 +113,12 @@ fn execute_entry(
         let body = if definition.language == "plpgsql" {
             context.session.plpgsql_body(function, definition, None)?
         } else {
-            context.lookup.routine_body(function)?
+            context.lookup.routine_body(function).map_err(|error| {
+                error.with_context(uqa_sql::routines::diagnostics::sql_context(
+                    definition,
+                    uqa_sql::routines::diagnostics::SQLRoutineStage::Startup,
+                ))
+            })?
         };
         execute_compiled_body(context, function, definition, &body, bound, record_target)
     })
@@ -129,7 +134,7 @@ fn execute_compiled_body(
 ) -> Result<RoutineOutcome, SQLError> {
     match compiled {
         CompiledFunctionBody::PLpgSQL(parsed) => {
-            execute_plpgsql_language(context, definition, parsed, bound)
+            execute_plpgsql_language(context, definition, parsed, bound, record_target)
         }
         CompiledFunctionBody::SQL(statements) => execute_sql_language(
             context,
@@ -171,8 +176,10 @@ fn execute_plpgsql_language(
     definition: &CreateFunction,
     parsed: &uqa_sql::plpgsql::PLpgSQLFunction,
     bound: Vec<Value>,
+    record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
 ) -> Result<RoutineOutcome, SQLError> {
     let mut interpreter = Interpreter::new(context.runtime, definition, parsed, bound)?;
+    interpreter.set_record_target(context.types, record_target);
     interpreter.run(&parsed.action)?;
     Ok(interpreter.into_outcome())
 }

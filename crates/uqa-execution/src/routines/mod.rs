@@ -44,6 +44,7 @@ mod blocks;
 mod control_flow;
 mod cursors;
 mod datum;
+mod error_context;
 mod plans;
 pub mod preparation;
 mod records;
@@ -103,6 +104,8 @@ pub struct Interpreter<'a> {
     bindings: HashMap<String, Vec<usize>>,
     cursor_arguments: BTreeSet<usize>,
     err_stack: Vec<CaughtError>,
+    error_context_attached: bool,
+    record_target: Option<RecordReturnTarget<'a>>,
     set_rows: Vec<Vec<Value>>,
     ret: Value,
     ret_record_types: Option<Vec<Option<ColumnType>>>,
@@ -118,6 +121,11 @@ pub struct Interpreter<'a> {
 struct CaughtError {
     diagnostics: (String, String),
     cause: SQLError,
+}
+
+struct RecordReturnTarget<'a> {
+    catalog: &'a dyn uqa_sql::routines::declaration::RoutineTypeCatalog,
+    columns: Vec<uqa_sql::routines::result_check::SQLFunctionResultColumn>,
 }
 
 /// Maps variable names and positional parameters onto an activation record.

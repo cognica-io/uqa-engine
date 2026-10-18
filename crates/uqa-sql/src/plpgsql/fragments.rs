@@ -86,6 +86,25 @@ pub type PLpgSQLExpression = PLpgSQLFragment<Expr>;
 pub type PLpgSQLStatement = PLpgSQLFragment<Statement>;
 pub type PLpgSQLCursorArguments = PLpgSQLFragment<Vec<PLpgSQLCursorArgument>>;
 
+/// `PostgreSQL` prepares a generic plan for a single scalar SELECT without input relations, then evaluates it outside SPI. Its parameter-dependent errors therefore carry the procedural statement frame, not an embedded-query frame.
+pub fn is_simple_expression_plan(
+    catalog: &dyn crate::routines::RoutineResolution,
+    plan: &crate::plan::UnifiedPlan,
+) -> bool {
+    let crate::plan::UnifiedPlan::Query(query) = plan else {
+        return false;
+    };
+    let crate::plan::RelationalPlan::QueryBlock(block) = &query.root else {
+        return false;
+    };
+    query.ctes.is_empty()
+        && block.is_single_expression()
+        && !crate::semantics::sets::static_setness::expression_may_return_set_statically(
+            catalog,
+            &block.projections[0].expr,
+        )
+}
+
 impl PLpgSQLExpression {
     pub fn parse_statement(&self) -> Result<Statement, SQLError> {
         self.parse()

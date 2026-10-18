@@ -238,6 +238,7 @@ impl Interpreter<'_> {
             self.ret_record_types = self.return_record_types(value)?;
             let source = self.return_value_type(value)?;
             let value = self.eval_return_value(value)?;
+            self.validate_record_return(&value, self.ret_record_types.as_deref())?;
             self.ret = match &self.def.returns {
                 FunctionReturns::Scalar { type_name } => super::coerce_routine_value_from(
                     self.services.expressions,
@@ -302,7 +303,9 @@ impl Interpreter<'_> {
                 message: "RETURN NEXT must have a parameter".into(),
             });
         };
+        let types = self.return_record_types(value)?;
         let value = self.eval_return_value(value)?;
+        self.validate_record_return(&value, types.as_deref())?;
         let value = match &self.def.returns {
             FunctionReturns::SetOf { type_name } => {
                 coerce_routine_value(self.services.expressions, &value, type_name)?

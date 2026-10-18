@@ -197,6 +197,34 @@ impl StatementBindingScope for Inputs {
 }
 
 #[test]
+fn procedural_simple_expressions_keep_parameters_even_with_forced_custom_plans() {
+    let inputs = Inputs {
+        mode: "force_custom_plan",
+        ..Inputs::default()
+    };
+    let mut entry = inputs.entry.borrow().as_ref().unwrap().clone();
+    for value in [1, 2] {
+        let selected = select_simple_expression_entry(
+            &inputs.context(),
+            &entry,
+            &[SQLParam::typed_scalar(
+                Value::Int(value),
+                ColumnType::Integer,
+            )],
+        )
+        .unwrap();
+        assert!(has_parameter(&selected.plan));
+        assert!(selected.update.custom_cost.is_none());
+        entry.record_execution(selected.update);
+    }
+    assert_eq!(entry.generic_plans, 2);
+    assert_eq!(
+        inputs.events.borrow().as_slice(),
+        ["optimize.generic", "cost.generic"]
+    );
+}
+
+#[test]
 fn routine_owned_definition_selects_once_without_the_named_registry() {
     let inputs = Inputs {
         mode: "force_generic_plan",

@@ -22,6 +22,11 @@ fn fragment() -> PreparedFragment {
         .prepared_definition(&UnifiedPlan::lower(syntax.clone()), &[])
         .unwrap();
     PreparedFragment {
+        source: Arc::new(PLpgSQLSource {
+            query: Arc::from("SELECT 1"),
+            mode: uqa_sql::plpgsql::PLpgSQLParseMode::Statement,
+        }),
+        simple_expression: true,
         syntax,
         analysis,
         parameter_types: definition.parameter_types.clone(),

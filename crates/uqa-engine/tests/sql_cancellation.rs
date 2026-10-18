@@ -97,7 +97,10 @@ fn assert_observed_cancel_request<T: std::fmt::Debug>(
     );
     let error = result.unwrap_err();
     assert!(
-        matches!(error, SQLError::Cancelled(QueryCancelled::USER_REQUEST)),
+        matches!(
+            error.primary(),
+            SQLError::Cancelled(QueryCancelled::USER_REQUEST)
+        ),
         "expected the observed cancellation, got {error:?}"
     );
     assert_eq!(error.sqlstate(), Some("57014"));

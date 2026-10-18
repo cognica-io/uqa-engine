@@ -150,6 +150,22 @@ impl RoutineStatements for Engine {
             params,
         )
     }
+    fn select_simple_expression_plan(
+        &self,
+        entry: &uqa_sql::prepared::entry::PreparedStatementPlan,
+        params: &[SQLParam],
+    ) -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError> {
+        let _statement_thread = self.statement_thread_context().enter();
+        uqa_planner::statement_planning::prepared::selection::select_simple_expression_entry(
+            &uqa_planner::statement_planning::prepared::selection::PreparedPlanningContext {
+                session: self,
+                analysis: self.prepared_definition_context(),
+                optimization: self,
+            },
+            entry,
+            params,
+        )
+    }
     fn execute_selected_body_plan(
         &self,
         plan: &UnifiedPlan,

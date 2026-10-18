@@ -16,6 +16,20 @@ impl Interpreter<'_> {
     pub(super) fn exec_stmt(&mut self, stmt: &PLpgSQLStmt) -> Result<Flow, SQLError> {
         self.services.runtime.cancellation_token().check()?;
         match stmt {
+            PLpgSQLStmt::Located { line, statement } => {
+                let result = self.exec_stmt(statement);
+                match result {
+                    Err(error) if !self.error_context_attached => {
+                        self.error_context_attached = true;
+                        Err(error.with_context(self.statement_error_context(*line, statement)))
+                    }
+                    Ok(flow) => {
+                        self.error_context_attached = false;
+                        Ok(flow)
+                    }
+                    error => error,
+                }
+            }
             PLpgSQLStmt::Block(block) => self.exec_block(block),
             PLpgSQLStmt::Assign { target, expr } => self.exec_assignment(*target, expr),
             PLpgSQLStmt::If {

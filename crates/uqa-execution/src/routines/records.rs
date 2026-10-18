@@ -11,7 +11,66 @@ use super::{
     RoutineOutcome, SQLError, TriggerRoutineContext, Value,
 };
 
-impl Interpreter<'_> {
+impl<'a> Interpreter<'a> {
+    pub(super) fn set_record_target(
+        &mut self,
+        catalog: &'a dyn uqa_sql::routines::declaration::RoutineTypeCatalog,
+        target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
+    ) {
+        self.record_target = target.map(|columns| super::RecordReturnTarget {
+            catalog,
+            columns: columns.to_vec(),
+        });
+    }
+
+    pub(super) fn validate_record_return(
+        &self,
+        value: &Value,
+        declared: Option<&[Option<ColumnType>]>,
+    ) -> Result<(), SQLError> {
+        let Some(target) = &self.record_target else {
+            return Ok(());
+        };
+        if matches!(value, Value::Null) {
+            return Ok(());
+        }
+        if let Value::Row(row) = value {
+            if let Some(fields) = row.field_types() {
+                return uqa_sql::routines::result_check::validate_procedural_record_identity(
+                    target.catalog,
+                    fields,
+                    &target.columns,
+                );
+            }
+        }
+        let inferred;
+        let source = if let Some(declared) = declared {
+            declared
+        } else {
+            inferred = match value {
+                Value::Row(row) => row
+                    .iter()
+                    .map(uqa_sql::routines::invocation::runtime_record_column_type)
+                    .collect(),
+                Value::Record(fields) => fields
+                    .iter()
+                    .map(|(_, value)| {
+                        uqa_sql::routines::invocation::runtime_record_column_type(value)
+                    })
+                    .collect(),
+                _ => vec![uqa_sql::routines::invocation::runtime_record_column_type(
+                    value,
+                )],
+            };
+            &inferred
+        };
+        uqa_sql::routines::result_check::validate_anonymous_record_result(
+            target.catalog,
+            source,
+            &target.columns,
+            None,
+        )
+    }
     pub(super) fn datum_type(&self, index: usize) -> Option<ColumnType> {
         self.resolver().datum_type(index)
     }

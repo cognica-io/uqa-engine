@@ -38,7 +38,9 @@ pub enum SQLError {
     MissingParam(usize),
     #[error("vector dimension mismatch: expected {expected}, got {actual}")]
     VectorDimMismatch { expected: usize, actual: usize },
-    #[error("{function_name}: column `{table}.{field}` has no text index; create one with CREATE INDEX ... ON {table} USING gin ({field})")]
+    #[error(
+        "{function_name}: column `{table}.{field}` has no text index; create one with CREATE INDEX ... ON {table} USING gin ({field})"
+    )]
     TextIndexRequired {
         function_name: String,
         table: String,
@@ -60,6 +62,9 @@ pub enum SQLError {
         detail: Option<String>,
         hint: Option<String>,
     },
+    /// Routine traceback, independent of the primary diagnostic and its typed cause.
+    #[error("{source}")]
+    Context { source: Box<Self>, context: String },
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -69,7 +74,42 @@ impl SQLError {
     pub const fn code(&self) -> Option<&'static str> {
         match self {
             Self::NotificationRequiresSubscription => Some("NOTIFICATION_REQUIRES_SUBSCRIPTION"),
+            Self::Context { source, .. } => source.code(),
             _ => None,
+        }
+    }
+
+    /// Append an enclosing routine frame after the innermost error context.
+    pub fn with_context(self, frame: impl AsRef<str>) -> Self {
+        match self {
+            Self::Context {
+                source,
+                mut context,
+            } => {
+                context.push('\n');
+                context.push_str(frame.as_ref());
+                Self::Context { source, context }
+            }
+            source => Self::Context {
+                source: Box::new(source),
+                context: frame.as_ref().to_owned(),
+            },
+        }
+    }
+
+    /// `PostgreSQL` CONTEXT, with inner frames before their callers.
+    pub fn context(&self) -> Option<&str> {
+        match self {
+            Self::Context { context, .. } => Some(context),
+            _ => None,
+        }
+    }
+
+    /// The typed primary error, unaffected by an attached routine traceback.
+    pub fn primary(&self) -> &Self {
+        match self {
+            Self::Context { source, .. } => source.primary(),
+            _ => self,
         }
     }
 
@@ -123,6 +163,7 @@ impl SQLError {
     /// errors that do not carry a defined `SQLSTATE`.
     pub fn sqlstate(&self) -> Option<&str> {
         match self {
+            SQLError::Context { source, .. } => source.sqlstate(),
             SQLError::Cancelled(cancelled) => Some(cancelled.sqlstate()),
             SQLError::Parse(_) => Some("42601"), // syntax_error
             SQLError::ParseDiagnostic(diagnostic) => Some(&diagnostic.sqlstate),
@@ -145,6 +186,7 @@ impl SQLError {
     /// `PostgreSQL` DETAIL field, reported separately from the primary message.
     pub fn detail(&self) -> Option<&str> {
         match self {
+            SQLError::Context { source, .. } => source.detail(),
             SQLError::Diagnostic { detail, .. } => detail.as_deref(),
             SQLError::ParseDiagnostic(diagnostic) => diagnostic.detail.as_deref(),
             _ => None,
@@ -154,6 +196,7 @@ impl SQLError {
     /// `PostgreSQL` HINT field, reported separately from the primary message.
     pub fn hint(&self) -> Option<&str> {
         match self {
+            SQLError::Context { source, .. } => source.hint(),
             SQLError::Diagnostic { hint, .. } => hint.as_deref(),
             SQLError::ParseDiagnostic(diagnostic) => diagnostic.hint.as_deref(),
             _ => None,
@@ -163,6 +206,7 @@ impl SQLError {
     /// One-based character position in the submitted SQL, only when supplied by the parser.
     pub fn position(&self) -> Option<u32> {
         match self {
+            Self::Context { source, .. } => source.position(),
             Self::ParseDiagnostic(diagnostic) => u32::try_from(diagnostic.cursor_position)
                 .ok()
                 .filter(|position| *position != 0),
@@ -202,5 +246,33 @@ impl From<uqa_core::ValueRetentionError> for SQLError {
                 message: error.to_string(),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SQLError;
+
+    #[test]
+    fn routine_frames_preserve_primary_fields_and_typed_cancellation() {
+        let error = SQLError::Diagnostic {
+            sqlstate: "22012".into(),
+            message: "division by zero".into(),
+            detail: Some("original detail".into()),
+            hint: Some("original hint".into()),
+        }
+        .with_context("inner routine")
+        .with_context("outer routine");
+        assert_eq!(error.to_string(), "division by zero");
+        assert_eq!(error.sqlstate(), Some("22012"));
+        assert_eq!(error.detail(), Some("original detail"));
+        assert_eq!(error.hint(), Some("original hint"));
+        assert_eq!(error.context(), Some("inner routine\nouter routine"));
+        assert!(matches!(error.primary(), SQLError::Diagnostic { .. }));
+
+        let cancelled = SQLError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST)
+            .with_context("interrupted routine");
+        assert_eq!(cancelled.sqlstate(), Some("57014"));
+        assert!(matches!(cancelled.primary(), SQLError::Cancelled(_)));
     }
 }

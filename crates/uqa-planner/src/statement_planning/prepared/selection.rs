@@ -79,7 +79,7 @@ pub fn select_entry(
     entry: &PreparedStatementPlan,
     parameters: &[SQLParam],
 ) -> Result<PreparedPlanSelection, SQLError> {
-    select(context, entry, parameters, true)
+    select(context, entry, parameters, true, None)
 }
 
 /// A routine's owner has already checked or rebuilt its analyzed inputs and
@@ -90,7 +90,22 @@ pub fn select_analyzed_entry(
     entry: &PreparedStatementPlan,
     parameters: &[SQLParam],
 ) -> Result<PreparedPlanSelection, SQLError> {
-    select(context, entry, parameters, false)
+    select(context, entry, parameters, false, None)
+}
+
+/// PL/pgSQL's simple-expression executor requests a generic plan even when the session normally favors custom statement plans. Values remain runtime parameters.
+pub fn select_simple_expression_entry(
+    context: &PreparedPlanningContext<'_>,
+    entry: &PreparedStatementPlan,
+    parameters: &[SQLParam],
+) -> Result<PreparedPlanSelection, SQLError> {
+    select(
+        context,
+        entry,
+        parameters,
+        false,
+        Some("force_generic_plan"),
+    )
 }
 
 fn select(
@@ -98,8 +113,11 @@ fn select(
     entry: &PreparedStatementPlan,
     parameters: &[SQLParam],
     check_analysis: bool,
+    mode: Option<&str>,
 ) -> Result<PreparedPlanSelection, SQLError> {
-    let mode = context.session.plan_cache_mode()?;
+    let mode = mode
+        .map(str::to_owned)
+        .map_or_else(|| context.session.plan_cache_mode(), Ok)?;
     let needs_analysis = check_analysis && needs_analysis(&context.analysis, entry)?;
     let mut generic_plan = if needs_analysis {
         None

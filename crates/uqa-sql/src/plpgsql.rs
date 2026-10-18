@@ -100,7 +100,7 @@ fn collect_loop_local_vars_stmts(
     out: &mut std::collections::BTreeSet<usize>,
 ) {
     for stmt in stmts {
-        match stmt {
+        match stmt.unlocated() {
             PLpgSQLStmt::Block(block) => collect_loop_local_vars_block(block, out),
             PLpgSQLStmt::If {
                 then_body,
@@ -314,6 +314,11 @@ pub enum IntoTarget {
 /// Executable `PL/pgSQL` statement.
 #[derive(Debug, Clone)]
 pub enum PLpgSQLStmt {
+    /// Original parser statement position, retained independently of its executable fragments.
+    Located {
+        line: i64,
+        statement: Box<Self>,
+    },
     Block(PLpgSQLBlock),
     /// `target := expr` (also `=`). `target` indexes the datum table.
     Assign {
@@ -484,6 +489,7 @@ pub enum PLpgSQLReturnValue {
 /// restore-from-catalog and fresh DDL take the same path.
 mod binding;
 mod conditions;
+mod diagnostics;
 mod json_validation;
 mod lowering_expression;
 mod lowering_statement;
@@ -521,8 +527,9 @@ pub mod runtime_diagnostics;
 
 mod fragments;
 pub use fragments::{
-    PLpgSQLCompilationIdentity, PLpgSQLCompileMode, PLpgSQLCursorArguments, PLpgSQLExpression,
-    PLpgSQLFragment, PLpgSQLParseMode, PLpgSQLSource, PLpgSQLStatement,
+    is_simple_expression_plan, PLpgSQLCompilationIdentity, PLpgSQLCompileMode,
+    PLpgSQLCursorArguments, PLpgSQLExpression, PLpgSQLFragment, PLpgSQLParseMode, PLpgSQLSource,
+    PLpgSQLStatement,
 };
 
 mod parameters;

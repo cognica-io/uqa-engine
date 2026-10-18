@@ -54,6 +54,9 @@ fn procedural_generic_plans_fold_immutable_work_once_and_keep_dynamic_sql_uncach
         CREATE FUNCTION retained_loop() RETURNS integer LANGUAGE plpgsql AS $$
         DECLARE i integer; v integer;
         BEGIN FOR i IN 1..32 LOOP SELECT plan_constant() + i INTO v; END LOOP; RETURN v; END$$;
+        CREATE FUNCTION expression_loop() RETURNS integer LANGUAGE plpgsql AS $$
+        DECLARE i integer; v integer;
+        BEGIN FOR i IN 1..32 LOOP v := plan_constant() + i; END LOOP; RETURN v; END$$;
         CREATE FUNCTION dynamic_loop() RETURNS integer LANGUAGE plpgsql AS $$
         DECLARE i integer; v integer;
         BEGIN FOR i IN 1..32 LOOP EXECUTE 'SELECT plan_constant() + $1' INTO v USING i; END LOOP; RETURN v; END$$;
@@ -75,6 +78,13 @@ fn procedural_generic_plans_fold_immutable_work_once_and_keep_dynamic_sql_uncach
         evaluations.store(0, Ordering::Relaxed);
         assert_eq!(scalar(&engine, "SELECT retained_loop()"), Value::Int(39));
         assert_eq!(evaluations.load(Ordering::Relaxed), expected, "{mode}");
+        evaluations.store(0, Ordering::Relaxed);
+        assert_eq!(scalar(&engine, "SELECT expression_loop()"), Value::Int(39));
+        assert_eq!(
+            evaluations.load(Ordering::Relaxed),
+            1,
+            "simple expression: {mode}"
+        );
     }
     exec(
         &engine,

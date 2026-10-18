@@ -15,6 +15,34 @@ use super::{
     QueryPlan, RelationalPlan, ScalarExpr, SelectStmt, SourcePlan, TableFunctionPlan, CTE,
 };
 
+impl QueryBlockPlan {
+    /// One scalar SELECT with no relational clauses or subplans. The caller must also reject set-returning routines using its selected catalog.
+    pub fn is_single_expression(&self) -> bool {
+        matches!(self.compute, ComputePlan::Project)
+            && self.from.is_none()
+            && self.r#where.is_none()
+            && self.group_by.is_empty()
+            && self.grouping_sets.is_empty()
+            && self.having.is_none()
+            && self.windows.is_empty()
+            && !self.distinct
+            && self.distinct_on.is_empty()
+            && self.order_by.is_empty()
+            && self.limit.is_none()
+            && self.offset.is_none()
+            && self.locking.is_empty()
+            && self.subqueries.is_empty()
+            && self.projections.len() == 1
+            && {
+                let mut window = false;
+                self.projections[0]
+                    .expr
+                    .visit(&mut |node| window |= matches!(node, ScalarExpr::WindowCall { .. }));
+                !window
+            }
+    }
+}
+
 impl QueryPlan {
     /// Rewrite every physical scalar node owned by this query exactly once,
     /// including CTEs, relational sources, and scalar-subquery plans.

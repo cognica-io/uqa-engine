@@ -211,6 +211,14 @@ fn plpgsql_statement_may_mutate_engine(
 ) -> Result<bool, SQLError> {
     use crate::plpgsql::PLpgSQLStmt;
     match statement {
+        PLpgSQLStmt::Located { statement, .. } => plpgsql_statement_may_mutate_engine(
+            context,
+            datums,
+            statement,
+            visiting_views,
+            visiting_routines,
+            classification,
+        ),
         PLpgSQLStmt::Block(block) => plpgsql_block_may_mutate_engine(
             context,
             datums,

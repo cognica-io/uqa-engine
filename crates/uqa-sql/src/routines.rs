@@ -15,6 +15,7 @@ pub mod declaration;
 mod defaults;
 pub mod definition_output;
 pub mod dependencies;
+pub mod diagnostics;
 pub mod inlining;
 pub mod lifecycle;
 pub mod merge_columns;

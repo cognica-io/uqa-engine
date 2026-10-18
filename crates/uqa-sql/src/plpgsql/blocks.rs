@@ -23,7 +23,7 @@ fn visit_block(block: &PLpgSQLBlock, output: &mut BTreeSet<usize>) {
 }
 fn visit_statements(statements: &[PLpgSQLStmt], output: &mut BTreeSet<usize>) {
     for statement in statements {
-        match statement {
+        match statement.unlocated() {
             PLpgSQLStmt::Block(block) => visit_block(block, output),
             PLpgSQLStmt::If {
                 then_body,
