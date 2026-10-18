@@ -10,6 +10,9 @@ use std::collections::BTreeMap;
 
 type Records = BTreeMap<Vec<u8>, (RecordWriteKind, Vec<u8>)>;
 
+mod combined;
+mod split;
+
 fn spill(records: &Records, control: &StorageReadControl) -> Arc<SpilledRun> {
     let key_bytes = records.keys().map(|key| key.len() as u64).sum();
     let mut writer =
@@ -146,14 +149,42 @@ fn incremental_occurrence_validation_rechecks_fences_and_new_snapshots() {
     }
 }
 
+fn split_records(count: usize, control: &StorageReadControl) -> Records {
+    let values = payload();
+    let mut records = BTreeMap::new();
+    records.insert(
+        keys(control).pop().unwrap(),
+        (RecordWriteKind::Occurrence, values[2].clone()),
+    );
+    for id in 0..count {
+        let term = format!("term{id:04}");
+        for (projection, value) in [
+            (OccurrenceProjection::Score, &values[0]),
+            (OccurrenceProjection::Positions, &values[1]),
+        ] {
+            let mut address = OccurrenceAddress::table("docs");
+            address.projection = Some(projection);
+            address.field = Some("body");
+            address.term = Some(term.as_bytes());
+            address.cluster = Some(0);
+            records.insert(
+                address.encode(control).unwrap().to_vec(),
+                (RecordWriteKind::Occurrence, value.clone()),
+            );
+        }
+    }
+    records
+}
+
 #[test]
 fn incremental_occurrence_resolution_reads_spill_in_linear_work() {
     for count in [128, 512, 1024] {
         for advanced in [false, true] {
             for mode in [ResolutionMode::Command, ResolutionMode::Publication] {
-                let control = StorageReadControl::with_limit(2 << 20);
+                let control = StorageReadControl::with_limit(256 << 10);
                 let store = MemoryVersionStore::new(control.memory());
-                let base = store.snapshot().unwrap();
+                let base =
+                    crate::mvcc::test_support::WindowSnapshot::new(store.snapshot().unwrap());
                 if advanced {
                     store
                         .commit(
@@ -167,33 +198,12 @@ fn incremental_occurrence_resolution_reads_spill_in_linear_work() {
                         .unwrap();
                 }
                 let current = store.snapshot().unwrap();
-                let values = payload();
-                let mut records = BTreeMap::new();
-                records.insert(
-                    keys(&control).pop().unwrap(),
-                    (RecordWriteKind::Occurrence, values[2].clone()),
-                );
-                for id in 0..count {
-                    let term = format!("term{id:04}");
-                    for (projection, value) in [
-                        (OccurrenceProjection::Score, &values[0]),
-                        (OccurrenceProjection::Positions, &values[1]),
-                    ] {
-                        let mut address = OccurrenceAddress::table("docs");
-                        address.projection = Some(projection);
-                        address.field = Some("body");
-                        address.term = Some(term.as_bytes());
-                        address.cluster = Some(0);
-                        records.insert(
-                            address.encode(&control).unwrap().to_vec(),
-                            (RecordWriteKind::Occurrence, value.clone()),
-                        );
-                    }
-                }
+                let records = split_records(count, &control);
                 let run = spill(&records, &control);
                 let original =
                     PreparedRecordCommit::from_shared_spilled_run(run.clone(), &control).unwrap();
                 let before = run.read_io_counts();
+                write_counts::take();
                 let resolved = resolve(
                     &original,
                     &base,
@@ -203,6 +213,14 @@ fn incremental_occurrence_resolution_reads_spill_in_linear_work() {
                     &control,
                 )
                 .unwrap();
+                let written = write_counts::take();
+                if !advanced {
+                    let bytes: u64 = records.values().map(|(_, value)| value.len() as u64).sum();
+                    assert_eq!(written.bytes, bytes, "{written:?}");
+                    assert_eq!(written.copied, 0);
+                    base.assert_reads(1, 0);
+                    assert_eq!(base.requests(), count * 2);
+                }
                 let after = run.read_io_counts();
                 let physical_blocks = run.file_blocks();
                 let reads = after.0 - before.0 + after.1 - before.1;

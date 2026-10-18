@@ -83,7 +83,7 @@ pub(super) fn revision(
 
 impl Resolver<'_> {
     pub(super) fn preserve(&self, write: &PreparedRecordWrite) -> VersionResult<()> {
-        self.changes.replace(
+        self.changes.preserve(
             write.clone().with_kind(self.mode.kind(write.kind())),
             self.control,
         )
@@ -151,7 +151,11 @@ impl Resolver<'_> {
                         ));
                     }
                 }
-                self.replace(&marker, write.value())?;
+                if &*marker == write.key() {
+                    self.replace_current(write, write.value())?;
+                } else {
+                    self.replace(&marker, write.value())?;
+                }
                 self.invalidate(&marker)?;
             }
             (RecordWriteKind::Occurrence, Kind::Score(_) | Kind::Positions) => {
@@ -176,6 +180,8 @@ impl Resolver<'_> {
                         .preserve(write.clone().with_kind(RecordWriteKind::Canonical), control)?;
                 } else if let Kind::Score(cluster) = kind {
                     self.merge_cluster(mutation, write, Some(&paired), cluster)?;
+                } else if base.sequence() == current.sequence() {
+                    self.preserve(write)?;
                 }
             }
             (RecordWriteKind::Occurrence, Kind::Cluster(cluster)) => {
@@ -266,6 +272,29 @@ impl Resolver<'_> {
         self.replace(key, Some(&bytes))
     }
 
+    pub(super) fn encode_current(
+        &self,
+        write: &PreparedRecordWrite,
+        template: &[u8],
+        value: Value<'_>,
+    ) -> VersionResult<()> {
+        let bytes = self
+            .layout
+            .encode(write.key(), template, value, self.control)?;
+        self.replace_current(write, Some(&bytes))
+    }
+
+    /// Replacing the input key preserves order while no related-key effect has
+    /// required the merged overlay. Its revision still belongs to the current view.
+    pub(super) fn replace_current(
+        &self,
+        write: &PreparedRecordWrite,
+        value: Option<&[u8]>,
+    ) -> VersionResult<()> {
+        self.changes
+            .preserve(self.replacement(write.key(), value)?, self.control)
+    }
+
     fn validate(&self, mutation: usize, write: &PreparedRecordWrite) -> VersionResult<()> {
         // Publication preserves these canonical preconditions for the physical writer's atomic validation. Command refresh must check them before exposing a new private view.
         if self.mode == ResolutionMode::Publication {
@@ -282,6 +311,11 @@ impl Resolver<'_> {
         Ok(())
     }
     pub(super) fn replace(&self, key: &[u8], value: Option<&[u8]>) -> VersionResult<()> {
+        self.changes
+            .replace(self.replacement(key, value)?, self.control)
+    }
+
+    fn replacement(&self, key: &[u8], value: Option<&[u8]>) -> VersionResult<PreparedRecordWrite> {
         let kind = if self.layout.kind(key, self.control)? == Kind::Cache {
             RecordWriteKind::OccurrenceCache
         } else {
@@ -293,8 +327,7 @@ impl Resolver<'_> {
             value,
             self.control,
         )?;
-        self.changes
-            .replace(write.with_kind(self.mode.kind(kind)), self.control)
+        Ok(write.with_kind(self.mode.kind(kind)))
     }
     fn invalidate(&self, marker: &[u8]) -> VersionResult<()> {
         for kind in [Related::Skips, Related::BlockMax] {

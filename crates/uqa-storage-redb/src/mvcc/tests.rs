@@ -18,6 +18,7 @@ mod diskann;
 mod identifiers;
 mod metadata;
 mod migration;
+mod occurrence_commits;
 mod read;
 mod receipts;
 mod reclamation;

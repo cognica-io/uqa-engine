@@ -57,7 +57,7 @@ impl Resolver<'_> {
             .flatten()
             .map(|stats| stats.revision);
         let Some(revision_value) = revisions.next() else {
-            return self.replace(write.key(), None);
+            return self.replace_current(write, None);
         };
         if revisions.any(|candidate| candidate != revision_value) {
             return Err(VersionError::WriteConflict {
@@ -81,15 +81,15 @@ impl Resolver<'_> {
                     "empty occurrence field retains length",
                 ));
             }
-            self.replace(write.key(), None)
+            self.replace_current(write, None)
         } else {
             let template = write
                 .value()
                 .or_else(|| bytes(current.as_ref()))
                 .or_else(|| bytes(base.as_ref()))
                 .expect("nonempty field statistics");
-            self.encode_replace(
-                write.key(),
+            self.encode_current(
+                write,
                 template,
                 Value::Statistics {
                     revision: revision_value,

@@ -16,6 +16,7 @@ mod diskann;
 mod identifiers;
 mod metadata_requests;
 mod monitor;
+mod occurrence_commits;
 mod ordered;
 mod points;
 mod receipts;

@@ -19,7 +19,7 @@ enum Target {
     Merged(PrivateRecordChanges),
 }
 
-/// Canonical and structurally fenced writes retain their input order, so a spilled batch can be written directly once. Derived related-key effects switch to the ordinary private overlay before their first replacement, preserving the original sequence of overwrites and write conditions.
+/// Canonical, structurally fenced and own-key derived writes retain their input order, so a spilled batch can be written directly once. Derived related-key effects switch to the ordinary private overlay before their first replacement, preserving the original sequence of overwrites and write conditions.
 pub(super) struct ResolvedChanges(RefCell<Option<Target>>);
 
 impl ResolvedChanges {
