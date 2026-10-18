@@ -6,7 +6,7 @@
 
 use super::*;
 
-/// A provider fixture that keeps score and positions in one row, like native SQLite.
+/// A provider fixture that keeps score and positions in one row, like native `SQLite`.
 struct Combined;
 
 impl OccurrenceRecordLayout for Combined {
@@ -315,7 +315,9 @@ fn combined_occurrence_validation_releases_failed_read_windows() {
                 retained,
                 "failed resolution retained memory: {failure}"
             );
-            if failure != "memory" {
+            if failure == "memory" {
+                base.assert_reads(0, 0);
+            } else {
                 base.assert_reads(1, 0);
                 assert_eq!(
                     base.requests(),
@@ -325,8 +327,6 @@ fn combined_occurrence_validation_releases_failed_read_windows() {
                         _ => 3,
                     }
                 );
-            } else {
-                base.assert_reads(0, 0);
             }
             drop((held, original, base, store));
             assert_eq!(control.memory().used(), 0);
