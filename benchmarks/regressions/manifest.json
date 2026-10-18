@@ -13795,8 +13795,8 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/projection/view_definition/expressions/tests.rs",
       "capability": "Retained DISTINCT expression reconstruction",
-      "workload": "Generated row DISTINCT disjunctions and DISTINCT negation in stored views and trigger definitions, with nested Boolean precedence and persistent reopening.",
-      "invariant": "PostgreSQL reference definitions and reconstructed query results agree; internal dispatch labels never become ordinary function calls.",
+      "workload": "Six scalar expression shapes in compact and pretty reconstruction: row DISTINCT disjunction, negation, AND grouping, scalar negation, negation under equality and an ordinary quoted function call.",
+      "invariant": "Reconstruction preserves PostgreSQL Boolean syntax and precedence while leaving the ordinary function call intact.",
       "case_names": [
         ""
       ]
@@ -13808,8 +13808,8 @@
       "cases": 4,
       "source": "crates/uqa-engine/tests/queries/sql_composites/expression_comparisons.rs",
       "capability": "Retained DISTINCT expression reconstruction",
-      "workload": "Generated row DISTINCT disjunctions and DISTINCT negation in stored views and trigger definitions, with nested Boolean precedence and persistent reopening.",
-      "invariant": "PostgreSQL reference definitions and reconstructed query results agree; internal dispatch labels never become ordinary function calls.",
+      "workload": "The PostgreSQL composite comparison oracle on memory, SQLite, SQLite K/V and redb, including a stored row DISTINCT view definition.",
+      "invariant": "Captured comparison values, diagnostics and pg_get_viewdef output agree with PostgreSQL.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite",
@@ -13824,8 +13824,8 @@
       "cases": 1,
       "source": "crates/uqa-engine/tests/catalog/event_definitions.rs",
       "capability": "Retained DISTINCT expression reconstruction",
-      "workload": "Generated row DISTINCT disjunctions and DISTINCT negation in stored views and trigger definitions, with nested Boolean precedence and persistent reopening.",
-      "invariant": "PostgreSQL reference definitions and reconstructed query results agree; internal dispatch labels never become ordinary function calls.",
+      "workload": "The PostgreSQL rule and trigger definition oracle, including WHEN clauses with DISTINCT negation.",
+      "invariant": "Captured event-definition SQL and diagnostics agree with PostgreSQL.",
       "case_names": [
         ""
       ]
@@ -13837,8 +13837,180 @@
       "cases": 1,
       "source": "crates/uqa-engine/tests/catalog/event_definitions.rs",
       "capability": "Retained DISTINCT expression reconstruction",
-      "workload": "Generated row DISTINCT disjunctions and DISTINCT negation in stored views and trigger definitions, with nested Boolean precedence and persistent reopening.",
-      "invariant": "PostgreSQL reference definitions and reconstructed query results agree; internal dispatch labels never become ordinary function calls.",
+      "workload": "The PostgreSQL rule and trigger definition oracle, including WHEN clauses with DISTINCT negation.",
+      "invariant": "Captured event-definition SQL and diagnostics agree with PostgreSQL.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "notification_policy_api_batch_rejection_keeps_the_callers_transaction",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_notifications/session_policy.rs",
+      "capability": "Routine notification admission",
+      "workload": "Direct and nested commands, API batches, prepared execution, triggers and transactional notification publication.",
+      "invariant": "Context wrapping preserves typed notification rejection and machine code; admission failure does not corrupt caller transactions or publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "notification_policy_covers_routines_prepared_queries_triggers_and_portals",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_notifications/session_policy.rs",
+      "capability": "Routine notification admission",
+      "workload": "Direct and nested commands, API batches, prepared execution, triggers and transactional notification publication.",
+      "invariant": "Context wrapping preserves typed notification rejection and machine code; admission failure does not corrupt caller transactions or publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "notification_policy_keeps_publication_deduplication_and_rollback_transactional",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_notifications/session_policy.rs",
+      "capability": "Routine notification admission",
+      "workload": "Direct and nested commands, API batches, prepared execution, triggers and transactional notification publication.",
+      "invariant": "Context wrapping preserves typed notification rejection and machine code; admission failure does not corrupt caller transactions or publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "notification_policy_rolls_back_nested_static_dynamic_and_rethrown_commands",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_notifications/session_policy.rs",
+      "capability": "Routine notification admission",
+      "workload": "Direct and nested commands, API batches, prepared execution, triggers and transactional notification publication.",
+      "invariant": "Context wrapping preserves typed notification rejection and machine code; admission failure does not corrupt caller transactions or publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "a_sql_standard_body_is_analyzed_whatever_check_function_bodies_says",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_function_bodies.rs",
+      "capability": "Routine body diagnostics",
+      "workload": "SQL-standard and delayed routine validation with incompatible declared return types.",
+      "invariant": "PostgreSQL SQLSTATE, primary message and DETAIL survive routine CONTEXT.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "with_check_function_bodies_off_a_body_is_examined_when_the_routine_is_called",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_function_bodies.rs",
+      "capability": "Routine body diagnostics",
+      "workload": "SQL-standard and delayed routine validation with incompatible declared return types.",
+      "invariant": "PostgreSQL SQLSTATE, primary message and DETAIL survive routine CONTEXT.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "foreign_server_identity_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_foreign_ddl/servers.rs",
+      "capability": "Persistent foreign-server dependencies",
+      "workload": "Role ownership changes and server dependencies on memory, SQLite, SQLite K/V and redb, including reopening persistent stores.",
+      "invariant": "All captured PostgreSQL diagnostic fields and result rows remain identical before and after reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unparsed_procedural_statement_is_conservative_without_running_the_parser",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/effects/routines/tests.rs",
+      "capability": "Deferred procedural effect classification",
+      "workload": "An unparsed invalid PERFORM under its retained source location.",
+      "invariant": "Effect classification remains conservative and does not parse the deferred SQL or emit notices.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "test_positive_evidence_pool_fusion_inside_derived_table",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_fusion_wand_coverage.rs",
+      "capability": "Nested positive-evidence-pool output",
+      "workload": "Text and vector pooling in derived relations, joins and multiple UNION ALL branches.",
+      "invariant": "Declared outputs and probability scores remain valid and no branch disappears at derived-query descriptor reconciliation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "test_positive_evidence_pool_fusion_inside_join_filter",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_fusion_wand_coverage.rs",
+      "capability": "Nested positive-evidence-pool output",
+      "workload": "Text and vector pooling in derived relations, joins and multiple UNION ALL branches.",
+      "invariant": "Declared outputs and probability scores remain valid and no branch disappears at derived-query descriptor reconciliation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "test_positive_evidence_pool_fusion_preserves_every_multi_union_batch_branch",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_fusion_wand_coverage.rs",
+      "capability": "Nested positive-evidence-pool output",
+      "workload": "Text and vector pooling in derived relations, joins and multiple UNION ALL branches.",
+      "invariant": "Declared outputs and probability scores remain valid and no branch disappears at derived-query descriptor reconciliation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "diskann_public_hybrid_pool_and_nested_consumers_preserve_existing_compositions",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/consumers.rs",
+      "capability": "DiskANN hybrid output composition",
+      "workload": "Public DiskANN vector retrieval composed with text pooling and nested consumers.",
+      "invariant": "Hybrid and nested results preserve existing identities and scores across the public query boundaries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retrieval_metadata_binding_agrees_with_analysis_without_running_a_query",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests.rs",
+      "capability": "Static retrieval output descriptors",
+      "workload": "Catalog-only binding of text and vector pooling with derived relations and CTE consumers.",
+      "invariant": "Nonexecuting metadata binding and full analysis agree on declared result and score types.",
       "case_names": [
         ""
       ]

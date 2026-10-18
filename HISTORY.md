@@ -38,6 +38,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve the declared retrieval score type during metadata-only query binding, so positive-evidence pooling and text/vector results compose through derived tables, joins, CTEs and UNION branches without an output descriptor mismatch.
+
 - Reconstruct generated row DISTINCT comparisons and DISTINCT negation with PostgreSQL Boolean syntax and precedence in view, rule and trigger definitions, preserving ordinary quoted function calls.
 
 - Share unchanged-snapshot reads for combined and split text occurrence records in native SQLite, SQLite Key/Value and redb, and retain ordered spill output for own-key replacements, removing per-cluster read admission and repeated spill rewrites during commit while preserving atomic snapshot publication.
