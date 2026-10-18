@@ -57,15 +57,3 @@ fn absent_catalog_returns_before_filtering_nonempty_event_snapshots() {
     persist_rule_catalog_snapshot(None, &UnavailableRelations, &rules).unwrap();
     persist_trigger_catalog_snapshot(None, &UnavailableRelations, &triggers).unwrap();
 }
-
-#[test]
-fn restored_rules_only_gain_bindings_for_calls_stored_without_one() {
-    let unbound = r#"{"condition":{"Func":{"name":"regexp_matches","args":[{"Literal":"z"}]}}}"#;
-    let bound = r#"{"condition":{"Func":{"name":"regexp_matches","binding":{"name":"pg_catalog.regexp_matches","argument_types":["text","text"],"builtin":true},"args":[{"Literal":"z"}]}}}"#;
-    assert!(gained_only_routine_bindings(unbound, bound).unwrap());
-    // Replacing a stored binding, or changing anything else, is not a binding the call gained.
-    let rebound = bound.replace("pg_catalog.regexp_matches", "public.regexp_matches");
-    assert!(!gained_only_routine_bindings(bound, &rebound).unwrap());
-    let changed = bound.replace("\"z\"", "\"y\"");
-    assert!(!gained_only_routine_bindings(unbound, &changed).unwrap());
-}

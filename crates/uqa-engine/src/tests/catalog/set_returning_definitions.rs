@@ -39,6 +39,14 @@ pub(super) fn legacy_calls(json: &str) -> (String, usize) {
     (serde_json::to_string(&value).unwrap(), renamed)
 }
 
+/// The legacy form of a stored rule catalog: its calls as [`legacy_calls`] renames them, in rule catalog format 3, which earlier releases wrote.
+pub(super) fn legacy_rule_catalog(json: &str) -> (String, usize) {
+    let (rules, renamed) = legacy_calls(json);
+    let mut value: serde_json::Value = serde_json::from_str(&rules).unwrap();
+    value["format_version"] = serde_json::Value::from(3);
+    (serde_json::to_string(&value).unwrap(), renamed)
+}
+
 fn rows(engine: &Engine, statement: &str) -> Vec<uqa_sql::ResultRow> {
     sql(engine, statement).rows
 }
@@ -99,7 +107,11 @@ fn store_legacy_definitions(catalog: &dyn CatalogFacade) {
         "sql_functions_json",
     ] {
         let stored = catalog.get_metadata(key).unwrap().unwrap();
-        let (legacy, renamed) = legacy_calls(&stored);
+        let (legacy, renamed) = if key == RULES_METADATA_KEY {
+            legacy_rule_catalog(&stored)
+        } else {
+            legacy_calls(&stored)
+        };
         assert!(renamed > 0, "{key}");
         catalog.set_metadata(key, &legacy).unwrap();
     }

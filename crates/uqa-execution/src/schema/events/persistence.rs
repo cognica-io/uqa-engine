@@ -97,8 +97,13 @@ impl EventRestoreContext<'_> {
                 )));
             }
             if let Some(persisted_definition) = persisted_definition {
-                restored_expressions |=
-                    recorded_rule_bindings(&persisted_definition, &rule, allows_migration)?;
+                let validated_definition = serde_json::to_string(&rule.definition)?;
+                if persisted_definition != validated_definition {
+                    return Err(StorageBackendError::Other(format!(
+                        "restore rule catalog: persisted definition for rule `{}` is not fully bound",
+                        rule.definition.name
+                    )));
+                }
             }
             rule.condition_plan = condition_plan;
             rule.condition_binding = condition_binding;
@@ -335,61 +340,6 @@ pub fn persist_trigger_catalog_snapshot(
     catalog
         .set_metadata(TRIGGERS_METADATA_KEY, &json)
         .map_err(|error| SQLError::Internal(format!("persist trigger catalog: {error}")))
-}
-
-/// Whether validating `rule`, whose definition was persisted as `persisted`, recorded the routine bindings of calls that a release resolving routines by name stored without one. Any other change means the persisted definition was not fully bound.
-fn recorded_rule_bindings(
-    persisted: &str,
-    rule: &StoredRule,
-    allows_migration: bool,
-) -> StorageBackendResult<bool> {
-    let validated = serde_json::to_string(&rule.definition)?;
-    if persisted == validated {
-        return Ok(false);
-    }
-    if !gained_only_routine_bindings(persisted, &validated)? {
-        return Err(StorageBackendError::Other(format!(
-            "restore rule catalog: persisted definition for rule `{}` is not fully bound",
-            rule.definition.name
-        )));
-    }
-    if !allows_migration {
-        return Err(StorageBackendError::Other(format!(
-            "rule `{}` requires an initial-open routine-identity migration",
-            rule.definition.name
-        )));
-    }
-    Ok(true)
-}
-
-/// Whether the serialized rule definition `validated` differs from the `persisted` one only by the routine bindings of calls stored without one.
-fn gained_only_routine_bindings(persisted: &str, validated: &str) -> StorageBackendResult<bool> {
-    let persisted: serde_json::Value = serde_json::from_str(persisted)?;
-    let mut validated: serde_json::Value = serde_json::from_str(validated)?;
-    drop_gained_routine_bindings(&persisted, &mut validated);
-    Ok(persisted == validated)
-}
-
-/// Remove from `validated` every routine binding whose call `persisted` stores without one. Only a routine call carries an optional `binding`.
-fn drop_gained_routine_bindings(persisted: &serde_json::Value, validated: &mut serde_json::Value) {
-    match (persisted, validated) {
-        (serde_json::Value::Object(persisted), serde_json::Value::Object(validated)) => {
-            if !persisted.contains_key("binding") {
-                validated.remove("binding");
-            }
-            for (key, value) in validated.iter_mut() {
-                if let Some(persisted) = persisted.get(key) {
-                    drop_gained_routine_bindings(persisted, value);
-                }
-            }
-        }
-        (serde_json::Value::Array(persisted), serde_json::Value::Array(validated)) => {
-            for (persisted, validated) in persisted.iter().zip(validated.iter_mut()) {
-                drop_gained_routine_bindings(persisted, validated);
-            }
-        }
-        _ => {}
-    }
 }
 
 #[cfg(test)]

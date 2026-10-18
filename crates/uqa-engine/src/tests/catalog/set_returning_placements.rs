@@ -6,7 +6,7 @@
 
 //! Views, SQL-standard routine bodies and rule actions stored with a set-returning call where parse analysis now rejects one: the catalog still loads and answers its queries, DROP VIEW still works, and evaluating such a call reports the executor's diagnostic wherever the executor cannot expand it.
 
-use super::set_returning_definitions::legacy_calls;
+use super::set_returning_definitions::{legacy_calls, legacy_rule_catalog};
 use crate::{
     tests::relation_lock_support::{sessions, sql},
     Engine,
@@ -104,7 +104,11 @@ fn store_legacy_definitions(catalog: &dyn CatalogFacade) {
     assert_eq!(views, PLACEMENTS.len());
     for key in ["sql_functions_json", RULES_METADATA_KEY] {
         let stored = catalog.get_metadata(key).unwrap().unwrap();
-        let (legacy, renamed) = legacy_calls(&stored);
+        let (legacy, renamed) = if key == RULES_METADATA_KEY {
+            legacy_rule_catalog(&stored)
+        } else {
+            legacy_calls(&stored)
+        };
         assert!(renamed >= PLACEMENTS.len(), "{key}: {renamed}");
         catalog.set_metadata(key, &legacy).unwrap();
     }
