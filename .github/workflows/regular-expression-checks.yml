@@ -7,6 +7,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
+      - "scripts/emscripten-flags.py"
       - ".github/workflows/regular-expression-checks.yml"
   push:
     branches: [main]
@@ -15,6 +16,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
+      - "scripts/emscripten-flags.py"
       - ".github/workflows/regular-expression-checks.yml"
 
 permissions:
@@ -26,13 +28,16 @@ concurrency:
 
 jobs:
   wasm:
-    name: Emscripten frame and memory bounds
+    name: Emscripten frame and memory bounds (Rust ${{ matrix.rust }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: ["1.90.0", "1.95.0"]
     env:
-      RUSTUP_TOOLCHAIN: "1.90.0"
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
       CARGO_INCREMENTAL: "0"
       RUSTFLAGS: "-D warnings -C link-arg=-sALLOW_MEMORY_GROWTH=1"
-      CFLAGS_wasm32_unknown_emscripten: ""
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,9 +46,14 @@ jobs:
       - uses: mymindstorm/setup-emsdk@v14
         with:
           version: "6.0.3"
-      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ matrix.rust }}
           targets: wasm32-unknown-emscripten
+      - name: Match C longjmp to the Rust unwind ABI
+        run: |
+          emscripten_flags="$(python3 scripts/emscripten-flags.py)"
+          echo "CFLAGS_wasm32_unknown_emscripten=${emscripten_flags}" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
           key: regex-emscripten

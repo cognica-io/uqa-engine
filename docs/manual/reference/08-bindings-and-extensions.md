@@ -209,7 +209,7 @@ try {
 
 ## Browser WASM
 
-The browser binding uses an Emscripten build. Initialization is asynchronous, and persistent files are synchronized to IndexedDB.
+The browser binding uses an Emscripten build. Initialization is asynchronous, and persistent files are synchronized to IndexedDB. For source builds, `scripts/build-wasm.sh` matches the C setjmp/longjmp mode to the active Rust compiler's standard library: JavaScript exceptions before Rust 1.93, native WebAssembly exceptions from Rust 1.93 onward. This preserves PostgreSQL parser and regular expression error recovery; the build keeps Rust 1.90 compatibility.
 
 ```sh
 npm install @cognica-io/uqa-wasm

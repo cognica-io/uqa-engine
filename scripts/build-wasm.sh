@@ -93,22 +93,11 @@ fi
 EM_SYSROOT="$(em-config CACHE)/sysroot"
 export BINDGEN_EXTRA_CLANG_ARGS_wasm32_unknown_emscripten="--sysroot=${EM_SYSROOT} -fvisibility=default"
 
-# Every C object must use the same exception and setjmp/longjmp mode as
-# the Rust objects it is linked with. The precompiled standard library
-# for wasm32-unknown-emscripten is built with emscripten's JavaScript
-# exception handling, and rustc passes -sDISABLE_EXCEPTION_CATCHING=0 to
-# match, so the C sources must stay on that default too.
-#
-# Compiling them with -fwasm-exceptions instead makes libpg_query emit
-# __wasm_longjmp and __c_longjmp, which the link step cannot resolve;
-# forcing wasm exceptions at link time to satisfy those then leaves the
-# standard library's __cxa_find_matching_catch_*, __resumeException, and
-# llvm_eh_typeid_for undefined. Selecting wasm exceptions for both sides
-# would require rebuilding std with -Z build-std on nightly.
-#
-# Setting the target-scoped variable also shields the build from any host
-# CFLAGS that point at a native sysroot.
-export CFLAGS_wasm32_unknown_emscripten=""
+# C setjmp/longjmp must match the active compiler's precompiled Rust std.
+# Rust 1.93 switched from JavaScript exceptions to native Wasm exceptions.
+# Target-scoped flags also exclude host CFLAGS pointing at a native sysroot.
+CFLAGS_wasm32_unknown_emscripten="$("${EMSDK_PYTHON}" scripts/emscripten-flags.py)"
+export CFLAGS_wasm32_unknown_emscripten
 
 cargo build --locked --target wasm32-unknown-emscripten -p uqa-wasm \
     ${wasm_build_args[@]+"${wasm_build_args[@]}"} ${wasm_feature_args[@]+"${wasm_feature_args[@]}"}

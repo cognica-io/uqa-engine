@@ -323,6 +323,20 @@ test("sql, params, vector, tensor, and cypher surfaces", async () => {
   await assert.rejects(engine.sql("SELECT FROM FROM"), /error|syntax/i);
 });
 
+test("WASM remains usable after PostgreSQL parser and regular expression errors", async () => {
+  const engine = await Engine.inMemory();
+  try {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await assert.rejects(engine.sql("SELECT FROM FROM"), /error|syntax/i);
+      await assert.rejects(engine.sql("SELECT 'abc' ~ '['"), /regular expression|bracket/i);
+      const result = await engine.sql("SELECT 'abc' ~ '^a.c$' AS matched, 42 AS answer");
+      assert.deepEqual(result.rows, [{ matched: true, answer: 42 }]);
+    }
+  } finally {
+    await engine.close();
+  }
+});
+
 test("WASM Nori diagnostics match the requested feature configuration", async () => {
   const engine = await Engine.inMemory();
   const listed = await engine.sql(
