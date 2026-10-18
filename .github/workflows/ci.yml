@@ -125,7 +125,7 @@ jobs:
         run: cargo clippy -p uqa-analysis -p uqa-nori-data -p uqa-kuromoji-data --features uqa-analysis/nori-tools,uqa-analysis/kuromoji-tools --all-targets --locked -- -D warnings
 
   msrv:
-    name: check Rust 1.90
+    name: check minimum Rust versions
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     steps:
@@ -140,8 +140,11 @@ jobs:
           cache-bin: false
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo check --workspace --locked
-      - run: cargo check -p uqa-analysis --features nori-tools,kuromoji-tools --all-targets --locked
+      - run: cargo +1.90.0 check --workspace --exclude uqa-cli --exclude uqa-python --locked
+      - run: cargo +1.90.0 check -p uqa-analysis --features nori-tools,kuromoji-tools --all-targets --locked
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Check terminal consumers on their minimum Rust version
+        run: cargo +1.95.0 check -p uqa-cli -p uqa-python --locked
 
   doc:
     name: doc

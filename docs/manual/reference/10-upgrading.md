@@ -6,6 +6,8 @@ This page describes UQA Engine 0.6.0 and earlier releases. Use the [version-tagg
 
 Version 0.6.0 adds PostgreSQL regular expressions and input collations, set-returning routine planning, BIT/VARBIT values and the expanded standalone usql shell. Update Rust, Python and JavaScript packages together.
 
+CLI and Python source builds now require Rust 1.95 or newer because the updated terminal dependency fixes buffered input stalling after `LISTEN`. Embedded Rust crates retain Rust 1.90 support. Building the full workspace therefore requires Rust 1.95; prebuilt usql and language packages do not require a Rust installation.
+
 Declared range definitions, shell type identities and transactional catalog descriptions require SQLite record format 65 and redb record format 61, including the earlier packed bit values and BIT/VARBIT type descriptors. Every database owner must use compatible binaries; an older owner could otherwise ignore a declared range, undefined type or its descriptions, or misinterpret a packed value. Close all owners and retain a pre-upgrade backup before first open. The existing atomic format upgrade preserves records, histories, receipts and identifier watermarks without rewriting user rows. Native SQLite mapping 17 and shared coordination format 2 are unchanged. Older binaries reject the upgraded database; restore the pre-upgrade backup to return to an older version.
 
 The preceding shell-type delivery exercised its format-63 SQLite / format-59 redb predecessor and format-64/60 source with their actual binaries in all nine provider/file configurations: native SQLite and SQLite K/V each in plain, encrypted, compressed and combined mode, plus redb. The upgrade preserves original data, history, pending/committed receipts and identifier watermarks. Previously opened SQLite handles and reopened older writers reject the new format. Shell records carry a format marker and exact single-OID claims; restoration rejects unknown versions or inconsistent claims before publishing catalog state.
@@ -701,7 +703,7 @@ Update the UQA packages used by one application together. Rust's `0.1`, `0.2`, `
 | Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.6.0` |
 | Browser WASM | `npm install @cognica-io/uqa-wasm@0.6.0` |
 
-The Rust workspace requires Rust 1.90 or newer. Python requires Python 3.8 or newer, and the Node.js package requires Node.js 16 or newer. The Node.js root package selects an exact-version native optional package for embedded execution; deploy the root and native packages from the same release. Deploy the Browser WASM JavaScript module and `uqa.wasm` from the same package together, including when updating a browser cache.
+Embedded Rust crates require Rust 1.90 or newer; CLI, Python and full-workspace source builds require Rust 1.95 or newer. Python requires Python 3.8 or newer, and the Node.js package requires Node.js 16 or newer. The Node.js root package selects an exact-version native optional package for embedded execution; deploy the root and native packages from the same release. Deploy the Browser WASM JavaScript module and `uqa.wasm` from the same package together, including when updating a browser cache.
 
 The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.6.0) contains the Python and npm archives, standalone Node.js addons, standalone usql archives and installers, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.6.0"` consistently for every UQA dependency.
 

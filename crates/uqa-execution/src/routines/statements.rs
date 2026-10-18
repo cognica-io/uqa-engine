@@ -6,10 +6,9 @@
 
 //! PL/pgSQL statement dispatch.
 
-use super::{
-    result_row_count, result_row_values, return_query_context_error, strict_into_check, Flow,
-    Interpreter, LoopSignal, PLpgSQLStmt, SQLError, Value,
-};
+use super::{Flow, Interpreter, LoopSignal, PLpgSQLStmt, SQLError};
+
+mod queries;
 
 impl Interpreter<'_> {
     // Source locations carry diagnostics through a small entry frame.
@@ -147,24 +146,9 @@ impl Interpreter<'_> {
             }
             PLpgSQLStmt::Return { value } => self.exec_return(value.as_ref()),
             PLpgSQLStmt::ReturnNext { value } => self.exec_return_next(value.as_ref()),
-            PLpgSQLStmt::ReturnQuery { query } => {
-                if !self.is_set {
-                    return Err(return_query_context_error());
-                }
-                let result = self.exec_query(query)?;
-                self.append_query_rows(&result)?;
-                // PostgreSQL sets ROW_COUNT (but not FOUND) here.
-                self.last_row_count = result_row_count(&result)?;
-                Ok(Flow::Normal)
-            }
+            PLpgSQLStmt::ReturnQuery { query } => self.exec_return_query(query),
             PLpgSQLStmt::ReturnQueryExecute { query, params } => {
-                if !self.is_set {
-                    return Err(return_query_context_error());
-                }
-                let result = self.exec_dynamic(query, params)?;
-                self.append_query_rows(&result)?;
-                self.last_row_count = result_row_count(&result)?;
-                Ok(Flow::Normal)
+                self.exec_return_query_execute(query, params)
             }
             PLpgSQLStmt::Raise {
                 level,
@@ -183,10 +167,7 @@ impl Interpreter<'_> {
                 self.exec_assert(condition, message.as_ref())
             }
             PLpgSQLStmt::ExecSQL { stmt, into, strict } => {
-                let prepared = self.prepare_statement(stmt)?;
-                let result = self.execute_fragment(&prepared)?;
-                self.consume_statement_result(prepared.is_call(), &result, into.as_ref(), *strict)?;
-                Ok(Flow::Normal)
+                self.exec_sql_statement(stmt, into.as_ref(), *strict)
             }
             PLpgSQLStmt::DynExecute {
                 query,
@@ -194,13 +175,7 @@ impl Interpreter<'_> {
                 into,
                 strict,
             } => self.exec_dynamic_into(query, params, into.as_ref(), *strict),
-            PLpgSQLStmt::Perform { query } => {
-                let result = self.exec_query(query)?;
-                let row_count = result_row_count(&result)?;
-                self.last_row_count = row_count;
-                self.set_found(row_count > 0);
-                Ok(Flow::Normal)
-            }
+            PLpgSQLStmt::Perform { query } => self.exec_perform(query),
             PLpgSQLStmt::OpenCursor { cursor, open } => {
                 self.exec_open_cursor(*cursor, open)?;
                 Ok(Flow::Normal)
@@ -228,20 +203,7 @@ impl Interpreter<'_> {
             }
             PLpgSQLStmt::Commit { chain } => self.exec_procedural_transaction(true, *chain),
             PLpgSQLStmt::Rollback { chain } => self.exec_procedural_transaction(false, *chain),
-            PLpgSQLStmt::GetDiagnostics { items } => {
-                for (kind, target) in items {
-                    match kind.as_str() {
-                        "ROW_COUNT" => {
-                            let count = Value::Int(self.last_row_count);
-                            self.assign_datum(*target, count)?;
-                        }
-                        other => {
-                            return Err(SQLError::Unsupported(format!("GET DIAGNOSTICS {other}")));
-                        }
-                    }
-                }
-                Ok(Flow::Normal)
-            }
+            PLpgSQLStmt::GetDiagnostics { items } => self.exec_get_diagnostics(items),
         }
     }
 
@@ -300,26 +262,5 @@ impl Interpreter<'_> {
                 message: "case not found".into(),
             }),
         }
-    }
-
-    fn exec_dynamic_into(
-        &mut self,
-        query: &super::PLpgSQLExpression,
-        params: &[super::PLpgSQLExpression],
-        into: Option<&super::IntoTarget>,
-        strict: bool,
-    ) -> Result<Flow, SQLError> {
-        let result = self.exec_dynamic(query, params)?;
-        let row_count = result_row_count(&result)?;
-        self.last_row_count = row_count;
-        if let Some(target) = into {
-            if strict {
-                strict_into_check(row_count)?;
-            }
-            let values = result_row_values(&result, 0);
-            self.assign_into(target, &result.row_schema(), values.as_deref())?;
-        }
-        // PostgreSQL: EXECUTE never changes FOUND.
-        Ok(Flow::Normal)
     }
 }

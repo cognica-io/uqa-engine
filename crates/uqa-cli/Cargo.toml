@@ -10,7 +10,7 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
-rust-version.workspace = true
+rust-version = "1.95"
 documentation = "https://docs.rs/uqa-cli"
 exclude.workspace = true
 keywords = ["database", "sql", "postgresql", "repl"]
@@ -34,7 +34,7 @@ uqa-core = { workspace = true }
 uqa-graph = { workspace = true }
 uqa-pg-query = { workspace = true }
 uqa-sql = { workspace = true }
-rustyline = "18.0.0"
+rustyline = "19.0.0"
 rpassword = "7.4"
 unicode-width = "0.2"
 ctrlc = "3.5"

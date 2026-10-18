@@ -114,13 +114,9 @@ pub fn execute_query_block_operator_output<'a, S: Clone + 'static>(
     clippy::too_many_arguments,
     reason = "keeps SELECT scope inputs aligned"
 )]
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves SELECT schema and row identity"
-)]
 pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
     context: RelationalContext<'a, S>,
-    mut operator: Box<dyn PhysicalOperator + 'a>,
+    operator: Box<dyn PhysicalOperator + 'a>,
     original: &'a QueryBlockPlan,
     params: &'a [SQLParam],
     ctes: &'a CteScope<S>,
@@ -129,6 +125,31 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
     resjunk: RelationalResjunk,
     runtime: QueryRuntimeView<'a>,
 ) -> Result<QueryOutput, SQLError> {
+    // Release operator-construction scratch before row evaluation can reenter a routine.
+    let operator = prepare_query_block_output_operator(
+        context, operator, original, params, ctes, &columns, resjunk, runtime,
+    )?;
+    collect_query_operator(context.runtime, columns, operator, output_mode)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps SELECT scope inputs aligned"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
+fn prepare_query_block_output_operator<'a, S: Clone + 'static>(
+    context: RelationalContext<'a, S>,
+    mut operator: Box<dyn PhysicalOperator + 'a>,
+    original: &'a QueryBlockPlan,
+    params: &'a [SQLParam],
+    ctes: &'a CteScope<S>,
+    columns: &[String],
+    resjunk: RelationalResjunk,
+    runtime: QueryRuntimeView<'a>,
+) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     if original.distinct {
         let work_mem_bytes = physical_work_mem_bytes(runtime)?;
         let resolver = context.expression_scope(ctes.clone());
@@ -173,7 +194,7 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
                 ))
             }
         } else {
-            let output = identity_order_columns(&columns);
+            let output = identity_order_columns(columns);
             let mut distinct_on: Vec<ScalarExpr> = Vec::with_capacity(original.distinct_on.len());
             for (index, expression) in original.distinct_on.iter().enumerate() {
                 let key = if let Some((_, column)) = resjunk
@@ -243,7 +264,7 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
         if original.with_ties {
             let limit =
                 resolve_fetch_limit_with_ties(original.limit.as_ref(), context, params, ctes)?;
-            let output = identity_order_columns(&columns);
+            let output = identity_order_columns(columns);
             let mut ordering = original.clone();
             for (index, column) in &resjunk.order_by {
                 ordering.order_by[*index].expr = ScalarExpr::InternalColumn(*column);
@@ -287,7 +308,7 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
             columns.len()
         )));
     }
-    if operator.schema()[..columns.len()] != columns {
+    if &operator.schema()[..columns.len()] != columns {
         let mut positions = columns
             .iter()
             .cloned()
@@ -303,5 +324,5 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
         );
         operator = Box::new(ColumnSelection::with_positions(operator, positions));
     }
-    collect_query_operator(context.runtime, columns, operator, output_mode)
+    Ok(operator)
 }

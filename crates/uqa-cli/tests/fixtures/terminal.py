@@ -11,6 +11,7 @@ import errno
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import signal
 import threading
@@ -24,6 +25,8 @@ BINARY = sys.argv[1]
 
 class Terminal:
     def __init__(self, name, no_color=False, args=(), settings=None):
+        self.editor_active = False
+        self.control_tail = b""
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.chdir(WORK)
@@ -53,21 +56,35 @@ class Terminal:
                 break
             if b"\x1b[6n" in part:
                 os.write(self.fd, b"\x1b[1;1R")
+            # Bracketed-paste mode marks each real editor invocation, including split escapes.
+            controls = self.control_tail + part
+            for mode in re.findall(rb"\x1b\[\?2004([hl])", controls):
+                self.editor_active = mode == b"h"
+            self.control_tail = controls[-7:]
             chunks.append(part)
         return b"".join(chunks)
 
-    def read_until(self, witness):
-        result = b""
+    def read_until(self, witness, ready=None):
+        result = self.control_tail if ready else b""
         deadline = time.monotonic() + 10
-        while witness not in result and time.monotonic() < deadline:
+        while True:
+            if witness in result and (ready is None or re.search(ready, result, re.S)):
+                return result
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"terminal witness missing: {witness!r}, got {result!r}")
             result += self.read(0.1)
-        if witness not in result:
-            raise RuntimeError(f"terminal witness missing: {witness!r}, got {result!r}")
-        return result
 
-    def sample(self, name, data, witness=None):
+    def sample(self, name, data, witness=None, wait_for_ready=True):
+        if data == b"\x03" and witness is None:
+            witness = b"usql> "
+        ready = None
+        if witness is not None and wait_for_ready:
+            # Redraws contain the prompt too. Observe a fresh editor invocation.
+            ready = rb"\x1b\[\?2004h.*?usql> "
+            if self.editor_active:
+                ready = rb"\x1b\[\?2004l.*?" + ready
         os.write(self.fd, data)
-        result = self.read_until(witness) if witness else self.read(0.35)
+        result = self.read_until(witness, ready) if witness else self.read(0.35)
         return result
 
     def close(self):
@@ -114,7 +131,7 @@ try:
     terminal.sample("reuse after rollback", b"SELECT 43;\r", b"(1 row)")
     included = WORK / "interrupted.sql"
     included.write_text("SELECT 'include_ready';\nSELECT pg_sleep(30);\nSELECT 'must_not_continue';\n")
-    terminal.sample("include", f"\\i '{included}'\r".encode(), b"include_ready")
+    terminal.sample("include", f"\\i '{included}'\r".encode(), b"include_ready", wait_for_ready=False)
     output = terminal.sample("interrupt include", b"\x03", b"usql> ")
     assert b"must_not_continue" not in output, output
     terminal.sample("reuse after include", b"SELECT 44;\r", b"(1 row)")
@@ -126,6 +143,11 @@ finally:
 
 terminal = Terminal("delayed-shutdown")
 terminal.sample("partial", b"SELECT")
+# Hold a real redraw while the child is stopped; its prompt is not a new editor.
+pending_redraw = [terminal.sample("redraw", b"\x0c")]
+assert b"usql> " in pending_redraw[0], pending_redraw
+read_terminal = terminal.read
+terminal.read = lambda seconds: pending_redraw.pop(0) if pending_redraw else read_terminal(seconds)
 os.kill(terminal.pid, signal.SIGSTOP)
 resume = threading.Timer(1.0, lambda: os.kill(terminal.pid, signal.SIGCONT))
 resume.start()
@@ -149,6 +171,8 @@ try:
     subprocess.run([BINARY,"--db",str(path),"-c","NOTIFY shell_events, 'idle delivery'"], env=env, check=True, capture_output=True, timeout=10)
     output=terminal.read_until(b"idle delivery")
     assert b"Asynchronous notification" in output, output
+    output = terminal.sample("buffered input", "SELECT '한글 日本語' AS buffered_input;\r".encode(), b"(1 row)")
+    assert "한글 日本語".encode() in output, output
     terminal.sample("unlisten", b"UNLISTEN *;\r", b"usql> ")
 finally:
     terminal.close()

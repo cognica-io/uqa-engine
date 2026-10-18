@@ -29,7 +29,7 @@ fn analytical_numeric_predicates_do_not_probe_enum_call_state() {
     assert_eq!(prepared.calls().enums.len(), 5);
     COMPARISON_LOOKUPS.with(|count| count.set(0));
     for id in 0..20_000 {
-        let sample = id ^ 20_260_802;
+        let sample = id ^ 0x0135_27c2;
         let (ship_day, discount, quantity) = (sample % 2_500, sample % 11, 1 + sample % 50);
         let row = ResultRow::from([
             ("ship_day".into(), Value::Int(ship_day)),

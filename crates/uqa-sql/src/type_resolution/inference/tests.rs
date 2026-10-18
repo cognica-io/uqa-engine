@@ -124,7 +124,7 @@ fn record_coercion_preserves_named_composite_and_domain_result_types() {
     });
     let mut domain = domain();
     if let ColumnType::Domain { base, .. } = &mut domain {
-        *base = Box::new(composite.clone());
+        **base = composite.clone();
     }
     let budget = MemoryBudget::new(8192);
     let token = CancellationToken::new();

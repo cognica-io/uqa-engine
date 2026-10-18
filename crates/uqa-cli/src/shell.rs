@@ -108,13 +108,10 @@ impl Session {
         out: &mut impl Write,
         history: bool,
     ) -> Result<(), String> {
-        loop {
-            let Some(offset) = crate::statements::input_terminator_offsets(buffer)
-                .first()
-                .copied()
-            else {
-                break;
-            };
+        while let Some(offset) = {
+            let offsets = crate::statements::input_terminator_offsets(buffer);
+            offsets.first().copied()
+        } {
             let remainder = buffer.split_off(offset + 1);
             let query = std::mem::replace(buffer, remainder);
             if self.shell.variables.active() {

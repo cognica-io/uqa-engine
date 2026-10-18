@@ -28,6 +28,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Require Rust 1.95 or newer for CLI and Python source builds so usql can use the upstream terminal reader correction; embedded Rust crates retain Rust 1.90 support. Prebuilt binaries and language packages do not require Rust.
+
 - Evaluate regular expressions, case mapping, `LIKE` and `ILIKE` in stored definitions with PostgreSQL's semantics after upgrading: the first open derives PostgreSQL's input collations for views, CHECK constraints, defaults, domain constraints, rules and trigger conditions stored before this release, moving the rule catalog to format 4; expression and partial indexes and stored generated columns keep the keys and values computed earlier, so drop and recreate those that use case mapping, `LIKE`, `ILIKE` or regular expressions, as UQA has no `REINDEX`; rows written earlier are not revalidated; and stored defaults, generated columns, index expressions, trigger and rule conditions, partition keys and parameter defaults that call `regexp_matches` report PostgreSQL's set-valued function error when evaluated; see [Upgrading](docs/manual/reference/10-upgrading.md#060).
 
 - Connect retained declared range input to catalog-aware casts and arrays, preserving endpoint and canonical invocation order, routine identity, lazy binary coercion and controlled value ownership. SQL range declarations and generated constructors remain separate work.
@@ -38,7 +40,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Reduce the native stack retained by PL/pgSQL statement locations so finite recursive functions execute in unoptimized builds, while preserving routine CONTEXT, cancellation and the existing frame-count and native stack limits.
+- Consume complete buffered terminal input after `LISTEN` instead of stopping after the first character and waiting for more input, preserving asynchronous notification delivery and UTF-8 commands.
+
+- Fix stack-depth errors for finite PL/pgSQL recursion in unoptimized builds by releasing query-construction scratch before row evaluation and keeping temporary SQL results off the common statement dispatcher, while preserving CONTEXT, cancellation and the existing frame-count and native stack limits.
 
 - Preserve the declared retrieval score type during metadata-only query binding, so positive-evidence pooling and text/vector results compose through derived tables, joins, CTEs and UNION branches without an output descriptor mismatch.
 
