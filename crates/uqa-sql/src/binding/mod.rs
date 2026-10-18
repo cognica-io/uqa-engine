@@ -509,8 +509,22 @@ impl SchemaScope {
                 rows,
                 alias,
                 column_aliases,
+                internal_relation,
+                internal_column_types,
                 ..
             } => {
+                if internal_relation.is_some()
+                    && internal_column_types.iter().any(Option::is_none)
+                    && !rows.is_empty()
+                {
+                    let inferred =
+                        self.bind_values_schema(routines, rows, subqueries, outer, params)?;
+                    if let Some(schema) =
+                        source.internal_values_schema_with_inference(Some(&inferred))?
+                    {
+                        return Ok(schema);
+                    }
+                }
                 if let Some(schema) = source.internal_values_schema()? {
                     return Ok(schema);
                 }

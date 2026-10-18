@@ -87,6 +87,7 @@ pub fn run_case(engine: &Engine, sql: &str) -> serde_json::Value {
             "message": error.to_string(),
             "detail": error.detail(),
             "hint": error.hint(),
+            "context": error.context(),
         })
     });
     let notices = engine

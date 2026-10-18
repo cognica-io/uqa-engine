@@ -16,7 +16,10 @@ use crate::{
 };
 
 mod anonymous;
-pub use anonymous::{validate_anonymous_record_result, validate_trigger_record_result};
+pub use anonymous::{
+    validate_anonymous_record_result, validate_procedural_record_identity,
+    validate_trigger_record_result,
+};
 
 /// Whether the routine returns nothing, one output value, or the complete output tuple.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -8,11 +8,13 @@
 
 use super::{
     arguments, ensure_routine_execute_privilege, properties, sql_function_result_layout,
-    ColumnType, CreateFunction, FunctionBinding, QueryBlockPlan, RelationalPlan,
-    RoutineInliningContext, SQLError, SQLFunctionResultKind, ScalarExpr, UnifiedPlan,
+    ColumnType, CreateFunction, FunctionBinding, RoutineInliningContext, SQLError,
+    SQLFunctionResultKind, ScalarExpr, UnifiedPlan,
 };
 use crate::ast::FunctionVolatility;
 use crate::plan::QueryPlan;
+
+mod scopes;
 
 pub struct InlineRoutineQuery {
     pub identity: [u8; 16],
@@ -58,12 +60,14 @@ impl RoutineInliningContext<'_> {
         Ok((names.len() == 1 + usize::from(ordinality)).then_some(names))
     }
 
-    /// Expand an ordinary SQL set function under the caller's snapshot. Volatile inputs, row-scope-dependent inputs, security boundaries and ordinality retain the function scan.
+    /// Expand an ordinary SQL set function under the caller's snapshot. Volatile inputs, subplans, security boundaries and ordinality retain the function scan.
     pub fn prepare_table(
         &self,
         binding: &FunctionBinding,
         arguments: &[ScalarExpr],
         active: &[[u8; 16]],
+        column_names: &[String],
+        column_types: &[String],
     ) -> Result<Option<InlineRoutineQuery>, SQLError> {
         let Some(function) = self.selected_function(binding) else {
             return Ok(None);
@@ -83,7 +87,7 @@ impl RoutineInliningContext<'_> {
         let Some(arguments) = arguments::prepare(self, definition, invocation, arguments)? else {
             return Ok(None);
         };
-        if !closed_arguments(self, &arguments)? {
+        if !substitutable_arguments(self, &arguments)? {
             return Ok(None);
         }
         match ensure_routine_execute_privilege(self.authority, definition) {
@@ -91,56 +95,129 @@ impl RoutineInliningContext<'_> {
             Err(error) if error.sqlstate() == Some("42501") => return Ok(None),
             Err(error) => return Err(error),
         }
-        let Some((plan, result, _)) = self.analyze_plan(&function, definition)? else {
+        let Some((plan, result, _)) =
+            self.analyze_plan(&function, definition).map_err(|error| {
+                error.with_context(super::super::diagnostics::sql_context(
+                    definition,
+                    super::super::diagnostics::SQLRoutineStage::Inlining,
+                ))
+            })?
+        else {
             return Ok(None);
         };
         let UnifiedPlan::Query(mut query) = plan else {
             return Ok(None);
         };
-        if !streamable_body(self, &query) {
+        if query.ctes.iter().any(|cte| cte.body.modifies_data()) {
             return Ok(None);
         }
-        let layout = sql_function_result_layout(self.types, definition, Some(&result))?;
+        self.bind_inline_relations(&mut query).map_err(|error| {
+            error.with_context(super::super::diagnostics::sql_context(
+                definition,
+                super::super::diagnostics::SQLRoutineStage::Inlining,
+            ))
+        })?;
+        let layout = self
+            .table_result_layout(definition, &result, column_names, column_types)
+            .map_err(|error| {
+                error.with_context(super::super::diagnostics::sql_context(
+                    definition,
+                    super::super::diagnostics::SQLRoutineStage::Inlining,
+                ))
+            })?;
         if layout.kind == SQLFunctionResultKind::Void
             || layout.kind == SQLFunctionResultKind::Value
                 && matches!(
-                    layout.declared_type,
-                    ColumnType::Composite(_) | ColumnType::Record | ColumnType::Domain { .. }
+                    crate::type_resolution::base_type(&layout.declared_type),
+                    ColumnType::Composite(_) | ColumnType::Record
                 )
         {
             return Ok(None);
         }
-        let RelationalPlan::QueryBlock(block) = &mut query.root else {
-            return Ok(None);
-        };
-        if !coerce_result(block, &layout, &result) {
+        let targets = layout.columns.as_ref().map_or_else(
+            || vec![layout.declared_type.clone()],
+            |columns| columns.iter().map(|column| column.ty.clone()).collect(),
+        );
+        let source_types = result.column_types().unwrap_or_default();
+        if source_types.len() != targets.len() {
             return Ok(None);
         }
+        query = Box::new(scopes::coerce_result(*query, &targets, source_types));
         let declared_columns = crate::semantics::user_function_declared_columns(
             self.routines,
             &function,
             Some(invocation),
-        )?;
-        let mut invalid = false;
-        query.rewrite_scalar_expressions(&mut |node| {
-            if let ScalarExpr::Param(index) = node {
-                if let Some(value) = index.checked_sub(1).and_then(|index| arguments.get(index)) {
-                    *node = value.clone();
-                } else {
-                    invalid = true;
-                }
-            }
+        )?
+        .or_else(|| {
+            layout
+                .columns
+                .as_ref()
+                .map(|columns| columns.iter().map(|column| column.name.clone()).collect())
         });
-        if invalid {
-            return Err(SQLError::Internal(
-                "SQL body parameter is outside its invocation".into(),
-            ));
-        }
+        query = scopes::substitute(query, &arguments, targets.len())?;
         Ok(Some(InlineRoutineQuery {
             identity,
             query,
             declared_columns,
         }))
+    }
+    fn bind_inline_relations(&self, query: &mut QueryPlan) -> Result<(), SQLError> {
+        let namespace = self.catalog.stored_query_namespace();
+        let mode = if query.relations_bound {
+            crate::catalog::resolution::RelationLookupMode::Bound
+        } else {
+            crate::catalog::resolution::RelationLookupMode::Dynamic
+        };
+        let mut dependencies = std::collections::BTreeSet::default();
+        crate::binding::view_dependencies::bind_query_plan_relations(
+            query,
+            &namespace.transition_relations,
+            &mut |reference| {
+                let mut reference = reference.to_string();
+                crate::binding::stored_relations::bind_catalog_relation_reference(
+                    self.relations,
+                    &mut reference,
+                    mode,
+                    false,
+                    "function",
+                    &mut dependencies,
+                )?;
+                Ok::<_, SQLError>(reference)
+            },
+        )
+    }
+
+    fn table_result_layout(
+        &self,
+        definition: &CreateFunction,
+        result: &crate::binding::statements::AnalyzedResult,
+        names: &[String],
+        types: &[String],
+    ) -> Result<super::super::result_check::SQLFunctionResultLayout, SQLError> {
+        use super::super::result_check::{
+            validate_anonymous_record_result, SQLFunctionResultColumn,
+        };
+        let mut layout = sql_function_result_layout(self.types, definition, Some(result))?;
+        if layout.kind == SQLFunctionResultKind::Tuple && !types.is_empty() {
+            let target = names
+                .iter()
+                .zip(types)
+                .map(|(name, ty)| {
+                    Ok(SQLFunctionResultColumn {
+                        name: name.clone(),
+                        ty: self.types.resolve_catalog_column_type_name(ty)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, SQLError>>()?;
+            validate_anonymous_record_result(
+                self.types,
+                result.column_types().unwrap_or_default(),
+                &target,
+                Some(SQLFunctionResultKind::Tuple),
+            )?;
+            layout.columns = Some(target);
+        }
+        Ok(layout)
     }
 }
 
@@ -157,7 +234,7 @@ fn closed_arguments(
     context: &RoutineInliningContext<'_>,
     arguments: &[ScalarExpr],
 ) -> Result<bool, SQLError> {
-    // Substitution into a new query level needs no scope adjustment for closed expressions or external parameters. Correlated arguments keep their original function scan until the IR carries lexical outer-reference levels.
+    // Scalar FROM replacement does not introduce attribute capture; row-dependent scalar calls retain their function scan.
     for argument in arguments {
         let mut closed = true;
         argument.visit(&mut |node| {
@@ -181,52 +258,26 @@ fn closed_arguments(
     Ok(true)
 }
 
-fn coerce_result(
-    block: &mut QueryBlockPlan,
-    layout: &super::super::result_check::SQLFunctionResultLayout,
-    result: &crate::binding::statements::AnalyzedResult,
-) -> bool {
-    let targets = layout.columns.as_ref().map_or_else(
-        || vec![layout.declared_type.clone()],
-        |columns| columns.iter().map(|column| column.ty.clone()).collect(),
-    );
-    if targets.len() != block.projections.len() {
-        return false;
-    }
-    let source_types = result.column_types().unwrap_or_default();
-    for (index, (projection, target)) in block.projections.iter_mut().zip(targets).enumerate() {
-        if source_types.get(index).and_then(Option::as_ref) != Some(&target) {
-            projection.expr = ScalarExpr::Cast {
-                implicit: true,
-                expr: Box::new(projection.expr.clone()),
-                ty: target.catalog_name(),
-            };
+fn substitutable_arguments(
+    context: &RoutineInliningContext<'_>,
+    arguments: &[ScalarExpr],
+) -> Result<bool, SQLError> {
+    for argument in arguments {
+        let mut subplan = false;
+        argument.visit(&mut |node| {
+            subplan |= matches!(
+                node,
+                ScalarExpr::ScalarSubquery(_)
+                    | ScalarExpr::Exists { .. }
+                    | ScalarExpr::InSubquery { .. }
+            );
+        });
+        if subplan
+            || properties::volatility(context, argument, &crate::RowSchema::default())?
+                == FunctionVolatility::Volatile
+        {
+            return Ok(false);
         }
     }
-    true
-}
-
-fn streamable_body(context: &RoutineInliningContext<'_>, query: &QueryPlan) -> bool {
-    if !query.ctes.is_empty() {
-        return false;
-    }
-    let RelationalPlan::QueryBlock(block) = &query.root else {
-        return false;
-    };
-    matches!(block.compute, super::ComputePlan::Project)
-        && block.subqueries.is_empty()
-        && !block.distinct
-        && block.distinct_on.is_empty()
-        && block.projections.iter().all(|projection| {
-            !crate::semantics::sets::static_setness::expression_may_return_set_statically(
-                context.routines,
-                &projection.expr,
-            )
-        })
-        && block.from.as_ref().is_none_or(|source| match source {
-            crate::plan::SourcePlan::Values { rows, .. } => {
-                rows.iter().flatten().all(super::is_constant)
-            }
-            _ => false,
-        })
+    Ok(true)
 }

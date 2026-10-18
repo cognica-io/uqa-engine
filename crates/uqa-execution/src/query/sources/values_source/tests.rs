@@ -8,6 +8,54 @@ use super::*;
 use crate::query::relational::values::test_support::Services;
 use uqa_sql::plan::{RelationalPlan, UnifiedPlan};
 
+#[test]
+fn internal_values_capture_a_typed_outer_attribute_in_its_original_scope() {
+    let relation = uqa_sql::ast::InternalRelationId::allocate();
+    let source = SourcePlan::Values {
+        rows: vec![vec![ScalarExpr::qualified_column("caller", "value")]],
+        alias: None,
+        column_aliases: vec![],
+        internal_relation: Some(relation),
+        internal_column_types: vec![None],
+        internal_column_collations: vec![],
+    };
+    let schema = crate::RowSchema::with_qualified_types(
+        "caller",
+        vec!["value".into()],
+        vec![Some(uqa_sql::ColumnType::Integer)],
+    );
+    let mut scope = crate::catalog::test_support::empty_scope();
+    scope.set_row_lock_outer_row(crate::OwnedPhysicalRow::new(
+        schema,
+        crate::PhysicalRow::from_values(vec![uqa_core::Value::Int(42)]),
+    ));
+    let mut operator = build_values_source(
+        &Services,
+        &Services,
+        &source,
+        &[],
+        &scope,
+        || Arc::new(Services),
+        None,
+        None,
+        || panic!("no predicate"),
+    )
+    .unwrap();
+    assert!(operator.schema().is_empty());
+    assert_eq!(
+        operator.row_schema().internal_type(relation.column(0)),
+        Some(&uqa_sql::ColumnType::Integer)
+    );
+    operator.open().unwrap();
+    let batch = operator.next().unwrap().unwrap();
+    let row = crate::OwnedPhysicalRow::new(batch.schema, batch.rows.into_iter().next().unwrap());
+    assert_eq!(
+        uqa_sql::expr::RowLookup::internal_column(&row, relation.column(0)),
+        Some(&uqa_core::Value::Int(42))
+    );
+    operator.close().unwrap();
+}
+
 #[derive(serde::Deserialize)]
 struct Reference {
     sql: String,

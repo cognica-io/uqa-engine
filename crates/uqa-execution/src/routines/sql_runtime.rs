@@ -34,7 +34,7 @@ impl Interpreter<'_> {
                     other => {
                         return Err(SQLError::Internal(format!(
                             "PL/pgSQL ASSERT message coercion returned {other:?}"
-                        )))
+                        )));
                     }
                 }
             }
@@ -57,7 +57,10 @@ impl Interpreter<'_> {
         // Bare RAISE re-throws the error being handled.
         if condition.is_none() && message.is_none() && options.is_empty() {
             return match self.err_stack.last() {
-                Some(error) => Err(error.cause.clone()),
+                Some(error) => {
+                    self.error_context_attached = true;
+                    Err(error.cause.clone())
+                }
                 None => Err(SQLError::Routine {
                     sqlstate: "0Z002".into(),
                     message: "RAISE without parameters cannot be used outside an exception handler"

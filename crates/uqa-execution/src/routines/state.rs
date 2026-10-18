@@ -76,6 +76,8 @@ impl<'a> Interpreter<'a> {
             bindings,
             cursor_arguments,
             err_stack: Vec::new(),
+            error_context_attached: false,
+            record_target: None,
             set_rows: Vec::new(),
             ret: Value::Null,
             ret_record_types: None,

@@ -10,6 +10,9 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_subquery/runtime_schema.rs"]
+mod runtime_schema;
+
 fn setup() -> Engine {
     let eng = Engine::new();
     eng.sql(

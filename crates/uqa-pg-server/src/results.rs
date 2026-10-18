@@ -97,6 +97,7 @@ pub(crate) fn send_notices(transport: &mut Transport, engine: &Engine) -> Result
 pub(crate) fn sql_error(error: &SQLError) -> ErrorOrNotice {
     let mut response = ErrorOrNotice::error(error.sqlstate().unwrap_or("XX000"), error.to_string());
     response.detail = error.detail().map(str::to_owned);
+    response.where_ = error.context().map(str::to_owned);
     response.hint = error.hint().map(str::to_owned);
     response.position = error.position().and_then(|value| value.try_into().ok());
     response
@@ -114,9 +115,19 @@ mod tests {
         };
         diagnostic.detail = Some("parser detail".into());
         diagnostic.hint = Some("parser hint".into());
+        let error = error
+            .with_context("SQL function \"inner\" statement 1")
+            .with_context("PL/pgSQL function outer(integer) line 3 at RETURN");
         let response = sql_error(&error);
         assert_eq!(response.detail.as_deref(), Some("parser detail"));
         assert_eq!(response.hint.as_deref(), Some("parser hint"));
         assert_eq!(response.position, Some(8));
+        assert_eq!(response.code, "42601");
+        assert_eq!(
+            response.where_.as_deref(),
+            Some(
+                "SQL function \"inner\" statement 1\nPL/pgSQL function outer(integer) line 3 at RETURN"
+            )
+        );
     }
 }

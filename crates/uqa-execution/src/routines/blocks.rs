@@ -103,7 +103,7 @@ impl Interpreter<'_> {
                     )));
                 }
                 // A termination of the session is reported at FATAL, which no handler catches.
-                if matches!(&error, SQLError::Cancelled(cancelled) if cancelled.reason.terminates_session())
+                if matches!(error.primary(), SQLError::Cancelled(cancelled) if cancelled.reason.terminates_session())
                 {
                     return Err(error);
                 }
@@ -126,13 +126,14 @@ impl Interpreter<'_> {
                 match arm {
                     Some(arm) => {
                         // A handler that catches a cancellation consumes it, as PostgreSQL reports a cancel or timeout interrupt once.
-                        if let SQLError::Cancelled(cancelled) = &error {
+                        if let SQLError::Cancelled(cancelled) = error.primary() {
                             self.services.runtime.cancellation.clear(cancelled.reason);
                         }
                         self.err_stack.push(super::CaughtError {
                             diagnostics: (state, message),
                             cause: error,
                         });
+                        self.error_context_attached = false;
                         let handled = self.exec_stmts(&arm.body);
                         self.err_stack.pop();
                         handled

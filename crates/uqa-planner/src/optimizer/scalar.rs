@@ -293,6 +293,10 @@ fn optimize_scalar(
                 let mut nested = config.clone();
                 nested.active_inline_routines.push(inlined.identity);
                 return optimize_scalar(inlined.expression, &nested)
+                    .map_err(|error| match inlined.error_context {
+                        Some(context) => error.with_context(context),
+                        None => error,
+                    })
                     .map(|expression| constants::retain_record_result(expression, false))
                     .map(|expression| constants::retain_computed_integer(expression, None));
             }

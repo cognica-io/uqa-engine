@@ -20,7 +20,7 @@ use uqa_sql::{
     binding::statements::ProceduralPlanAnalysis,
     plan::UnifiedPlan,
     plpgsql::{
-        parameterize_statement_variables, PLpgSQLCursorArguments, PLpgSQLExpression,
+        parameterize_statement_variables, PLpgSQLCursorArguments, PLpgSQLExpression, PLpgSQLSource,
         PLpgSQLStatement, PLpgSQLVariableReference,
     },
     prepared::{definition::analysis_is_current, dependencies::PreparedAnalysisDependencies},
@@ -34,6 +34,8 @@ pub struct PLpgSQLPreparations {
 }
 
 pub(super) struct PreparedFragment {
+    source: Arc<PLpgSQLSource>,
+    simple_expression: bool,
     pub syntax: Statement,
     pub analysis: ProceduralPlanAnalysis,
     valid: AtomicBool,
@@ -141,80 +143,101 @@ impl Interpreter<'_> {
         &self,
         expression: &PLpgSQLExpression,
     ) -> Result<Arc<PreparedFragment>, SQLError> {
-        self.prepare_fragment(expression.site(), || expression.parse_statement())
+        self.prepare_fragment(expression.site(), expression.source(), || {
+            expression.parse_statement()
+        })
     }
     pub(super) fn prepare_statement(
         &self,
         statement: &PLpgSQLStatement,
     ) -> Result<Arc<PreparedFragment>, SQLError> {
-        self.prepare_fragment(statement.site(), || statement.parse())
+        self.prepare_fragment(statement.site(), statement.source(), || statement.parse())
     }
     pub(super) fn prepare_cursor_arguments(
         &self,
         arguments: &PLpgSQLCursorArguments,
     ) -> Result<Arc<PreparedFragment>, SQLError> {
-        self.prepare_fragment(arguments.site(), || arguments.parse_statement())
+        self.prepare_fragment(arguments.site(), arguments.source(), || {
+            arguments.parse_statement()
+        })
     }
     fn prepare_fragment(
         &self,
         site: usize,
+        source: &Arc<PLpgSQLSource>,
         parse: impl FnOnce() -> Result<Statement, SQLError>,
     ) -> Result<Arc<PreparedFragment>, SQLError> {
         self.services.runtime.cancellation_token().check()?;
-        self.preparations.get_or_prepare(
-            site,
-            |prepared| {
-                let Some(context) = self.services.statements.body_input_context() else {
-                    return Ok(true);
-                };
-                analysis_is_current(
-                    &context.analysis,
-                    prepared.analysis.effective_search_path.as_ref(),
-                    &prepared.analysis.dependencies,
-                    prepared.analysis.dependency_snapshot.as_ref(),
-                )
-            },
-            |retained| {
-                let syntax = if let Some(syntax) = retained {
-                    syntax.clone()
-                } else {
-                    let (syntax, metadata) = uqa_sql::parser::with_settings(
-                        self.services.statements.parser_settings(),
-                        parse,
-                    );
-                    for notice in metadata.notices.iter() {
-                        self.services.runtime.push_notice(notice.clone());
-                    }
-                    syntax?
-                };
-                let bound = parameterize_statement_variables(
-                    &syntax,
-                    &mut self.resolver(),
-                    self.variable_conflict,
-                    &mut |statement, parameters, names| {
-                        self.resolve_variable_sites(statement, &parameters, names)
-                    },
-                    &|name: &str| self.services.runtime.has_aggregate_function(name),
-                )?;
-                let mut plan = bound.plan;
-                let analysis = self
-                    .services
-                    .statements
-                    .analyze_static_plan(&mut plan, &bound.parameters)?;
-                let definition = analysis.prepared_definition(&plan, &bound.parameters)?;
-                let variants = super::plans::RoutinePlanVariants::new(&definition);
-                // Only a completely analyzed statement is retained. Parse and input
-                // failures retry; runtime errors cannot undo an already prepared site.
-                Ok(PreparedFragment {
-                    syntax,
-                    analysis,
-                    valid: AtomicBool::new(true),
-                    variables: bound.references,
-                    parameter_types: definition.parameter_types,
-                    variants,
-                })
-            },
-        )
+        self.preparations
+            .get_or_prepare(
+                site,
+                |prepared| {
+                    let Some(context) = self.services.statements.body_input_context() else {
+                        return Ok(true);
+                    };
+                    analysis_is_current(
+                        &context.analysis,
+                        prepared.analysis.effective_search_path.as_ref(),
+                        &prepared.analysis.dependencies,
+                        prepared.analysis.dependency_snapshot.as_ref(),
+                    )
+                },
+                |retained| {
+                    let syntax = if let Some(syntax) = retained {
+                        syntax.clone()
+                    } else {
+                        let (syntax, metadata) = uqa_sql::parser::with_settings(
+                            self.services.statements.parser_settings(),
+                            parse,
+                        );
+                        for notice in metadata.notices.iter() {
+                            self.services.runtime.push_notice(notice.clone());
+                        }
+                        syntax?
+                    };
+                    let bound = parameterize_statement_variables(
+                        &syntax,
+                        &mut self.resolver(),
+                        self.variable_conflict,
+                        &mut |statement, parameters, names| {
+                            self.resolve_variable_sites(statement, &parameters, names)
+                        },
+                        &|name: &str| self.services.runtime.has_aggregate_function(name),
+                    )?;
+                    let mut plan = bound.plan;
+                    let analysis = self
+                        .services
+                        .statements
+                        .analyze_static_plan(&mut plan, &bound.parameters)?;
+                    let definition = analysis.prepared_definition(&plan, &bound.parameters)?;
+                    let variants = super::plans::RoutinePlanVariants::new(&definition);
+                    let mut simple_expression = false;
+                    self.services
+                        .statements
+                        .with_statement_scope(&mut |routines, _| {
+                            simple_expression = source.mode
+                                != uqa_sql::plpgsql::PLpgSQLParseMode::Statement
+                                && uqa_sql::plpgsql::is_simple_expression_plan(
+                                    routines,
+                                    &definition.logical_plan,
+                                );
+                            Ok(())
+                        })?;
+                    // Only a completely analyzed statement is retained. Parse and input
+                    // failures retry; runtime errors cannot undo an already prepared site.
+                    Ok(PreparedFragment {
+                        source: Arc::clone(source),
+                        simple_expression,
+                        syntax,
+                        analysis,
+                        valid: AtomicBool::new(true),
+                        variables: bound.references,
+                        parameter_types: definition.parameter_types,
+                        variants,
+                    })
+                },
+            )
+            .map_err(|error| source.error_context(error))
     }
     pub(super) fn fragment_parameters(
         &self,
@@ -269,6 +292,13 @@ impl Interpreter<'_> {
         self.services
             .statements
             .execute_selected_body_plan(&plan, &parameters)
+            .map_err(|error| {
+                if prepared.simple_expression {
+                    error
+                } else {
+                    prepared.source.error_context(error)
+                }
+            })
     }
 
     pub(super) fn select_fragment_plan(
@@ -278,7 +308,16 @@ impl Interpreter<'_> {
     ) -> Result<UnifiedPlan, SQLError> {
         prepared
             .variants
-            .select(|entry| self.services.statements.select_body_plan(entry, parameters))
+            .select(|entry| {
+                if prepared.simple_expression {
+                    self.services
+                        .statements
+                        .select_simple_expression_plan(entry, parameters)
+                } else {
+                    self.services.statements.select_body_plan(entry, parameters)
+                }
+            })
+            .map_err(|error| prepared.source.error_context(error))
     }
 }
 

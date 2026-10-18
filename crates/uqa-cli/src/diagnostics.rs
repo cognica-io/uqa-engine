@@ -12,6 +12,10 @@ use uqa_sql::{SQLError, SQLNotice};
 pub(super) fn sql_error_text(error: &SQLError) -> String {
     let mut text = format!("{}: {error}", error.sqlstate().unwrap_or("XX000"));
     append_fields(&mut text, error.detail(), error.hint());
+    if let Some(context) = error.context() {
+        text.push_str("\nCONTEXT: ");
+        text.push_str(context);
+    }
     crate::printing::message_text(&text)
 }
 
@@ -45,9 +49,12 @@ mod tests {
         };
         diagnostic.detail = Some("parser detail".into());
         diagnostic.hint = Some("parser hint".into());
+        let error = error
+            .with_context("SQL function \"inner\" statement 1")
+            .with_context("PL/pgSQL function outer(integer) line 3 at RETURN");
         let text = sql_error_text(&error);
         assert!(text.starts_with("42601: "));
-        assert!(text.ends_with("\nDETAIL: parser detail\nHINT: parser hint"));
+        assert!(text.ends_with("\nDETAIL: parser detail\nHINT: parser hint\nCONTEXT: SQL function \"inner\" statement 1\nPL/pgSQL function outer(integer) line 3 at RETURN"));
     }
 }
 
@@ -59,5 +66,11 @@ mod terminal_tests {
         let text = super::sql_notice_text(&notice);
         assert!(!text.contains('\x1b'));
         assert!(text.contains("red"));
+        let error = uqa_sql::SQLError::Routine {
+            sqlstate: "22012".into(),
+            message: "division by zero".into(),
+        }
+        .with_context("SQL function \"\x1b[31minner\" statement 1");
+        assert!(!super::sql_error_text(&error).contains('\x1b'));
     }
 }

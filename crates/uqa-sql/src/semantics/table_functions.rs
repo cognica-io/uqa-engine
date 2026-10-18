@@ -206,18 +206,45 @@ pub fn resolve_table_function_binding(
     if let Some(binding) = binding {
         return Ok(Some(binding.clone()));
     }
-    let identity = name.to_ascii_lowercase();
-    let builtin = crate::semantics::builtin_function_dispatch_name(&identity);
     let (argument_names, argument_types, explicit_variadic) =
         crate::function_call_argument_signature(args, input_schema, params, Some(resolver))?;
-    let builtins = builtin_table_function_overloads(&builtin, &argument_types);
+    resolve_table_function_binding_for_types(
+        routines,
+        name,
+        binding,
+        crate::type_resolution::RoutineCallDescriptor {
+            argument_names: &argument_names,
+            argument_types: &argument_types,
+            explicit_variadic,
+        },
+    )
+}
+
+/// Select a FROM call from arguments already analyzed in their owning scalar-subquery scope.
+pub(crate) fn resolve_table_function_binding_for_types(
+    routines: &dyn RoutineResolution,
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    call: crate::type_resolution::RoutineCallDescriptor<'_>,
+) -> Result<Option<FunctionBinding>, SQLError> {
+    if let Some(binding) = binding {
+        return Ok(Some(binding.clone()));
+    }
+    let crate::type_resolution::RoutineCallDescriptor {
+        argument_names,
+        argument_types,
+        explicit_variadic,
+    } = call;
+    let identity = name.to_ascii_lowercase();
+    let builtin = crate::semantics::builtin_function_dispatch_name(&identity);
+    let builtins = builtin_table_function_overloads(&builtin, argument_types);
     if !builtins.is_empty() || has_builtin_table_function_overloads(&builtin) {
         return routines
             .resolve_table_function_overload_with_builtins(
                 name,
                 None,
-                &argument_names,
-                &argument_types,
+                argument_names,
+                argument_types,
                 explicit_variadic,
                 &builtins,
             )
@@ -232,8 +259,8 @@ pub fn resolve_table_function_binding(
     match routines.resolve_static_sql_function_match(
         name,
         None,
-        &argument_names,
-        &argument_types,
+        argument_names,
+        argument_types,
         explicit_variadic,
     ) {
         Ok(Some(function)) => Ok(Some(function.binding())),

@@ -31,13 +31,14 @@ pub(super) fn optimize(
     else {
         return Ok(());
     };
-    if !column_types.is_empty() {
-        return Ok(());
-    }
     if !*ordinality {
-        if let Some(mut inlined) =
-            context.prepare_table(binding, args, &config.active_inline_routines)?
-        {
+        if let Some(mut inlined) = context.prepare_table(
+            binding,
+            args,
+            &config.active_inline_routines,
+            column_aliases,
+            column_types,
+        )? {
             ensure_unit_source(&mut inlined.query);
             let mut nested = config.clone();
             nested.active_inline_routines.push(inlined.identity);
@@ -56,6 +57,9 @@ pub(super) fn optimize(
             };
             return Ok(());
         }
+    }
+    if !column_types.is_empty() {
+        return Ok(());
     }
     let Some(columns) = context.scalar_from_columns(
         binding,
@@ -87,6 +91,50 @@ pub(super) fn optimize(
         alias: Some(alias.as_deref().unwrap_or(output_name).to_string()),
         column_aliases: columns,
     };
+    Ok(())
+}
+
+pub(super) fn optimize_group(
+    source: &mut SourcePlan,
+    config: &OptimizerConfig<'_>,
+    aggregates: &dyn AggregateClassifier,
+) -> Result<(), SQLError> {
+    let SourcePlan::FunctionGroup {
+        functions,
+        alias,
+        column_aliases,
+        ordinality: false,
+    } = source
+    else {
+        return Ok(());
+    };
+    let [function] = functions.as_slice() else {
+        return Ok(());
+    };
+    let mut member = SourcePlan::Function {
+        name: function.name.clone(),
+        binding: function.binding.clone(),
+        output_name: function.output_name.clone(),
+        relations: function.relations.clone(),
+        args: function.args.clone(),
+        alias: alias.clone(),
+        column_aliases: function.column_aliases.clone(),
+        column_types: function.column_types.clone(),
+        ordinality: false,
+    };
+    optimize(&mut member, config, aggregates)?;
+    if let SourcePlan::Subquery {
+        column_aliases: columns,
+        ..
+    } = &mut member
+    {
+        *columns = uqa_sql::semantics::apply_table_function_aliases(
+            columns.clone(),
+            column_aliases,
+            false,
+        );
+        *source = member;
+    }
     Ok(())
 }
 

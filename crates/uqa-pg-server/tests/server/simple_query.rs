@@ -43,6 +43,13 @@ fn result_fields_and_text_match_postgresql_over_tcp() {
 }
 
 #[test]
+fn routine_planning_and_error_context_match_postgresql_over_tcp() {
+    compare_oracle(include_str!(
+        "../../../../tests/parity/pg18/from_routine_planning_oracle.expected.json"
+    ));
+}
+
+#[test]
 fn case_result_modifiers_match_postgresql_over_tcp() {
     compare_oracle(include_str!("case_modifiers.json"));
 }

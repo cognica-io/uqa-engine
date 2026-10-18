@@ -20,12 +20,8 @@ fn tables() -> Engine {
 
 fn ambiguous(engine: &Engine, call: &str, name: &str) {
     let error = exec_err(engine, call);
-    let detail = match &error {
-        SQLError::Diagnostic { detail, .. } => detail.clone(),
-        _ => None,
-    };
     assert_eq!(
-        (error.sqlstate(), error.to_string(), detail.as_deref()),
+        (error.sqlstate(), error.to_string(), error.detail()),
         (
             Some("42702"),
             format!("column reference \"{name}\" is ambiguous"),

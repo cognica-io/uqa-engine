@@ -27,6 +27,76 @@ fn open(provider: usize, path: &std::path::Path) -> Engine {
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn from_routine_planning_matches_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("from-routine-planning.db");
+    let engine = open(provider, &path);
+    let mut reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/from_routine_planning_oracle.expected.json"
+    )))
+    .unwrap();
+    crate::pg18_oracle::verify(&engine, &reference.to_string());
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    engine
+        .sql("SET search_path TO routine_from, public", &[])
+        .unwrap();
+    reference["cases"].as_array_mut().unwrap().retain(|case| {
+        matches!(
+            case["id"].as_str().unwrap(),
+            "domain_unfetched"
+                | "assignment_distinct"
+                | "assignment_distinct_on"
+                | "assignment_ordered"
+                | "assignment_grouped"
+                | "assignment_grouping_sets"
+                | "assignment_lateral"
+                | "domain_rows"
+                | "correlated"
+                | "correlated_implicit"
+                | "correlated_collision"
+                | "cte_rows"
+                | "cte_correlated_rows"
+                | "unused_argument"
+                | "conditional_argument"
+                | "collated_arg"
+                | "shadowed_caller_cte"
+                | "missing_not_caller_cte"
+                | "single_rows_from"
+                | "multi_rows_from"
+                | "ordinality_unfetched"
+                | "record_unfetched"
+                | "record_wrong_width"
+                | "scalar_unfetched"
+                | "procedural_unfetched"
+                | "nested_sql"
+                | "nested_procedural"
+                | "procedural_width"
+                | "catch_error"
+                | "catch_reused"
+                | "rethrow_error"
+                | "rethrow_reused"
+                | "handler_error"
+                | "constant_expression"
+                | "assignment_error"
+                | "constant_assignment"
+                | "query_error"
+                | "perform_error"
+        )
+    });
+    assert_eq!(reference["cases"].as_array().unwrap().len(), 38);
+    crate::pg18_oracle::verify(&engine, &reference.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn set_returning_contexts_match_postgresql_and_reopen(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("set-returning-contexts.db");

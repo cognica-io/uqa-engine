@@ -13393,6 +13393,233 @@
       "invariant": "The hard depth bound is enforced before the resource hook; a permitted callback observes its exact depth and restarting releases operation state."
     },
     {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "from_routine_planning_matches_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/set_returning_contexts.rs",
+      "capability": "Routine planning, demand and diagnostic preservation",
+      "workload": "PostgreSQL 18.4 FROM-routine queries across general and correlated bodies, LIMIT 0, nested errors, exception handlers and persistent reopening.",
+      "invariant": "Rows, types and ordered diagnostic fields match PostgreSQL; sequence observations prove zero execution for unfetched bodies and fresh execution on each consumed call.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_sources_run_once_on_pull_and_remain_unused_when_closed_without_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/deferred/tests.rs",
+      "capability": "Routine planning, demand and diagnostic preservation",
+      "workload": "Open, optional repeated pulls and close of a deferred physical source.",
+      "invariant": "Producer invocations are exactly zero without demand and exactly one across repeated pulls.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "failed_operator_initialization_cannot_be_pulled_and_is_still_closed",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/deferred/tests.rs",
+      "capability": "Routine planning, demand and diagnostic preservation",
+      "workload": "Deferred operator fails during initialization before any row can be produced.",
+      "invariant": "The typed first error is preserved; initialization runs once, subsequent pulls cannot execute the failed input, and close releases it.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "procedural_simple_expressions_keep_parameters_even_with_forced_custom_plans",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/statement_planning/prepared/selection/tests.rs",
+      "capability": "Routine planning, demand and diagnostic preservation",
+      "workload": "Two PL/pgSQL simple-expression executions with different variables under force_custom_plan.",
+      "invariant": "The generic plan is built and costed once, retains runtime parameters and does not create a custom plan.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "table_routine_exact_overload_binding_reaches_dml_and_correlated_lateral_sources",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_routine_identity.rs",
+      "capability": "Routine planning, demand and diagnostic preservation",
+      "workload": "Overloaded FROM routines with typed scalar subqueries across UPDATE, DELETE, MERGE and a correlated lateral source.",
+      "invariant": "The analyzed bigint invocation and declared output column survive planning and execution without unknown-type reselection."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "result_assignment_follows_body_distinct_grouping_and_ordering",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/inlining/tests/table.rs",
+      "capability": "SQL set-function result assignment",
+      "workload": "Noninjective numeric-to-integer result assignment around DISTINCT, DISTINCT ON, GROUP BY, grouping sets and ORDER BY bodies.",
+      "invariant": "Assignment applies after the original body operators without evaluating the body during typed expansion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "runtime_column_binding_preserves_deferred_closed_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/deferred/tests.rs",
+      "capability": "Derived source row descriptors",
+      "workload": "Open and closed metadata descriptors share a one-row producer with an invocation counter.",
+      "invariant": "Runtime columns are available before consumer binding; closed sources remain unexecuted until pulled and each producer runs once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "derived_runtime_columns_survive_qualification_aliases_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_subquery/runtime_schema.rs",
+      "capability": "Runtime-derived SQL columns",
+      "workload": "DISTINCT and CTE subqueries over schemaless documents and registered table functions on memory, SQLite, SQLite Key/Value and redb, including persistent reopening.",
+      "invariant": "Qualified and wildcard projections retain all runtime columns, aliases retain positional values, and callback schema discovery executes once even with LIMIT 0.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bound_output_preserves_metadata_shared_values_and_lock_origins",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/column_selection.rs",
+      "capability": "Declared derived-query output",
+      "workload": "A declared derived output selects one text slot twice and a composite slot from a wider physical row.",
+      "invariant": "Output collations, record fields, column order and lock origins survive; both repeated values share the original payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bound_output_rejects_changed_columns_types_and_nonpositional_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/column_selection.rs",
+      "capability": "Declared derived-query output",
+      "workload": "Malformed output bindings change a name, width, input position, type or positional descriptor.",
+      "invariant": "Each incompatible binding fails before the input can open.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-pg-server",
+      "kind": "test",
+      "test": "routine_planning_and_error_context_match_postgresql_over_tcp",
+      "cases": 1,
+      "source": "crates/uqa-pg-server/tests/server/simple_query.rs",
+      "capability": "Routine planning and PostgreSQL protocol diagnostics",
+      "workload": "The independent 141-statement PostgreSQL routine-planning transcript runs over a real TCP connection.",
+      "invariant": "Rows, types, command completion and ordered error contexts match the independent PostgreSQL reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_output_binding_keeps_scores_outside_public_columns",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/deferred/tests.rs",
+      "capability": "Physical derived-query output",
+      "workload": "A derived query owns a hidden retrieval score outside its public columns.",
+      "invariant": "Physical binding retains the opaque score identity and initializes the source exactly once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "score_descriptor_follows_cte_definition_scope_and_demand",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/output_descriptor/tests.rs",
+      "capability": "Physical derived-query output",
+      "workload": "Nested and recursive CTEs, shadowed names and unused retrieval definitions.",
+      "invariant": "Descriptor selection follows the definition scope and only the output sources, without evaluating rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "score_provenance_survives_derived_tables_and_joins",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_text_match_scoring.rs",
+      "capability": "Derived-query score provenance",
+      "workload": "Retrieval scores cross projections, DISTINCT, nested queries, joins, views and folded/materialized CTEs.",
+      "invariant": "Complete per-document scores equal direct retrieval; hidden metadata never becomes public columns.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bound_output_preserves_scores_without_exposing_internal_columns",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/column_selection.rs",
+      "capability": "Derived-query score provenance",
+      "workload": "A public text output retains two hidden score identities, including multiple qualifiers for one identity.",
+      "invariant": "Public collation, score qualifiers and both opaque identities survive; score values share their original payload slots without redundant physical columns.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "an_unconsumed_retrieval_never_executes_even_when_opened_and_closed",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_sources/hierarchy/tests.rs",
+      "capability": "Deferred retrieval descriptor and demand",
+      "workload": "Ordinary and hierarchy retrieval sources are opened and closed without pulling a row.",
+      "invariant": "No retrieval runs and the prepared score descriptor remains available before demand.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "demanded_retrieval_preserves_schema_scores_and_current_recheck_pins_without_replay",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_sources/hierarchy/tests.rs",
+      "capability": "Deferred retrieval descriptor and demand",
+      "workload": "Ordinary and hierarchy retrieval sources run with successful, failing and tuple-recheck inputs.",
+      "invariant": "Prepared row schemas, scores and current tuple pins survive; the producer does not replay after success or error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "combined_occurrence_resolution_writes_ordered_spill_once",

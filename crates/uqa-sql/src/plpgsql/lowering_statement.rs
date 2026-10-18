@@ -115,16 +115,37 @@ pub(super) fn lower_optional_stmt_list(
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "PL/pgSQL lowering preserves parser order and datum validation"
-)]
 pub(super) fn lower_stmt(
     raw: &JSONValue,
     datums: &[PLpgSQLDatum],
     mode: PLpgSQLCompileMode,
 ) -> Result<PLpgSQLStmt> {
     ensure_single_tag(raw, "statement")?;
+    let line = raw
+        .as_object()
+        .and_then(|object| object.values().next())
+        .map(|statement| json_optional_i64(statement, "lineno"))
+        .transpose()?
+        .flatten();
+    let statement = lower_statement(raw, datums, mode)?;
+    Ok(match line {
+        Some(line) if line > 0 => PLpgSQLStmt::Located {
+            line,
+            statement: Box::new(statement),
+        },
+        _ => statement,
+    })
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "PL/pgSQL lowering preserves parser order and datum validation"
+)]
+fn lower_statement(
+    raw: &JSONValue,
+    datums: &[PLpgSQLDatum],
+    mode: PLpgSQLCompileMode,
+) -> Result<PLpgSQLStmt> {
     if let Some(block) = raw.get("PLpgSQL_stmt_block") {
         return Ok(PLpgSQLStmt::Block(lower_block(block, datums, mode)?));
     }
@@ -357,7 +378,7 @@ pub(super) fn lower_stmt(
                     _ => {
                         return Err(SQLError::Unsupported(
                             "RAISE ... USING object diagnostic fields".into(),
-                        ))
+                        ));
                     }
                 };
                 options.push(super::RaiseOption {

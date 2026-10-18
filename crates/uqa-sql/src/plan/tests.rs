@@ -324,3 +324,25 @@ fn source_visitors_cover_retained_queries_and_data_modifying_ctes() {
         });
     }
 }
+#[test]
+fn single_expression_classification_rejects_relational_and_window_queries() {
+    for (sql, expected) in [
+        ("SELECT $1::int / 0", true),
+        ("SELECT 1, 2", false),
+        ("SELECT 1 WHERE false", false),
+        ("SELECT sum(1)", false),
+        ("SELECT row_number() OVER ()", false),
+        ("SELECT (SELECT 1)", false),
+        ("SELECT 1 ORDER BY 1", false),
+        ("SELECT 1 LIMIT 0", false),
+    ] {
+        let UnifiedPlan::Query(query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("SELECT")
+        };
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("query block")
+        };
+        assert_eq!(block.is_single_expression(), expected, "{sql}");
+    }
+}

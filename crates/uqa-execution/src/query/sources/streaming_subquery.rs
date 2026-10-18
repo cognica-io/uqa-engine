@@ -54,6 +54,7 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
     // The block's scalar subqueries live in their own arena for the whole pull pipeline: the evaluators built below snapshot this scope, so a derived table with subqueries still streams and an outer LIMIT keeps its inner locking demand-driven.
     let mut ctes = ctes.enter_scalar_subqueries(&block.subqueries);
     let ctes: &mut CteScope<S> = &mut ctes;
+    let outer_row = ctes.row_lock_outer_row().cloned();
     let source_schema = bind_source_plan_schema_for_execution(
         context.ctes.routines,
         block
@@ -62,8 +63,12 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
             .expect("derived-table FROM checked above"),
         params,
         ctes,
-        None,
+        outer_row.as_ref().map(|row| &row.schema),
     )?;
+    let source_schema = uqa_sql::binding::overlay_outer_schema(
+        &source_schema,
+        outer_row.as_ref().map(|row| &row.schema),
+    );
     let block = &*block;
     let from = block
         .from
@@ -122,6 +127,10 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
                 column_prune.as_ref(),
                 qualifier_filters.as_ref(),
             )?
+        };
+        let operator: Box<dyn crate::PhysicalOperator + 'a> = match outer_row {
+            Some(outer) => Box::new(crate::ScopeOverlay::new(operator, outer)),
+            None => operator,
         };
         // A volatile projection or filter observes only rows demanded by its parent, even when the underlying scan returns a larger batch.
         let operator: Box<dyn crate::PhysicalOperator + 'a> = if scalar_demand {

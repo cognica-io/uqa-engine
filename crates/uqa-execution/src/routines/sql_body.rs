@@ -51,34 +51,7 @@ pub fn execute_sql_language(
         definition: def,
         plans,
     } = body;
-    let call_params = def.call_params();
-    if call_params.len() != bound.len() {
-        return Err(SQLError::Internal(format!(
-            "routine `{}` received {} values for {} concrete call parameters",
-            def.name,
-            bound.len(),
-            call_params.len()
-        )));
-    }
-    let params = bound
-        .iter()
-        .cloned()
-        .zip(call_params)
-        .filter(|(_, parameter)| is_sql_body_parameter(parameter))
-        .map(|(value, parameter)| {
-            let ty = uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name)
-                .ok()
-                .or_else(|| {
-                    context
-                        .expressions
-                        .catalog_column_type(&parameter.type_name)
-                })
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!("unknown type `{}`", parameter.type_name))
-                })?;
-            Ok(SQLParam::typed_scalar(value, ty))
-        })
-        .collect::<Result<Vec<_>, SQLError>>()?;
+    let params = body_parameters(context, def, bound)?;
     if plans.is_empty() {
         check_sql_function_result(types, def, None)?;
     }
@@ -127,7 +100,15 @@ pub fn execute_sql_language(
     for (position, plan) in plans.iter().enumerate() {
         let check = (position + 1 == plans.len())
             .then_some(&check_result as super::context::StatementResultCheck<'_>);
-        let statement = statements.prepare(plan, position, check)?;
+        let frame = || {
+            uqa_sql::routines::diagnostics::sql_context(
+                def,
+                uqa_sql::routines::diagnostics::SQLRoutineStage::Statement(position + 1),
+            )
+        };
+        let statement = statements
+            .prepare(plan, position, check)
+            .map_err(|error| error.with_context(frame()))?;
         let _direct_routine_command = matches!(
             statement.plan(),
             UnifiedPlan::Command(command)
@@ -137,12 +118,54 @@ pub fn execute_sql_language(
                 )
         )
         .then(|| DirectRoutineCommandGuard::enter(context.session));
-        last = statement.execute(context, &params, check)?;
+        last = statement
+            .execute(context, &params, check)
+            .map_err(|error| error.with_context(frame()))?;
     }
     let layout = layout
         .into_inner()
         .map_or_else(|| sql_function_result_layout(types, def, None), Ok)?;
-    shape_result(context.expressions, types, def, &last, &layout)
+    shape_result(context.expressions, types, def, &last, &layout).map_err(|error| {
+        error.with_context(uqa_sql::routines::diagnostics::sql_context(
+            def,
+            uqa_sql::routines::diagnostics::SQLRoutineStage::Statement(plans.len()),
+        ))
+    })
+}
+
+fn body_parameters(
+    context: RoutineContext<'_>,
+    def: &CreateFunction,
+    bound: &[Value],
+) -> Result<Vec<SQLParam>, SQLError> {
+    let call_params = def.call_params();
+    if call_params.len() != bound.len() {
+        return Err(SQLError::Internal(format!(
+            "routine `{}` received {} values for {} concrete call parameters",
+            def.name,
+            bound.len(),
+            call_params.len()
+        )));
+    }
+    bound
+        .iter()
+        .cloned()
+        .zip(call_params)
+        .filter(|(_, parameter)| is_sql_body_parameter(parameter))
+        .map(|(value, parameter)| {
+            let ty = uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name)
+                .ok()
+                .or_else(|| {
+                    context
+                        .expressions
+                        .catalog_column_type(&parameter.type_name)
+                })
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(format!("unknown type `{}`", parameter.type_name))
+                })?;
+            Ok(SQLParam::typed_scalar(value, ty))
+        })
+        .collect()
 }
 
 fn shape_result(
@@ -293,7 +316,7 @@ pub(super) fn row_fields(value: Value, expected: usize) -> Result<Vec<Value>, SQ
         _ => {
             return Err(SQLError::Internal(
                 "a SQL routine row result contained a scalar value".into(),
-            ))
+            ));
         }
     };
     if fields.len() == expected {

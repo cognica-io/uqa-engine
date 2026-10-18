@@ -21,7 +21,14 @@ pub(super) fn execute_view_plan_output_with_parent_cache<S: Clone + 'static>(
     local_cte_names: &BTreeSet<String>,
 ) -> Result<QueryOutput, SQLError> {
     let saved = crate::query::scope::bindings::save_and_remove_cte_names(ctes, local_cte_names);
-    let result = context.ctes.queries.execute_query(plan, params, ctes);
+    let result = if let Some(outer) = ctes.row_lock_outer_row() {
+        context
+            .ctes
+            .queries
+            .execute_lateral_query(plan, outer, params, ctes)
+    } else {
+        context.ctes.queries.execute_query(plan, params, ctes)
+    };
     crate::query::scope::bindings::restore_cte_names(ctes, saved);
     result
 }

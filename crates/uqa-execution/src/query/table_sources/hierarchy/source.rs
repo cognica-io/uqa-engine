@@ -10,7 +10,8 @@ use super::{
     calibrate_global_vector_pool, retain_global_top_k, DirectVectorRetrieval, PhysicalRetrieval,
 };
 use crate::query::{
-    scored_input::{DeferredTableScan, HierarchyScoredDocumentSource, ScoredDocumentSource},
+    deferred::DeferredOperator,
+    scored_input::{HierarchyScoredDocumentSource, ScoredDocumentSource},
     table_sources::retrieval::RetrievalAccess,
 };
 use crate::{RowSchema, RowSource};
@@ -24,8 +25,8 @@ pub(super) fn deferred<'a>(
     params: &'a [SQLParam],
     sources: Vec<ScoredDocumentSource>,
     schema: RowSchema,
-) -> DeferredTableScan<'a> {
-    DeferredTableScan::new(
+) -> DeferredOperator<'a> {
+    DeferredOperator::from_rows(
         schema,
         Box::new(move || evaluate(retrieval, physical, direct, predicate, params, sources)),
     )

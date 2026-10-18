@@ -33,12 +33,12 @@ fn cursor_query_lowering_preserves_source_before_variable_binding() {
     let PLpgSQLStmt::OpenCursor {
         open: PLpgSQLCursorOpen::Static { source_sql, .. },
         ..
-    } = &parsed.action.body[0]
+    } = parsed.action.body[0].unlocated()
     else {
         panic!("expected a static OPEN");
     };
     assert_eq!(&**source_sql, "SELECT /* static source */ 42");
-    let PLpgSQLStmt::ForQuery { source_sql, .. } = &parsed.action.body[1] else {
+    let PLpgSQLStmt::ForQuery { source_sql, .. } = parsed.action.body[1].unlocated() else {
         panic!("expected a query loop");
     };
     assert_eq!(&**source_sql, "SELECT  2");
@@ -88,7 +88,7 @@ fn pg18_bound_cursor_named_arguments_lower_in_declaration_order() {
     let PLpgSQLStmt::OpenCursor {
         cursor,
         open: PLpgSQLCursorOpen::Bound { arguments },
-    } = &parsed.action.body[0]
+    } = parsed.action.body[0].unlocated()
     else {
         panic!("expected OPEN as the first statement");
     };
@@ -111,23 +111,23 @@ fn pg18_bound_cursor_named_arguments_lower_in_declaration_order() {
         Expr::Literal(Value::Int(2))
     ));
     assert!(matches!(
-        parsed.action.body[1],
+        parsed.action.body[1].unlocated(),
         PLpgSQLStmt::FetchCursor {
             cursor,
             direction: CursorDirection::Forward,
             count: PLpgSQLCursorCount::Constant(1),
             ..
-        } if cursor == cursor_index
+        } if *cursor == cursor_index
     ));
     assert!(matches!(
-        parsed.action.body[2],
-        PLpgSQLStmt::CloseCursor { cursor } if cursor == cursor_index
+        parsed.action.body[2].unlocated(),
+        PLpgSQLStmt::CloseCursor { cursor } if *cursor == cursor_index
     ));
     assert!(matches!(
-        parsed.action.body[3],
+        parsed.action.body[3].unlocated(),
         PLpgSQLStmt::Return {
             value: Some(PLpgSQLReturnValue::Datum(index))
-        } if index == 5
+        } if *index == 5
     ));
 }
 
@@ -167,7 +167,7 @@ fn pg18_dynamic_and_bound_cursor_for_loops_lower_structurally() {
         params,
         body,
         ..
-    } = &parsed.action.body[0]
+    } = parsed.action.body[0].unlocated()
     else {
         panic!("expected dynamic-query FOR as the first statement");
     };
@@ -188,7 +188,7 @@ fn pg18_dynamic_and_bound_cursor_for_loops_lower_structurally() {
         cursor: lowered_cursor,
         arguments,
         body,
-    } = &parsed.action.body[1]
+    } = parsed.action.body[1].unlocated()
     else {
         panic!("expected bound-cursor FOR as the second statement");
     };
@@ -231,7 +231,7 @@ fn pg18_dynamic_open_fetch_directions_and_move_lower_structurally() {
     .unwrap();
 
     assert!(matches!(
-        &parsed.action.body[0],
+        parsed.action.body[0].unlocated(),
         PLpgSQLStmt::OpenCursor {
             open: PLpgSQLCursorOpen::Static {
                 scroll: Some(true),
@@ -241,7 +241,7 @@ fn pg18_dynamic_open_fetch_directions_and_move_lower_structurally() {
         }
     ));
     assert!(matches!(
-        &parsed.action.body[1],
+        parsed.action.body[1].unlocated(),
         PLpgSQLStmt::FetchCursor {
             direction: CursorDirection::Absolute,
             count: PLpgSQLCursorCount::Constant(-1),
@@ -249,7 +249,7 @@ fn pg18_dynamic_open_fetch_directions_and_move_lower_structurally() {
         }
     ));
     assert!(matches!(
-        &parsed.action.body[2],
+        parsed.action.body[2].unlocated(),
         PLpgSQLStmt::MoveCursor {
             direction: CursorDirection::Forward,
             count: PLpgSQLCursorCount::Expression(_),
@@ -257,7 +257,7 @@ fn pg18_dynamic_open_fetch_directions_and_move_lower_structurally() {
         }
     ));
     assert!(matches!(
-        &parsed.action.body[4],
+        parsed.action.body[4].unlocated(),
         PLpgSQLStmt::OpenCursor {
             open: PLpgSQLCursorOpen::Dynamic {
                 params,
@@ -268,7 +268,7 @@ fn pg18_dynamic_open_fetch_directions_and_move_lower_structurally() {
         } if params.len() == 1
     ));
     assert!(matches!(
-        &parsed.action.body[5],
+        parsed.action.body[5].unlocated(),
         PLpgSQLStmt::FetchCursor {
             direction: CursorDirection::Relative,
             count: PLpgSQLCursorCount::Expression(_),
@@ -284,7 +284,7 @@ fn pg18_return_slots_and_cursor_minus_one_sentinel_lower_directly() {
     )
     .unwrap();
     assert!(matches!(
-        scalar.action.body[0],
+        scalar.action.body[0].unlocated(),
         PLpgSQLStmt::Return {
             value: Some(PLpgSQLReturnValue::Datum(0))
         }
@@ -295,7 +295,7 @@ fn pg18_return_slots_and_cursor_minus_one_sentinel_lower_directly() {
     )
     .unwrap();
     assert!(matches!(
-        set.action.body[0],
+        set.action.body[0].unlocated(),
         PLpgSQLStmt::ReturnNext {
             value: Some(PLpgSQLReturnValue::Datum(0))
         }
@@ -424,7 +424,7 @@ fn representative_parser_output_lowers_without_silent_defaults() {
         .iter()
         .any(|datum| matches!(datum, PLpgSQLDatum::RecField { field, .. } if field == "f")));
     assert!(parsed.action.body.iter().any(|stmt| matches!(
-        stmt,
+        stmt.unlocated(),
         PLpgSQLStmt::GetDiagnostics { items }
             if items.as_slice() == [("ROW_COUNT".to_string(), 3)]
     )));
@@ -447,7 +447,7 @@ fn pg18_foreach_array_statements_preserve_targets_slices_labels_and_bodies() {
         .action
         .body
         .iter()
-        .filter_map(|statement| match statement {
+        .filter_map(|statement| match statement.unlocated() {
             PLpgSQLStmt::ForeachArray {
                 label,
                 target,
@@ -467,12 +467,12 @@ fn pg18_foreach_array_statements_preserve_targets_slices_labels_and_bodies() {
     assert_eq!(loops[1].2, 1);
     assert_eq!(parsed.datums[loops[1].1].name(), Some("piece"));
     assert!(matches!(
-        loops[1].3.as_slice(),
-        [PLpgSQLStmt::Exit {
+        loops[1].3[0].unlocated(),
+        PLpgSQLStmt::Exit {
             is_exit: true,
             label: Some(label),
             cond: None,
-        }] if label == "slice_loop"
+        } if label == "slice_loop"
     ));
 }
 
@@ -489,11 +489,11 @@ fn pg18_assert_statements_preserve_conditions_and_lazy_messages() {
     .unwrap();
 
     assert!(matches!(
-        parsed.action.body[0],
+        parsed.action.body[0].unlocated(),
         PLpgSQLStmt::Assert { message: None, .. }
     ));
     assert!(matches!(
-        parsed.action.body[1],
+        parsed.action.body[1].unlocated(),
         PLpgSQLStmt::Assert {
             message: Some(_),
             ..
@@ -520,7 +520,7 @@ fn pg18_procedural_transaction_statements_preserve_chain_mode() {
         .action
         .body
         .iter()
-        .filter_map(|statement| match statement {
+        .filter_map(|statement| match statement.unlocated() {
             PLpgSQLStmt::Commit { chain } => Some(("commit", *chain)),
             PLpgSQLStmt::Rollback { chain } => Some(("rollback", *chain)),
             PLpgSQLStmt::Return { value: None } => None,

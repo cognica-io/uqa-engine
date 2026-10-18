@@ -1,0 +1,2630 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE SCHEMA routine_from",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "schema"
+    },
+    {
+      "sql": "SET search_path TO routine_from, public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "path"
+    },
+    {
+      "sql": "CREATE TABLE data(x integer, y integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "table"
+    },
+    {
+      "sql": "INSERT INTO data VALUES (2,20),(3,30)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "rows"
+    },
+    {
+      "sql": "CREATE SEQUENCE calls",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "sequence"
+    },
+    {
+      "sql": "CREATE FUNCTION f_table() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT x/0 FROM data'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_table"
+    },
+    {
+      "sql": "SELECT * FROM f_table() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "f_table"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "unfetched_table"
+    },
+    {
+      "sql": "SELECT * FROM f_table()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "fetched_table"
+    },
+    {
+      "sql": "CREATE FUNCTION f_aggregate() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT sum(x/0)::int FROM data'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_aggregate"
+    },
+    {
+      "sql": "SELECT * FROM f_aggregate() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "f_aggregate"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "unfetched_aggregate"
+    },
+    {
+      "sql": "SELECT * FROM f_aggregate()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "fetched_aggregate"
+    },
+    {
+      "sql": "CREATE FUNCTION f_constant_aggregate() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT sum(1/0)::int FROM data'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_constant_aggregate"
+    },
+    {
+      "sql": "SELECT * FROM f_constant_aggregate() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "unfetched_constant_aggregate"
+    },
+    {
+      "sql": "SELECT * FROM f_constant_aggregate()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "fetched_constant_aggregate"
+    },
+    {
+      "sql": "CREATE FUNCTION f_distinct() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT DISTINCT 1/0 FROM data'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_distinct"
+    },
+    {
+      "sql": "SELECT * FROM f_distinct() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "unfetched_distinct"
+    },
+    {
+      "sql": "SELECT * FROM f_distinct()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "fetched_distinct"
+    },
+    {
+      "sql": "CREATE FUNCTION f_union() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT 1/0 UNION ALL SELECT 2'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_union"
+    },
+    {
+      "sql": "SELECT * FROM f_union() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "unfetched_union"
+    },
+    {
+      "sql": "SELECT * FROM f_union()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "fetched_union"
+    },
+    {
+      "sql": "CREATE FUNCTION f_cte() RETURNS SETOF int LANGUAGE sql STABLE AS 'WITH a AS (SELECT 1/0 AS x) SELECT x FROM a'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_cte"
+    },
+    {
+      "sql": "SELECT * FROM f_cte() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "unfetched_cte"
+    },
+    {
+      "sql": "SELECT * FROM f_cte()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "fetched_cte"
+    },
+    {
+      "sql": "CREATE FUNCTION f_subquery() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT (SELECT 1/0) FROM data'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_subquery"
+    },
+    {
+      "sql": "SELECT * FROM f_subquery() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "unfetched_subquery"
+    },
+    {
+      "sql": "SELECT * FROM f_subquery()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "fetched_subquery"
+    },
+    {
+      "sql": "CREATE FUNCTION f_window() RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT (sum(1/0) OVER ())::int FROM data'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_window"
+    },
+    {
+      "sql": "SELECT * FROM f_window() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "unfetched_window"
+    },
+    {
+      "sql": "SELECT * FROM f_window()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "fetched_window"
+    },
+    {
+      "sql": "CREATE FUNCTION f_values() RETURNS SETOF int LANGUAGE sql STABLE AS 'VALUES (1/0),(2)'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_values"
+    },
+    {
+      "sql": "SELECT * FROM f_values() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "unfetched_values"
+    },
+    {
+      "sql": "SELECT * FROM f_values()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "fetched_values"
+    },
+    {
+      "sql": "CREATE FUNCTION correlate(x int) RETURNS TABLE(a int, b int) LANGUAGE sql STABLE AS $$SELECT correlate.x, data.x FROM data ORDER BY data.x$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_correlated"
+    },
+    {
+      "sql": "SELECT d.x, f.a, f.b FROM data d CROSS JOIN LATERAL correlate(d.y) f ORDER BY 1,2,3",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "20",
+              "2"
+            ],
+            [
+              "2",
+              "20",
+              "3"
+            ],
+            [
+              "3",
+              "30",
+              "2"
+            ],
+            [
+              "3",
+              "30",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated"
+    },
+    {
+      "sql": "SELECT d.x, f.a, f.b FROM data d, correlate(d.y) f ORDER BY 1,2,3",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "20",
+              "2"
+            ],
+            [
+              "2",
+              "20",
+              "3"
+            ],
+            [
+              "3",
+              "30",
+              "2"
+            ],
+            [
+              "3",
+              "30",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated_implicit"
+    },
+    {
+      "sql": "SELECT data.x, f.a, f.b FROM data, correlate(data.y) f ORDER BY 1,2,3",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "20",
+              "2"
+            ],
+            [
+              "2",
+              "20",
+              "3"
+            ],
+            [
+              "3",
+              "30",
+              "2"
+            ],
+            [
+              "3",
+              "30",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated_collision"
+    },
+    {
+      "sql": "CREATE FUNCTION arg_error(x int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT x + 1/0 FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_arg_error"
+    },
+    {
+      "sql": "SELECT * FROM data d, arg_error(d.x) f LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "arg_error_unfetched"
+    },
+    {
+      "sql": "CREATE FUNCTION with_cte(x int) RETURNS TABLE(value bigint) LANGUAGE sql STABLE AS $$WITH a AS (SELECT x + 1 AS v) SELECT v FROM a UNION ALL SELECT x + 2$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_cte_result"
+    },
+    {
+      "sql": "SELECT * FROM with_cte(4)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ],
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "id": "cte_rows"
+    },
+    {
+      "sql": "SELECT d.x, f.value FROM data d, with_cte(d.y) f ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "value"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "21"
+            ],
+            [
+              "2",
+              "22"
+            ],
+            [
+              "3",
+              "31"
+            ],
+            [
+              "3",
+              "32"
+            ]
+          ]
+        }
+      ],
+      "id": "cte_correlated_rows"
+    },
+    {
+      "sql": "CREATE FUNCTION lazy_rows() RETURNS SETOF bigint LANGUAGE sql STABLE AS $$SELECT DISTINCT nextval('calls') FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_lazy"
+    },
+    {
+      "sql": "SELECT * FROM lazy_rows() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lazy_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "id": "lazy_unfetched"
+    },
+    {
+      "sql": "SELECT last_value, is_called FROM calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "id": "lazy_sequence_unset"
+    },
+    {
+      "sql": "SELECT * FROM lazy_rows() ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lazy_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "lazy_fetched"
+    },
+    {
+      "sql": "SELECT * FROM lazy_rows() ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lazy_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ],
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "id": "lazy_repeated"
+    },
+    {
+      "sql": "CREATE FUNCTION scalar_error(x int) RETURNS int LANGUAGE sql AS $$SELECT x/0$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_scalar"
+    },
+    {
+      "sql": "SELECT * FROM scalar_error(1) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "SQL function \"scalar_error\" during inlining"
+      },
+      "results": [],
+      "id": "scalar_unfetched"
+    },
+    {
+      "sql": "SELECT * FROM scalar_error(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "SQL function \"scalar_error\" during inlining"
+      },
+      "results": [],
+      "id": "scalar_fetched"
+    },
+    {
+      "sql": "CREATE FUNCTION procedural_error(x int) RETURNS int LANGUAGE plpgsql IMMUTABLE AS $$\nBEGIN\n  RETURN x/0;\nEND\n$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_plpgsql"
+    },
+    {
+      "sql": "SELECT * FROM procedural_error(1) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "PL/pgSQL function procedural_error(integer) line 3 at RETURN"
+      },
+      "results": [],
+      "id": "procedural_unfetched"
+    },
+    {
+      "sql": "SELECT * FROM generate_series(1, procedural_error(1)) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "PL/pgSQL function procedural_error(integer) line 3 at RETURN"
+      },
+      "results": [],
+      "id": "procedural_argument"
+    },
+    {
+      "sql": "CREATE FUNCTION nested_sql(x int) RETURNS int LANGUAGE sql AS $$SELECT procedural_error(x)$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_nested_sql"
+    },
+    {
+      "sql": "SELECT * FROM nested_sql(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "PL/pgSQL function procedural_error(integer) line 3 at RETURN\nSQL function \"nested_sql\" during inlining"
+      },
+      "results": [],
+      "id": "nested_sql"
+    },
+    {
+      "sql": "CREATE FUNCTION nested_procedural(x int) RETURNS int LANGUAGE plpgsql AS $$BEGIN RETURN procedural_error(x); END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_nested_plpgsql"
+    },
+    {
+      "sql": "SELECT * FROM nested_procedural(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "PL/pgSQL function procedural_error(integer) line 3 at RETURN\nPL/pgSQL function nested_procedural(integer) line 1 at RETURN"
+      },
+      "results": [],
+      "id": "nested_procedural"
+    },
+    {
+      "sql": "CREATE FUNCTION record_rows() RETURNS SETOF record LANGUAGE sql AS $$SELECT 1, 2$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_record"
+    },
+    {
+      "sql": "SELECT * FROM record_rows() AS (a int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "return type mismatch in function declared to return record",
+        "detail": "Final statement returns too many columns.",
+        "hint": null,
+        "context": "SQL function \"record_rows\" statement 1"
+      },
+      "results": [],
+      "id": "record_width"
+    },
+    {
+      "sql": "CREATE FUNCTION procedural_rows() RETURNS SETOF record LANGUAGE plpgsql AS $$BEGIN RETURN NEXT ROW(1,2); END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_record_plpgsql"
+    },
+    {
+      "sql": "SELECT * FROM procedural_rows() AS (a int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "returned record type does not match expected record type",
+        "detail": "Number of returned columns (2) does not match expected column count (1).",
+        "hint": null,
+        "context": "PL/pgSQL function procedural_rows() line 1 at RETURN NEXT"
+      },
+      "results": [],
+      "id": "procedural_width"
+    },
+    {
+      "sql": "CREATE FUNCTION volatile_rows() RETURNS SETOF int LANGUAGE sql VOLATILE AS $$SELECT 1/0 FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_volatile"
+    },
+    {
+      "sql": "SELECT * FROM volatile_rows() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "volatile_rows"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "volatile_unfetched"
+    },
+    {
+      "sql": "SELECT * FROM volatile_rows()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "SQL function \"volatile_rows\" statement 1"
+      },
+      "results": [],
+      "id": "volatile_fetched"
+    },
+    {
+      "sql": "CREATE FUNCTION strict_rows(x int) RETURNS SETOF int LANGUAGE sql STABLE STRICT AS $$SELECT x/0 FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_strict"
+    },
+    {
+      "sql": "SELECT * FROM strict_rows(1) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "strict_rows"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "strict_unfetched"
+    },
+    {
+      "sql": "SELECT * FROM strict_rows(NULL)",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "strict_rows"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "strict_null"
+    },
+    {
+      "sql": "CREATE FUNCTION configured_rows() RETURNS SETOF int LANGUAGE sql STABLE SET work_mem = '4MB' AS $$SELECT 1/0 FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_configured"
+    },
+    {
+      "sql": "SELECT * FROM configured_rows() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "configured_rows"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "configured_unfetched"
+    },
+    {
+      "sql": "CREATE FUNCTION definer_rows() RETURNS SETOF int LANGUAGE sql STABLE SECURITY DEFINER AS $$SELECT 1/0 FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_definer"
+    },
+    {
+      "sql": "SELECT * FROM definer_rows() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definer_rows"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "definer_unfetched"
+    },
+    {
+      "sql": "SET check_function_bodies = off",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "check_off"
+    },
+    {
+      "sql": "CREATE FUNCTION missing_rows() RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT x FROM missing_relation$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_missing"
+    },
+    {
+      "sql": "SELECT * FROM missing_rows() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"missing_relation\" does not exist",
+        "detail": null,
+        "hint": null,
+        "context": "SQL function \"missing_rows\" during inlining"
+      },
+      "results": [],
+      "id": "missing_unfetched"
+    },
+    {
+      "sql": "CREATE FUNCTION syntax_rows() RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT )$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_syntax"
+    },
+    {
+      "sql": "SELECT * FROM syntax_rows() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "syntax error at or near \")\"",
+        "detail": null,
+        "hint": null,
+        "context": "SQL function \"syntax_rows\" during inlining"
+      },
+      "results": [],
+      "id": "syntax_unfetched"
+    },
+    {
+      "sql": "SET check_function_bodies = on",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "check_on"
+    },
+    {
+      "sql": "CREATE FUNCTION unused_argument(a int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT 7 FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_unused_argument"
+    },
+    {
+      "sql": "SELECT * FROM data d, unused_argument(10/(d.x-2)) f ORDER BY 1,2,3",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y",
+            "f"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "20",
+              "7"
+            ],
+            [
+              "2",
+              "20",
+              "7"
+            ],
+            [
+              "3",
+              "30",
+              "7"
+            ],
+            [
+              "3",
+              "30",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "unused_argument"
+    },
+    {
+      "sql": "CREATE FUNCTION conditional_argument(a int, flag boolean) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT CASE WHEN flag THEN a ELSE 7 END FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_conditional_argument"
+    },
+    {
+      "sql": "SELECT * FROM data d, conditional_argument(10/(d.x-2), false) f ORDER BY 1,2,3",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y",
+            "f"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "20",
+              "7"
+            ],
+            [
+              "2",
+              "20",
+              "7"
+            ],
+            [
+              "3",
+              "30",
+              "7"
+            ],
+            [
+              "3",
+              "30",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "conditional_argument"
+    },
+    {
+      "sql": "CREATE FUNCTION collated_arg(a text) RETURNS SETOF boolean LANGUAGE sql STABLE AS $$SELECT a < 'z' FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_collated"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES ('a' COLLATE \"C\"),('x' COLLATE \"C\")) v(a), collated_arg(v.a) f ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "f"
+          ],
+          "type_oids": [
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "a",
+              "t"
+            ],
+            [
+              "a",
+              "t"
+            ],
+            [
+              "x",
+              "t"
+            ],
+            [
+              "x",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "collated_arg"
+    },
+    {
+      "sql": "CREATE FUNCTION catch_error(x int) RETURNS text LANGUAGE plpgsql AS $$BEGIN IF x = 1 THEN BEGIN RETURN procedural_error(x)::text; EXCEPTION WHEN division_by_zero THEN RETURN SQLSTATE || '|' || SQLERRM; END; END IF; RETURN 'ok'; END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_catch"
+    },
+    {
+      "sql": "SELECT * FROM catch_error(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "catch_error"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "22012|division by zero"
+            ]
+          ]
+        }
+      ],
+      "id": "catch_error"
+    },
+    {
+      "sql": "SELECT * FROM catch_error(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "catch_error"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "ok"
+            ]
+          ]
+        }
+      ],
+      "id": "catch_reused"
+    },
+    {
+      "sql": "CREATE FUNCTION rethrow_error(x int) RETURNS int LANGUAGE plpgsql AS $$BEGIN IF x = 1 THEN BEGIN RETURN procedural_error(x); EXCEPTION WHEN division_by_zero THEN RAISE; END; END IF; RETURN 2; END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_rethrow"
+    },
+    {
+      "sql": "SELECT * FROM rethrow_error(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "PL/pgSQL function procedural_error(integer) line 3 at RETURN\nPL/pgSQL function rethrow_error(integer) line 1 at RETURN"
+      },
+      "results": [],
+      "id": "rethrow_error"
+    },
+    {
+      "sql": "SELECT * FROM rethrow_error(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rethrow_error"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "rethrow_reused"
+    },
+    {
+      "sql": "CREATE FUNCTION handler_error() RETURNS int LANGUAGE plpgsql AS $$BEGIN BEGIN RETURN 1/0; EXCEPTION WHEN division_by_zero THEN RETURN 2/0; END; END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_handler_error"
+    },
+    {
+      "sql": "SELECT * FROM handler_error()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "PL/pgSQL expression \"2/0\"\nPL/pgSQL function handler_error() line 1 at RETURN"
+      },
+      "results": [],
+      "id": "handler_error"
+    },
+    {
+      "sql": "WITH data AS (SELECT 50 AS x, 500 AS y) SELECT f.a, f.b FROM correlate(7) f ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "2"
+            ],
+            [
+              "7",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "shadowed_caller_cte"
+    },
+    {
+      "sql": "WITH missing_relation AS (SELECT 42 AS x) SELECT * FROM missing_rows() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"missing_relation\" does not exist",
+        "detail": null,
+        "hint": null,
+        "context": "SQL function \"missing_rows\" during inlining"
+      },
+      "results": [],
+      "id": "missing_not_caller_cte"
+    },
+    {
+      "sql": "SELECT * FROM ROWS FROM (f_constant_aggregate()) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "single_rows_from"
+    },
+    {
+      "sql": "SELECT * FROM ROWS FROM (f_constant_aggregate(), f_values()) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "f_constant_aggregate",
+            "f_values"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "multi_rows_from"
+    },
+    {
+      "sql": "SELECT * FROM f_constant_aggregate() WITH ORDINALITY LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "f_constant_aggregate",
+            "ordinality"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "id": "ordinality_unfetched"
+    },
+    {
+      "sql": "CREATE FUNCTION stable_record() RETURNS SETOF record LANGUAGE sql STABLE AS $$SELECT 1/0, x FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_stable_record"
+    },
+    {
+      "sql": "SELECT * FROM stable_record() AS (a int, b int) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "record_unfetched"
+    },
+    {
+      "sql": "SELECT * FROM stable_record() AS (a int) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "return type mismatch in function declared to return record",
+        "detail": "Final statement returns too many columns.",
+        "hint": null,
+        "context": "SQL function \"stable_record\" during inlining"
+      },
+      "results": [],
+      "id": "record_wrong_width"
+    },
+    {
+      "sql": "CREATE FUNCTION constant_expression() RETURNS int LANGUAGE plpgsql AS $$BEGIN RETURN 1/0; END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_constant_expression"
+    },
+    {
+      "sql": "SELECT * FROM constant_expression()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "PL/pgSQL expression \"1/0\"\nPL/pgSQL function constant_expression() line 1 at RETURN"
+      },
+      "results": [],
+      "id": "constant_expression"
+    },
+    {
+      "sql": "CREATE FUNCTION assignment_error(n int) RETURNS int LANGUAGE plpgsql AS $$DECLARE value int; BEGIN value := n/0; RETURN value; END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_assignment"
+    },
+    {
+      "sql": "SELECT * FROM assignment_error(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "PL/pgSQL function assignment_error(integer) line 1 at assignment"
+      },
+      "results": [],
+      "id": "assignment_error"
+    },
+    {
+      "sql": "CREATE FUNCTION constant_assignment() RETURNS int LANGUAGE plpgsql AS $$DECLARE value int; BEGIN value := 1/0; RETURN value; END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_constant_assignment"
+    },
+    {
+      "sql": "SELECT * FROM constant_assignment()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "PL/pgSQL assignment \"value := 1/0\"\nPL/pgSQL function constant_assignment() line 1 at assignment"
+      },
+      "results": [],
+      "id": "constant_assignment"
+    },
+    {
+      "sql": "CREATE FUNCTION query_error(n int) RETURNS SETOF int LANGUAGE plpgsql AS $$BEGIN RETURN QUERY SELECT n/0 FROM data; END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_query_error"
+    },
+    {
+      "sql": "SELECT * FROM query_error(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "SQL statement \"SELECT n/0 FROM data\"\nPL/pgSQL function query_error(integer) line 1 at RETURN QUERY"
+      },
+      "results": [],
+      "id": "query_error"
+    },
+    {
+      "sql": "CREATE FUNCTION perform_error(n int) RETURNS int LANGUAGE plpgsql AS $$BEGIN PERFORM n/0 FROM data; RETURN n; END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_perform_error"
+    },
+    {
+      "sql": "SELECT * FROM perform_error(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": "SQL statement \"SELECT n/0 FROM data\"\nPL/pgSQL function perform_error(integer) line 1 at PERFORM"
+      },
+      "results": [],
+      "id": "perform_error"
+    },
+    {
+      "sql": "CREATE FUNCTION correlated_aggregate(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT sum(n + x)::int FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_correlated_aggregate"
+    },
+    {
+      "sql": "SELECT d.x, f.v FROM data d, correlated_aggregate(d.y) f(v) ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "45"
+            ],
+            [
+              "3",
+              "65"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated_aggregate"
+    },
+    {
+      "sql": "CREATE FUNCTION correlated_window(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT (n + row_number() OVER (ORDER BY x))::int FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_correlated_window"
+    },
+    {
+      "sql": "SELECT d.x, f.v FROM data d, correlated_window(d.y) f(v) ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "21"
+            ],
+            [
+              "2",
+              "22"
+            ],
+            [
+              "3",
+              "31"
+            ],
+            [
+              "3",
+              "32"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated_window"
+    },
+    {
+      "sql": "CREATE FUNCTION correlated_distinct(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT DISTINCT n + x FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_correlated_distinct"
+    },
+    {
+      "sql": "SELECT d.x, f.v FROM data d, correlated_distinct(d.y) f(v) ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "22"
+            ],
+            [
+              "2",
+              "23"
+            ],
+            [
+              "3",
+              "32"
+            ],
+            [
+              "3",
+              "33"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated_distinct"
+    },
+    {
+      "sql": "CREATE FUNCTION correlated_union(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT n + 1 UNION ALL SELECT n + 2$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_correlated_union"
+    },
+    {
+      "sql": "SELECT d.x, f.v FROM data d, correlated_union(d.y) f(v) ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "21"
+            ],
+            [
+              "2",
+              "22"
+            ],
+            [
+              "3",
+              "31"
+            ],
+            [
+              "3",
+              "32"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated_union"
+    },
+    {
+      "sql": "CREATE FUNCTION correlated_values(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$VALUES (n + 1),(n + 2)$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_correlated_values"
+    },
+    {
+      "sql": "SELECT d.x, f.v FROM data d, correlated_values(d.y) f(v) ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "21"
+            ],
+            [
+              "2",
+              "22"
+            ],
+            [
+              "3",
+              "31"
+            ],
+            [
+              "3",
+              "32"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated_values"
+    },
+    {
+      "sql": "CREATE FUNCTION correlated_subquery(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT (SELECT n + data.x) FROM data$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_correlated_subquery"
+    },
+    {
+      "sql": "SELECT d.x, f.v FROM data d, correlated_subquery(d.y) f(v) ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "22"
+            ],
+            [
+              "2",
+              "23"
+            ],
+            [
+              "3",
+              "32"
+            ],
+            [
+              "3",
+              "33"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated_subquery"
+    },
+    {
+      "sql": "CREATE FUNCTION correlated_derived(n int) RETURNS SETOF int LANGUAGE sql STABLE AS $$SELECT v FROM (SELECT n + x AS v FROM data) nested$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_correlated_derived"
+    },
+    {
+      "sql": "SELECT d.x, f.v FROM data d, correlated_derived(d.y) f(v) ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "22"
+            ],
+            [
+              "2",
+              "23"
+            ],
+            [
+              "3",
+              "32"
+            ],
+            [
+              "3",
+              "33"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated_derived"
+    },
+    {
+      "sql": "CREATE DOMAIN positive AS int CHECK(VALUE>0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_domain"
+    },
+    {
+      "sql": "CREATE FUNCTION domain_error() RETURNS SETOF positive LANGUAGE sql STABLE AS $$SELECT (1/0)::positive$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_domain_error"
+    },
+    {
+      "sql": "SELECT * FROM domain_error() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "domain_unfetched"
+    },
+    {
+      "sql": "CREATE FUNCTION domain_values(n int) RETURNS SETOF positive LANGUAGE sql STABLE AS $$VALUES (n::positive),((n+1)::positive)$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_domain_values"
+    },
+    {
+      "sql": "SELECT * FROM domain_values(2)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "domain_values"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "domain_rows"
+    },
+    {
+      "sql": "SELECT * FROM domain_values(-1) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "domain_values"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "domain_constraint_unfetched"
+    },
+    {
+      "sql": "SELECT * FROM domain_values(-1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain positive violates check constraint \"positive_check\"",
+        "detail": null,
+        "hint": null,
+        "context": null
+      },
+      "results": [],
+      "id": "domain_constraint_fetched"
+    },
+    {
+      "sql": "CREATE FUNCTION assignment_distinct() RETURNS SETOF integer LANGUAGE sql STABLE AS $$SELECT DISTINCT v FROM (VALUES (1.2),(1.4)) d(v)$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_assignment_distinct"
+    },
+    {
+      "sql": "SELECT * FROM assignment_distinct()",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "assignment_distinct"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "assignment_distinct"
+    },
+    {
+      "sql": "CREATE FUNCTION assignment_distinct_on() RETURNS TABLE(n integer, label text) LANGUAGE sql STABLE AS $$SELECT DISTINCT ON(v) v,label FROM (VALUES (1.4,'a'),(1.2,'z'),(1.4,'b')) d(v,label) ORDER BY v,label$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_assignment_distinct_on"
+    },
+    {
+      "sql": "SELECT * FROM assignment_distinct_on()",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "label"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "z"
+            ],
+            [
+              "1",
+              "a"
+            ]
+          ]
+        }
+      ],
+      "id": "assignment_distinct_on"
+    },
+    {
+      "sql": "CREATE FUNCTION assignment_ordered() RETURNS TABLE(n integer, label text) LANGUAGE sql STABLE AS $$SELECT v,label FROM (VALUES (1.4,'a'),(1.2,'z')) d(v,label) ORDER BY v$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_assignment_ordered"
+    },
+    {
+      "sql": "SELECT * FROM assignment_ordered()",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "label"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "z"
+            ],
+            [
+              "1",
+              "a"
+            ]
+          ]
+        }
+      ],
+      "id": "assignment_ordered"
+    },
+    {
+      "sql": "CREATE FUNCTION assignment_grouped() RETURNS TABLE(n integer, count integer) LANGUAGE sql STABLE AS $$SELECT v,count(*)::int FROM (VALUES (1.2),(1.4),(1.4)) d(v) GROUP BY v ORDER BY v$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_assignment_grouped"
+    },
+    {
+      "sql": "SELECT * FROM assignment_grouped()",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "count"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "assignment_grouped"
+    },
+    {
+      "sql": "CREATE FUNCTION assignment_grouping_sets() RETURNS TABLE(n integer, count integer) LANGUAGE sql STABLE AS $$SELECT v,count(*)::int FROM (VALUES (1.2),(1.4),(1.4)) d(v) GROUP BY GROUPING SETS((v),()) ORDER BY v NULLS LAST$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_assignment_grouping_sets"
+    },
+    {
+      "sql": "SELECT * FROM assignment_grouping_sets()",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "count"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              null,
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "assignment_grouping_sets"
+    },
+    {
+      "sql": "SELECT d.x,f.n FROM data d, assignment_distinct() f(n) ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "1"
+            ],
+            [
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "assignment_lateral"
+    }
+  ]
+}

@@ -202,10 +202,20 @@ pub(super) fn optimize_source(
 ) -> Result<(), SQLError> {
     match source {
         SourcePlan::Join {
-            left, right, on, ..
+            left,
+            right,
+            on,
+            lateral,
+            ..
         } => {
+            // Function FROM items are implicitly lateral. Keep that scope when SQL expansion replaces the function with a derived table.
+            let function_lateral = matches!(
+                right.as_ref(),
+                SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
+            );
             optimize_source(left, config, aggregates)?;
             optimize_source(right, config, aggregates)?;
+            *lateral |= function_lateral && matches!(right.as_ref(), SourcePlan::Subquery { .. });
             if let Some(on) = on {
                 optimize_scalar_slot(on, config)?;
                 if config.enable_filter_pushdown {
@@ -232,6 +242,7 @@ pub(super) fn optimize_source(
                     optimize_scalar_slot(expression, config)?;
                 }
             }
+            super::function_source::optimize_group(source, config, aggregates)?;
         }
         SourcePlan::Subquery { body, .. } => optimize_query(body, config, aggregates)?,
         SourcePlan::Table { .. } => {}

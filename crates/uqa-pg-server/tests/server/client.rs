@@ -278,6 +278,7 @@ fn result_evidence(messages: &[Message], include_fields: bool) -> Value {
                     "message": diagnostic[&b'M'],
                     "detail": diagnostic.get(&b'D'),
                     "hint": diagnostic.get(&b'H'),
+                    "context": diagnostic.get(&b'W'),
                 });
             }
             b'N' => {
