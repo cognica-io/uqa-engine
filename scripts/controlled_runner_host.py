@@ -54,7 +54,10 @@ class ControlledHost:
         self.output.mkdir(parents=True, exist_ok=False)
         self.workspace = WORK / "measurement" / run_id
         self.account = pwd.getpwnam("uqa-bench")
-        self.rust_bin = Path(self.account.pw_dir) / ".cargo" / "bin"
+        rustup = Path(self.account.pw_dir) / ".cargo" / "bin" / "rustup"
+        # Resolve the operator's tools once; checked-out toolchain files cannot change them.
+        self.rust_bin = Path(command("runuser", "-u", "uqa-bench", "--", str(rustup),
+                                     "which", "cargo", cwd=Path(self.account.pw_dir))).parent
         self.counter = 0
         self.boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
         self.toolchain = {name: command("runuser", "-u", "uqa-bench", "--", path, flag)

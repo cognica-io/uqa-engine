@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -19,6 +20,40 @@ import controlled_runner_host as runner
 
 
 class ControlledBuildTest(unittest.TestCase):
+    def test_operator_toolchain_is_resolved_before_source_checkout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "operator-home"
+            tools = home / ".rustup/toolchains/operator-selected/bin"
+            calls = []
+
+            def command(*args, cwd=None):
+                calls.append((args, cwd))
+                if args[-2:] == ("which", "cargo"):
+                    self.assertEqual(cwd, home)
+                    return str(tools / "cargo")
+                executable = Path(args[-2])
+                if executable.name in {"cargo", "rustc"}:
+                    self.assertEqual(executable.parent, tools)
+                return executable.name + " operator-version"
+
+            with patch.object(runner, "CONTROL", root / "control"), \
+                    patch.object(runner.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir=str(home))), \
+                    patch.object(runner, "command", side_effect=command), \
+                    patch.object(Path, "read_text", return_value="boot-id"), \
+                    patch.object(runner.ControlledHost, "make_writable"):
+                host = runner.ControlledHost("toolchain-test", {})
+            self.assertEqual(calls[0][0][-2:], ("which", "cargo"))
+            for role in ("reference", "candidate"):
+                source = root / role
+                source.mkdir()
+                (source / "rust-toolchain.toml").write_text(f'[toolchain]\nchannel = "{role}-only"\n')
+                with patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as execute:
+                    host.unit(role, [str(host.rust_bin / "cargo"), "--version"], source)
+                args = execute.call_args.args[0]
+                self.assertIn(f"--setenv=PATH={tools}:/usr/local/bin:/usr/bin:/bin", args)
+                self.assertEqual(args[-2:], [str(tools / "cargo"), "--version"])
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
