@@ -59,6 +59,7 @@ class PerformanceChecksTest(unittest.TestCase):
         source.parent.mkdir(parents=True)
         source.write_text("fn bounded_work() {}\n", encoding="utf-8")
         self.manifest = self.root / "manifest.json"
+        self.selection_file = self.root / "selection.toml"
         self.suite = {
             "package-name": "uqa-example", "kind": "lib", "status": "listed",
             "testcases": {
@@ -163,22 +164,36 @@ class PerformanceChecksTest(unittest.TestCase):
             runner.verify_selection([self.check], self.listing)
 
     def test_arguments_select_only_existing_test_targets(self):
-        args = runner.arguments([self.check, {**self.check, "test": "other"}])
+        args = runner.arguments([self.check, {**self.check, "test": "other"}], self.selection_file)
         self.assertEqual(args.count("-p"), 1)
         self.assertEqual(args[:2], ["--profile", "ci"])
         self.assertIn("--locked", args)
         self.assertIn("--lib", args)
         self.assertIn("--tests", args)
         self.assertNotIn("--all-targets", args)
-        self.assertIn("test(/(^|::)bounded_work(::.*)?$/)", args[-1])
+        self.assertEqual(args[-2:], ["--tool-config-file", f"uqa-performance:{self.selection_file.resolve()}"])
+
+    def test_large_inventory_is_transported_in_configuration_not_process_arguments(self):
+        checks = [{**self.check, "test": f"bounded_work_{index}"} for index in range(4096)]
+        config = runner.selection_config(checks)
+        self.assertGreater(len(config.encode()), 256 * 1024)
+        expression = json.loads(config.split("default-filter = ", 1)[1])
+        self.assertEqual(expression.split(" | "), [runner.selector(check) for check in checks])
+        self.selection_file.write_text(config)
+        for archive in (None, self.root / "tests.tar.zst"):
+            with self.subTest(archive=archive):
+                args = runner.arguments(checks, self.selection_file, archive)
+                self.assertLess(sum(len(arg.encode()) + 1 for arg in args), 4096)
+                self.assertEqual(args.count("--tool-config-file"), 1)
+                self.assertNotIn("-E", args)
 
     def test_archive_selection_preserves_inventory_without_cargo_build_flags(self):
         archive = self.root / "tests.tar.zst"
-        args = runner.arguments([self.check], archive)
+        args = runner.arguments([self.check], self.selection_file, archive)
         self.assertEqual(args[:2], ["--profile", "ci"])
         self.assertEqual(args[args.index("--archive-file") + 1], str(archive.resolve()))
         self.assertEqual(args[args.index("--workspace-remap") + 1], str(self.root))
-        self.assertEqual(args[-2:], runner.arguments([self.check])[-2:])
+        self.assertEqual(args[-2:], runner.arguments([self.check], self.selection_file)[-2:])
         for flag in ("--locked", "--lib", "--tests", "-p"):
             self.assertNotIn(flag, args)
 
@@ -234,8 +249,10 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["checks"][0]["selected_cases"], 2)
-        self.assertEqual(list(capture.call_args.args[5:]), runner.arguments([self.check]))
-        self.assertEqual(run.call_args.args[0][3:], runner.arguments([self.check]))
+        selection_file = self.root / "run-output/selection.toml"
+        self.assertEqual(selection_file.read_text(), runner.selection_config([self.check]))
+        self.assertEqual(list(capture.call_args.args[5:]), runner.arguments([self.check], selection_file))
+        self.assertEqual(run.call_args.args[0][3:], runner.arguments([self.check], selection_file))
         self.assertTrue(run.call_args.kwargs["check"])
         self.assertIsNone(capture.call_args.kwargs["timeout"])
         self.assertEqual(json.loads((self.root / "run-output/test-inventory.json").read_text()), self.listing)
@@ -253,8 +270,10 @@ class PerformanceChecksTest(unittest.TestCase):
         )
         self.assertEqual(status, 1)
         self.assertEqual(result["checks"][0]["selected_cases"], 2)
-        self.assertEqual(list(capture.call_args.args[5:]), runner.arguments([self.check], archive))
-        self.assertEqual(run.call_args.args[0][3:], runner.arguments([self.check], archive))
+        selection_file = self.root / "run-output/selection.toml"
+        self.assertEqual(selection_file.read_text(), runner.selection_config([self.check]))
+        self.assertEqual(list(capture.call_args.args[5:]), runner.arguments([self.check], selection_file, archive))
+        self.assertEqual(run.call_args.args[0][3:], runner.arguments([self.check], selection_file, archive))
         self.assertIn("100", result["error"])
         self.assertEqual(capture.call_args.kwargs["timeout"], 120)
 
@@ -270,6 +289,16 @@ class PerformanceChecksTest(unittest.TestCase):
         status, result, _, run = self.run_main(listing={"rust-suites": {}})
         self.assertEqual(status, 1)
         self.assertEqual(result["status"], "failed")
+        run.assert_not_called()
+
+    def test_selection_configuration_failure_cannot_retain_stale_test_results(self):
+        with mock.patch.object(runner, "selection_config", side_effect=OSError("selection unavailable")):
+            status, result, capture, run = self.run_main()
+        self.assertEqual(status, 1)
+        self.assertEqual(result["stage"], "discovery")
+        self.assertIn("selection unavailable", result["error"])
+        self.assertEqual(capture.call_count, 3)
+        self.assertFalse((self.root / "run-output/test-inventory.json").exists())
         run.assert_not_called()
 
     def test_discovery_timeout_retains_failed_report_and_does_not_run_tests(self):

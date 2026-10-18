@@ -82,12 +82,18 @@ def build_arguments(checks: list[dict]) -> list[str]:
     ]
 
 
-def arguments(checks: list[dict], archive: pathlib.Path | None = None) -> list[str]:
+def selection_config(checks: list[dict]) -> str:
+    # nextest's tool config keeps the inventory out of both per-argument and total argv limits.
+    expression = " | ".join(selector(check) for check in checks)
+    return "[profile.ci]\ndefault-filter = " + json.dumps(expression) + "\n"
+
+
+def arguments(checks: list[dict], selection_file: pathlib.Path, archive: pathlib.Path | None = None) -> list[str]:
     source = build_arguments(checks) if archive is None else [
         "--archive-file", str(archive.resolve()), "--extract-to", str(ROOT),
         "--extract-overwrite", "--workspace-remap", str(ROOT),
     ]
-    return ["--profile", "ci", *source, "-E", " | ".join(selector(check) for check in checks)]
+    return ["--profile", "ci", *source, "--tool-config-file", f"uqa-performance:{selection_file.resolve()}"]
 
 
 def verify_selection(checks: list[dict], listing: dict) -> list[dict]:
@@ -269,17 +275,19 @@ def main() -> int:
         "status": "failed", "stage": "discovery", "checks": [],
     }
     try:
-        selection = arguments(checks, args.archive_file)
         # A build/selection failure must never publish JUnit from an earlier run.
         (ROOT / "target/nextest/ci/junit.xml").unlink(missing_ok=True)
         discovered = args.output / "test-inventory.json"
         discovered.unlink(missing_ok=True)
+        args.output.mkdir(parents=True, exist_ok=True)
+        selection_file = args.output / "selection.toml"
+        selection_file.write_text(selection_config(checks), encoding="utf-8")
+        selection = arguments(checks, selection_file, args.archive_file)
         print("Discovering the exact regression inventory", file=sys.stderr, flush=True)
         listing_text = capture(
             "cargo", "nextest", "list", "--message-format", "json", *selection,
             timeout=120 if args.archive_file is not None else None,
         )
-        args.output.mkdir(parents=True, exist_ok=True)
         discovered.write_text(listing_text + "\n", encoding="utf-8")
         result["stage"] = "selection"
         print("Validating the discovered case identities", file=sys.stderr, flush=True)
