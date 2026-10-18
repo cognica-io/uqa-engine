@@ -313,6 +313,42 @@ fn score_provenance_survives_derived_tables_and_joins() {
          WHERE text_match(d.body, 'rust') ORDER BY d.id",
     );
     assert_scores_match(&joined, &expected);
+
+    eng.sql(
+        "CREATE VIEW scored_docs AS SELECT id, body FROM docs WHERE text_match(body, 'rust')",
+        &[],
+    )
+    .unwrap();
+    for body in [
+        "SELECT DISTINCT id, body FROM docs WHERE text_match(body, 'rust')",
+        "SELECT DISTINCT id, body FROM scored_docs",
+        "SELECT DISTINCT id, body FROM (SELECT id, body FROM scored_docs) AS nested",
+        "WITH hits AS (SELECT id, body FROM docs WHERE text_match(body, 'rust')) SELECT DISTINCT id, body FROM hits",
+        "WITH hits AS MATERIALIZED (SELECT id, body FROM docs WHERE text_match(body, 'rust')) SELECT DISTINCT id, body FROM hits",
+        "WITH hits AS NOT MATERIALIZED (SELECT id, body FROM docs WHERE text_match(body, 'rust')) SELECT DISTINCT id, body FROM hits",
+        "SELECT DISTINCT d.id, d.body FROM docs AS d JOIN doc_meta AS m ON d.id = m.doc_id WHERE text_match(d.body, 'rust')",
+    ] {
+        let sql = format!(
+            "SELECT hit.id AS id, score_bm25(hit.body, 'rust') AS score FROM ({body}) AS hit ORDER BY hit.id"
+        );
+        assert_scores_match(&projected_score_map(&eng, &sql), &expected);
+    }
+    for materialization in ["MATERIALIZED", "NOT MATERIALIZED"] {
+        let sql = format!(
+            "WITH hits AS {materialization} (SELECT id, body FROM scored_docs) \
+             SELECT hit.id AS id, score_bm25(hit.body, 'rust') AS score \
+             FROM (SELECT DISTINCT id, body FROM hits) AS hit ORDER BY hit.id"
+        );
+        assert_scores_match(&projected_score_map(&eng, &sql), &expected);
+    }
+    let lateral = projected_score_map(
+        &eng,
+        "SELECT d.id AS id, score_bm25(d.body, 'rust') AS score \
+         FROM docs AS d CROSS JOIN LATERAL \
+         (SELECT * FROM (SELECT DISTINCT d.id) AS nested) AS side \
+         WHERE text_match(d.body, 'rust') ORDER BY d.id",
+    );
+    assert_scores_match(&lateral, &expected);
 }
 
 #[test]

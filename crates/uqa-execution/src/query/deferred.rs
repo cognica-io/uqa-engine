@@ -23,15 +23,16 @@ pub(in crate::query) struct DeferredOperator<'a> {
 }
 
 impl<'a> DeferredOperator<'a> {
-    /// An open analysis descriptor needs its runtime columns before consumers can bind names and wildcards. A closed descriptor can defer all production until the first pull.
+    /// A complete physical descriptor can defer production until the first pull. Open public columns or execution-owned metadata need the producer's descriptor before consumers bind names, wildcards and score sources.
     pub(in crate::query) fn from_bound_schema(
-        schema: RowSchema,
+        schema: Option<RowSchema>,
         pending: OperatorProducer<'a>,
     ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-        if schema.columns_are_open(None) {
-            pending()
-        } else {
-            Ok(Box::new(Self::new(schema, pending)))
+        match schema {
+            Some(schema) if !schema.columns_are_open(None) => {
+                Ok(Box::new(Self::new(schema, pending)))
+            }
+            _ => pending(),
         }
     }
 

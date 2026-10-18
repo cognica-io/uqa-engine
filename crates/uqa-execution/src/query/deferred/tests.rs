@@ -23,7 +23,7 @@ fn runtime_column_binding_preserves_deferred_closed_descriptors() {
             runtime.clone()
         };
         let mut scan = DeferredOperator::from_bound_schema(
-            bound,
+            Some(bound),
             Box::new(|| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 Ok(Box::new(TableScan::from_physical_rows(
@@ -41,6 +41,39 @@ fn runtime_column_binding_preserves_deferred_closed_descriptors() {
         assert_eq!(rows[0]["value"], uqa_core::Value::Int(7));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
+}
+
+#[test]
+fn physical_output_binding_keeps_scores_outside_public_columns() {
+    let column = uqa_sql::ast::InternalRelationId::allocate().column(0);
+    let schema = RowSchema::new(vec!["id".into()]);
+    let schema = RowSchema::append_internal_typed(
+        &schema,
+        &[(column, Some(uqa_sql::ColumnType::DoublePrecision))],
+    );
+    let schema = RowSchema::with_score_source(&schema, Some("hit"), column);
+    let calls = AtomicUsize::new(0);
+    let mut output = DeferredOperator::from_bound_schema(
+        None,
+        Box::new(|| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(TableScan::from_physical_rows(
+                schema.clone(),
+                vec![],
+            )))
+        }),
+    )
+    .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(output.row_schema(), &schema);
+    assert_eq!(
+        output.row_schema().score_sources().collect::<Vec<_>>(),
+        [(Some("hit"), column)]
+    );
+    output.open().unwrap();
+    assert!(output.next().unwrap().is_none());
+    output.close().unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]

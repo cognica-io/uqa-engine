@@ -13540,6 +13540,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_output_binding_keeps_scores_outside_public_columns",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/deferred/tests.rs",
+      "capability": "Physical derived-query output",
+      "workload": "A derived query owns a hidden retrieval score outside its public columns.",
+      "invariant": "Physical binding retains the opaque score identity and initializes the source exactly once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "score_descriptor_follows_cte_definition_scope_and_demand",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/output_descriptor/tests.rs",
+      "capability": "Physical derived-query output",
+      "workload": "Nested and recursive CTEs, shadowed names and unused retrieval definitions.",
+      "invariant": "Descriptor selection follows the definition scope and only the output sources, without evaluating rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "score_provenance_survives_derived_tables_and_joins",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_text_match_scoring.rs",
+      "capability": "Derived-query score provenance",
+      "workload": "Retrieval scores cross projections, DISTINCT, nested queries, joins, views and folded/materialized CTEs.",
+      "invariant": "Complete per-document scores equal direct retrieval; hidden metadata never becomes public columns.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bound_output_preserves_scores_without_exposing_internal_columns",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/column_selection.rs",
+      "capability": "Derived-query score provenance",
+      "workload": "A public text output retains two hidden score identities, including multiple qualifiers for one identity.",
+      "invariant": "Public collation, score qualifiers and both opaque identities survive; score values share their original payload slots without redundant physical columns.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "an_unconsumed_retrieval_never_executes_even_when_opened_and_closed",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_sources/hierarchy/tests.rs",
+      "capability": "Deferred retrieval descriptor and demand",
+      "workload": "Ordinary and hierarchy retrieval sources are opened and closed without pulling a row.",
+      "invariant": "No retrieval runs and the prepared score descriptor remains available before demand.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "demanded_retrieval_preserves_schema_scores_and_current_recheck_pins_without_replay",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_sources/hierarchy/tests.rs",
+      "capability": "Deferred retrieval descriptor and demand",
+      "workload": "Ordinary and hierarchy retrieval sources run with successful, failing and tuple-recheck inputs.",
+      "invariant": "Prepared row schemas, scores and current tuple pins survive; the producer does not replay after success or error.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

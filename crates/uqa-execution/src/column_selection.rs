@@ -283,11 +283,11 @@ impl<'a> ColumnSelection<'a> {
         }
     }
 
-    /// Map a query's public outputs to its analyzed descriptor. Analysis owns output collations and record descriptors; the producer owns value slots, including shared slots and hidden execution inputs.
+    /// Map public outputs to their analyzed descriptor and retain structural score provenance. Analysis owns public collations and record descriptors; the producer owns shared value slots and opaque score identities.
     pub(crate) fn with_bound_output(
         child: Box<dyn PhysicalOperator + 'a>,
         columns: &[(String, usize)],
-        schema: RowSchema,
+        mut schema: RowSchema,
     ) -> ExecResult<Self> {
         if !schema.is_identity_layout()
             || schema.physical_width() != schema.len()
@@ -308,10 +308,29 @@ impl<'a> ColumnSelection<'a> {
             .map(|(_, position)| Some(*position))
             .collect::<Vec<_>>();
         let ordering = remap_ordering(child.output_ordering(), &input_positions);
-        let slots = columns
+        let mut slots = columns
             .iter()
             .map(|(_, position)| child.row_schema().physical_slot(*position))
             .collect::<Vec<_>>();
+        if child.row_schema().score_sources().next().is_some() {
+            let score_columns = child
+                .row_schema()
+                .score_sources()
+                .map(|(_, column)| column)
+                .collect::<std::collections::BTreeSet<_>>();
+            let retired = child
+                .row_schema()
+                .internal_columns_with_types()
+                .into_iter()
+                .filter_map(|(column, _, _)| (!score_columns.contains(&column)).then_some(column))
+                .collect::<Vec<_>>();
+            let scores =
+                RowSchema::remap_typed_identities_without_input_aliases(child.row_schema(), &[]);
+            let scores = RowSchema::without_internal_attributes(&scores, &retired);
+            let (scores, score_slots) = scores.canonical_projection();
+            schema = RowSchema::join(&schema, &scores, []);
+            slots.extend(score_slots.into_iter().map(Some));
+        }
         let identity_layout = child.row_schema().physical_width() == slots.len()
             && slots
                 .iter()
@@ -624,6 +643,70 @@ mod tests {
         ] {
             let child = Box::new(TableScan::from_physical_rows(input.clone(), vec![]));
             assert!(ColumnSelection::with_bound_output(child, &columns, bound).is_err());
+        }
+    }
+
+    #[test]
+    fn bound_output_preserves_scores_without_exposing_internal_columns() {
+        use uqa_sql::ColumnType;
+
+        let public = RowSchema::with_types(vec!["body".into()], vec![Some(ColumnType::Text)])
+            .with_column_collations([Some(950)]);
+        let first = uqa_sql::ast::InternalRelationId::allocate().column(0);
+        let second = uqa_sql::ast::InternalRelationId::allocate().column(0);
+        let physical = RowSchema::from_physical_layout(uqa_sql::schema::PhysicalLayout {
+            columns: vec!["unused".into(), "body".into()],
+            identities: vec![
+                ColumnIdentity::unqualified("unused"),
+                ColumnIdentity::unqualified("body"),
+            ],
+            types: vec![Some(ColumnType::Integer), Some(ColumnType::Text)],
+            slots: vec![Some(0), Some(1)],
+            physical_width: 4,
+            aliases: vec![],
+            internal: vec![
+                (first, Some(2), Some(ColumnType::DoublePrecision)),
+                (second, Some(3), Some(ColumnType::DoublePrecision)),
+            ],
+            score_sources: vec![
+                (Some("left".into()), first),
+                (Some("right".into()), second),
+                (Some("echo".into()), first),
+            ],
+            wildcard_hidden: std::collections::HashSet::new(),
+        })
+        .unwrap();
+        let row = crate::PhysicalRow::from_values(vec![
+            Value::Int(99),
+            Value::Str("rust".into()),
+            Value::Float(1.25),
+            Value::Float(2.5),
+        ]);
+        let retained = row.clone();
+        let mut output = ColumnSelection::with_bound_output(
+            Box::new(TableScan::from_physical_rows(physical, vec![row])),
+            &[("body".into(), 1)],
+            public,
+        )
+        .unwrap();
+        assert_eq!(output.schema(), ["body"]);
+        assert_eq!(output.row_schema().column_collation(0), Some(950));
+        assert_eq!(
+            output.row_schema().score_sources().collect::<Vec<_>>(),
+            [
+                (Some("left"), first),
+                (Some("right"), second),
+                (Some("echo"), first)
+            ]
+        );
+        assert_eq!(output.row_schema().physical_width(), 3);
+        let batches = crate::physical::run_to_batches(&mut output).unwrap();
+        for (column, slot) in [(first, 2), (second, 3)] {
+            let output_slot = batches[0].schema.internal_slot(column).unwrap();
+            assert!(std::ptr::eq(
+                batches[0].rows[0].value(output_slot).unwrap(),
+                retained.value(slot).unwrap(),
+            ));
         }
     }
 }

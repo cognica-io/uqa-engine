@@ -58,9 +58,16 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
             let context_copy = *context;
             let body = body.clone();
             let mut scope = ctes.clone();
-            let bound_output = (!schema.columns_are_open(None)).then(|| schema.clone());
+            let bound_output = (!schema.columns_are_open(None)).then_some(schema);
+            let deferred_schema = if bound_output.is_some()
+                && !super::output_descriptor::requires_physical_descriptor(&body, &scope)?
+            {
+                bound_output.clone()
+            } else {
+                None
+            };
             let operator = crate::query::deferred::DeferredOperator::from_bound_schema(
-                schema,
+                deferred_schema,
                 Box::new(move || {
                     let local_cte_names = query_cte_names(&body);
                     let output = execute_view_plan_output_with_parent_cache(

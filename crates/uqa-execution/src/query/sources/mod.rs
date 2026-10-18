@@ -45,6 +45,7 @@ mod join_keys;
 mod join_source;
 mod join_validation;
 mod lateral_source;
+mod output_descriptor;
 mod source_operator;
 mod source_qualification;
 mod streaming_subquery;
