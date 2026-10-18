@@ -119,5 +119,62 @@ class PythonPublicationSelectionTest(unittest.TestCase):
                 )
 
 
+class NpmPublicationSelectionTest(unittest.TestCase):
+    def test_downloads_only_npm_packages_from_a_mixed_release(self):
+        source = (ROOT / ".github/workflows/npmjs.yml").read_text()
+        step = source.split("      - name: Download the released npm distributions\n", 1)[1]
+        step = step.split("\n      - ", 1)[0]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        version = "0.0.0"
+        npm = {
+            f"cognica-io-uqa{suffix}-{version}.tgz"
+            for suffix in ("", "-wasm", "-linux-x64-gnu", "-linux-arm64-gnu",
+                           "-darwin-x64", "-darwin-arm64", "-win32-x64-msvc",
+                           "-win32-arm64-msvc")
+        }
+        other = {
+            f"uqa-cli-{version}-{arch}-{target}.tgz"
+            for arch in ("x86_64", "aarch64")
+            for target in ("unknown-linux-gnu", "apple-darwin")
+        } | {f"uqa-cli-{version}-x86_64-pc-windows-msvc.zip",
+             f"uqa-{version}.tar.gz", "uqa.whl", "install-usql.sh"}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            assets = root / "assets"
+            assets.mkdir()
+            for name in npm | other:
+                (assets / name).write_bytes(name.encode())
+            binary = root / "bin"
+            binary.mkdir()
+            gh = binary / "gh"
+            gh.write_text(textwrap.dedent("""\
+                #!/usr/bin/env python3
+                import argparse, os, pathlib, shutil
+                parser = argparse.ArgumentParser()
+                parser.add_argument('command', choices=['release'])
+                parser.add_argument('action', choices=['download'])
+                parser.add_argument('tag')
+                parser.add_argument('--dir', required=True)
+                parser.add_argument('--pattern', action='append', required=True)
+                args = parser.parse_args()
+                assert args.tag == os.environ['RELEASE_TAG']
+                for pattern in args.pattern:
+                    for asset in pathlib.Path(os.environ['UQA_RELEASE_ASSETS']).glob(pattern):
+                        shutil.copyfile(asset, pathlib.Path(args.dir) / asset.name)
+                """))
+            gh.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-e"], input=script, text=True, capture_output=True,
+                cwd=root, check=False,
+                env={**os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"],
+                     "RELEASE_TAG": f"v{version}", "UQA_RELEASE_ASSETS": str(assets)},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                {path.name: path.read_bytes() for path in (root / "dist").iterdir()},
+                {name: name.encode() for name in npm},
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

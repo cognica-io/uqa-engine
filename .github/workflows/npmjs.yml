@@ -67,7 +67,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          gh release download "$RELEASE_TAG" --dir dist --pattern '*.tgz'
+          gh release download "$RELEASE_TAG" --dir dist --pattern 'cognica-io-uqa-*.tgz'
 
       - name: Verify the original npm release transport and licenses
         shell: bash
