@@ -185,7 +185,7 @@ fn name_pattern(source: &str) -> Result<(Option<String>, String), String> {
             match c {
                 '*' => part.push_str(".*"),
                 '?' => part.push('.'),
-                _ => part.extend(c.to_lowercase()),
+                _ => part.push(c.to_ascii_lowercase()),
             }
         }
     }

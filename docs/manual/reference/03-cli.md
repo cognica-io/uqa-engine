@@ -128,7 +128,7 @@ SQL owns typed text output, including booleans, arrays, enums, retained composit
 | `\watch [seconds] [i=seconds] [c=count] [m=rows]` | Repeat the current query until interrupted, the count is reached or fewer than the minimum rows are returned |
 | `\migrate-python-db source destination` | Migrate a legacy Python database |
 
-Catalog patterns support `*`, `?`, regular expressions, schema qualification and case-preserving double quotes. `\dg` lists roles and `\da` lists aggregates; use `\graphs` and `\analyzers` for the previous UQA operations. `\dS` includes system relations. The existing UQA `\dF` alias remains equivalent to `\dft`. `\analyzers` lists custom persistent names; `SELECT * FROM list_analyzers()` also includes built-ins. See [text analyzers](06-text-analyzers.md) for analyzer configuration and field binding.
+Catalog patterns support `*`, `?`, regular expressions, schema qualification and case-preserving double quotes. In unquoted UTF-8 patterns, only ASCII letters fold to lowercase; non-ASCII identifiers retain their exact case, as in PostgreSQL psql. `\dg` lists roles and `\da` lists aggregates; use `\graphs` and `\analyzers` for the previous UQA operations. `\dS` includes system relations. The existing UQA `\dF` alias remains equivalent to `\dft`. `\analyzers` lists custom persistent names; `SELECT * FROM list_analyzers()` also includes built-ins. See [text analyzers](06-text-analyzers.md) for analyzer configuration and field binding.
 
 ## Variables, scripts and files
 

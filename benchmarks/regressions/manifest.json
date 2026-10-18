@@ -14144,6 +14144,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-cli",
+      "kind": "lib",
+      "test": "catalog_name_patterns_preserve_non_ascii_identifiers",
+      "cases": 1,
+      "source": "crates/uqa-cli/src/shell_tests.rs",
+      "capability": "PostgreSQL catalog pattern semantics",
+      "workload": "Query three catalog names through real usql catalog commands, including Unicode 17 uppercase U+A7CE, Greek uppercase omega and an ASCII uppercase pattern.",
+      "invariant": "Only the PostgreSQL 18 UTF-8 matching relation is returned; ASCII folds and non-ASCII names remain exact.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
