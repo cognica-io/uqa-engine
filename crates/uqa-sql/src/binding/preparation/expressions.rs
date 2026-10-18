@@ -634,17 +634,18 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<Option<FunctionBinding>, SQLError> {
-        let mut selected = crate::semantics::resolve_table_function_binding(
+        let mut arguments = self.observe_function_arguments(name, args, &[], input, subqueries)?;
+        let mut selected = crate::semantics::resolve_table_function_binding_for_types(
             self.routines,
             name,
             binding,
-            args,
-            input,
-            &self.parameters.values(),
-            self.routines,
+            crate::type_resolution::RoutineCallDescriptor {
+                argument_names: &arguments.names,
+                argument_types: &arguments.types(),
+                explicit_variadic: arguments.variadic,
+            },
         )?;
         let chosen = selected.as_ref().or(binding);
-        let mut arguments = self.observe_function_arguments(name, args, &[], input, subqueries)?;
         let signature = self.select_function_arguments(name, chosen, args, &arguments)?;
         self.coerce_function_arguments(name, chosen, args, &mut arguments, &signature)?;
         if let Some(selected) = &mut selected {

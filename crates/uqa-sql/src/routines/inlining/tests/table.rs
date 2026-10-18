@@ -7,6 +7,31 @@
 use super::*;
 
 #[test]
+fn from_overloads_use_argument_subquery_types_before_attempting_expansion() {
+    let catalog = Catalog::new("CREATE FUNCTION picked(value integer) RETURNS TABLE(int4_value text) LANGUAGE SQL AS 'SELECT ''int4'''; CREATE FUNCTION picked(value bigint) RETURNS TABLE(int8_value text) LANGUAGE SQL AS 'SELECT ''int8'''");
+    let context = crate::binding::fixture::empty_binding_context();
+    for (sql, column) in [
+        ("SELECT * FROM picked((SELECT 7::bigint))", "int8_value"),
+        ("SELECT * FROM picked((SELECT 7::integer))", "int4_value"),
+        (
+            "SELECT * FROM ROWS FROM (picked((SELECT 7::bigint)))",
+            "int8_value",
+        ),
+    ] {
+        let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        crate::binding::infer_prepared_parameter_types(&catalog, &plan, &[], &context)
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        let UnifiedPlan::Query(query) = plan else {
+            unreachable!()
+        };
+        let schema =
+            crate::binding::bind_query_plan_schema(&catalog, &query, &[], &context, None).unwrap();
+        assert_eq!(schema.columns(), &[column.to_string()], "{sql}");
+        assert_eq!(catalog.evaluations.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[test]
 fn correlated_arguments_capture_only_attributes_and_keep_expression_demand_in_the_body() {
     let catalog = Catalog::new("CREATE FUNCTION conditional(x integer, flag boolean) RETURNS SETOF integer LANGUAGE sql STABLE AS $$SELECT CASE WHEN flag THEN x ELSE 7 END$$");
     let binding = catalog.binding(

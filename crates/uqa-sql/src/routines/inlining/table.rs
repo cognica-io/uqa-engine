@@ -128,8 +128,8 @@ impl RoutineInliningContext<'_> {
         if layout.kind == SQLFunctionResultKind::Void
             || layout.kind == SQLFunctionResultKind::Value
                 && matches!(
-                    layout.declared_type,
-                    ColumnType::Composite(_) | ColumnType::Record | ColumnType::Domain { .. }
+                    crate::type_resolution::base_type(&layout.declared_type),
+                    ColumnType::Composite(_) | ColumnType::Record
                 )
         {
             return Ok(None);
