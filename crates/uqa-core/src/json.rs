@@ -50,6 +50,19 @@ pub struct JsonEvent<'a> {
     pub range: std::ops::Range<usize>,
 }
 
+/// The structural token expected when a reader rejects malformed input. Consumers choose their own diagnostic wording.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JsonExpected {
+    Value,
+    End,
+    ArrayValueOrEnd,
+    ArraySeparator,
+    ObjectKeyOrEnd,
+    ObjectSeparator,
+    Key,
+    Colon,
+}
+
 #[derive(Clone, Copy)]
 enum Frame {
     ArrayFirst,
@@ -103,6 +116,7 @@ pub struct JsonReader<'a, 'c> {
     cancellation: Option<&'c CancellationToken>,
     production: Option<ProductionControl<'c>>,
     root_started: bool,
+    expected: JsonExpected,
     depth_limit: Option<usize>,
     ignored_string_escapes: bool,
     /// The input came from a `str`, so every token between ASCII delimiters is already valid UTF-8.
@@ -129,6 +143,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
             cancellation: Some(cancellation),
             production: None,
             root_started: false,
+            expected: JsonExpected::Value,
             depth_limit: None,
             ignored_string_escapes: false,
             validated_utf8: false,
@@ -143,6 +158,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
             cancellation: None,
             production: None,
             root_started: false,
+            expected: JsonExpected::Value,
             depth_limit: None,
             ignored_string_escapes: false,
             validated_utf8: true,
@@ -161,6 +177,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
             cancellation: None,
             production: Some(*control),
             root_started: false,
+            expected: JsonExpected::Value,
             depth_limit: None,
             ignored_string_escapes: false,
             validated_utf8: true,
@@ -181,10 +198,25 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         self
     }
 
+    /// Borrow the failure position and expected structural token after `next_event` returns `InvalidJson`. No additional traversal or allocation is required.
+    pub const fn syntax_position(&self) -> (usize, JsonExpected) {
+        (self.position, self.expected)
+    }
+
     pub fn next_event(&mut self) -> Result<Option<JsonEvent<'a>>, JsonReadError> {
         self.check()?;
         self.skip_whitespace()?;
         let frame = self.stack.frames().last().copied();
+        self.expected = match frame {
+            None if self.root_started => JsonExpected::End,
+            None | Some(Frame::ArrayValue) => JsonExpected::Value,
+            Some(Frame::ArrayFirst) => JsonExpected::ArrayValueOrEnd,
+            Some(Frame::ArrayAfter) => JsonExpected::ArraySeparator,
+            Some(Frame::ObjectFirst) => JsonExpected::ObjectKeyOrEnd,
+            Some(Frame::ObjectKey) => JsonExpected::Key,
+            Some(Frame::ObjectValue) => JsonExpected::Colon,
+            Some(Frame::ObjectAfter) => JsonExpected::ObjectSeparator,
+        };
         match frame {
             None if self.root_started => {
                 return if self.position == self.input.len() {
@@ -206,6 +238,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                     self.advance()?;
                     self.skip_whitespace()?;
                     self.replace(Frame::ArrayValue);
+                    self.expected = JsonExpected::Value;
                 }
                 _ => return Err(JsonReadError::InvalidJson),
             },
@@ -215,6 +248,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                     self.advance()?;
                     self.skip_whitespace()?;
                     self.replace(Frame::ObjectKey);
+                    self.expected = JsonExpected::Key;
                 }
                 _ => return Err(JsonReadError::InvalidJson),
             },
@@ -231,6 +265,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                 self.consume(b':')?;
                 self.skip_whitespace()?;
                 self.replace(Frame::ObjectAfter);
+                self.expected = JsonExpected::Value;
             }
             Some(Frame::ArrayFirst | Frame::ArrayValue) => self.replace(Frame::ArrayAfter),
             _ => {}

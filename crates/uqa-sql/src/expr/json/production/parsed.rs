@@ -13,31 +13,33 @@ use uqa_core::{
 };
 
 pub(super) fn parse(text: &str, control: &ProductionControl<'_>) -> Result<Node> {
-    parse_optional(text, control)?
-        .ok_or_else(|| super::super::super::json_strip::invalid_json_input(text))
+    let mut reader = JsonReader::with_control(text, control).with_depth_limit(127);
+    parse_node(&mut reader, control).map_err(|error| match error {
+        JsonReadError::InvalidJson | JsonReadError::Malformed { .. } => {
+            super::super::diagnostics::invalid_input(text, reader.syntax_position())
+        }
+        JsonReadError::Memory(error) => error.into(),
+        JsonReadError::Cancelled(error) => error.into(),
+    })
 }
 
 pub(super) fn parse_optional(text: &str, control: &ProductionControl<'_>) -> Result<Option<Node>> {
-    match parse_node(text, control) {
+    match parse(text, control) {
         Ok(node) => Ok(Some(node)),
-        // The JSON reader decodes no tagged carriers, so both failures describe invalid input text.
-        Err(JsonReadError::InvalidJson | JsonReadError::Malformed { .. }) => Ok(None),
-        Err(JsonReadError::Memory(error)) => Err(error.into()),
-        Err(JsonReadError::Cancelled(error)) => Err(error.into()),
+        Err(error) if error.sqlstate() == Some("22P02") => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
 fn parse_node(
-    text: &str,
+    reader: &mut JsonReader<'_, '_>,
     control: &ProductionControl<'_>,
 ) -> std::result::Result<Node, JsonReadError> {
-    // serde_json's existing value decoder accepts at most 127 nested containers.
-    let mut reader = JsonReader::with_control(text, control).with_depth_limit(127);
     let token = reader
         .next_event()?
         .ok_or(JsonReadError::InvalidJson)?
         .token;
-    let node = consume(&mut reader, token, control)?;
+    let node = consume(reader, token, control)?;
     if reader.next_event()?.is_some() {
         return Err(JsonReadError::InvalidJson);
     }

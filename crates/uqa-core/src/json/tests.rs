@@ -368,3 +368,18 @@ fn controlled_strings_match_serde_escapes_and_preserve_both_cancellation_owners(
         assert_eq!(memory.used(), 0);
     }
 }
+
+#[test]
+fn failed_json_read_retains_the_original_position_and_structural_expectation() {
+    for (input, offset, expected) in [
+        ("{bad", 1, JsonExpected::ObjectKeyOrEnd),
+        ("[1,", 3, JsonExpected::Value),
+        ("{\"a\":1", 6, JsonExpected::ObjectSeparator),
+        ("[1,]", 3, JsonExpected::Value),
+        ("{\"a\" 1}", 5, JsonExpected::Colon),
+    ] {
+        let mut reader = JsonReader::unbounded(input);
+        while reader.next_event().is_ok() {}
+        assert_eq!(reader.syntax_position(), (offset, expected), "{input}");
+    }
+}
