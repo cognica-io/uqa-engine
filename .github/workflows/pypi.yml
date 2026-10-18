@@ -1,6 +1,11 @@
 name: Publish Python to PyPI
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pypi.yml
+      - .github/pypi-source-policy.json
   workflow_dispatch:
     inputs:
       tag:
@@ -20,8 +25,77 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  resolve:
+    name: resolve Python publication
+    runs-on: ubuntu-24.04
+    outputs:
+      ready: ${{ steps.selection.outputs.ready }}
+      tag: ${{ steps.selection.outputs.tag }}
+      publish_sdist: ${{ steps.selection.outputs.publish_sdist }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Resolve release and source publication policy
+        id: selection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PUBLISH_SDIST: ${{ inputs.publish_sdist }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          event = os.environ["GITHUB_EVENT_NAME"]
+          if event == "push":
+              versions = re.findall(r'^version = "([^"]+)"$', Path("pyproject.toml").read_text(), re.M)
+              if len(versions) != 1:
+                  raise SystemExit("Expected one Python project version")
+              tag, choice = "v" + versions[0], "true"
+          elif event == "workflow_dispatch":
+              tag, choice = os.environ["INPUT_TAG"], os.environ["INPUT_PUBLISH_SDIST"]
+          else:
+              raise SystemExit("Unsupported publication event")
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag) or choice not in {"true", "false"}:
+              raise SystemExit("Invalid release tag or source publication choice")
+          repository = os.environ["GITHUB_REPOSITORY"]
+          policy = json.loads(Path(".github/pypi-source-policy.json").read_text())
+          if not isinstance(policy, dict) or any(
+              not re.fullmatch(r"uqa-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz", name)
+              or not isinstance(evidence, str)
+              or not evidence.startswith(f"https://github.com/{repository}/actions/runs/")
+              for name, evidence in policy.items()
+          ):
+              raise SystemExit("Invalid source filename rejection evidence")
+          filename = f"uqa-{tag[1:]}.tar.gz"
+          if filename in policy:
+              choice = "false"
+              print(f"Source retained on GitHub: {filename}; PyPI rejection: {policy[filename]}")
+          if event == "push":
+              result = subprocess.run(["gh", "api", f"repos/{repository}/releases/tags/{tag}"],
+                                      text=True, capture_output=True)
+              release = json.loads(result.stdout)
+              if result.returncode:
+                  if str(release.get("status")) == "404":
+                      print(f"{tag} has no public release to reconcile")
+                      with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+                          output.write("ready=false\n")
+                      raise SystemExit(0)
+                  raise SystemExit(f"Cannot read release: {result.stderr.strip()}")
+              if release.get("draft") is not False or release.get("prerelease") is not False:
+                  raise SystemExit("Registry recovery requires a public stable release")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"ready=true\ntag={tag}\npublish_sdist={choice}\n")
+          PY
+
   prepare:
     name: prepare uqa distributions
+    needs: resolve
+    if: ${{ needs.resolve.outputs.ready == 'true' }}
     runs-on: ubuntu-24.04
     outputs:
       digests: ${{ steps.inventory.outputs.digests }}
@@ -30,8 +104,8 @@ jobs:
       contents: read
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.tag }}
-      PUBLISH_SDIST: ${{ inputs.publish_sdist }}
+      RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      PUBLISH_SDIST: ${{ needs.resolve.outputs.publish_sdist }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -262,18 +336,18 @@ jobs:
 
   record:
     name: record PyPI publication
-    needs: [prepare, publish]
+    needs: [resolve, prepare, publish]
     if: ${{ always() && needs.prepare.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'skipped') }}
     runs-on: ubuntu-24.04
     concurrency:
-      group: registry-release-notes-${{ inputs.tag }}
+      group: registry-release-notes-${{ needs.resolve.outputs.tag }}
       cancel-in-progress: false
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.tag }}
-      PUBLISH_SDIST: ${{ inputs.publish_sdist }}
+      RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      PUBLISH_SDIST: ${{ needs.resolve.outputs.publish_sdist }}
     steps:
       - name: Update the GitHub release notes
         shell: bash

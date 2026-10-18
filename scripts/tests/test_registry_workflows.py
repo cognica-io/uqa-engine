@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pathlib
 import subprocess
@@ -84,6 +85,88 @@ class RegistryTransferIntegrityTest(unittest.TestCase):
                 self.assertIn("inventory differs from verified files", result.stderr)
 
 
+class PythonPublicationResolutionTest(unittest.TestCase):
+    def resolve(self, *, event="workflow_dispatch", version="0.0.1", tag="v0.0.1",
+                choice="true", policy=None, status=0, release=None):
+        source = (ROOT / ".github/workflows/pypi.yml").read_text()
+        step = source.split("      - name: Resolve release and source publication policy\n", 1)[1]
+        step = step.split("\n  prepare:\n", 1)[0]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / ".github").mkdir()
+            (root / ".github/pypi-source-policy.json").write_text(json.dumps(policy or {}))
+            (root / "pyproject.toml").write_text(f'[project]\nversion = "{version}"\n')
+            binary = root / "bin"
+            binary.mkdir()
+            gh = binary / "gh"
+            gh.write_text(textwrap.dedent("""\
+                #!/usr/bin/env python3
+                import os, sys
+                assert sys.argv[1:] == ['api', 'repos/cognica-io/uqa-engine/releases/tags/' + os.environ['UQA_EXPECTED_TAG']]
+                print(os.environ['UQA_RELEASE_RESPONSE'])
+                raise SystemExit(int(os.environ['UQA_RELEASE_STATUS']))
+                """))
+            gh.chmod(0o755)
+            output = root / "output"
+            result = subprocess.run(
+                ["bash", "-e"], input=script, text=True, capture_output=True,
+                cwd=root, check=False,
+                env={**os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"],
+                     "GITHUB_EVENT_NAME": event, "GITHUB_REPOSITORY": "cognica-io/uqa-engine",
+                     "INPUT_TAG": tag, "INPUT_PUBLISH_SDIST": choice, "GITHUB_OUTPUT": str(output),
+                     "UQA_EXPECTED_TAG": "v" + version, "UQA_RELEASE_STATUS": str(status),
+                     "UQA_RELEASE_RESPONSE": json.dumps(release if release is not None else {"draft": False, "prerelease": False})},
+            )
+            values = dict(line.split("=", 1) for line in output.read_text().splitlines()) if output.exists() else {}
+            return result, values
+
+    def test_source_policy_only_changes_the_exact_documented_filename(self):
+        policy = {"uqa-0.0.1.tar.gz": "https://github.com/cognica-io/uqa-engine/actions/runs/123/job/456"}
+        for tag, choice, expected in (("v0.0.1", "true", "false"),
+                                      ("v0.0.2", "true", "true"),
+                                      ("v0.0.2", "false", "false")):
+            with self.subTest(tag=tag, choice=choice):
+                result, values = self.resolve(tag=tag, choice=choice, policy=policy)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(values, {"ready": "true", "tag": tag, "publish_sdist": expected})
+
+    def test_main_push_reconciles_the_current_public_release(self):
+        for policy, expected in (({}, "true"), ({"uqa-0.0.1.tar.gz": "https://github.com/cognica-io/uqa-engine/actions/runs/123"}, "false")):
+            with self.subTest(policy=policy):
+                result, values = self.resolve(event="push", tag="", choice="", policy=policy)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(values, {"ready": "true", "tag": "v0.0.1", "publish_sdist": expected})
+
+    def test_only_an_absent_release_can_skip_reconciliation(self):
+        result, values = self.resolve(event="push", status=1, release={"status": "404"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(values, {"ready": "false"})
+        for status in (401, 403, 500):
+            with self.subTest(status=status):
+                result, values = self.resolve(event="push", status=1, release={"status": str(status)})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(values, {})
+
+    def test_drafts_prereleases_and_incomplete_release_records_are_not_published(self):
+        for release in ({"draft": True, "prerelease": False},
+                        {"draft": False, "prerelease": True}, {}):
+            with self.subTest(release=release):
+                result, values = self.resolve(event="push", release=release)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(values, {})
+
+    def test_invalid_release_choices_and_rejection_evidence_fail_closed(self):
+        for kwargs in ({"tag": "v0.0.1\ntag=v0.0.2"}, {"choice": "invalid"},
+                       {"event": "pull_request"},
+                       {"policy": {"uqa-0.0.1.tar.gz": "unverified"}},
+                       {"policy": {"uqa-0.0.1.whl": "https://github.com/cognica-io/uqa-engine/actions/runs/123"}}):
+            with self.subTest(kwargs=kwargs):
+                result, values = self.resolve(**kwargs)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(values, {})
+
+
 class PythonPublicationSelectionTest(unittest.TestCase):
     def test_explicit_source_location_preserves_selected_inventory_and_digests(self):
         source = (ROOT / ".github/workflows/pypi.yml").read_text()
@@ -117,6 +200,44 @@ class PythonPublicationSelectionTest(unittest.TestCase):
                     {"digests<<UQA_RELEASE_DIGESTS", "UQA_RELEASE_DIGESTS",
                      *RegistryTransferIntegrityTest.manifest(expected).splitlines()},
                 )
+
+
+class PythonRegistryInventoryTest(unittest.TestCase):
+    def test_reconciliation_requires_the_exact_existing_file_hashes(self):
+        source = (ROOT / ".github/workflows/pypi.yml").read_text()
+        step = source.split("      - name: Check whether PyPI already has this exact release\n", 1)[1]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("\n      - ", 1)[0])
+        files = {"first.whl": b"first verified wheel", "second.whl": b"second verified wheel"}
+        exact = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
+        cases = ((exact, True), ({"first.whl": exact["first.whl"]}, False),
+                 ({**exact, "unexpected.whl": "f" * 64}, False),
+                 ({**exact, "first.whl": "0" * 64}, False))
+        for remote, valid in cases:
+            with self.subTest(remote=remote), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                (root / "dist").mkdir()
+                for name, data in files.items():
+                    (root / "dist" / name).write_bytes(data)
+                (root / "sitecustomize.py").write_text(textwrap.dedent("""\
+                    import io, os, urllib.request
+                    urllib.request.urlopen = lambda request: io.BytesIO(os.environ['UQA_PYPI_RESPONSE'].encode())
+                    """))
+                output = root / "output"
+                response = {"urls": [{"filename": name, "digests": {"sha256": digest}}
+                                     for name, digest in remote.items()]}
+                result = subprocess.run(
+                    ["bash", "-e"], input=script, text=True, capture_output=True,
+                    cwd=root, check=False,
+                    env={**os.environ, "PYTHONPATH": str(root), "RELEASE_TAG": "v0.0.1",
+                         "GITHUB_OUTPUT": str(output), "UQA_PYPI_RESPONSE": json.dumps(response)},
+                )
+                if valid:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(output.read_text(), "publish=false\n")
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("different release inventory", result.stderr)
+                    self.assertFalse(output.exists())
 
 
 class NpmPublicationSelectionTest(unittest.TestCase):
