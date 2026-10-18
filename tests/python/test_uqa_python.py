@@ -590,6 +590,7 @@ def test_sql_notices_and_function_depth_limit() -> None:
         """
     )
     assert engine.sql_function_depth_limit() >= 1
+    assert engine.sql("SELECT rec(10) AS v").rows == [{"v": 0}]
     engine.set_sql_function_depth_limit(3)
     assert engine.sql_function_depth_limit() == 3
     with pytest.raises(RuntimeError, match="stack depth limit exceeded"):
