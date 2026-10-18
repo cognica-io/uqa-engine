@@ -9,7 +9,7 @@
       "--notices"
     ],
     "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "3bef3591c7b515e5fcb6165d60905da2972a5cbcca21041d499baf1ef22975a3"
+    "input_sha256": "5bad490121bf43d3c6554dafc16f86f4d9f51ab0f34071a794e721acdbcb2a0c"
   },
   "cases": [
     {
@@ -1956,6 +1956,343 @@
             [
               "2",
               "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_partition",
+      "sql": "SELECT generate_series(1, 2) AS g, row_number() OVER (PARTITION BY generate_series(1, 2)) FROM (VALUES (1)) v ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "row_number"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_order",
+      "sql": "SELECT generate_series(1, 2) AS g, row_number() OVER (ORDER BY generate_series(1, 2)) FROM (VALUES (1)) v ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "row_number"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_descending",
+      "sql": "SELECT generate_series(1, 2) AS g, rank() OVER (ORDER BY generate_series(1, 2) DESC) FROM (VALUES (1)) v ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "rank"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_inside_expression",
+      "sql": "SELECT generate_series(1, 2) + 0 AS g, row_number() OVER (PARTITION BY generate_series(1, 2)) FROM (VALUES (1)) v ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "row_number"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_over_rows",
+      "sql": "SELECT count(*) OVER (PARTITION BY generate_series(1, 2)), generate_series(1, 2) FROM (VALUES (1), (2)) v(x) ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count",
+            "generate_series"
+          ],
+          "type_oids": [
+            20,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_two_windows",
+      "sql": "SELECT generate_series(1, 2) AS g, row_number() OVER (PARTITION BY generate_series(1, 2)), rank() OVER (ORDER BY generate_series(1, 2) DESC) FROM (VALUES (1)) v ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "row_number",
+            "rank"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_correlated",
+      "sql": "SELECT x, generate_series(1, x) AS g, count(*) OVER (PARTITION BY generate_series(1, x)) FROM (VALUES (1), (2), (3)) v(x) ORDER BY 1, 2, 3",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "g",
+            "count"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "1",
+              "3"
+            ],
+            [
+              "3",
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_sort_key",
+      "sql": "SELECT row_number() OVER (PARTITION BY generate_series(1, 2)) AS r FROM (VALUES (1)) v ORDER BY generate_series(1, 2), r",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_sort_expression",
+      "sql": "SELECT row_number() OVER (ORDER BY generate_series(1, 3)) AS r FROM (VALUES (1)) v ORDER BY generate_series(1, 3) * -1",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ],
+            [
+              "2"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_distinct_on",
+      "sql": "SELECT DISTINCT ON (generate_series(1, 2)) row_number() OVER (PARTITION BY generate_series(1, 2)) AS r FROM (VALUES (1), (2)) v",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
             ]
           ]
         }

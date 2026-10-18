@@ -13365,6 +13365,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "target_list_calls_that_repeat_a_set_returning_key_read_its_column",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/window/tests/set_returning_keys.rs",
+      "capability": "PostgreSQL set-returning call placement",
+      "workload": "Independent PostgreSQL 18.4 statements placing set-returning calls in select lists, FROM, LATERAL, ROWS FROM, single-row INSERT VALUES, DML, RETURNING, ON CONFLICT, MERGE, trigger and rule conditions, EXECUTE, CALL and column definition lists, and catalogs that stored such calls in earlier releases, across provider reopening.",
+      "invariant": "Set-returning calls expand where PostgreSQL 18.4 places them and report its SQLSTATEs, messages and hints elsewhere, and definitions stored by earlier releases load, run as stored without being placed again and keep the catalog usable.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
