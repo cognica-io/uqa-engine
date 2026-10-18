@@ -102,10 +102,18 @@ class PythonPublicationResolutionTest(unittest.TestCase):
             gh = binary / "gh"
             gh.write_text(textwrap.dedent("""\
                 #!/usr/bin/env python3
-                import os, sys
-                assert sys.argv[1:] == ['api', 'repos/cognica-io/uqa-engine/releases/tags/' + os.environ['UQA_EXPECTED_TAG']]
-                print(os.environ['UQA_RELEASE_RESPONSE'])
-                raise SystemExit(int(os.environ['UQA_RELEASE_STATUS']))
+                import json, os, sys
+                response = os.environ['UQA_RELEASE_RESPONSE']
+                status = int(os.environ['UQA_RELEASE_STATUS'])
+                if sys.argv[1:] == ['api', 'repos/cognica-io/uqa-engine/releases/tags/' + os.environ['UQA_EXPECTED_TAG']]:
+                    if not status:
+                        matches = [release for page in json.loads(response) for release in page
+                                   if release.get('tag_name') == os.environ['UQA_EXPECTED_TAG'] and not release.get('draft')]
+                        response, status = (json.dumps(matches[0]), 0) if matches else ('{"status":"404"}', 1)
+                else:
+                    assert sys.argv[1:] == ['api', '--paginate', '--slurp', 'repos/cognica-io/uqa-engine/releases?per_page=100']
+                print(response)
+                raise SystemExit(status)
                 """))
             gh.chmod(0o755)
             output = root / "output"
@@ -116,7 +124,7 @@ class PythonPublicationResolutionTest(unittest.TestCase):
                      "GITHUB_EVENT_NAME": event, "GITHUB_REPOSITORY": "cognica-io/uqa-engine",
                      "INPUT_TAG": tag, "INPUT_PUBLISH_SDIST": choice, "GITHUB_OUTPUT": str(output),
                      "UQA_EXPECTED_TAG": "v" + version, "UQA_RELEASE_STATUS": str(status),
-                     "UQA_RELEASE_RESPONSE": json.dumps(release if release is not None else {"draft": False, "prerelease": False})},
+                     "UQA_RELEASE_RESPONSE": json.dumps(release if release is not None else [[{"tag_name": "v" + version, "draft": False, "prerelease": False}]])},
             )
             values = dict(line.split("=", 1) for line in output.read_text().splitlines()) if output.exists() else {}
             return result, values
@@ -139,10 +147,10 @@ class PythonPublicationResolutionTest(unittest.TestCase):
                 self.assertEqual(values, {"ready": "true", "tag": "v0.0.1", "publish_sdist": expected})
 
     def test_only_an_absent_release_can_skip_reconciliation(self):
-        result, values = self.resolve(event="push", status=1, release={"status": "404"})
+        result, values = self.resolve(event="push", release=[[]])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(values, {"ready": "false"})
-        for status in (401, 403, 500):
+        for status in (401, 403, 404, 500):
             with self.subTest(status=status):
                 result, values = self.resolve(event="push", status=1, release={"status": str(status)})
                 self.assertNotEqual(result.returncode, 0)
@@ -152,7 +160,19 @@ class PythonPublicationResolutionTest(unittest.TestCase):
         for release in ({"draft": True, "prerelease": False},
                         {"draft": False, "prerelease": True}, {}):
             with self.subTest(release=release):
-                result, values = self.resolve(event="push", release=release)
+                result, values = self.resolve(event="push", release=[[{"tag_name": "v0.0.1", **release}]])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(values, {})
+
+    def test_release_lookup_includes_later_pages_and_rejects_duplicate_tags(self):
+        public = {"tag_name": "v0.0.1", "draft": False, "prerelease": False}
+        other = {**public, "tag_name": "v0.0.2"}
+        result, values = self.resolve(event="push", release=[[other], [public]])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(values["tag"], "v0.0.1")
+        for pages in ([[other], [{**public, "draft": True}]], [[public], [public]]):
+            with self.subTest(pages=pages):
+                result, values = self.resolve(event="push", release=pages)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(values, {})
 

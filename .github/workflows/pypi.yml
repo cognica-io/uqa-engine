@@ -76,16 +76,22 @@ jobs:
               choice = "false"
               print(f"Source retained on GitHub: {filename}; PyPI rejection: {policy[filename]}")
           if event == "push":
-              result = subprocess.run(["gh", "api", f"repos/{repository}/releases/tags/{tag}"],
-                                      text=True, capture_output=True)
-              release = json.loads(result.stdout)
+              result = subprocess.run(
+                  ["gh", "api", "--paginate", "--slurp", f"repos/{repository}/releases?per_page=100"],
+                  text=True, capture_output=True,
+              )
               if result.returncode:
-                  if str(release.get("status")) == "404":
-                      print(f"{tag} has no public release to reconcile")
-                      with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-                          output.write("ready=false\n")
-                      raise SystemExit(0)
-                  raise SystemExit(f"Cannot read release: {result.stderr.strip()}")
+                  raise SystemExit(f"Cannot list releases: {result.stderr.strip()}")
+              matches = [release for page in json.loads(result.stdout) for release in page
+                         if release.get("tag_name") == tag]
+              if not matches:
+                  print(f"{tag} has no release to reconcile")
+                  with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+                      output.write("ready=false\n")
+                  raise SystemExit(0)
+              if len(matches) != 1:
+                  raise SystemExit("Release tag matches multiple release records")
+              release = matches[0]
               if release.get("draft") is not False or release.get("prerelease") is not False:
                   raise SystemExit("Registry recovery requires a public stable release")
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
