@@ -38,6 +38,50 @@ impl FunctionTypeResolver for EmptyRoutineResolution {
 impl RoutineResolution for EmptyRoutineResolution {}
 
 #[test]
+fn retrieval_metadata_binding_agrees_with_analysis_without_running_a_query() {
+    let context = super::BindingContext {
+        catalog: super::fixture::catalog(BTreeMap::from([(
+            RelationIdentity::new("public", "messages"),
+            super::fixture::table_definition(vec![
+                column("id", ColumnType::Integer),
+                column("content", ColumnType::Text),
+                column("embedding", ColumnType::Vector(2)),
+            ]),
+        )])),
+        ..super::fixture::empty_binding_context()
+    };
+    for sql in [
+        "SELECT id, _score FROM messages WHERE text_match(content, 'learning')",
+        "SELECT id, _score FROM messages WHERE pool_positive_evidence(\
+            bayesian_match(content, 'learning'), knn_match(embedding, ARRAY[0.9, 0.1], 3))",
+        "SELECT id, _score FROM (SELECT id, _score FROM messages WHERE \
+            pool_positive_evidence(bayesian_match(content, 'learning'), \
+            knn_match(embedding, ARRAY[0.9, 0.1], 3))) hits",
+        "WITH hits AS (SELECT id, _score FROM messages WHERE \
+            pool_positive_evidence(bayesian_match(content, 'learning'), \
+            knn_match(embedding, ARRAY[0.9, 0.1], 3))) SELECT id, _score FROM hits",
+    ] {
+        let crate::plan::UnifiedPlan::Query(query) =
+            crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("SELECT");
+        };
+        let bound =
+            super::bind_query_plan_schema(&EmptyRoutineResolution, &query, &[], &context, None)
+                .unwrap();
+        let analyzed =
+            super::analyze_query_plan_schema(&EmptyRoutineResolution, &query, &[], &context, None)
+                .unwrap();
+        assert_eq!(
+            bound.column_types(),
+            &[Some(ColumnType::Integer), Some(ColumnType::DoublePrecision)],
+            "{sql}",
+        );
+        assert_eq!(bound, analyzed, "{sql}");
+    }
+}
+
+#[test]
 fn routine_parameter_lookup_preserves_wildcard_syntax_sites() {
     let context = super::BindingContext {
         catalog: super::fixture::catalog(BTreeMap::new()),

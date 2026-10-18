@@ -7,6 +7,22 @@
 use super::{numeric_operator_precedence, Deparser, QueryPlan, SQLError, ScalarExpr, Scope};
 
 impl Deparser<'_> {
+    pub(super) fn distinct_operator(
+        &self,
+        args: &[ScalarExpr],
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<String, SQLError> {
+        let [left, right] = args else {
+            return Err(SQLError::Internal("invalid distinct operands".into()));
+        };
+        Ok(self.parenthesize(format!(
+            "{} IS DISTINCT FROM {}",
+            self.operand(left, 80, false, scope, subqueries)?,
+            self.operand(right, 80, false, scope, subqueries)?
+        )))
+    }
+
     pub(super) fn json_path_call(
         &self,
         name: &str,

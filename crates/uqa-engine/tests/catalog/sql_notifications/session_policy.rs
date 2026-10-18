@@ -13,7 +13,7 @@ use uqa_sql::SQLError;
 
 fn rejected(error: &SQLError) {
     assert!(
-        matches!(error, SQLError::NotificationRequiresSubscription),
+        matches!(error.primary(), SQLError::NotificationRequiresSubscription),
         "{error:?}"
     );
     assert_eq!(error.sqlstate(), Some("0A000"));

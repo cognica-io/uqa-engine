@@ -21,9 +21,9 @@ The Rust CLI enables the bundled `nori` and `kuromoji` analyzers by default, mat
 
 Current source builds include the memory foreign-data wrapper. Add `--features arrow` for native Arrow IPC execution or `--features duckdb` for native DuckDB execution; neither feature enables the other. Foreign-table definitions, `\d`, `\dft`, `\dfs` and completion use SQL catalog metadata and remain available for omitted native handlers.
 
-## Standalone release installation (development source)
+## Standalone release installation
 
-Starting with the next release, GitHub releases attach `uqa-cli-<version>-<target>.tgz` for Linux and macOS, `.zip` archives for Windows, matching `.sha256` files, and `install-usql.sh` / `install-usql.ps1`. Each system has x86_64 and ARM64 builds on native runners. The standalone executable includes Nori, Kuromoji, Arrow and DuckDB; no Python or Rust installation is needed. Linux builds target GNU libc on Ubuntu 24.04, so use Ubuntu 24.04 or a compatible newer distribution; these are not musl/Alpine binaries.
+Starting with 0.6.0, GitHub releases attach `uqa-cli-<version>-<target>.tgz` for Linux and macOS, `.zip` archives for Windows, matching `.sha256` files, and `install-usql.sh` / `install-usql.ps1`. Each system has x86_64 and ARM64 builds on native runners. The standalone executable includes Nori, Kuromoji, Arrow and DuckDB; no Python or Rust installation is needed. Linux builds target GNU libc on Ubuntu 24.04, so use Ubuntu 24.04 or a compatible newer distribution; these are not musl/Alpine binaries.
 
 With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall#installation) installed, Cargo users can download the same official binary without compiling UQA:
 
@@ -32,7 +32,7 @@ cargo binstall uqa-cli --strategies crate-meta-data
 usql
 ```
 
-The installed command is `usql`, while the crate name is `uqa-cli`. `--strategies crate-meta-data` selects the project's release artifacts and fails if no matching binary exists; it cannot fall back to compilation or third-party builds. To select a release, replace `uqa-cli` with `uqa-cli@<version>`. The existing 0.5.4 and earlier releases do not have these standalone assets. Cargo's built-in `cargo install` still compiles source. Use the attached installer below when you want it to verify the accompanying SHA-256 file; cargo-binstall downloads through HTTPS but does not consume these checksum sidecars.
+The installed command is `usql`, while the crate name is `uqa-cli`. `--strategies crate-meta-data` selects the project's release artifacts and fails if no matching binary exists; it cannot fall back to compilation or third-party builds. To select a release, replace `uqa-cli` with `uqa-cli@<version>`. The 0.5.4 and earlier releases do not have these standalone assets. Cargo's built-in `cargo install` still compiles source. Use the attached installer below when you want it to verify the accompanying SHA-256 file; cargo-binstall downloads through HTTPS but does not consume these checksum sidecars.
 
 Download the installer from the desired [GitHub release](https://github.com/cognica-io/uqa-engine/releases), then run it. Each attached installer is pinned to that release version and downloads the matching architecture's archive over HTTPS, verifies its SHA-256 checksum, and installs into a user directory without changing shell configuration:
 
@@ -83,7 +83,7 @@ Key precedence is `--key`, then `--key-file`, then `UQA_KEY`. Interactive sessio
 
 Command-line secrets can be visible to process inspection and shell history. Prefer a protected key file or a deployment-specific secret injection mechanism.
 
-## Editing and output (development source)
+## Editing and output
 
 The Rust shell accepts multiline SQL, PostgreSQL dollar and escape strings, quoted identifiers and nested comments. Highlighting and bracket matching use the complete query buffer; parentheses inside quoted text never block Enter. Tab completion reads the live catalog and accepts unqualified, schema-qualified and quoted relation names, columns, variables, settings and paths. It does not insert SQL keywords into strings or comments. `NO_COLOR` disables color; `\set HIGHLIGHT off` disables it for the current session.
 

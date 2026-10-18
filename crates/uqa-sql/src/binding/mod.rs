@@ -281,11 +281,8 @@ impl SchemaScope {
             || Ok(RowSchema::default()),
             |source| self.bind_source(routines, source, &block.subqueries, params, outer),
         )?;
-        let source = if self.validate_references {
-            analysis::with_query_source_columns(&source, block)
-        } else {
-            source
-        };
+        // Query-owned metadata types belong to both analysis and metadata-only binding.
+        let source = analysis::with_query_source_columns(&source, block);
         let expression_schema = overlay_outer_schema(&source, outer);
         let output = preparation::block_metadata(self, routines, block, &source, outer, params)?;
         let output = analysis::with_projected_open_columns(&output, &block.projections, &source);

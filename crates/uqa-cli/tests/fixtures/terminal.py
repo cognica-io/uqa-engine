@@ -13,6 +13,7 @@ from pathlib import Path
 import pty
 import select
 import signal
+import threading
 import time
 import sys
 import subprocess
@@ -70,7 +71,7 @@ class Terminal:
         return result
 
     def close(self):
-        self.sample("clear", b"\x03")
+        self.sample("clear", b"\x03", b"usql> ")
         self.sample("quit", b"\\q\r")
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
@@ -122,6 +123,16 @@ try:
     assert b"\x1b[1;34mSELECT" not in output, output
 finally:
     terminal.close()
+
+terminal = Terminal("delayed-shutdown")
+terminal.sample("partial", b"SELECT")
+os.kill(terminal.pid, signal.SIGSTOP)
+resume = threading.Timer(1.0, lambda: os.kill(terminal.pid, signal.SIGCONT))
+resume.start()
+try:
+    assert terminal.close() == 0
+finally:
+    resume.join()
 
 terminal = Terminal("no-color", no_color=True)
 try:

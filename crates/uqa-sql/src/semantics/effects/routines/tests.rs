@@ -173,7 +173,9 @@ fn unparsed_procedural_statement_is_conservative_without_running_the_parser() {
         crate::plpgsql::PLpgSQLCompileMode::Runtime,
     )
     .unwrap();
-    let crate::plpgsql::PLpgSQLStmt::Perform { query: statement } = &parsed.action.body[0] else {
+    let crate::plpgsql::PLpgSQLStmt::Perform { query: statement } =
+        parsed.action.body[0].unlocated()
+    else {
         panic!("statement")
     };
     let context = QueryEffectContext {

@@ -10,6 +10,112 @@ use crate::catalog::{
 };
 
 #[test]
+fn generated_distinct_expressions_keep_postgresql_boolean_syntax() {
+    use super::super::{Deparser, Scope};
+    use uqa_sql::ast::{BinaryOp, FunctionBinding, FunctionDispatch, FunctionOrderSyntax};
+    use uqa_sql::ScalarExpr;
+
+    fn call(dispatch: Option<FunctionDispatch>, args: Vec<ScalarExpr>) -> ScalarExpr {
+        let binding = dispatch.map(FunctionBinding::dispatched);
+        ScalarExpr::Func {
+            name: binding
+                .as_ref()
+                .map_or_else(|| "IS DISTINCT FROM".into(), |binding| binding.name.clone()),
+            binding,
+            args,
+            distinct: false,
+            order_syntax: FunctionOrderSyntax::Ordinary,
+            order_by: Vec::new(),
+            filter: None,
+        }
+    }
+
+    let column = |name: &str| ScalarExpr::Column(name.into());
+    let first = call(
+        Some(FunctionDispatch::ValueIsDistinct),
+        vec![column("a"), column("b")],
+    );
+    let second = call(
+        Some(FunctionDispatch::ValueIsDistinct),
+        vec![column("c"), column("d")],
+    );
+    let row = call(
+        Some(FunctionDispatch::RowDistinct),
+        vec![first.clone(), second],
+    );
+    let negated = call(Some(FunctionDispatch::DistinctNot), vec![first]);
+    let cases = [
+        (
+            row.clone(),
+            "((a IS DISTINCT FROM b) OR (c IS DISTINCT FROM d))",
+            "a IS DISTINCT FROM b OR c IS DISTINCT FROM d",
+        ),
+        (
+            call(Some(FunctionDispatch::DistinctNot), vec![row.clone()]),
+            "(NOT ((a IS DISTINCT FROM b) OR (c IS DISTINCT FROM d)))",
+            "NOT (a IS DISTINCT FROM b OR c IS DISTINCT FROM d)",
+        ),
+        (
+            ScalarExpr::And(vec![row, column("flag")]),
+            "(((a IS DISTINCT FROM b) OR (c IS DISTINCT FROM d)) AND flag)",
+            "(a IS DISTINCT FROM b OR c IS DISTINCT FROM d) AND flag",
+        ),
+        (
+            negated.clone(),
+            "(NOT (a IS DISTINCT FROM b))",
+            "NOT a IS DISTINCT FROM b",
+        ),
+        (
+            ScalarExpr::Binary {
+                op: BinaryOp::Equal,
+                lhs: Box::new(negated),
+                rhs: Box::new(column("flag")),
+            },
+            "((NOT (a IS DISTINCT FROM b)) = flag)",
+            "(NOT a IS DISTINCT FROM b) = flag",
+        ),
+        (
+            call(None, vec![column("a"), column("b")]),
+            "\"IS DISTINCT FROM\"(a, b)",
+            "\"IS DISTINCT FROM\"(a, b)",
+        ),
+    ];
+    let catalog = empty_catalog();
+    let resolution = RelationNameResolution {
+        search_path: vec!["public".into()],
+        temporary_schema: "pg_temp_1".into(),
+        temporary_namespace_allocated: false,
+        current_user: "uqa".into(),
+        lookup_mode: RelationLookupMode::Dynamic,
+    };
+    let scope = Scope {
+        column_names_visible: true,
+        ..Scope::default()
+    };
+    for pretty in [false, true] {
+        let deparser = Deparser {
+            output: None,
+            catalog: &catalog,
+            dynamic: resolution.clone(),
+            bound: resolution.clone(),
+            pretty,
+            wrap: 0,
+            standalone: false,
+            indent: false,
+            routine: None,
+            aliases: std::cell::OnceCell::new(),
+        };
+        for (expression, compact, readable) in &cases {
+            assert_eq!(
+                deparser.expression(expression, &scope, &[]).unwrap(),
+                if pretty { *readable } else { *compact },
+                "pretty={pretty}, {expression:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn named_call_reconstruction_preserves_notation_and_keyword_quoting() {
     let catalog = empty_catalog();
     let resolution = RelationNameResolution {

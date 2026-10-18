@@ -23,17 +23,15 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.5.4
+## New in 0.6.0
 
-Version 0.5.4 reduces repeated catalog and index work during session creation, UPDATE and DDL. Typed constraint expressions preserve PostgreSQL identities and output; constraint catalog scans and private views retain their transaction semantics across concurrent DDL. Native Arrow and DuckDB foreign handlers are independent, opt-in features, with memory available by default. See the [release history](HISTORY.md#054---2026-10-15).
+Version 0.6.0 uses PostgreSQL 18.4's regular expression engine and input collations for pattern matching and case mapping. Functions in FROM and select lists preserve PostgreSQL set-returning behavior, eligible SQL routine bodies undergo planning, and routine errors carry ordered SQL/PL/pgSQL CONTEXT. See the [release history](HISTORY.md#060---2026-10-18).
 
-Catalog lookups reuse retained metadata, native SQLite equality probes seek stored keys directly, and retrieval filters read selected candidates. HNSW, IVF and full-text occurrence commits avoid repeated decoding and spill work within their existing memory allowances. Idle maintenance skips unnecessary wakeups and statistics passes.
+BIT and BIT VARYING values retain their exact logical lengths through SQL, language bindings and persistent storage. Shell types and type descriptions retain transactional catalog identities. Text occurrence commits share unchanged-snapshot reads and ordered spill output within the existing memory allowance.
 
-The engine provides native DiskANN vector indexes through memory, native SQLite, SQLite Key/Value and redb. Bounded graph navigation and product quantization select candidates; complete-tensor reranking preserves canonical cosine scores and the existing probability conversion. Indexes retain transaction, rollback and reopen behavior, and EXPLAIN distinguishes estimated work from actual query counters. See the [SQL configuration and score contract](docs/manual/sql/02-ddl.md#diskann-vector-indexes) and [matching Rust, Python, Node.js and browser examples](examples/README.md).
+The `usql` shell adds query-buffer commands, variables, conditionals, script includes, native file COPY, output formats, syntax highlighting, completion, cancellation and idle LISTEN notifications. Standalone Linux, macOS and Windows binaries for x86_64 and ARM64 bundle Nori, Kuromoji, Arrow and DuckDB; install them with the attached scripts or `cargo binstall`. See the [CLI installation and command reference](docs/manual/reference/03-cli.md).
 
-Independent SQL notification subscriptions retain their original database and selected role, with bounded queues and explicit cleanup. Rust, Python, Node.js and Browser WASM also provide authenticated HTTP/SSE clients with visible loss and reconnection events for compatible servers. See the [direct Rust API](docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language bindings](docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [HTTP contract](docs/manual/reference/09-http-engine.md#rust-notification-subscriptions).
-
-Persistent databases upgrade to SQLite record format 62 and redb record format 58; native mapping 17 and coordination format 2 are unchanged. Initial open creates physical constraint catalog records and restores retained expression identities atomically, preserving user rows. Close every owner before taking a pre-upgrade backup, update all owners together, and follow the [0.5.4 upgrade guide](docs/manual/reference/10-upgrading.md#054) for migration, feature selection, custom Rust adapters and rollback requirements.
+Persistent databases upgrade to SQLite record format 65 and redb record format 61; native mapping 17 and coordination format 2 are unchanged. Close every owner, retain a pre-upgrade backup and update all owners together. Pattern and case-mapping changes also require recreating affected expression/partial indexes and stored generated columns. Follow the [0.6.0 upgrade guide](docs/manual/reference/10-upgrading.md#060) for the exact migration and Rust adapter requirements.
 
 ## Mathematical foundation
 
@@ -46,7 +44,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.5.4
+python -m pip install uqa==0.6.0
 usql
 ```
 
@@ -98,10 +96,10 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.5.4
+cargo add uqa@0.6.0
 ```
 
-Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.5.4 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
+Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.6.0 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
 

@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-18
+
 ### Added
 
 - Add the `uqa-pg-regex` crate, which builds PostgreSQL 18.4's Advanced Regular Expression engine from unchanged, checksummed PostgreSQL sources behind a safe Rust API with admitted memory, cancellation hooks, PostgreSQL's 2 MB stack budget on any thread and a call-frame bound in WebAssembly. It is distributed under the PostgreSQL, Spencer and Tcl licenses, whose notices ship with the Python, Node.js and browser WASM packages.
@@ -26,15 +28,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Evaluate regular expressions, case mapping, `LIKE` and `ILIKE` in stored definitions with PostgreSQL's semantics after upgrading: the first open derives PostgreSQL's input collations for views, CHECK constraints, defaults, domain constraints, rules and trigger conditions stored before this release, moving the rule catalog to format 4; expression and partial indexes and stored generated columns keep the keys and values computed earlier, so drop and recreate those that use case mapping, `LIKE`, `ILIKE` or regular expressions, as UQA has no `REINDEX`; rows written earlier are not revalidated; and stored defaults, generated columns, index expressions, trigger and rule conditions, partition keys and parameter defaults that call `regexp_matches` report PostgreSQL's set-valued function error when evaluated; see [Upgrading](docs/manual/reference/10-upgrading.md#development-source).
+- Evaluate regular expressions, case mapping, `LIKE` and `ILIKE` in stored definitions with PostgreSQL's semantics after upgrading: the first open derives PostgreSQL's input collations for views, CHECK constraints, defaults, domain constraints, rules and trigger conditions stored before this release, moving the rule catalog to format 4; expression and partial indexes and stored generated columns keep the keys and values computed earlier, so drop and recreate those that use case mapping, `LIKE`, `ILIKE` or regular expressions, as UQA has no `REINDEX`; rows written earlier are not revalidated; and stored defaults, generated columns, index expressions, trigger and rule conditions, partition keys and parameter defaults that call `regexp_matches` report PostgreSQL's set-valued function error when evaluated; see [Upgrading](docs/manual/reference/10-upgrading.md#060).
 
 - Connect retained declared range input to catalog-aware casts and arrays, preserving endpoint and canonical invocation order, routine identity, lazy binary coercion and controlled value ownership. SQL range declarations and generated constructors remain separate work.
 
 - Let internal SQL equality-key consumers share physical decoding, normalization and output under one memory allowance and both cancellation scopes, while retaining existing exact, hash, spill and reservation bytes.
 
-- Upgrade persistent databases to SQLite record format 65 and redb record format 61 for declared range definitions, shell type identities and transactional descriptions, including packed bit values and their type descriptors. Close all owners, retain a pre-upgrade backup and update every owner together; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).
+- Upgrade persistent databases to SQLite record format 65 and redb record format 61 for declared range definitions, shell type identities and transactional descriptions, including packed bit values and their type descriptors. Close all owners, retain a pre-upgrade backup and update every owner together; see the [0.6.0 upgrade guide](docs/manual/reference/10-upgrading.md#060).
 
 ### Fixed
+
+- Preserve the declared retrieval score type during metadata-only query binding, so positive-evidence pooling and text/vector results compose through derived tables, joins, CTEs and UNION branches without an output descriptor mismatch.
+
+- Reconstruct generated row DISTINCT comparisons and DISTINCT negation with PostgreSQL Boolean syntax and precedence in view, rule and trigger definitions, preserving ordinary quoted function calls.
 
 - Share unchanged-snapshot reads for combined and split text occurrence records in native SQLite, SQLite Key/Value and redb, and retain ordered spill output for own-key replacements, removing per-cluster read admission and repeated spill rewrites during commit while preserving atomic snapshot publication.
 
@@ -98,7 +104,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Read infinite interval endpoints without allocating a normalized input string. Preserve signs, case, whitespace, finite interval parsing and cancellation under the caller's memory allowance.
 
-- Replace the yanked ZIP build dependency through maintained DuckDB bindings, retaining native DuckDB 1.5.5 and bundled Parquet support. Rust callers sharing DuckDB types must use the matching package alias; see the [development-source upgrade guide](docs/manual/reference/10-upgrading.md#development-source).
+- Replace the yanked ZIP build dependency through maintained DuckDB bindings, retaining native DuckDB 1.5.5 and bundled Parquet support. Rust callers sharing DuckDB types must use the matching package alias; see the [0.6.0 upgrade guide](docs/manual/reference/10-upgrading.md#060).
 
 - Reject B-tree key declarations whose selected SQL type has no default operator class, including domains, expressions and indexes affected by column type changes. Preserve PostgreSQL diagnostics, statement rollback, generic array/record classes and unordered included values.
 
