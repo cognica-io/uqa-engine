@@ -8,7 +8,8 @@
 
 use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{BinaryOp, FunctionBinding};
-use crate::catalog::collations::derivation::Derivation;
+use crate::catalog::collations::{derivation::Derivation, CollationSelection};
+use crate::semantics::sets::placement::SetPlacement;
 use crate::type_resolution::ResolvedFunctionOverload;
 
 pub(super) struct ObservedFunctionArguments {
@@ -44,6 +45,43 @@ impl ObservedFunctionArguments {
 
     pub(super) fn types(&self) -> Vec<Option<ColumnType>> {
         self.values.iter().map(|value| value.ty.clone()).collect()
+    }
+
+    /// `PostgreSQL`'s `inputcollid` for these coerced arguments, as `assign_collations_walker` merges the call's children: an explicit collation wins, a non-default implicit collation beats the default, and conflicting implicit collations leave zero. A collatable argument without a collation also leaves zero. A WITHIN GROUP call merges its direct arguments, and its aggregated argument only when it is the only one; a hypothetical-set call merges none of its paired arguments. `None` records that no argument is collatable.
+    pub(super) fn input_collation(
+        &self,
+        direct: usize,
+        kind: Option<super::super::ordered_calls::Kind>,
+        within_group: bool,
+    ) -> Result<Option<CollationSelection>, SQLError> {
+        use super::super::ordered_calls::Kind;
+        let contributing = if !within_group {
+            &self.values[..]
+        } else if matches!(kind, Some(Kind::Hypothetical)) {
+            &self.values[..0]
+        } else if self.values.len() == direct + 1 {
+            &self.values[..]
+        } else {
+            &self.values[..direct.min(self.values.len())]
+        };
+        let merged = contributing.iter().fold(Derivation::None, |state, value| {
+            state.combine(value.derivation)
+        });
+        if merged != Derivation::None {
+            let oid = u32::try_from(merged.oid()).expect("collation identity");
+            return CollationSelection::from_oid(oid).map(Some).ok_or_else(|| {
+                SQLError::Internal(format!("cache lookup failed for collation {oid}"))
+            });
+        }
+        Ok(contributing
+            .iter()
+            .any(|value| {
+                value
+                    .ty
+                    .as_ref()
+                    .is_some_and(crate::schema::composites::type_is_collatable)
+            })
+            .then_some(CollationSelection::INDETERMINATE))
     }
 
     pub(super) fn into_collated_result(
@@ -414,7 +452,7 @@ impl Preparation<'_> {
             }
             return Ok(FunctionResult::Unselected);
         }
-        let targets = self.function_argument_targets(name, selection, types)?;
+        let targets = self.function_argument_targets(name, binding, selection, types)?;
         for (index, value) in arguments.values.iter_mut().enumerate() {
             let position = selection
                 .positions
@@ -430,9 +468,37 @@ impl Preparation<'_> {
         Ok(FunctionResult::Unselected)
     }
 
+    /// Record `PostgreSQL`'s `inputcollid` on the binding the call keeps: its selected overload, its existing binding, or, for a regular-expression function without a registered signature, a built-in selected by name. A selected `pg_collation_for` also keeps the collation it observes.
+    pub(super) fn keep_call_selection(
+        &mut self,
+        expression: &ScalarExpr,
+        arguments: &ObservedFunctionArguments,
+        input_collation: Option<CollationSelection>,
+        selected: Option<&mut ResolvedFunctionOverload>,
+    ) {
+        let ScalarExpr::Func { name, binding, .. } = expression else {
+            unreachable!("function expression");
+        };
+        if let Some(selected) = selected {
+            selected.binding.input_collation = input_collation;
+            arguments.retain_collation_observer(&mut selected.binding);
+        } else if binding.is_none()
+            && crate::expr::binds_input_collation_by_name(name)
+            && !self.routines.has_untyped_function(name)
+        {
+            self.parameters.retain_builtin_selection(
+                expression,
+                FunctionBinding::builtin_by_name(name, input_collation),
+            );
+        }
+        self.parameters
+            .retain_input_collation(expression, input_collation);
+    }
+
     fn function_argument_targets(
         &mut self,
         name: &str,
+        binding: Option<&FunctionBinding>,
         selection: &SelectedFunctionArguments,
         types: Vec<Option<ColumnType>>,
     ) -> Result<Vec<Option<ColumnType>>, SQLError> {
@@ -445,6 +511,20 @@ impl Preparation<'_> {
                     &invocation.argument_targets
                 });
             types
+                .iter()
+                .map(|name| {
+                    if super::super::ordered_calls::is_polymorphic(name) {
+                        Ok(None)
+                    } else {
+                        self.type_name(name).map(Some)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else if let Some(binding) = binding.filter(|binding| {
+            binding.builtin && binding.dispatch.is_none() && !binding.argument_types.is_empty()
+        }) {
+            binding
+                .argument_types
                 .iter()
                 .map(|name| {
                     if super::super::ordered_calls::is_polymorphic(name) {
@@ -558,11 +638,10 @@ impl Preparation<'_> {
             order_types.push(value.ty);
         }
         if let Some(filter) = filter {
-            selected = selected.combine(
-                self.boolean_expression(filter, input, subqueries, "FILTER")?
-                    .derivation
-                    .error_only(),
-            );
+            let filter = self.in_placement(SetPlacement::Filter, |analysis| {
+                analysis.boolean_expression(filter, input, subqueries, "FILTER")
+            })?;
+            selected = selected.combine(filter.derivation.error_only());
         }
         Ok(ObservedFunctionModifiers {
             diagnostics: selected,

@@ -42,6 +42,10 @@ impl ViewPlanBinding for Bindings<'_> {
     fn bind_type_identities(&self, _: &mut QueryPlan) -> Result<(), SQLError> {
         panic!("retained identities")
     }
+    fn assign_input_collations(&self, _: &mut QueryPlan) -> Result<(), SQLError> {
+        // The fixture's definitions call no collation-dependent routine.
+        Ok(())
+    }
     fn bind_routines(&self, plan: &mut QueryPlan, _: &[SQLParam]) -> Result<RowSchema, SQLError> {
         self.0.assert_provisional_namespace();
         self.0.bindings.set(self.0.bindings.get() + 1);

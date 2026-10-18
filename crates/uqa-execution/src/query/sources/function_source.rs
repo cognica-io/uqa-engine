@@ -171,10 +171,21 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
         hook.as_ref(),
     )?;
     validate_table_function_column_definition(
-        source.name,
-        source.binding,
-        resolved.as_ref().map(|resolved| resolved.function.as_ref()),
-        source.column_types,
+        context.relational.catalog,
+        uqa_sql::semantics::ColumnDefinitionRequest {
+            name: source.name,
+            binding: source.binding,
+            user_function: resolved.as_ref().map(|resolved| resolved.function.as_ref()),
+            user_invocation: resolved
+                .as_ref()
+                .and_then(|resolved| resolved.binding.invocation.as_deref()),
+            args: source.args,
+            declared_types: source.column_types,
+            column_names: source.column_aliases,
+        },
+        &input_schema,
+        params,
+        hook.as_ref(),
     )?;
     let call = TableFunctionCall {
         name: source.name,
@@ -191,9 +202,15 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
         ordinality: source.ordinality,
         column_types: source.column_types,
     };
-    let output = hook.table_function_rows(call, params, outer_row.as_ref())?;
-    let columns = output.columns;
-    let rows = output.rows;
+    let (columns, rows) = function_rows(
+        context,
+        &source,
+        call,
+        resolved.as_ref(),
+        &hook,
+        params,
+        outer_row,
+    )?;
     validate_table_function_alias_count(
         source.alias.unwrap_or(source.output_name),
         columns.len(),
@@ -233,4 +250,157 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
     Ok(attach_closed_qualifier_filter(
         operator, qualifier, filters, context, params, ctes,
     ))
+}
+
+type FunctionRows<'a> = Box<dyn Iterator<Item = crate::ExecResult<crate::PhysicalRow>> + Send + 'a>;
+
+/// The output columns and rows of a function in FROM. `PostgreSQL` checks EXECUTE when it initializes a function scan and calls the function only when the scan's first row is requested; a call whose columns only its result reveals runs at once.
+fn function_rows<'a, S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'a, S>,
+    source: &FunctionSource<'_>,
+    call: TableFunctionCall<'_>,
+    resolved: Option<&uqa_sql::semantics::ResolvedUserTableFunction>,
+    hook: &std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
+    params: &'a [SQLParam],
+    outer_row: Option<crate::OwnedPhysicalRow>,
+) -> Result<(Vec<String>, FunctionRows<'a>), SQLError> {
+    let deferred_columns = match resolved {
+        Some(resolved) => {
+            hook.require_user_function_execute(&resolved.function)?;
+            Some(user_function_columns(
+                context.relational.catalog,
+                resolved,
+                source,
+            )?)
+        }
+        None => {
+            let columns = crate::query::table_functions::deferred_table_function_columns(&call)
+                .transpose()?;
+            if let Some(binding) = call.binding.filter(|binding| binding.builtin) {
+                if columns.is_some() {
+                    hook.require_builtin_execute(binding)?;
+                }
+            }
+            columns
+        }
+    };
+    let input_schema = outer_row
+        .as_ref()
+        .map_or_else(crate::RowSchema::default, |row| row.schema.clone());
+    require_argument_function_execute(
+        context.relational.catalog,
+        hook.as_ref(),
+        source.args,
+        &input_schema,
+        params,
+    )?;
+    if let Some(columns) = deferred_columns {
+        let rows = deferred_function_rows(
+            &call,
+            std::sync::Arc::clone(hook),
+            params,
+            outer_row,
+            columns.len(),
+        );
+        return Ok((columns, rows));
+    }
+    let output = hook.table_function_rows(call, params, outer_row.as_ref())?;
+    let rows: FunctionRows<'a> = output.rows;
+    Ok((output.columns, rows))
+}
+
+/// Initialize argument calls without evaluating them. Their retained routine identities must pass EXECUTE even when the scan is never fetched.
+pub(super) fn require_argument_function_execute(
+    catalog: &dyn uqa_sql::semantics::sets::SetFunctionCatalog,
+    runtime: &dyn crate::query::set_projection::SetFunctionRuntime,
+    arguments: &[uqa_sql::ScalarExpr],
+    schema: &crate::RowSchema,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    for argument in arguments {
+        argument.try_visit(&mut |expression| {
+            if let uqa_sql::ScalarExpr::Func {
+                name,
+                binding,
+                args,
+                ..
+            } = expression
+            {
+                if let Some(binding) = binding.as_ref().filter(|binding| binding.builtin) {
+                    runtime.require_builtin_execute(binding)?;
+                } else if let Some(resolved) = resolve_user_table_function(
+                    catalog,
+                    name,
+                    binding.as_ref(),
+                    args,
+                    schema,
+                    params,
+                    runtime,
+                )? {
+                    runtime.require_user_function_execute(&resolved.function)?;
+                }
+            }
+            Ok::<_, SQLError>(true)
+        })?;
+    }
+    Ok(())
+}
+
+/// The output columns of a user function in FROM, including an ordinality column, as its declared result and the FROM item's aliases name them.
+fn user_function_columns(
+    catalog: &dyn uqa_sql::semantics::sets::SetFunctionCatalog,
+    resolved: &uqa_sql::semantics::ResolvedUserTableFunction,
+    source: &FunctionSource<'_>,
+) -> Result<Vec<String>, SQLError> {
+    uqa_sql::semantics::user_table_function_columns(
+        catalog,
+        &resolved.function,
+        resolved.binding.invocation.as_deref(),
+        source.output_name,
+        source.alias,
+        source.column_aliases,
+        source.ordinality,
+    )
+}
+
+/// The rows of a function call whose `width` columns are known before it runs. The call evaluates its arguments and starts at the first row request, so a consumer that requests none, such as `LIMIT 0`, never evaluates it.
+fn deferred_function_rows<'a>(
+    call: &TableFunctionCall<'_>,
+    runtime: std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
+    params: &'a [SQLParam],
+    outer_row: Option<crate::OwnedPhysicalRow>,
+    width: usize,
+) -> FunctionRows<'a> {
+    let name = call.name.to_string();
+    let binding = call.binding.cloned();
+    let output_name = call.output_name.to_string();
+    let args = call.args.to_vec();
+    let alias = call.alias.map(str::to_string);
+    let column_aliases = call.column_aliases.to_vec();
+    let column_types = call.column_types.to_vec();
+    let ordinality = call.ordinality;
+    Box::new(
+        crate::query::table_functions::DeferredTableFunctionRows::new(move || {
+            let call = TableFunctionCall {
+                name: &name,
+                binding: binding.as_ref(),
+                output_name: &output_name,
+                relations: None,
+                args: &args,
+                function_states: None,
+                alias: alias.as_deref(),
+                column_aliases: &column_aliases,
+                ordinality,
+                column_types: &column_types,
+            };
+            let output = runtime.table_function_rows(call, params, outer_row.as_ref())?;
+            if output.columns.len() != width {
+                return Err(SQLError::Internal(format!(
+                    "table function `{name}` produced {} columns for a {width}-column source",
+                    output.columns.len()
+                )));
+            }
+            Ok(output.rows)
+        }),
+    )
 }

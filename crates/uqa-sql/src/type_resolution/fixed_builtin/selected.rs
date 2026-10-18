@@ -33,6 +33,7 @@ impl SelectedCall {
                     invocation: None,
                     composite_field: None,
                     resolution_error: None,
+                    input_collation: None,
                 },
             ),
             arguments: std::mem::take(arguments),

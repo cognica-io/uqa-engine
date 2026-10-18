@@ -223,6 +223,7 @@ fn non_fixed_udf_introspection_retains_the_resolver_binding() {
             invocation: None,
             composite_field: None,
             resolution_error: None,
+            input_collation: None,
         },
     };
     let parameters = [SQLParam::Scalar(Value::Int(7))];
@@ -286,6 +287,7 @@ fn non_fixed_udf_introspection_keeps_typed_text_distinct_from_unknown() {
                     invocation: None,
                     composite_field: None,
                     resolution_error: None,
+                    input_collation: None,
                 },
                 return_type: ColumnType::Text,
                 exact_matches: 1,
@@ -380,6 +382,7 @@ fn scalar_introspection_rejects_non_scalar_catalog_bindings() {
                 invocation: None,
                 composite_field: None,
                 resolution_error: None,
+                input_collation: None,
             },
         };
         let expression = ScalarExpr::Func {

@@ -12,6 +12,7 @@ use super::{
     try_build_streaming_subquery_operator, ColumnPrune, CteScope, PhysicalOperator,
     QualifierFilters, SQLError, SQLParam, SourceContext, SourcePlan, Value,
 };
+use uqa_sql::semantics::sets::placement_scope::SetPlacementScope;
 
 fn table_source_aliases(
     source_columns: &[String],
@@ -238,6 +239,8 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 };
                 let mut privilege_scope = ctes.enter_privilege_subject(privilege_subject);
                 let ctes: &mut CteScope<S> = &mut privilege_scope;
+                // A view runs its stored query as it was created; its set-returning calls are not placed again.
+                let _stored = SetPlacementScope::stored_definition();
                 let plan = &view.query;
                 let output_columns = view.output_columns.as_deref().unwrap_or(&[]);
                 let inherited_lock = ctes.source_row_lock_for_view(&qualifier, name);

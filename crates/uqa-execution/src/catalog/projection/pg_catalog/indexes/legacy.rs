@@ -163,13 +163,16 @@ fn append_index_tree(
 }
 
 fn equivalent_index(left: &CatalogIndexRelation, right: &CatalogIndexRelation) -> bool {
-    left.columns == right.columns
+    uqa_sql::catalog::index::same_index_keys(&left.columns, &right.columns)
         && left.primary == right.primary
         && left.index_type == right.index_type
         && left.definition.unique == right.definition.unique
         && left.definition.nulls_not_distinct == right.definition.nulls_not_distinct
         && left.definition.included_columns == right.definition.included_columns
-        && left.definition.predicate == right.definition.predicate
+        && uqa_sql::catalog::index::same_index_predicate(
+            left.definition.predicate.as_deref(),
+            right.definition.predicate.as_deref(),
+        )
         && (0..left.columns.len()).all(|position| {
             left.definition
                 .column_order

@@ -102,6 +102,51 @@ class RepositoryPolicyCheckerTest(unittest.TestCase):
                          self.assertRaisesRegex(RuntimeError, "attribution or source-resource identity"):
                         LICENSES.check_archive(path, {"LICENSE": b"license"})
 
+    def test_bindings_ship_the_regular_expression_engine_notice_with_its_license_files(self) -> None:
+        notice = LICENSES.postgresql_regex_notice()
+        self.assertEqual(LICENSES.binding_dictionary_payloads()[LICENSES.POSTGRESQL_REGEX_NOTICE], notice)
+        crate = ROOT / "crates/uqa-pg-regex"
+        for relative in LICENSES.POSTGRESQL_REGEX_LICENSES:
+            self.assertIn((crate / relative).read_bytes(), notice)
+        for directory in LICENSES.BINDING_PACKAGES:
+            self.assertEqual((directory / LICENSES.POSTGRESQL_REGEX_NOTICE).read_bytes(), notice)
+        self.assertIn(LICENSES.POSTGRESQL_REGEX_NOTICE, LICENSES.SEPARATELY_LICENSED_CRATES["uqa-pg-regex"])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            for relative in (LICENSES.POSTGRESQL_REGEX_NOTICE, *LICENSES.POSTGRESQL_REGEX_LICENSES):
+                copy = root / "crates/uqa-pg-regex" / relative
+                copy.parent.mkdir(parents=True, exist_ok=True)
+                copy.write_bytes((crate / relative).read_bytes())
+            with mock.patch.object(LICENSES, "ROOT", root):
+                self.assertEqual(LICENSES.postgresql_regex_notice(), notice)
+                for relative in LICENSES.POSTGRESQL_REGEX_LICENSES:
+                    source = root / "crates/uqa-pg-regex" / relative
+                    original = source.read_bytes()
+                    source.write_bytes(original + b"amended terms\n")
+                    with self.subTest(relative=relative), self.assertRaisesRegex(RuntimeError, "unchanged"):
+                        LICENSES.postgresql_regex_notice()
+                    source.write_bytes(original)
+
+    def test_separately_licensed_crate_archives_ship_their_own_license_files(self) -> None:
+        canonical = {"LICENSE": b"agpl"}
+        for crate, license_files in LICENSES.SEPARATELY_LICENSED_CRATES.items():
+            path = pathlib.Path(f"{crate}-0.0.0.crate")
+            members = {f"{crate}-0.0.0/{relative}": b"upstream" for relative in license_files}
+            with mock.patch.object(LICENSES, "archive_members", return_value=members):
+                LICENSES.check_archive(path, canonical)
+            for relative in license_files:
+                changed = dict(members)
+                del changed[f"{crate}-0.0.0/{relative}"]
+                with self.subTest(crate=crate, missing=relative), \
+                     mock.patch.object(LICENSES, "archive_members", return_value=changed), \
+                     self.assertRaisesRegex(RuntimeError, "omits"):
+                    LICENSES.check_archive(path, canonical)
+            with_policy = {**members, f"{crate}-0.0.0/LICENSING.md": b"policy"}
+            with self.subTest(crate=crate, policy=True), \
+                 mock.patch.object(LICENSES, "archive_members", return_value=with_policy), \
+                 self.assertRaisesRegex(RuntimeError, "AGPL licensing policy"):
+                LICENSES.check_archive(path, canonical)
+
     def test_release_bundle_check_rejects_partial_missing_and_duplicate_runtimes(self) -> None:
         for language, extension in (("nori", "uqan"), ("kuromoji", "uqak")):
             bundle = (ROOT / f"crates/uqa-{language}-data/data/{language}.{extension}").read_bytes()

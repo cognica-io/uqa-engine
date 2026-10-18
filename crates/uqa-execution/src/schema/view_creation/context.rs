@@ -31,6 +31,8 @@ pub trait ViewPlanBinding {
     ) -> Result<RowSchema, SQLError>;
     /// Record the user-defined types that the plan casts to by identity.
     fn bind_type_identities(&self, plan: &mut QueryPlan) -> Result<(), SQLError>;
+    /// Record each call's input collation in a query whose routines are bound, as a view stored by an earlier release lacks them.
+    fn assign_input_collations(&self, plan: &mut QueryPlan) -> Result<(), SQLError>;
 }
 pub trait MaterializedViewAccess {
     fn ensure_maintenance(&self, name: &str, view: &StoredView) -> Result<(), SQLError>;

@@ -166,3 +166,64 @@ fn analyzed_inference_and_stored_index_syntax_match_postgresql() {
         }
     }
 }
+
+/// A key stored before calls recorded their input collations matches the analyzed target, while an explicit COLLATE still distinguishes expressions.
+#[test]
+fn stored_keys_without_recorded_input_collations_match_analyzed_targets() {
+    let crate::Statement::CreateTable(table) = crate::compile("CREATE TABLE t (a text, b text)")
+        .unwrap()
+        .remove(0)
+    else {
+        panic!("table")
+    };
+    let mut catalog = Catalog(table.columns);
+    catalog.0[0].collation_oid = Some(950);
+    let binding = crate::binding::BindingContext {
+        catalog: crate::binding::fixture::catalog(std::collections::BTreeMap::from([(
+            crate::RelationIdentity::new("public", "t"),
+            crate::binding::fixture::table_definition(catalog.0.clone()),
+        )])),
+        ..crate::binding::fixture::empty_binding_context()
+    };
+    // Storage binding alone records no input collations, as a key stored by an earlier release has none, while the statement's analysis derives the target's.
+    let infer = |index: &str, target: &str| {
+        let key = reference_key(index, &catalog);
+        let query = format!("INSERT INTO t VALUES ('x', 'y') ON CONFLICT ({target}) DO NOTHING");
+        let mut plan = crate::plan::UnifiedPlan::lower(crate::compile(&query).unwrap().remove(0));
+        crate::binding::read_prepared_inputs(&catalog, &mut plan, &[], &binding, None).unwrap();
+        let crate::plan::UnifiedPlan::Command(command) = plan else {
+            panic!("INSERT")
+        };
+        let crate::plan::CommandPlan::Insert(insert) = *command else {
+            panic!("INSERT")
+        };
+        let context = InferenceContext {
+            catalog: &catalog,
+            aggregates: &catalog,
+            routines: &catalog,
+            binding: &catalog,
+        };
+        let prepared = prepare_inference_predicate(context, &insert, &[]).unwrap();
+        let outcome = conflict_key_indices(
+            &catalog,
+            &insert.table,
+            &[key],
+            prepared.on_conflict.as_ref().unwrap(),
+        );
+        outcome.map_err(|error| error.sqlstate().map(str::to_owned))
+    };
+    for (index, target) in [
+        ("CREATE UNIQUE INDEX i ON t (lower(a))", "lower(a)"),
+        ("CREATE UNIQUE INDEX i ON t (upper(b))", "upper(b)"),
+        ("CREATE UNIQUE INDEX i ON t (initcap(a))", "initcap(a)"),
+    ] {
+        assert_eq!(infer(index, target), Ok(vec![0]), "{index}");
+    }
+    assert_eq!(
+        infer(
+            "CREATE UNIQUE INDEX i ON t (lower(a COLLATE \"POSIX\"))",
+            "lower(a)"
+        ),
+        Err(Some("42P10".to_owned()))
+    );
+}

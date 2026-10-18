@@ -47,6 +47,7 @@ fn binding(name: &str, argument: &str) -> crate::ast::FunctionBinding {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     }
 }
 

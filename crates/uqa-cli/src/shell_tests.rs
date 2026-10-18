@@ -46,19 +46,22 @@ fn editor_context_preserves_literals_comments_and_real_catalog_names() {
         let (_, matches) = helper.complete(input, input.len(), &context).unwrap();
         assert!(!matches.is_empty(), "{input}");
     }
-    for (buffer, line) in [
-        ("", "SELECT 'SEL"),
-        ("", "-- SEL"),
-        ("SELECT $é$", "SELECT"),
-        ("/* nested /* comment", "SELECT"),
+    // Only a keyword outside every literal and comment is colored, and nothing is colored when `NO_COLOR` is set.
+    let colors = std::env::var_os("NO_COLOR").is_none();
+    for (buffer, line, keyword) in [
+        ("", "SELECT 'SEL", true),
+        ("", "-- SEL", false),
+        ("SELECT $é$", "SELECT", false),
+        ("/* nested /* comment", "SELECT", false),
     ] {
         helper.configure(buffer, true, &crate::variables::Variables::default());
         let (_, matches) = helper.complete(line, line.len(), &context).unwrap();
         assert!(matches.is_empty(), "{buffer}\n{line}");
-        assert!(
-            !helper
+        assert_eq!(
+            helper
                 .highlight(line, line.len())
                 .contains("\x1b[1;34mSELECT"),
+            keyword && colors,
             "{buffer}\n{line}"
         );
     }

@@ -6,7 +6,7 @@
 
 //! LIKE compilation and wildcard matching share admitted and ordinary owners.
 
-use super::casing;
+use super::casing::CaseMapping;
 use crate::{
     error::{Result, SQLError},
     expr::conversion::value_to_string_with_control,
@@ -16,9 +16,9 @@ use uqa_core::{
     Value,
 };
 
-/// A LIKE/ILIKE pattern compiled once for repeated evaluation. ASCII values use a byte matcher; Unicode retains character-oriented `_` semantics and contextual lowercase rules.
+/// A LIKE/ILIKE pattern compiled once for repeated evaluation. ASCII values use a byte matcher; Unicode retains character-oriented `_` semantics. ILIKE matches the input collation's lowercase forms of the input and of the whole pattern, as `PostgreSQL`'s `Generic_Text_IC_like` does.
 pub struct CompiledLikePattern {
-    case_insensitive: bool,
+    lowercase: Option<CaseMapping>,
     binary: bool,
     pattern_chars: Produced<Vec<LikePatternToken<char>>>,
     pattern_ascii: Option<Produced<Vec<LikePatternToken<u8>>>>,
@@ -33,26 +33,12 @@ enum LikePatternToken<T> {
 }
 
 impl CompiledLikePattern {
-    #[must_use]
-    pub fn new(pattern: &str, case_insensitive: bool) -> Self {
-        Self::with_escape(pattern, case_insensitive, None)
-            .expect("the default LIKE escape is exactly one character")
-    }
-
-    pub fn from_value(pattern: &Value, case_insensitive: bool) -> Result<Self> {
-        Self::from_value_with_escape_with_control(
-            pattern,
-            case_insensitive,
-            None,
-            &ProductionControl::uncontrolled(),
-        )
-    }
-
-    /// Compile the selected text or bytea pattern without converting binary data to display text.
+    /// Compile the selected text or bytea pattern without converting binary data to display text. `collation` is the call's input collation: a text pattern requires a determinate one, and ILIKE maps case through its provider. Bytea patterns have no collation.
     pub fn from_value_with_escape_with_control(
         pattern: &Value,
         case_insensitive: bool,
         escape: Option<&Value>,
+        collation: u32,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
         if let Some(pattern) = crate::expr::datums::binary_payload(pattern, control)? {
@@ -93,7 +79,7 @@ impl CompiledLikePattern {
                 tokens.push_copy(token)?;
             }
             return Ok(Self {
-                case_insensitive,
+                lowercase: None,
                 binary: true,
                 pattern_chars: ProductionVec::new(*control).finish()?,
                 pattern_ascii: Some(tokens.finish()?),
@@ -107,33 +93,75 @@ impl CompiledLikePattern {
             &pattern,
             case_insensitive,
             escape.as_deref().map(String::as_str),
+            collation,
             control,
         )
+    }
+
+    /// Report an escape that is neither empty nor one character (one byte for bytea) without compiling the pattern.
+    pub(in crate::expr) fn validate_escape(
+        pattern: &Value,
+        escape: &Value,
+        control: &ProductionControl<'_>,
+    ) -> Result<()> {
+        if crate::expr::datums::binary_payload(pattern, control)?.is_some() {
+            let escape = crate::expr::datums::binary_payload(escape, control)?
+                .ok_or_else(|| SQLError::Internal("bytea escape has an invalid carrier".into()))?;
+            return if escape.bytes().len() <= 1 {
+                Ok(())
+            } else {
+                Err(invalid_escape())
+            };
+        }
+        let escape = value_to_string_with_control(escape, control)?;
+        escape_character(Some(&escape)).map(|_| ())
     }
 
     pub fn with_escape(
         pattern: &str,
         case_insensitive: bool,
         escape: Option<&str>,
+        collation: u32,
     ) -> Result<Self> {
         Self::with_escape_with_control(
             pattern,
             case_insensitive,
             escape,
+            collation,
             &ProductionControl::uncontrolled(),
         )
     }
 
-    /// Compile while keeping each native token buffer under the supplied owner.
+    /// Compile while keeping each native token buffer under the supplied owner. ILIKE lowercases the pattern after rewriting it to the backslash escape, as `PostgreSQL` lowercases the result of `like_escape`.
     pub fn with_escape_with_control(
         pattern: &str,
         case_insensitive: bool,
         escape: Option<&str>,
+        collation: u32,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
         control.check()?;
+        let mapping =
+            CaseMapping::select(collation, if case_insensitive { "ILIKE" } else { "LIKE" })?;
         let escape = escape_character(escape)?;
-        let pattern_chars = compile(pattern, case_insensitive, escape, control)?;
+        let lowercase = case_insensitive.then_some(mapping);
+        let pattern_chars = match lowercase {
+            Some(mapping) => {
+                let normalized = if escape == Some('\\') {
+                    None
+                } else {
+                    Some(crate::expr::pattern::normalize_escape(
+                        pattern, escape, control,
+                    )?)
+                };
+                let lowered = mapping.lowercase(
+                    normalized.as_deref().map_or(pattern, String::as_str),
+                    control,
+                )?;
+                compile(&lowered, Some('\\'), control)?
+            }
+            None => compile(pattern, escape, control)?,
+        };
         let mut ascii = ProductionVec::new(*control);
         let mut all_ascii = true;
         for token in pattern_chars.iter() {
@@ -158,16 +186,11 @@ impl CompiledLikePattern {
             None
         };
         Ok(Self {
-            case_insensitive,
+            lowercase,
             binary: false,
             pattern_chars,
             pattern_ascii,
         })
-    }
-
-    #[must_use]
-    pub fn is_match(&self, haystack: &str) -> bool {
-        self.try_is_match(haystack).unwrap_or(false)
     }
 
     pub fn try_is_match(&self, haystack: &str) -> Result<bool> {
@@ -180,11 +203,10 @@ impl CompiledLikePattern {
         control: &ProductionControl<'_>,
     ) -> Result<bool> {
         control.check()?;
-        let normalized = if self.case_insensitive {
-            Some(casing::lowercase(haystack, control)?)
-        } else {
-            None
-        };
+        let normalized = self
+            .lowercase
+            .map(|mapping| mapping.lowercase(haystack, control))
+            .transpose()?;
         let haystack = normalized.as_deref().map_or(haystack, String::as_str);
         if let Some(pattern) = self
             .pattern_ascii
@@ -198,11 +220,6 @@ impl CompiledLikePattern {
             characters.push_copy(character)?;
         }
         wildcard_match(&characters, &self.pattern_chars, control)
-    }
-
-    #[must_use]
-    pub fn matches_value(&self, haystack: &Value) -> bool {
-        self.try_matches_value(haystack).unwrap_or(false)
     }
 
     pub fn try_matches_value(&self, haystack: &Value) -> Result<bool> {
@@ -265,7 +282,6 @@ pub(in crate::expr) fn invalid_escape() -> SQLError {
 
 fn compile(
     pattern: &str,
-    insensitive: bool,
     escape: Option<char>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<LikePatternToken<char>>>> {
@@ -278,31 +294,16 @@ fn compile(
                 output.push_copy(LikePatternToken::DanglingEscape)?;
                 break;
             };
-            push_literal(&mut output, literal, insensitive)?;
+            output.push_copy(LikePatternToken::Literal(literal))?;
             continue;
         }
-        match character {
-            '%' => output.push_copy(LikePatternToken::AnyMany)?,
-            '_' => output.push_copy(LikePatternToken::AnyOne)?,
-            literal => push_literal(&mut output, literal, insensitive)?,
-        }
+        output.push_copy(match character {
+            '%' => LikePatternToken::AnyMany,
+            '_' => LikePatternToken::AnyOne,
+            literal => LikePatternToken::Literal(literal),
+        })?;
     }
     Ok(output.finish()?)
-}
-
-fn push_literal(
-    output: &mut ProductionVec<'_, LikePatternToken<char>>,
-    literal: char,
-    insensitive: bool,
-) -> Result<()> {
-    if insensitive {
-        for character in literal.to_lowercase() {
-            output.push_copy(LikePatternToken::Literal(character))?;
-        }
-    } else {
-        output.push_copy(LikePatternToken::Literal(literal))?;
-    }
-    Ok(())
 }
 
 fn wildcard_match<T: Copy + Eq>(

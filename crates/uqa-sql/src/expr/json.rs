@@ -12,6 +12,7 @@ use crate::error::{Result, SQLError};
 
 use super::{hex_encode, out_of_range};
 
+mod diagnostics;
 mod path;
 mod production;
 #[cfg(test)]

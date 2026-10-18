@@ -140,6 +140,7 @@ pub fn relocate_sql_routines(
                 invocation: None,
                 composite_field: None,
                 resolution_error: None,
+                input_collation: None,
             },
         };
         let mut renamed_registry = analysis::move_routine_registry_entry(registry, &target)?;

@@ -155,6 +155,7 @@ pub(crate) fn prepare_procedure_call(
         ),
         schema_expression: None,
     };
+    analysis.scope.set_placement = crate::semantics::sets::placement::SetPlacement::CallArgument;
     let resolved = ProcedureCallAnalysis::new(args)?.resolve(name, overloads, &mut |argument| {
         let scalar = crate::ir::scalar_call_argument(&argument.scalar)?.value;
         analysis

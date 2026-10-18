@@ -337,7 +337,7 @@ impl Engine {
         let columns = updates.keys().cloned().collect::<Vec<_>>();
         let strength =
             uqa_execution::query::locking::context::update_lock_strength(self, table, &columns);
-        self.with_implicit_row_write_transaction(table, doc_id, strength, |engine| {
+        self.with_evaluating_row_write_transaction(table, doc_id, strength, |engine| {
             engine.update_document_fields_with_vector_values_inner(table, doc_id, updates, vectors)
         })
     }
@@ -414,7 +414,7 @@ impl Engine {
         let columns = updates.keys().cloned().collect::<Vec<_>>();
         let strength =
             uqa_execution::query::locking::context::update_lock_strength(self, table, &columns);
-        self.with_implicit_row_write_transaction(table, doc_id, strength, |engine| {
+        self.with_evaluating_row_write_transaction(table, doc_id, strength, |engine| {
             engine.patch_document_fields_with_vector_values_inner(table, doc_id, updates, vectors)
         })
     }

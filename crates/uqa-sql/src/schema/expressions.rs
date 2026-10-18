@@ -27,14 +27,9 @@ pub struct PlannedSchemaExpression {
     pub constant: bool,
 }
 
+/// The declared row of a schema expression, with each column's collation, which the input collations of its calls derive from.
 pub fn row_schema(columns: &[ColumnDef]) -> RowSchema {
-    RowSchema::with_types(
-        columns.iter().map(|column| column.name.clone()).collect(),
-        columns
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    )
+    RowSchema::with_column_definitions(None, columns)
 }
 
 /// Analyze every branch before planning, and bind original routine/type/input identities for storage. Assignment coercion follows the planner's mutability check.

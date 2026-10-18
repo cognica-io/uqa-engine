@@ -47,6 +47,9 @@ exceptions = [
     # DuckDB pulls webpki-roots; the HTTPS client pulls webpki-root-certs.
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
+    # The imported PostgreSQL regular expression engine keeps the PostgreSQL License,
+    # Henry Spencer's license and the Tcl license of its upstream sources.
+    { allow = ["PostgreSQL", "Spencer-99", "TCL"], crate = "uqa-pg-regex" },
 ]
 
 [bans]

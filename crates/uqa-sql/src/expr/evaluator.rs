@@ -161,6 +161,15 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 if let Some(hook) = ctx.engine {
                     hook.require_builtin_execute(binding)?;
                 }
+                if let Some(dispatch) = binding.dispatch {
+                    if let Some(result) =
+                        super::eval_distinct_boolean(dispatch, args.len(), |index| {
+                            eval(&args[index], ctx)
+                        })
+                    {
+                        return result;
+                    }
+                }
                 if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
                     binding.dispatch
                 {
@@ -217,6 +226,15 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                     .into_uncontrolled()
                     .expect("ordinary array access"),
                 );
+            }
+            // A set-returning built-in cannot produce the one value this expression needs; `PostgreSQL` rejects it before evaluating its arguments.
+            if let Some(binding) = binding.as_ref().filter(|binding| binding.builtin) {
+                if crate::semantics::sets::static_setness::builtin_call_returns_set(
+                    name,
+                    Some(binding),
+                ) {
+                    return Err(crate::semantics::sets::placement::set_valued_call_error());
+                }
             }
             let call_args = evaluate_call_args(args, ctx)?;
             if let Some(binding) = binding {

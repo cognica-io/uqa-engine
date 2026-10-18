@@ -47,6 +47,7 @@ impl FunctionTypeResolver for Catalog {
                 invocation: None,
                 composite_field: None,
                 resolution_error: None,
+                input_collation: None,
             },
             return_type: ColumnType::Integer,
             exact_matches: 1,

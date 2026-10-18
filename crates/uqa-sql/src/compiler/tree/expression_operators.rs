@@ -301,7 +301,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
             }
             let call = dispatched_call(FunctionDispatch::IsDistinct, vec![left, right]);
             Ok(if matches!(kind, AExprKind::AexprNotDistinct) {
-                Expr::Not(Box::new(call))
+                dispatched_call(FunctionDispatch::DistinctNot, vec![call])
             } else {
                 call
             })

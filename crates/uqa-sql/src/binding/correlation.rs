@@ -499,7 +499,11 @@ fn source_scope(
             let complete = !column_aliases.is_empty()
                 || matches!(
                     name.to_ascii_lowercase().as_str(),
-                    "generate_series" | "unnest" | "regexp_split_to_table" | "string_to_table"
+                    "generate_series"
+                        | "unnest"
+                        | "regexp_matches"
+                        | "regexp_split_to_table"
+                        | "string_to_table"
                 );
             if names.is_empty() && complete {
                 names.insert(output_name.clone());
@@ -533,7 +537,11 @@ fn source_scope(
                     let local = crate::semantics::builtin_function_dispatch_name(&function.name);
                     if matches!(
                         local.as_str(),
-                        "generate_series" | "unnest" | "regexp_split_to_table" | "string_to_table"
+                        "generate_series"
+                            | "unnest"
+                            | "regexp_matches"
+                            | "regexp_split_to_table"
+                            | "string_to_table"
                     ) {
                         names.push(function.output_name.clone());
                     } else {

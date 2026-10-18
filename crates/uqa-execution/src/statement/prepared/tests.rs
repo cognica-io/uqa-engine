@@ -28,6 +28,8 @@ fn clock() -> i64 {
 struct Registry {
     fail: bool,
     entry: RefCell<Option<PreparedStatementPlan>>,
+    cancellation: uqa_core::CancellationToken,
+    analysis_cancellation: RefCell<Vec<Result<(), uqa_core::QueryCancelled>>>,
 }
 struct Scope<'a>(&'a Registry);
 impl Drop for Scope<'_> {
@@ -47,6 +49,11 @@ impl StatementBindingScope for Scope<'_> {
 impl StatementAnalysisScopes for Registry {
     fn with_scope(&self, analyze: StatementAnalysisOperation<'_>) -> Result<(), SQLError> {
         record("scope");
+        assert!(uqa_sql::expr::statement_cancellation()
+            .is_some_and(|current| current.shares_signal(&self.cancellation)));
+        self.analysis_cancellation
+            .borrow_mut()
+            .push(uqa_sql::expr::check_statement_cancellation());
         let scope = Scope(self);
         analyze(&scope)
     }
@@ -94,6 +101,7 @@ fn register(registry: &Registry) -> Result<(), SQLError> {
             transaction_timestamp_micros: None,
             date_order: None,
             interval_style: None,
+            cancellation: &registry.cancellation,
             clock,
         },
         "saved".into(),
@@ -143,4 +151,21 @@ fn failed_analysis_never_locks_the_registry_or_samples_its_clock() {
     EVENTS.with(|events| assert_eq!(*events.borrow(), ["scope", "binding", "release"]));
     assert!(registry.entry.borrow().is_none());
     assert!(!LOCKED.with(Cell::get));
+}
+
+#[test]
+fn analysis_observes_the_session_cancellation_and_restores_the_callers() {
+    let registry = Registry::default();
+    registry
+        .cancellation
+        .cancel_with(uqa_core::CancellationReason::StatementTimeout);
+    assert!(uqa_sql::expr::statement_cancellation().is_none());
+    register(&registry).unwrap();
+    assert_eq!(
+        *registry.analysis_cancellation.borrow(),
+        [Err(uqa_core::QueryCancelled::new(
+            uqa_core::CancellationReason::StatementTimeout
+        )); 2]
+    );
+    assert!(uqa_sql::expr::statement_cancellation().is_none());
 }

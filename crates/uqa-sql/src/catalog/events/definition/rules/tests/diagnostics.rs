@@ -30,7 +30,14 @@ fn rule_event_namespaces_match_postgresql_diagnostics() {
         };
         let result = if let Some(mut condition) = rule.condition {
             context
-                .validate_rule_condition(&mut condition, columns, rule.event, None, None)
+                .validate_rule_condition(
+                    &mut condition,
+                    columns,
+                    rule.event,
+                    None,
+                    None,
+                    RelationLookupMode::Dynamic,
+                )
                 .map(drop)
         } else {
             let mut action = rule.actions.into_iter().next().unwrap();

@@ -32,7 +32,7 @@ mod random;
 mod range;
 pub(crate) use range::datum as range_datum;
 mod regex;
-pub use regex::check_constant_similar_translation;
+pub use regex::{check_constant_similar_translation, RegexMatches, RegexSplit};
 mod time;
 mod uuid;
 
@@ -74,16 +74,19 @@ pub(crate) mod interval_style;
 mod pattern;
 mod scalar_array;
 mod scalar_core;
+pub(crate) use scalar_core::binds_input_collation_by_name;
 mod scalar_dispatch;
 mod scalar_geospatial;
 mod scalar_helpers;
 mod scalar_json;
 mod scalar_math;
 mod scalar_postgres;
+pub use scalar_postgres::eval_distinct_boolean;
 mod scalar_range;
 mod scalar_temporal;
 mod session_settings;
 mod session_sleep;
+mod statement_cancellation;
 mod temporal_input;
 mod value_catalog;
 pub mod variadic_any;
@@ -142,6 +145,9 @@ use scalar_dispatch::eval_scalar_function;
 pub(crate) use scalar_helpers::{append_sql_literal, quote_ident_with_control};
 use scalar_helpers::{point_xy, typeof_value};
 pub use scalar_helpers::{quote_ident, CompiledLikePattern};
+pub use statement_cancellation::{
+    check_statement_cancellation, statement_cancellation, StatementCancellationScope,
+};
 pub use temporal_input::{
     temporal_date_order, temporal_interval_style, DateOrderScope, IntervalStyleScope,
     TemporalInputContext, TemporalInputScope,
@@ -163,8 +169,8 @@ pub use call_arguments::{
     validate_named_argument_order_with_control, variadic_argument_value, wrap_variadic_argument,
 };
 pub use call_dispatch::{
-    eval_builtin_function_call, eval_builtin_function_call_with_control, eval_function_call,
-    eval_generated_function_call_with_control,
+    builtin_named_args, eval_builtin_function_call, eval_builtin_function_call_with_control,
+    eval_function_call, eval_generated_function_call_with_control,
 };
 pub use context::{
     cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,

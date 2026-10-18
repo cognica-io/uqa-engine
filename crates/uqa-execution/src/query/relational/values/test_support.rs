@@ -135,6 +135,12 @@ impl SQLRoutineInvoker for Services {
     ) -> Option<Result<crate::functions::SQLTableFunctionResult, SQLError>> {
         panic!("unexpected user routine")
     }
+    fn require_user_function_execute(
+        &self,
+        _: &uqa_sql::routines::SQLUserFunction,
+    ) -> Result<(), SQLError> {
+        panic!("unexpected user routine")
+    }
 }
 impl SetFunctionRuntime for Services {
     fn has_registered_table_function(&self, _: &str) -> bool {

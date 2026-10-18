@@ -13,7 +13,10 @@ use crate::routines::{
 use uqa_core::Value;
 use uqa_sql::{
     ast::RoutineInvocationBinding,
-    routines::{invocation::specialized_definition, CompiledFunctionBody, SQLUserFunction},
+    routines::{
+        invocation::specialized_definition, CompiledFunctionBody, RoutineBody, SQLUserFunction,
+    },
+    semantics::sets::placement_scope::SetPlacementScope,
     type_resolution::canonical_routine_type_name,
     SQLError,
 };
@@ -100,6 +103,12 @@ fn execute_entry(
             definition,
         )?;
     }
+    // A SQL-standard body runs as it was stored; a body compiled from source text places its set-returning calls as a new statement does.
+    let _placement = if matches!(function.body, RoutineBody::Bound(_)) {
+        SetPlacementScope::stored_definition()
+    } else {
+        SetPlacementScope::compiled_source()
+    };
     super::scopes::with_routine_context(context.session, definition, || {
         let body = if definition.language == "plpgsql" {
             context.session.plpgsql_body(function, definition, None)?

@@ -113,7 +113,7 @@ impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
     }
 
     fn transaction_timestamp_micros(&self) -> Option<i64> {
-        Some(Engine::transaction_timestamp_micros(self))
+        self.session_transaction_clock_micros()
     }
 
     fn temporal_date_order(&self) -> Option<uqa_core::TemporalDateOrder> {
@@ -169,6 +169,7 @@ impl Engine {
             aggregates: self,
             planning: self,
             statements: self,
+            cancellation: &self.runtime.cancellation,
         }
     }
 }

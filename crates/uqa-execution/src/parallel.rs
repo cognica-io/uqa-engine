@@ -59,10 +59,10 @@ where
         });
     #[cfg(not(target_os = "emscripten"))]
     {
-        let input = uqa_sql::expr::TemporalInputContext::current();
+        let context = crate::statement::thread_context::StatementThreadContext::current();
         chunks
             .into_par_iter()
-            .map(|chunk| under_temporal_input(input, || worker(chunk)))
+            .map(|chunk| under_statement_thread_context(&context, || worker(chunk)))
             .reduce(Vec::new, |mut a, b| {
                 a.extend(b);
                 a
@@ -191,10 +191,10 @@ impl ParallelExecutor {
         }
         #[cfg(not(target_os = "emscripten"))]
         {
-            let input = uqa_sql::expr::TemporalInputContext::current();
+            let context = crate::statement::thread_context::StatementThreadContext::current();
             workers
                 .par_iter()
-                .map(|w| under_temporal_input(input, w))
+                .map(|w| under_statement_thread_context(&context, w))
                 .collect()
         }
         #[cfg(target_os = "emscripten")]
@@ -204,13 +204,13 @@ impl ParallelExecutor {
     }
 }
 
-/// Run a worker under the dispatching thread's transaction clock and date order.
+/// Run a worker under the dispatching thread's transaction clock, date order, interval style and statement cancellation.
 #[cfg(not(target_os = "emscripten"))]
-fn under_temporal_input<R>(
-    input: uqa_sql::expr::TemporalInputContext,
+fn under_statement_thread_context<R>(
+    context: &crate::statement::thread_context::StatementThreadContext,
     work: impl FnOnce() -> R,
 ) -> R {
-    let _scope = input.enter();
+    let _scope = context.enter();
     work()
 }
 
@@ -249,5 +249,72 @@ mod temporal_tests {
             chunk
         });
         super::ParallelExecutor::new(4).execute_branches(&[check; 4]);
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use uqa_core::{CancellationReason, CancellationToken, QueryCancelled};
+    use uqa_sql::expr::{
+        check_statement_cancellation, statement_cancellation, StatementCancellationScope,
+    };
+
+    #[test]
+    fn statement_cancellation_reaches_each_worker() {
+        let token = CancellationToken::new();
+        token.cancel_with(CancellationReason::StatementTimeout);
+        let _statement = StatementCancellationScope::enter(token.clone());
+        let check = || {
+            assert!(statement_cancellation().is_some_and(|current| current.shares_signal(&token)));
+            assert_eq!(
+                check_statement_cancellation(),
+                Err(QueryCancelled::new(CancellationReason::StatementTimeout))
+            );
+        };
+        super::run_parallel(vec![1, 2, 3, 4], 4, |chunk| {
+            check();
+            chunk
+        });
+        super::ParallelExecutor::new(4).execute_branches(&[check; 4]);
+    }
+
+    #[test]
+    fn work_dispatched_outside_a_statement_never_observes_another_statements_context() {
+        let token = CancellationToken::new();
+        token.cancel();
+        let statement = crate::statement::thread_context::StatementThreadContext {
+            temporal_input: uqa_sql::expr::TemporalInputContext {
+                transaction_clock_micros: Some(123),
+                ..uqa_sql::expr::TemporalInputContext::current()
+            },
+            cancellation: Some(token),
+        };
+        let _statement = statement.enter();
+        let outside = || {
+            assert!(statement_cancellation().is_none());
+            assert_eq!(check_statement_cancellation(), Ok(()));
+            assert_eq!(uqa_sql::expr::transaction_clock_micros(), None);
+        };
+        let dispatch_outside = || {
+            let _detached = crate::statement::thread_context::StatementThreadContext {
+                temporal_input: uqa_sql::expr::TemporalInputContext {
+                    transaction_clock_micros: None,
+                    ..uqa_sql::expr::TemporalInputContext::current()
+                },
+                cancellation: None,
+            }
+            .enter();
+            super::ParallelExecutor::new(4).execute_branches(&[outside; 4]);
+            super::run_parallel(vec![1, 2, 3, 4], 4, |chunk| {
+                outside();
+                chunk
+            });
+        };
+        super::ParallelExecutor::new(4).execute_branches(&[dispatch_outside; 4]);
+        assert_eq!(
+            check_statement_cancellation(),
+            Err(QueryCancelled::USER_REQUEST)
+        );
+        assert_eq!(uqa_sql::expr::transaction_clock_micros(), Some(123));
     }
 }

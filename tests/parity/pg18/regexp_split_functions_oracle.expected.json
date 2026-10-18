@@ -1,0 +1,1809 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "reference": "PostgreSQL 18.4 in a disposable Docker database",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "8d4eb4225167cc8e04e2ce405801432f2730603b558fb724643a8c056f14d4ba"
+  },
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_plain",
+      "sql": "SELECT regexp_split_to_table('hello world', '\\s+')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "hello"
+            ],
+            [
+              "world"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_flags",
+      "sql": "SELECT regexp_split_to_table('aXbxc', 'x', 'i')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "b"
+            ],
+            [
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_quoted",
+      "sql": "SELECT regexp_split_to_table('a.b', '.', 'q')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_global",
+      "sql": "SELECT regexp_split_to_table('abc', 'b', 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "regexp_split_to_table() does not support the \"global\" option",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "table_global_before_pattern",
+      "sql": "SELECT regexp_split_to_table('abc', '(', 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "regexp_split_to_table() does not support the \"global\" option",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "table_invalid_flag",
+      "sql": "SELECT regexp_split_to_table('abc', 'b', 'z')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "table_invalid_flag_after_global",
+      "sql": "SELECT regexp_split_to_table('abc', 'b', 'gz')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "table_empty_pattern",
+      "sql": "SELECT regexp_split_to_table('abc', '')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "b"
+            ],
+            [
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_empty_star",
+      "sql": "SELECT regexp_split_to_table('abc', 'x*')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "b"
+            ],
+            [
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_leading_trailing",
+      "sql": "SELECT regexp_split_to_table(',a,', ',')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              ""
+            ],
+            [
+              "a"
+            ],
+            [
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_whole_match",
+      "sql": "SELECT regexp_split_to_table('abc', 'abc')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              ""
+            ],
+            [
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_greedy_then_empty",
+      "sql": "SELECT regexp_split_to_table('baaac', 'a*')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "b"
+            ],
+            [
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_anchor_start",
+      "sql": "SELECT regexp_split_to_table('abc', '^')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "abc"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_anchor_end",
+      "sql": "SELECT regexp_split_to_table('abc', '$')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "abc"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_newline_sensitive",
+      "sql": "SELECT regexp_split_to_table(E'a\\nb', '$', 'n')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "\nb"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_multibyte_empty",
+      "sql": "SELECT regexp_split_to_table('a' || chr(233) || 'b', '')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "\u00e9"
+            ],
+            [
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_empty_input",
+      "sql": "SELECT regexp_split_to_table('', 'x')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_captures_ignored",
+      "sql": "SELECT regexp_split_to_table('a1b2c', '([0-9])')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "b"
+            ],
+            [
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_null_input",
+      "sql": "SELECT count(*) FROM regexp_split_to_table(NULL, ',')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_null_pattern",
+      "sql": "SELECT count(*) FROM regexp_split_to_table('a', NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_null_flags",
+      "sql": "SELECT count(*) FROM regexp_split_to_table('a', ',', NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_null_select_list",
+      "sql": "SELECT regexp_split_to_table(NULL, ',')",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_ordinality",
+      "sql": "SELECT * FROM regexp_split_to_table('a,b', ',') WITH ORDINALITY",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table",
+            "ordinality"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "a",
+              "1"
+            ],
+            [
+              "b",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_column_alias",
+      "sql": "SELECT p FROM regexp_split_to_table('a,b', ',') AS t(p)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_lateral",
+      "sql": "SELECT v.x, p FROM (VALUES ('a,b'), ('c')) v(x), LATERAL regexp_split_to_table(v.x, ',') p",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "p"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "a,b",
+              "a"
+            ],
+            [
+              "a,b",
+              "b"
+            ],
+            [
+              "c",
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_rows_from",
+      "sql": "SELECT * FROM ROWS FROM (regexp_split_to_table('a,b,c', ','), generate_series(1, 2)) AS t(p, n)",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "a",
+              "1"
+            ],
+            [
+              "b",
+              "2"
+            ],
+            [
+              "c",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_select_list_lockstep",
+      "sql": "SELECT generate_series(1, 3) AS n, regexp_split_to_table('a,b', ',') AS p",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "p"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "a"
+            ],
+            [
+              "2",
+              "b"
+            ],
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_named",
+      "sql": "SELECT regexp_split_to_table(string => 'a,b', pattern => ',')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_named_flags",
+      "sql": "SELECT * FROM regexp_split_to_table(pattern => 'x', string => 'aXb', flags => 'i')",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_result_type",
+      "sql": "SELECT pg_typeof(regexp_split_to_table('a', 'b'))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_where_rejected",
+      "sql": "SELECT 1 WHERE regexp_split_to_table('a', 'b') IS NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "array_plain",
+      "sql": "SELECT regexp_split_to_array('hello world', '\\s+')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{hello,world}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_flags",
+      "sql": "SELECT regexp_split_to_array('aXbxc', 'x', 'i')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a,b,c}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_global",
+      "sql": "SELECT regexp_split_to_array('abc', 'b', 'g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "regexp_split_to_array() does not support the \"global\" option",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "array_invalid_flag_after_global",
+      "sql": "SELECT regexp_split_to_array('abc', 'b', 'gz')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "array_empty_pattern",
+      "sql": "SELECT regexp_split_to_array('abc', '')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a,b,c}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_whole_star",
+      "sql": "SELECT regexp_split_to_array('aaa', 'a*')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"\",\"\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_greedy_then_empty",
+      "sql": "SELECT regexp_split_to_array('baaac', 'a*')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{b,c}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_empty_input",
+      "sql": "SELECT regexp_split_to_array('', 'x')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_whole_match",
+      "sql": "SELECT regexp_split_to_array('abc', 'abc')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"\",\"\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_multibyte_empty",
+      "sql": "SELECT regexp_split_to_array('a' || chr(233) || 'b', '')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a,\u00e9,b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_anchors",
+      "sql": "SELECT regexp_split_to_array('abc', '^'), regexp_split_to_array('abc', '$')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array",
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009,
+            1009
+          ],
+          "rows": [
+            [
+              "{abc}",
+              "{abc}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_nulls",
+      "sql": "SELECT regexp_split_to_array(NULL, 'x') IS NULL, regexp_split_to_array('abc', NULL) IS NULL, regexp_split_to_array('abc', 'b', NULL) IS NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_null_before_flags",
+      "sql": "SELECT regexp_split_to_array(NULL, 'x', 'z') IS NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_named",
+      "sql": "SELECT regexp_split_to_array(string => 'a,b', pattern => ',', flags => 'i')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a,b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_named_mixed",
+      "sql": "SELECT regexp_split_to_array('a,b', pattern => ',')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a,b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_result_type",
+      "sql": "SELECT pg_typeof(regexp_split_to_array('a', 'b'))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text[]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_qualified",
+      "sql": "SELECT pg_catalog.regexp_split_to_array('a,b', ',')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a,b}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "array_rows",
+      "sql": "SELECT x, regexp_split_to_array(x, ',') FROM (VALUES ('a,b'), (''), (NULL)) v(x)",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            25,
+            1009
+          ],
+          "rows": [
+            [
+              "a,b",
+              "{a,b}"
+            ],
+            [
+              "",
+              "{\"\"}"
+            ],
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_table",
+      "sql": "CREATE TABLE regexp_split_source (id integer, x text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_rows",
+      "sql": "INSERT INTO regexp_split_source VALUES (1, 'a,b'), (2, NULL), (3, ''), (4, ',c,')",
+      "command_tags": [
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_source_lateral",
+      "sql": "SELECT id, p, n FROM regexp_split_source, LATERAL regexp_split_to_table(x, ',') WITH ORDINALITY AS t(p, n) ORDER BY id, n",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "p",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "a",
+              "1"
+            ],
+            [
+              "1",
+              "b",
+              "2"
+            ],
+            [
+              "3",
+              "",
+              "1"
+            ],
+            [
+              "4",
+              "",
+              "1"
+            ],
+            [
+              "4",
+              "c",
+              "2"
+            ],
+            [
+              "4",
+              "",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_source_array",
+      "sql": "SELECT id, regexp_split_to_array(x, ',') FROM regexp_split_source ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "regexp_split_to_array"
+          ],
+          "type_oids": [
+            23,
+            1009
+          ],
+          "rows": [
+            [
+              "1",
+              "{a,b}"
+            ],
+            [
+              "2",
+              null
+            ],
+            [
+              "3",
+              "{\"\"}"
+            ],
+            [
+              "4",
+              "{\"\",c,\"\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table_source_predicate",
+      "sql": "SELECT id FROM regexp_split_source WHERE cardinality(regexp_split_to_array(x, ',')) > 1 ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "prepare_split",
+      "sql": "PREPARE regexp_split_rows(text, text) AS SELECT regexp_split_to_table($1, $2)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_split",
+      "sql": "EXECUTE regexp_split_rows('a1b2c', '[0-9]')",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "a"
+            ],
+            [
+              "b"
+            ],
+            [
+              "c"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_split_null",
+      "sql": "EXECUTE regexp_split_rows(NULL, '[0-9]')",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "deallocate_split",
+      "sql": "DEALLOCATE regexp_split_rows",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_view",
+      "sql": "CREATE VIEW regexp_split_view AS SELECT x, regexp_split_to_table(x, ',') AS p, regexp_split_to_array(x, 'B', 'i') AS a FROM (VALUES ('a,b'), ('c')) v(x)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "view_rows",
+      "sql": "SELECT * FROM regexp_split_view",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "p",
+            "a"
+          ],
+          "type_oids": [
+            25,
+            25,
+            1009
+          ],
+          "rows": [
+            [
+              "a,b",
+              "a",
+              "{\"a,\",\"\"}"
+            ],
+            [
+              "a,b",
+              "b",
+              "{\"a,\",\"\"}"
+            ],
+            [
+              "c",
+              "c",
+              "{c}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_check",
+      "sql": "CREATE TABLE regexp_split_check (x text CHECK (cardinality(regexp_split_to_array(x, ',')) < 3))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "check_accepts",
+      "sql": "INSERT INTO regexp_split_check VALUES ('a,b')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "check_rejects",
+      "sql": "INSERT INTO regexp_split_check VALUES ('a,b,c')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"regexp_split_check\" violates check constraint \"regexp_split_check_x_check\"",
+        "detail": "Failing row contains (a,b,c).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_default",
+      "sql": "CREATE TABLE regexp_split_default (id integer, parts text[] DEFAULT regexp_split_to_array('x-y', '-'))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "default_rows",
+      "sql": "INSERT INTO regexp_split_default (id) VALUES (1) RETURNING parts",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parts"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{x,y}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "default_rejected",
+      "sql": "CREATE TABLE regexp_split_bad (x text DEFAULT regexp_split_to_table('a', 'b'))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in DEFAULT expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "regprocedure",
+      "sql": "SELECT 'regexp_split_to_table(text,text)'::regprocedure::oid, 'regexp_split_to_array(text,text,text)'::regprocedure",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "regprocedure"
+          ],
+          "type_oids": [
+            26,
+            2202
+          ],
+          "rows": [
+            [
+              "2765",
+              "regexp_split_to_array(text,text,text)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "catalog",
+      "sql": "SELECT oid,proname,prokind,proisstrict,provolatile,proparallel,proleakproof,prorettype,proargtypes::text AS argument_types,prosrc FROM pg_proc WHERE oid BETWEEN 2765 AND 2768 ORDER BY oid",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "proname",
+            "prokind",
+            "proisstrict",
+            "provolatile",
+            "proparallel",
+            "proleakproof",
+            "prorettype",
+            "argument_types",
+            "prosrc"
+          ],
+          "type_oids": [
+            26,
+            19,
+            18,
+            16,
+            18,
+            18,
+            16,
+            26,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "2765",
+              "regexp_split_to_table",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25",
+              "regexp_split_to_table_no_flags"
+            ],
+            [
+              "2766",
+              "regexp_split_to_table",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "25",
+              "25 25 25",
+              "regexp_split_to_table"
+            ],
+            [
+              "2767",
+              "regexp_split_to_array",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "1009",
+              "25 25",
+              "regexp_split_to_array_no_flags"
+            ],
+            [
+              "2768",
+              "regexp_split_to_array",
+              "f",
+              "t",
+              "i",
+              "s",
+              "f",
+              "1009",
+              "25 25 25",
+              "regexp_split_to_array"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "catalog_set_metadata",
+      "sql": "SELECT oid, proretset, prorows, proargnames FROM pg_proc WHERE oid BETWEEN 2765 AND 2768 ORDER BY oid",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "proretset",
+            "prorows",
+            "proargnames"
+          ],
+          "type_oids": [
+            26,
+            16,
+            700,
+            1009
+          ],
+          "rows": [
+            [
+              "2765",
+              "t",
+              "1000",
+              "{string,pattern}"
+            ],
+            [
+              "2766",
+              "t",
+              "1000",
+              "{string,pattern,flags}"
+            ],
+            [
+              "2767",
+              "f",
+              "0",
+              "{string,pattern}"
+            ],
+            [
+              "2768",
+              "f",
+              "0",
+              "{string,pattern,flags}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

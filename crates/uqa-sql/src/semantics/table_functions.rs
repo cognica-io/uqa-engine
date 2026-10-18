@@ -9,10 +9,16 @@
 use crate::ast::{
     ColumnType, FunctionBinding, FunctionParamMode, FunctionReturns, RoutineInvocationBinding,
 };
-use crate::routines::{routine_returns_anonymous_record, RoutineResolution, SQLUserFunction};
+use crate::routines::{RoutineResolution, SQLUserFunction};
 use crate::type_resolution::{BuiltinFunctionOverload, FunctionTypeResolver};
 use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
 use std::sync::Arc;
+
+mod column_definitions;
+pub use column_definitions::{
+    validate_table_function_column_definition, ColumnDefinitionRequest,
+    SETOF_COLUMN_DEFINITION_PREFIX,
+};
 
 pub struct ResolvedUserTableFunction {
     pub function: Arc<SQLUserFunction>,
@@ -90,73 +96,60 @@ pub fn user_function_composite_result(
     else {
         return Ok(None);
     };
+    // A polymorphic result without a resolved invocation type names no composite.
+    if crate::type_resolution::routine_polymorphic_type(name).is_some() {
+        return Ok(None);
+    }
     let Some(ColumnType::Composite(reference)) = routines.resolve_type_name(name)? else {
         return Ok(None);
     };
     crate::expr::composites::descriptor(routines.composite_types(), reference.oid).map(Some)
 }
 
-fn validate_user_table_function_column_definition(
+/// The columns a user function in FROM declares, before column aliases: a named composite result's attributes, including those of a single composite OUT parameter, or else the OUT parameters. `None` for a function with neither, whose single column the FROM item names.
+pub fn user_function_declared_columns(
+    routines: &dyn RoutineResolution,
     function: &SQLUserFunction,
-    declared_types: &[String],
-) -> Result<(), SQLError> {
-    let returns_anonymous_record = routine_returns_anonymous_record(&function.def);
-    if declared_types.is_empty() {
-        if returns_anonymous_record {
-            return Err(SQLError::Routine {
-                sqlstate: "42601".into(),
-                message: "a column definition list is required for functions returning \"record\""
-                    .into(),
-            });
-        }
-        return Ok(());
-    }
-    if returns_anonymous_record {
-        return Ok(());
-    }
-    if function.def.output_params().len() > 1 {
-        return Err(redundant_out_column_definition_error());
-    }
-    Err(SQLError::Routine {
-        sqlstate: "42601".into(),
-        message: "a column definition list is only allowed for functions returning \"record\""
-            .into(),
-    })
+    invocation: Option<&RoutineInvocationBinding>,
+) -> Result<Option<Vec<String>>, SQLError> {
+    Ok(
+        user_function_composite_result(routines, function, invocation)?
+            .map(|descriptor| {
+                descriptor
+                    .attributes
+                    .iter()
+                    .map(|attribute| attribute.name.clone())
+                    .collect()
+            })
+            .or_else(|| user_function_output_columns_for(function)),
+    )
 }
 
-pub fn validate_table_function_column_definition(
-    name: &str,
-    binding: Option<&FunctionBinding>,
-    user_function: Option<&SQLUserFunction>,
-    declared_types: &[String],
-) -> Result<(), SQLError> {
-    if let Some(function) = user_function {
-        return validate_user_table_function_column_definition(function, declared_types);
-    }
-    if declared_types.is_empty() || binding.is_some_and(|binding| !binding.builtin) {
-        return Ok(());
-    }
-    let builtin = crate::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase());
-    if matches!(
-        builtin.as_str(),
-        "json_each"
-            | "jsonb_each"
-            | "json_each_text"
-            | "jsonb_each_text"
-            | "pg_get_sequence_data"
-            | "pg_sequence_parameters"
-            | "aclexplode"
-    ) {
-        return Err(redundant_out_column_definition_error());
-    }
-    Ok(())
-}
-
-fn redundant_out_column_definition_error() -> SQLError {
-    SQLError::Routine {
-        sqlstate: "42601".into(),
-        message: "a column definition list is redundant for a function with OUT parameters".into(),
-    }
+/// Derive a user FROM function's width from its result type before applying aliases. Only an anonymous record takes its shape from the column definition list; aliases never add fields to a scalar result.
+pub fn user_table_function_columns(
+    routines: &dyn RoutineResolution,
+    function: &SQLUserFunction,
+    invocation: Option<&RoutineInvocationBinding>,
+    output_name: &str,
+    alias: Option<&str>,
+    column_aliases: &[String],
+    ordinality: bool,
+) -> Result<Vec<String>, SQLError> {
+    let columns = if column_definitions::user_function_result_class(routines, function, invocation)?
+        == column_definitions::ResultClass::Record
+    {
+        column_aliases.to_vec()
+    } else {
+        user_function_declared_columns(routines, function, invocation)?
+            .unwrap_or_else(|| vec![alias.unwrap_or(output_name).to_string()])
+    };
+    let columns = apply_table_function_aliases(columns, column_aliases, ordinality);
+    validate_table_function_alias_count(
+        alias.unwrap_or(output_name),
+        columns.len(),
+        column_aliases.len(),
+    )?;
+    Ok(columns)
 }
 
 pub fn resolve_user_table_function(
@@ -256,6 +249,7 @@ fn has_builtin_table_function_overloads(name: &str) -> bool {
         "generate_series"
             | "pg_listening_channels"
             | "unnest"
+            | "regexp_matches"
             | "regexp_split_to_table"
             | "string_to_table"
             | "json_array_elements"
@@ -310,7 +304,12 @@ fn builtin_table_function_overloads(
             };
             vec![overload(vec![ColumnType::AnyArray], 0, element.clone())]
         }
-        "regexp_split_to_table" | "string_to_table" => vec![overload(
+        // The scalar and FROM positions select from the same catalog signatures.
+        "regexp_matches" | "regexp_split_to_table" => {
+            crate::type_resolution::fixed_builtin_overloads(name)
+                .expect("regular-expression set functions have fixed catalog signatures")
+        }
+        "string_to_table" => vec![overload(
             vec![ColumnType::Text, ColumnType::Text],
             0,
             ColumnType::Text,
@@ -348,6 +347,7 @@ pub fn is_builtin_table_function(name: &str) -> bool {
         "generate_series"
             | "pg_listening_channels"
             | "unnest"
+            | "regexp_matches"
             | "regexp_split_to_table"
             | "string_to_table"
             | "json_array_elements"
@@ -443,6 +443,7 @@ pub fn table_function_empty_schema(
             }
             "generate_series"
             | "pg_listening_channels"
+            | "regexp_matches"
             | "regexp_split_to_table"
             | "string_to_table"
             | "json_array_elements"
@@ -592,6 +593,7 @@ pub fn table_function_column_types(
                         .and_then(|ty| crate::type_resolution::array_element_type(&ty).cloned())
                 })
                 .collect(),
+            "regexp_matches" => vec![Some(ColumnType::Array(Box::new(ColumnType::Text)))],
             "regexp_split_to_table"
             | "string_to_table"
             | "json_object_keys"

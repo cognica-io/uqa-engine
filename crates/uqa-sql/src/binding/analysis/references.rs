@@ -291,20 +291,21 @@ pub(super) fn require_boolean_condition(
     crate::type_resolution::boolean::require_argument_type(Some(&ty), construct, Some(resolver))
 }
 
-pub(in crate::binding) fn require_scalar_boolean_test(
+fn require_scalar_boolean_test(
     routines: &dyn RoutineResolution,
     argument: &ScalarExpr,
     schema: &RowSchema,
     params: &[SQLParam],
     test: crate::ast::BooleanTest,
 ) -> Result<(), SQLError> {
-    if crate::semantics::sets::validation::expression_may_return_set(
-        routines, routines, argument, schema, params,
-    )? {
-        Err(SQLError::Routine {
-            sqlstate: "42804".into(),
-            message: format!("argument of {} must not return a set", test.label()),
-        })
+    if crate::semantics::sets::placement_scope::placing_set_calls()
+        && crate::semantics::sets::validation::expression_may_return_set(
+            routines, routines, argument, schema, params,
+        )?
+    {
+        Err(crate::semantics::sets::placement::set_argument_error(
+            test.label(),
+        ))
     } else {
         Ok(())
     }

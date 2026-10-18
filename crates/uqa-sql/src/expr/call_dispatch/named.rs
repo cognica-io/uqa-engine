@@ -13,7 +13,12 @@ use uqa_core::{
     Value,
 };
 
-pub(super) fn builtin_named_args(
+/// Reorder a built-in call's named arguments into declared positions, or `None` when the function has no such signature.
+///
+/// # Errors
+///
+/// Reports `PostgreSQL`'s named-argument diagnostics, an exhausted allowance and cancellation.
+pub fn builtin_named_args(
     function: &str,
     call_args: &[(Option<String>, Value)],
     control: &ProductionControl<'_>,
@@ -32,7 +37,11 @@ pub(super) fn builtin_named_args(
             4 => &["string", "pattern", "start", "flags"],
             _ => return Ok(None),
         },
-        "regexp_like" => match call_args.len() {
+        "regexp_like"
+        | "regexp_match"
+        | "regexp_matches"
+        | "regexp_split_to_array"
+        | "regexp_split_to_table" => match call_args.len() {
             2 => &["string", "pattern"],
             3 => &["string", "pattern", "flags"],
             _ => return Ok(None),

@@ -12682,6 +12682,715 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "matches_spans_and_diagnostics_equal_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/oracle.rs",
+      "capability": "PostgreSQL regular expression matching",
+      "workload": "207 independently captured PostgreSQL 18.4 statements covering match selection, subexpression spans, back-references, lookaround, constraint escapes, directors, flags, collations and invalid-pattern diagnostics.",
+      "invariant": "Compilation and matching return PostgreSQL's spans, captured substrings, operator results and invalid-pattern messages."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "class_members_over_every_code_point_equal_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/oracle.rs",
+      "capability": "PostgreSQL regular expression character classes",
+      "workload": "64 class and escape patterns evaluated over every Unicode scalar value under the C, builtin and ICU collation strategies.",
+      "invariant": "Every class member and non-member equals the independent PostgreSQL 18.4 result."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "compiled_state_is_charged_and_dropping_releases_every_byte",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression memory",
+      "workload": "One compiled expression with lookbehind, classes, bounds, a back-reference and lookahead, executed once.",
+      "invariant": "Compiled state is fully charged, execution memory is returned when matching ends, and dropping the expression releases every reserved byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "every_refused_compile_reservation_reports_out_of_memory_without_leaking",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression memory",
+      "workload": "Each reservation of a representative compilation refused in turn.",
+      "invariant": "Refusing the expression's memory context or converted pattern fails with out of memory (53200) as PostgreSQL's context creation and palloc do, every refused engine allocation reports REG_ESPACE, and no reserved byte remains."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "every_refused_execution_reservation_reports_out_of_memory_and_keeps_the_expression",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression memory",
+      "workload": "Each reservation of a matching run with 21 subexpressions, a back-reference and lookbehind refused in turn.",
+      "invariant": "Every refusal reports REG_ESPACE, returns all execution memory and leaves the compiled expression usable with unchanged results."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "a_byte_limit_fails_compilation_with_out_of_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "A nested bounded repetition that expands beyond a 256 KiB allowance.",
+      "invariant": "Compilation stops with REG_ESPACE without exceeding the allowance and releases every reserved byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "compilation_stops_at_every_interrupt_check",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression cancellation",
+      "workload": "Cancellation requested at each interrupt check of a representative compilation.",
+      "invariant": "Every request stops compilation with a cancellation and leaves no reserved byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "execution_stops_at_every_interrupt_check_and_keeps_the_expression",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression cancellation",
+      "workload": "Cancellation requested at each interrupt check of a matching run with back-references and lookbehind.",
+      "invariant": "Every request stops matching with a cancellation, returns all execution memory and keeps the compiled expression usable."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "a_deep_stack_reports_regular_expression_too_complex",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/resources.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "Two hundred nested subexpressions compiled and matched under stack limits below their measured depths.",
+      "invariant": "Both compilation and matching fail with REG_ETOOBIG instead of exceeding the caller's stack limit."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "stack_depth_limits_equal_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/oracle.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "Six independently captured PostgreSQL 18.4 statements with nested capturing and non-capturing groups and long literals below and beyond the default max_stack_depth of 2 MB.",
+      "invariant": "Patterns PostgreSQL accepts compile and match with its results, and patterns it rejects fail with REG_ETOOBIG at the engine's 2 MB budget while the hooks set no limit."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "deep_operations_on_a_small_thread_run_on_a_separate_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "5000 nested groups compiled and matched on a 512 KiB thread with 128 KiB of its stack left.",
+      "invariant": "The operations complete on a separately allocated stack although compilation needs more than a megabyte of engine stack, and every reserved byte is released."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "an_execution_with_little_stack_left_runs_on_a_separate_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "A match over 1000 nested capturing groups with 96 KiB of thread stack left.",
+      "invariant": "Matching dissects every group on a separately allocated stack and fills every span."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "an_operation_that_outgrows_its_thread_stack_starts_again_on_a_separate_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "5000 nested groups compiled with 1 MiB of thread stack left, against the same compilation with headroom to spare.",
+      "invariant": "The first attempt is abandoned when it outgrows the thread's stack, its reservations come back, and the second attempt completes on a separately allocated stack."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "test",
+      "test": "operations_beyond_the_stack_budget_report_regular_expression_too_complex",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/tests/stack.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "10000 nested capturing and non-capturing groups compiled with hooks that set no stack limit.",
+      "invariant": "Compilation fails with REG_ETOOBIG at the 2 MB budget and no reserved byte remains; the separate callback-boundary check verifies that the resource hook never sees a deeper stack."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regexp_matches_rows_match_the_postgresql_reference",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/match_rows.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches finds every match as PostgreSQL's first call does and returns one text[] row per match in order, admitting each row under the requesting allowance, and no rows for no match or a NULL argument; single-result regular-expression functions reject g after validating every flag, and both cancellation scopes are observed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "single_result_functions_reject_global_after_flags_and_before_the_pattern",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/match_rows.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches finds every match as PostgreSQL's first call does and returns one text[] row per match in order, admitting each row under the requesting allowance, and no rows for no match or a NULL argument; single-result regular-expression functions reject g after validating every flag, and both cancellation scopes are observed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regexp_matches_rows_admit_each_row_and_keep_the_cursor_at_a_rejected_one",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/match_rows.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches finds every match as PostgreSQL's first call does and returns one text[] row per match in order, admitting each row under the requesting allowance, and no rows for no match or a NULL argument; single-result regular-expression functions reject g after validating every flag, and both cancellation scopes are observed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regexp_matches_rows_observe_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/match_rows.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches finds every match as PostgreSQL's first call does and returns one text[] row per match in order, admitting each row under the requesting allowance, and no rows for no match or a NULL argument; single-result regular-expression functions reject g after validating every flag, and both cancellation scopes are observed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "regexp_matches_rows_match_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/regexp_matches.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches finds every match as PostgreSQL's first call does and returns one text[] row per match in order, admitting each row under the requesting allowance, and no rows for no match or a NULL argument; single-result regular-expression functions reject g after validating every flag, and both cancellation scopes are observed.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "strict_null_simplification_keeps_set_returning_calls",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches finds every match as PostgreSQL's first call does and returns one text[] row per match in order, admitting each row under the requesting allowance, and no rows for no match or a NULL argument; single-result regular-expression functions reject g after validating every flag, and both cancellation scopes are observed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "regexp_matches_streams_one_row_per_match_and_none_for_null_inputs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_functions/regular_expressions/tests.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches finds every match as PostgreSQL's first call does and returns one text[] row per match in order, admitting each row under the requesting allowance, and no rows for no match or a NULL argument; single-result regular-expression functions reject g after validating every flag, and both cancellation scopes are observed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "regexp_matches_reports_flag_errors_before_the_first_row",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_functions/regular_expressions/tests.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches finds every match as PostgreSQL's first call does and returns one text[] row per match in order, admitting each row under the requesting allowance, and no rows for no match or a NULL argument; single-result regular-expression functions reject g after validating every flag, and both cancellation scopes are observed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "regexp_matches_metadata_and_set_estimates_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/builtin_routines/tests.rs",
+      "capability": "Set-returning regexp_matches",
+      "workload": "Independent PostgreSQL 18.4 regexp_matches rows in FROM, LATERAL, ROWS FROM, WITH ORDINALITY and select lists, empty-match advancement, NULL arguments, named arguments, prepared parameters, stored views and table rows across provider reopening, global-option diagnostics, catalog identities, insufficient output allowance and cancellation.",
+      "invariant": "regexp_matches finds every match as PostgreSQL's first call does and returns one text[] row per match in order, admitting each row under the requesting allowance, and no rows for no match or a NULL argument; single-result regular-expression functions reject g after validating every flag, and both cancellation scopes are observed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "compiled_expressions_charge_and_return_every_engine_byte",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/engine/tests.rs",
+      "capability": "PostgreSQL regular expression evaluation",
+      "workload": "Independent PostgreSQL 18.4 regular-expression statements covering match selection, ARE syntax, every flag, invalid patterns, replacement escapes, operators, long inputs, nested groups within and beyond the 2 MB stack budget, per-collation character classes and case folding, collation conflicts, and stored views, CHECK constraints and defaults across provider reopening, with engine allocations under fixed allowances and canceled scopes.",
+      "invariant": "Every regular-expression function and operator returns PostgreSQL 18.4's matches, results and diagnostics through PostgreSQL's engine, each engine allocation is charged to the call's allowance and released when the call ends, a refused reservation reports the allowance's own error, and the engine's interrupt checks report the statement's cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "an_exhausted_allowance_is_reported_as_the_allowance_error",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/engine/tests.rs",
+      "capability": "PostgreSQL regular expression evaluation",
+      "workload": "Independent PostgreSQL 18.4 regular-expression statements covering match selection, ARE syntax, every flag, invalid patterns, replacement escapes, operators, long inputs, nested groups within and beyond the 2 MB stack budget, per-collation character classes and case folding, collation conflicts, and stored views, CHECK constraints and defaults across provider reopening, with engine allocations under fixed allowances and canceled scopes.",
+      "invariant": "Every regular-expression function and operator returns PostgreSQL 18.4's matches, results and diagnostics through PostgreSQL's engine, each engine allocation is charged to the call's allowance and released when the call ends, a refused reservation reports the allowance's own error, and the engine's interrupt checks report the statement's cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "refusals_take_precedence_over_the_engine_out_of_memory_report",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/engine/tests.rs",
+      "capability": "PostgreSQL regular expression evaluation",
+      "workload": "Independent PostgreSQL 18.4 regular-expression statements covering match selection, ARE syntax, every flag, invalid patterns, replacement escapes, operators, long inputs, nested groups within and beyond the 2 MB stack budget, per-collation character classes and case folding, collation conflicts, and stored views, CHECK constraints and defaults across provider reopening, with engine allocations under fixed allowances and canceled scopes.",
+      "invariant": "Every regular-expression function and operator returns PostgreSQL 18.4's matches, results and diagnostics through PostgreSQL's engine, each engine allocation is charged to the call's allowance and released when the call ends, a refused reservation reports the allowance's own error, and the engine's interrupt checks report the statement's cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "engine_interrupt_checks_report_the_call_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/engine/tests.rs",
+      "capability": "PostgreSQL regular expression evaluation",
+      "workload": "Independent PostgreSQL 18.4 regular-expression statements covering match selection, ARE syntax, every flag, invalid patterns, replacement escapes, operators, long inputs, nested groups within and beyond the 2 MB stack budget, per-collation character classes and case folding, collation conflicts, and stored views, CHECK constraints and defaults across provider reopening, with engine allocations under fixed allowances and canceled scopes.",
+      "invariant": "Every regular-expression function and operator returns PostgreSQL 18.4's matches, results and diagnostics through PostgreSQL's engine, each engine allocation is charged to the call's allowance and released when the call ends, a refused reservation reports the allowance's own error, and the engine's interrupt checks report the statement's cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "the_running_statements_cancellation_reaches_the_engine",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/engine/tests.rs",
+      "capability": "PostgreSQL regular expression evaluation",
+      "workload": "Independent PostgreSQL 18.4 regular-expression statements covering match selection, ARE syntax, every flag, invalid patterns, replacement escapes, operators, long inputs, nested groups within and beyond the 2 MB stack budget, per-collation character classes and case folding, collation conflicts, and stored views, CHECK constraints and defaults across provider reopening, with engine allocations under fixed allowances and canceled scopes.",
+      "invariant": "Every regular-expression function and operator returns PostgreSQL 18.4's matches, results and diagnostics through PostgreSQL's engine, each engine allocation is charged to the call's allowance and released when the call ends, a refused reservation reports the allowance's own error, and the engine's interrupt checks report the statement's cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "regular_expression_engine_matches_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/regular_expression_engine.rs",
+      "capability": "PostgreSQL regular expression evaluation",
+      "workload": "Independent PostgreSQL 18.4 regular-expression statements covering match selection, ARE syntax, every flag, invalid patterns, replacement escapes, operators, long inputs, nested groups within and beyond the 2 MB stack budget, per-collation character classes and case folding, collation conflicts, and stored views, CHECK constraints and defaults across provider reopening, with engine allocations under fixed allowances and canceled scopes.",
+      "invariant": "Every regular-expression function and operator returns PostgreSQL 18.4's matches, results and diagnostics through PostgreSQL's engine, each engine allocation is charged to the call's allowance and released when the call ends, a refused reservation reports the allowance's own error, and the engine's interrupt checks report the statement's cancellation.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regexp_split_admits_each_piece_and_keeps_the_cursor_before_a_rejected_one",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/split_pieces.rs",
+      "capability": "Regular-expression split functions",
+      "workload": "Independent PostgreSQL 18.4 regexp_split_to_table and regexp_split_to_array statements covering degenerate empty matches, flags, global-option diagnostics, NULL and named arguments and stored views across provider reopening, with pieces beyond the requesting allowance and canceled scopes.",
+      "invariant": "Both functions return PostgreSQL's pieces in order, admit each piece under the requesting allowance, keep the cursor before a refused piece, release every reservation of a refused array and observe both cancellation scopes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regexp_split_observes_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/split_pieces.rs",
+      "capability": "Regular-expression split functions",
+      "workload": "Independent PostgreSQL 18.4 regexp_split_to_table and regexp_split_to_array statements covering degenerate empty matches, flags, global-option diagnostics, NULL and named arguments and stored views across provider reopening, with pieces beyond the requesting allowance and canceled scopes.",
+      "invariant": "Both functions return PostgreSQL's pieces in order, admit each piece under the requesting allowance, keep the cursor before a refused piece, release every reservation of a refused array and observe both cancellation scopes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "regexp_split_functions_match_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/regexp_split.rs",
+      "capability": "Regular-expression split functions",
+      "workload": "Independent PostgreSQL 18.4 regexp_split_to_table and regexp_split_to_array statements covering degenerate empty matches, flags, global-option diagnostics, NULL and named arguments and stored views across provider reopening, with pieces beyond the requesting allowance and canceled scopes.",
+      "invariant": "Both functions return PostgreSQL's pieces in order, admit each piece under the requesting allowance, keep the cursor before a refused piece, release every reservation of a refused array and observe both cancellation scopes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "search_loop_functions_match_the_postgresql_reference",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/search_loop.rs",
+      "capability": "Regular-expression search loop",
+      "workload": "Independent PostgreSQL 18.4 regexp_count, regexp_instr, regexp_substr and regexp_replace statements covering start positions, empty matches after non-empty ones, anchors before the start, occurrence and subexpression parameters and flags that begin with a digit, with replacement output beyond the allowance and canceled scopes.",
+      "invariant": "The functions search the whole input from the start position as PostgreSQL does and return its counts, positions, substrings and replacements, a refused replacement output releases its partial text and keeps earlier values, and both cancellation scopes stop production.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "regexp_search_loop_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/regexp_search_loop.rs",
+      "capability": "Regular-expression search loop",
+      "workload": "Independent PostgreSQL 18.4 regexp_count, regexp_instr, regexp_substr and regexp_replace statements covering start positions, empty matches after non-empty ones, anchors before the start, occurrence and subexpression parameters and flags that begin with a digit, with replacement output beyond the allowance and canceled scopes.",
+      "invariant": "The functions search the whole input from the start position as PostgreSQL does and return its counts, positions, substrings and replacements, a refused replacement output releases its partial text and keeps earlier values, and both cancellation scopes stop production.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regex_output_quota_failure_releases_partial_replacements_and_keeps_earlier_values",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests.rs",
+      "capability": "Regular-expression search loop",
+      "workload": "Independent PostgreSQL 18.4 regexp_count, regexp_instr, regexp_substr and regexp_replace statements covering start positions, empty matches after non-empty ones, anchors before the start, occurrence and subexpression parameters and flags that begin with a digit, with replacement output beyond the allowance and canceled scopes.",
+      "invariant": "The functions search the whole input from the start position as PostgreSQL does and return its counts, positions, substrings and replacements, a refused replacement output releases its partial text and keeps earlier values, and both cancellation scopes stop production.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regex_production_observes_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests.rs",
+      "capability": "Regular-expression search loop",
+      "workload": "Independent PostgreSQL 18.4 regexp_count, regexp_instr, regexp_substr and regexp_replace statements covering start positions, empty matches after non-empty ones, anchors before the start, occurrence and subexpression parameters and flags that begin with a digit, with replacement output beyond the allowance and canceled scopes.",
+      "invariant": "The functions search the whole input from the start position as PostgreSQL does and return its counts, positions, substrings and replacements, a refused replacement output releases its partial text and keeps earlier values, and both cancellation scopes stop production.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "code_point_buffers_follow_postgresql_allocation_limit",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/engine/tests.rs",
+      "capability": "PostgreSQL regular expression memory",
+      "workload": "Code point buffer sizes for text of 268435454 and 268435455 bytes, computed before any buffer is allocated.",
+      "invariant": "A buffer within PostgreSQL's MaxAllocSize is admitted at four bytes per code point plus the terminator, and one beyond it reports XX000 invalid memory alloc request size without allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "multibyte_escapes_follow_postgresql_slow_path",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/pattern/escape/tests.rs",
+      "capability": "PostgreSQL regular expression matching",
+      "workload": "SIMILAR TO patterns with single-byte and multibyte escape characters and multibyte pattern characters inside and outside bracket expressions.",
+      "invariant": "The translation equals PostgreSQL 18.4's similar_to_escape output, which copies or escapes a multibyte pattern character without moving the bracket position when the escape character is multibyte.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "collation_case_mapping_matches_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/collation_case_mapping.rs",
+      "capability": "PostgreSQL input collations of case mapping and patterns",
+      "workload": "Independent PostgreSQL 18.4 statements of lower, upper, initcap, casefold, LIKE and ILIKE under every built-in collation, implicit and explicit collation conflicts, stored views, rules, defaults, CHECK constraints, generated columns, triggers, domains and expression indexes, and catalogs stored without input collations, across provider reopening.",
+      "invariant": "Every case-mapping and pattern call evaluates under PostgreSQL 18.4's input collation with its results and diagnostics, definitions stored without a selection derive PostgreSQL's selection once and keep it, ON CONFLICT matches index keys stored without one, and case mapping returns the same text across runs and chunk boundaries.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "definitions_stored_without_input_collations_derive_them_once",
+      "cases": 3,
+      "source": "crates/uqa-engine/tests/pg18_semantics/collation_case_mapping/legacy.rs",
+      "capability": "PostgreSQL input collations of case mapping and patterns",
+      "workload": "Independent PostgreSQL 18.4 statements of lower, upper, initcap, casefold, LIKE and ILIKE under every built-in collation, implicit and explicit collation conflicts, stored views, rules, defaults, CHECK constraints, generated columns, triggers, domains and expression indexes, and catalogs stored without input collations, across provider reopening.",
+      "invariant": "Every case-mapping and pattern call evaluates under PostgreSQL 18.4's input collation with its results and diagnostics, definitions stored without a selection derive PostgreSQL's selection once and keep it, ON CONFLICT matches index keys stored without one, and case mapping returns the same text across runs and chunk boundaries.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "runs_and_chunks_map_like_single_characters",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/scalar_helpers/casing/tests.rs",
+      "capability": "PostgreSQL input collations of case mapping and patterns",
+      "workload": "Independent PostgreSQL 18.4 statements of lower, upper, initcap, casefold, LIKE and ILIKE under every built-in collation, implicit and explicit collation conflicts, stored views, rules, defaults, CHECK constraints, generated columns, triggers, domains and expression indexes, and catalogs stored without input collations, across provider reopening.",
+      "invariant": "Every case-mapping and pattern call evaluates under PostgreSQL 18.4's input collation with its results and diagnostics, definitions stored without a selection derive PostgreSQL's selection once and keep it, ON CONFLICT matches index keys stored without one, and case mapping returns the same text across runs and chunk boundaries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_keys_without_recorded_input_collations_match_analyzed_targets",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/conflict/inference.rs",
+      "capability": "PostgreSQL input collations of case mapping and patterns",
+      "workload": "Independent PostgreSQL 18.4 statements of lower, upper, initcap, casefold, LIKE and ILIKE under every built-in collation, implicit and explicit collation conflicts, stored views, rules, defaults, CHECK constraints, generated columns, triggers, domains and expression indexes, and catalogs stored without input collations, across provider reopening.",
+      "invariant": "Every case-mapping and pattern call evaluates under PostgreSQL 18.4's input collation with its results and diagnostics, definitions stored without a selection derive PostgreSQL's selection once and keep it, ON CONFLICT matches index keys stored without one, and case mapping returns the same text across runs and chunk boundaries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "collation_dependent_calls_stored_without_a_selection_are_found",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/legacy_collations/tests.rs",
+      "capability": "PostgreSQL input collations of case mapping and patterns",
+      "workload": "Independent PostgreSQL 18.4 statements of lower, upper, initcap, casefold, LIKE and ILIKE under every built-in collation, implicit and explicit collation conflicts, stored views, rules, defaults, CHECK constraints, generated columns, triggers, domains and expression indexes, and catalogs stored without input collations, across provider reopening.",
+      "invariant": "Every case-mapping and pattern call evaluates under PostgreSQL 18.4's input collation with its results and diagnostics, definitions stored without a selection derive PostgreSQL's selection once and keep it, ON CONFLICT matches index keys stored without one, and case mapping returns the same text across runs and chunk boundaries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "calls_whose_results_do_not_depend_on_the_collation_are_not_found",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/legacy_collations/tests.rs",
+      "capability": "PostgreSQL input collations of case mapping and patterns",
+      "workload": "Independent PostgreSQL 18.4 statements of lower, upper, initcap, casefold, LIKE and ILIKE under every built-in collation, implicit and explicit collation conflicts, stored views, rules, defaults, CHECK constraints, generated columns, triggers, domains and expression indexes, and catalogs stored without input collations, across provider reopening.",
+      "invariant": "Every case-mapping and pattern call evaluates under PostgreSQL 18.4's input collation with its results and diagnostics, definitions stored without a selection derive PostgreSQL's selection once and keep it, ON CONFLICT matches index keys stored without one, and case mapping returns the same text across runs and chunk boundaries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_calls_are_found_in_stored_expressions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/legacy_collations/tests.rs",
+      "capability": "PostgreSQL input collations of case mapping and patterns",
+      "workload": "Independent PostgreSQL 18.4 statements of lower, upper, initcap, casefold, LIKE and ILIKE under every built-in collation, implicit and explicit collation conflicts, stored views, rules, defaults, CHECK constraints, generated columns, triggers, domains and expression indexes, and catalogs stored without input collations, across provider reopening.",
+      "invariant": "Every case-mapping and pattern call evaluates under PostgreSQL 18.4's input collation with its results and diagnostics, definitions stored without a selection derive PostgreSQL's selection once and keep it, ON CONFLICT matches index keys stored without one, and case mapping returns the same text across runs and chunk boundaries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "set_returning_contexts_match_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/set_returning_contexts.rs",
+      "capability": "PostgreSQL set-returning call placement",
+      "workload": "Independent PostgreSQL 18.4 statements placing set-returning calls in select lists, FROM, LATERAL, ROWS FROM, single-row INSERT VALUES, DML, RETURNING, ON CONFLICT, MERGE, trigger and rule conditions, EXECUTE, CALL and column definition lists, and catalogs that stored such calls in earlier releases, across provider reopening.",
+      "invariant": "Set-returning calls expand where PostgreSQL 18.4 places them and report its SQLSTATEs, messages and hints elsewhere, and definitions stored by earlier releases load, run as stored without being placed again and keep the catalog usable.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "select_list_set_functions_reject_pg18_forbidden_contexts",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_plpgsql/set_returning.rs",
+      "capability": "PostgreSQL set-returning call placement",
+      "workload": "Independent PostgreSQL 18.4 statements placing set-returning calls in select lists, FROM, LATERAL, ROWS FROM, single-row INSERT VALUES, DML, RETURNING, ON CONFLICT, MERGE, trigger and rule conditions, EXECUTE, CALL and column definition lists, and catalogs that stored such calls in earlier releases, across provider reopening.",
+      "invariant": "Set-returning calls expand where PostgreSQL 18.4 places them and report its SQLSTATEs, messages and hints elsewhere, and definitions stored by earlier releases load, run as stored without being placed again and keep the catalog usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "legacy_set_returning_definitions_reopen_and_fail_only_when_evaluated",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/set_returning_definitions.rs",
+      "capability": "PostgreSQL set-returning call placement",
+      "workload": "Independent PostgreSQL 18.4 statements placing set-returning calls in select lists, FROM, LATERAL, ROWS FROM, single-row INSERT VALUES, DML, RETURNING, ON CONFLICT, MERGE, trigger and rule conditions, EXECUTE, CALL and column definition lists, and catalogs that stored such calls in earlier releases, across provider reopening.",
+      "invariant": "Set-returning calls expand where PostgreSQL 18.4 places them and report its SQLSTATEs, messages and hints elsewhere, and definitions stored by earlier releases load, run as stored without being placed again and keep the catalog usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "legacy_set_returning_placements_load_and_keep_the_catalog_usable",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/set_returning_placements.rs",
+      "capability": "PostgreSQL set-returning call placement",
+      "workload": "Independent PostgreSQL 18.4 statements placing set-returning calls in select lists, FROM, LATERAL, ROWS FROM, single-row INSERT VALUES, DML, RETURNING, ON CONFLICT, MERGE, trigger and rule conditions, EXECUTE, CALL and column definition lists, and catalogs that stored such calls in earlier releases, across provider reopening.",
+      "invariant": "Set-returning calls expand where PostgreSQL 18.4 places them and report its SQLSTATEs, messages and hints elsewhere, and definitions stored by earlier releases load, run as stored without being placed again and keep the catalog usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_definitions_place_no_set_returning_call_until_their_scope_ends",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/sets/placement_scope.rs",
+      "capability": "PostgreSQL set-returning call placement",
+      "workload": "Independent PostgreSQL 18.4 statements placing set-returning calls in select lists, FROM, LATERAL, ROWS FROM, single-row INSERT VALUES, DML, RETURNING, ON CONFLICT, MERGE, trigger and rule conditions, EXECUTE, CALL and column definition lists, and catalogs that stored such calls in earlier releases, across provider reopening.",
+      "invariant": "Set-returning calls expand where PostgreSQL 18.4 places them and report its SQLSTATEs, messages and hints elsewhere, and definitions stored by earlier releases load, run as stored without being placed again and keep the catalog usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "target_list_calls_that_repeat_a_set_returning_key_read_its_column",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/window/tests/set_returning_keys.rs",
+      "capability": "PostgreSQL set-returning call placement",
+      "workload": "Independent PostgreSQL 18.4 statements placing set-returning calls in select lists, FROM, LATERAL, ROWS FROM, single-row INSERT VALUES, DML, RETURNING, ON CONFLICT, MERGE, trigger and rule conditions, EXECUTE, CALL and column definition lists, and catalogs that stored such calls in earlier releases, across provider reopening.",
+      "invariant": "Set-returning calls expand where PostgreSQL 18.4 places them and report its SQLSTATEs, messages and hints elsewhere, and definitions stored by earlier releases load, run as stored without being placed again and keep the catalog usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "lib",
+      "test": "failed_stack_allocation_releases_compilation_and_preserves_compiled_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/src/regex/tests.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "Injected stack allocation failure before initial compilation, after an abandoned compilation, and before execution of a retained expression.",
+      "invariant": "Every failed compilation releases its exact reservation; an execution failure clears output spans and leaves the compiled expression reusable."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "lib",
+      "test": "stack_callback_refuses_the_hard_limit_before_consulting_the_resource_hook",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/src/operation/tests.rs",
+      "capability": "PostgreSQL regular expression bounded work",
+      "workload": "Direct callback checks at the hard stack limit, above the limit, and across a stack restart.",
+      "invariant": "The hard depth bound is enforced before the resource hook; a permitted callback observes its exact depth and restarting releases operation state."
     }
   ]
 }

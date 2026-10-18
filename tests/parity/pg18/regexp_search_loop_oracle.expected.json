@@ -1,0 +1,851 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "reference": "PostgreSQL 18.4 in a disposable Docker database",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "1e0fe28b28bfb659ca0bfcc9cef1b5a2906bc77f22c186e688365cea0df24241"
+  },
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "count_empty_after_match",
+      "sql": "SELECT regexp_count('aab', 'a*')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "count_alternation_empty",
+      "sql": "SELECT regexp_count('ab', 'a|')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "count_empty_pattern",
+      "sql": "SELECT regexp_count('abc', '')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "count_start_at_end",
+      "sql": "SELECT regexp_count('abc', '', 4)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "count_start_past_end",
+      "sql": "SELECT regexp_count('abc', '', 5)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "count_anchor_with_start",
+      "sql": "SELECT regexp_count('ab', '^b', 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "count_absolute_anchor_with_start",
+      "sql": "SELECT regexp_count('ab', '\\Ab', 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "count_multibyte_start",
+      "sql": "SELECT regexp_count(chr(233) || 'a' || chr(233), chr(233), 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "instr_second_empty",
+      "sql": "SELECT regexp_instr('aab', 'a*', 1, 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_instr"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "instr_third_empty",
+      "sql": "SELECT regexp_instr('aab', 'a*', 1, 3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_instr"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "instr_end_option",
+      "sql": "SELECT regexp_instr('aab', 'a*', 1, 1, 1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_instr"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "instr_anchor_with_start",
+      "sql": "SELECT regexp_instr('ab', '^b', 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_instr"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "instr_start_at_end",
+      "sql": "SELECT regexp_instr('abc', '', 4)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_instr"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "instr_whole_match_subexpression",
+      "sql": "SELECT regexp_instr('abc', 'b', 1, 1, 0, '', 1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_instr"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "instr_subexpression_beyond",
+      "sql": "SELECT regexp_instr('abc', 'b', 1, 1, 0, '', 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_instr"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "instr_unmatched_group",
+      "sql": "SELECT regexp_instr('abc', '(x)?b', 1, 1, 0, '', 1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_instr"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "instr_multibyte_position",
+      "sql": "SELECT regexp_instr(chr(233) || 'ab', 'b', 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_instr"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "instr_multibyte_empty",
+      "sql": "SELECT regexp_instr(chr(233) || chr(233), '', 1, 3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_instr"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "instr_zero_n",
+      "sql": "SELECT regexp_instr('abc', 'b', 1, 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"n\": 0",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "substr_third_empty",
+      "sql": "SELECT regexp_substr('aab', 'a*', 1, 3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_substr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "substr_anchor_with_start",
+      "sql": "SELECT regexp_substr('ab', '^b', 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_substr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "substr_start_at_end",
+      "sql": "SELECT regexp_substr('abc', '', 4)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_substr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "substr_whole_match_subexpression",
+      "sql": "SELECT regexp_substr('abc', 'b', 1, 1, '', 1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_substr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "substr_group",
+      "sql": "SELECT regexp_substr('a1b2', '([a-z])([0-9])', 1, 2, '', 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_substr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "substr_zero_n",
+      "sql": "SELECT regexp_substr('abc', 'b', 1, 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"n\": 0",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "replace_global_empty_after_match",
+      "sql": "SELECT regexp_replace('aab', 'a*', 'X', 'g')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XXbX"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_nth_empty",
+      "sql": "SELECT regexp_replace('aab', 'a*', 'X', 1, 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "aaXb"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_anchor_with_start",
+      "sql": "SELECT regexp_replace('ab', '^b', 'X', 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "ab"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_start_keeps_prefix",
+      "sql": "SELECT regexp_replace('abab', 'b', 'X', 3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "abaX"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_start_at_end",
+      "sql": "SELECT regexp_replace('abc', '', 'X', 4)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "abcX"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_start_past_end",
+      "sql": "SELECT regexp_replace('abc', '', 'X', 5)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "abc"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_pattern_compiled_past_start",
+      "sql": "SELECT regexp_replace('a', '[', 'x', 3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2201B",
+        "message": "invalid regular expression: brackets [] not balanced",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "replace_backreferences_global",
+      "sql": "SELECT regexp_replace('a1b2', '([a-z])([0-9])', '\\2\\1', 'g')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_replace"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1a2b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "replace_integer_flags_hint",
+      "sql": "SELECT regexp_replace('abc', 'b', 'x', '1')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"1\"",
+        "detail": null,
+        "hint": "If you meant to use regexp_replace() with a start parameter, cast the fourth argument to integer explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "replace_integer_first_flag_hint",
+      "sql": "SELECT regexp_replace('abc', 'b', 'x', '1g')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"1\"",
+        "detail": null,
+        "hint": "If you meant to use regexp_replace() with a start parameter, cast the fourth argument to integer explicitly."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "replace_trailing_digit_flag",
+      "sql": "SELECT regexp_replace('abc', 'b', 'x', 'g1')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"1\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "replace_negative_n",
+      "sql": "SELECT regexp_replace('abc', 'b', 'x', 1, -1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"n\": -1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    }
+  ]
+}

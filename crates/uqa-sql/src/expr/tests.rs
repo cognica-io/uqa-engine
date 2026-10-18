@@ -11,6 +11,15 @@ use crate::ast::Expr;
 
 mod collations;
 
+/// The ordinary scalar kernels, with collation-dependent functions under the database default collation.
+fn eval_scalar_function(name: &str, args: &[Value]) -> crate::error::Result<Value> {
+    super::eval_scalar_function(
+        name,
+        args,
+        crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
+    )
+}
+
 struct DomainCastHook;
 
 impl EngineHook for DomainCastHook {
@@ -41,6 +50,67 @@ impl EngineHook for DomainCastHook {
             array_oid: None,
         }))
     }
+}
+
+#[test]
+fn set_returning_built_ins_report_the_executor_diagnostic_in_scalar_evaluation() {
+    let ctx = EvalContext::new(None, &[]);
+    let text = |value: &str| Expr::Literal(Value::Str(value.into()));
+    let call = |binding: Option<FunctionBinding>, args: Vec<Expr>| Expr::Func {
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
+        name: "regexp_matches".into(),
+        binding,
+        args,
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let bound = FunctionBinding {
+        object_id: None,
+        name: "pg_catalog.regexp_matches".into(),
+        argument_types: vec!["text".into(), "text".into()],
+        builtin: true,
+        dispatch: None,
+        invocation: None,
+        composite_field: None,
+        resolution_error: None,
+        input_collation: None,
+    };
+    // A bound call is rejected before its arguments are evaluated, as the executor rejects it when it initializes the expression.
+    let failing_argument = Expr::Binary {
+        op: crate::ast::BinaryOp::Divide,
+        lhs: Box::new(Expr::Literal(Value::Int(1))),
+        rhs: Box::new(Expr::Literal(Value::Int(0))),
+    };
+    for expression in [
+        call(Some(bound.clone()), vec![text("zz"), text("z")]),
+        call(Some(bound), vec![failing_argument, text("z")]),
+        call(None, vec![text("zz"), text("z")]),
+    ] {
+        let error = eval(&expression, &ctx).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("0A000"), "{expression:?}");
+        assert_eq!(
+            error.to_string(),
+            "set-valued function called in context that cannot accept a set"
+        );
+    }
+    let error = eval_function_call(
+        "generate_series",
+        vec![(None, Value::Int(1)), (None, Value::Int(2))],
+        &ctx,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    let error = eval_function_call(
+        "regexp_matches",
+        vec![
+            (Some("string".into()), Value::Str("a".into())),
+            (Some("pattern".into()), Value::Str("a".into())),
+        ],
+        &ctx,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("0A000"));
 }
 
 #[test]

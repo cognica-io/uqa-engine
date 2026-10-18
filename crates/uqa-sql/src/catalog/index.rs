@@ -39,7 +39,10 @@ pub struct IndexCatalogIdentity {
 pub mod identity;
 
 mod relationships;
-pub use relationships::{can_attach_index, IndexAttachmentShape, IndexRelationships};
+pub use relationships::{
+    can_attach_index, same_index_keys, same_index_predicate, IndexAttachmentShape,
+    IndexRelationships,
+};
 
 mod enforced_key;
 pub use enforced_key::{referenceable_keys, EnforcedKey};

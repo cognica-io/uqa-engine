@@ -1,0 +1,6976 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "reference": "PostgreSQL 18.4 in a disposable Docker database",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "capture_script_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "3e9ba68af9d0cebdd002b33c47740b41dd8034525ef21d74b0dbcac07f0937df"
+  },
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_t",
+      "sql": "CREATE TABLE t (a text[], b int)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_t_row",
+      "sql": "INSERT INTO t VALUES (ARRAY['a'], 1)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_u",
+      "sql": "CREATE TABLE u (k int PRIMARY KEY, a text[])",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_u_row",
+      "sql": "INSERT INTO u VALUES (1, ARRAY['a'])",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_sf",
+      "sql": "CREATE FUNCTION sf() RETURNS SETOF int LANGUAGE sql AS 'SELECT 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_trg",
+      "sql": "CREATE FUNCTION trg() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_pr",
+      "sql": "CREATE PROCEDURE pr(x text[]) LANGUAGE plpgsql AS $$ BEGIN END $$",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_prepare",
+      "sql": "PREPARE p(text[]) AS SELECT $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "update_set",
+      "sql": "UPDATE t SET a = regexp_matches('a', 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in UPDATE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "update_set_series",
+      "sql": "UPDATE t SET b = generate_series(1, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in UPDATE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "update_set_user",
+      "sql": "UPDATE t SET b = sf()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in UPDATE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "update_set_nested",
+      "sql": "UPDATE t SET a = ARRAY[generate_series(1, 2)::text]",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in UPDATE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "update_set_row",
+      "sql": "UPDATE t SET (a, b) = (regexp_matches('a', 'a'), 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in UPDATE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "update_subscript",
+      "sql": "UPDATE t SET a[generate_series(1, 2)] = 'x'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in UPDATE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "update_where",
+      "sql": "UPDATE t SET b = 2 WHERE regexp_matches('a', 'a') IS NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "update_where_folded",
+      "sql": "UPDATE t SET b = 2 WHERE (generate_series(0, 1)::boolean) OR true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "update_returning",
+      "sql": "UPDATE t SET b = 2 RETURNING generate_series(1, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in RETURNING",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "update_subquery",
+      "sql": "UPDATE t SET b = (SELECT generate_series(1, 1)) RETURNING b",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "b"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "delete_where",
+      "sql": "DELETE FROM t WHERE regexp_matches('a', 'a') IS NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "delete_where_user",
+      "sql": "DELETE FROM t WHERE sf() > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "delete_returning",
+      "sql": "DELETE FROM t RETURNING generate_series(1, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in RETURNING",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "insert_returning",
+      "sql": "INSERT INTO t VALUES (ARRAY['q'], 5) RETURNING regexp_matches('a', 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in RETURNING",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "insert_returning_user",
+      "sql": "INSERT INTO t VALUES (ARRAY['q'], 5) RETURNING sf()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in RETURNING",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_update_set",
+      "sql": "INSERT INTO u VALUES (1, ARRAY['z']) ON CONFLICT (k) DO UPDATE SET a = regexp_matches('a', 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in UPDATE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_update_where",
+      "sql": "INSERT INTO u VALUES (1, ARRAY['z']) ON CONFLICT (k) DO UPDATE SET a = ARRAY['q'] WHERE generate_series(1, 2) > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_inference",
+      "sql": "INSERT INTO u VALUES (2, ARRAY['z']) ON CONFLICT ((generate_series(1, 2))) DO NOTHING",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in index expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "conflict_predicate",
+      "sql": "INSERT INTO u VALUES (2, ARRAY['z']) ON CONFLICT (k) WHERE generate_series(1, 2) > 0 DO NOTHING",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in index predicates",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "merge_join",
+      "sql": "MERGE INTO u USING (SELECT 1 AS k) s ON generate_series(1, 2) = s.k WHEN MATCHED THEN DO NOTHING",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in JOIN conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "merge_when",
+      "sql": "MERGE INTO u USING (SELECT 1 AS k) s ON u.k = s.k WHEN MATCHED AND generate_series(1, 2) > 0 THEN DO NOTHING",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in MERGE WHEN conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "merge_update",
+      "sql": "MERGE INTO u USING (SELECT 1 AS k) s ON u.k = s.k WHEN MATCHED THEN UPDATE SET a = regexp_matches('a', 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in UPDATE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "merge_returning",
+      "sql": "MERGE INTO u USING (SELECT 1 AS k) s ON u.k = s.k WHEN MATCHED THEN DO NOTHING RETURNING generate_series(1, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in RETURNING",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "merge_insert_unfired",
+      "sql": "MERGE INTO u USING (SELECT 1 AS k) s ON u.k = s.k WHEN MATCHED THEN DO NOTHING WHEN NOT MATCHED THEN INSERT VALUES (generate_series(10, 12), NULL)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-valued function called in context that cannot accept a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "merge_insert_fired",
+      "sql": "MERGE INTO u USING (SELECT 5 AS k) s ON u.k = s.k WHEN NOT MATCHED THEN INSERT VALUES (s.k, regexp_matches('a', 'a'))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-valued function called in context that cannot accept a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "trigger_when",
+      "sql": "CREATE TRIGGER tr BEFORE INSERT ON t FOR EACH ROW WHEN (regexp_matches(NEW.a[1], 'a') IS NOT NULL) EXECUTE FUNCTION trg()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in trigger WHEN conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "trigger_when_old",
+      "sql": "CREATE TRIGGER tr AFTER INSERT ON t FOR EACH ROW WHEN (regexp_matches(OLD.a[1], 'a') IS NOT NULL) EXECUTE FUNCTION trg()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in trigger WHEN conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "trigger_when_statement",
+      "sql": "CREATE TRIGGER tr AFTER INSERT ON t FOR EACH STATEMENT WHEN (generate_series(1, 2) > NEW.b) EXECUTE FUNCTION trg()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in trigger WHEN conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "trigger_when_user",
+      "sql": "CREATE TRIGGER tr BEFORE INSERT ON t FOR EACH ROW WHEN (sf() > NEW.b) EXECUTE FUNCTION trg()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in trigger WHEN conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "trigger_when_not",
+      "sql": "CREATE TRIGGER tr BEFORE INSERT ON t FOR EACH ROW WHEN (NOT generate_series(0, 1)::boolean) EXECUTE FUNCTION trg()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in trigger WHEN conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "rule_where",
+      "sql": "CREATE RULE r AS ON INSERT TO t WHERE regexp_matches('a', 'a') IS NOT NULL DO ALSO SELECT 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "rule_where_instead",
+      "sql": "CREATE RULE r AS ON UPDATE TO t WHERE generate_series(1, 2) > NEW.b DO INSTEAD NOTHING",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "execute_parameter",
+      "sql": "EXECUTE p(regexp_matches('a', 'a'))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in EXECUTE parameters",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "execute_parameter_nested",
+      "sql": "EXECUTE p(ARRAY[generate_series(1, 2)::text])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in EXECUTE parameters",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "execute_parameter_user",
+      "sql": "EXECUTE p(ARRAY[sf()::text])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in EXECUTE parameters",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "execute_parameter_valid",
+      "sql": "EXECUTE p(ARRAY['ok'])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{ok}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "call_argument",
+      "sql": "CALL pr(regexp_matches('a', 'a'))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in CALL arguments",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "call_argument_named",
+      "sql": "CALL pr(x => regexp_matches('a', 'a'))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in CALL arguments",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "call_argument_nested",
+      "sql": "CALL pr(ARRAY[generate_series(1, 2)::text])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in CALL arguments",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "call_argument_user",
+      "sql": "CALL pr(ARRAY[sf()::text])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in CALL arguments",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "call_argument_valid",
+      "sql": "CALL pr(ARRAY['ok'])",
+      "command_tags": [
+        "CALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "fixtures_unchanged",
+      "sql": "SELECT t.a, t.b, u.k, u.a FROM t, u ORDER BY u.k",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "k",
+            "a"
+          ],
+          "type_oids": [
+            1009,
+            23,
+            23,
+            1009
+          ],
+          "rows": [
+            [
+              "{a}",
+              "1",
+              "1",
+              "{a}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_then",
+      "sql": "SELECT CASE WHEN true THEN generate_series(1, 2) END",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in CASE",
+        "detail": null,
+        "hint": "You might be able to move the set-returning function into a LATERAL FROM item."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "case_base",
+      "sql": "SELECT CASE generate_series(1, 2) WHEN 1 THEN 1 END",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in CASE",
+        "detail": null,
+        "hint": "You might be able to move the set-returning function into a LATERAL FROM item."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "case_else",
+      "sql": "SELECT CASE WHEN true THEN 1 ELSE generate_series(1, 2) END",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in CASE",
+        "detail": null,
+        "hint": "You might be able to move the set-returning function into a LATERAL FROM item."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "case_user",
+      "sql": "SELECT CASE WHEN true THEN sf() END",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in CASE",
+        "detail": null,
+        "hint": "You might be able to move the set-returning function into a LATERAL FROM item."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "case_when_condition",
+      "sql": "SELECT CASE WHEN generate_series(0, 1)::boolean THEN 1 END",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of CASE/WHEN must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "case_simple_when",
+      "sql": "SELECT CASE 1 WHEN generate_series(1, 2) THEN 1 END",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of CASE/WHEN must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coalesce",
+      "sql": "SELECT coalesce(generate_series(1, 2), 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in COALESCE",
+        "detail": null,
+        "hint": "You might be able to move the set-returning function into a LATERAL FROM item."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coalesce_types_first",
+      "sql": "SELECT coalesce(generate_series(1, 2), 'x'::text)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "COALESCE types integer and text cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "aggregate_argument",
+      "sql": "SELECT sum(generate_series(1, 2))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "aggregate function calls cannot contain set-returning function calls",
+        "detail": null,
+        "hint": "You might be able to move the set-returning function into a LATERAL FROM item."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "aggregate_argument_user",
+      "sql": "SELECT sum(sf())",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "aggregate function calls cannot contain set-returning function calls",
+        "detail": null,
+        "hint": "You might be able to move the set-returning function into a LATERAL FROM item."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "aggregate_order",
+      "sql": "SELECT array_agg(1 ORDER BY generate_series(1, 2))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "aggregate function calls cannot contain set-returning function calls",
+        "detail": null,
+        "hint": "You might be able to move the set-returning function into a LATERAL FROM item."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "aggregate_inner_case",
+      "sql": "SELECT sum(CASE WHEN true THEN generate_series(1, 2) END)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in CASE",
+        "detail": null,
+        "hint": "You might be able to move the set-returning function into a LATERAL FROM item."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "aggregate_filter",
+      "sql": "SELECT count(*) FILTER (WHERE generate_series(1, 2) > 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in FILTER",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "aggregate_filter_first",
+      "sql": "SELECT sum(generate_series(1, 2)) FILTER (WHERE generate_series(1, 2) > 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in FILTER",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "window_argument",
+      "sql": "SELECT lag(generate_series(1, 2)) OVER ()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "window function calls cannot contain set-returning function calls",
+        "detail": null,
+        "hint": "You might be able to move the set-returning function into a LATERAL FROM item."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "window_filter",
+      "sql": "SELECT count(*) FILTER (WHERE generate_series(1, 2) > 0) OVER ()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in FILTER",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "window_frame",
+      "sql": "SELECT row_number() OVER (ROWS generate_series(1, 2) PRECEDING)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in window definitions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "not_operand",
+      "sql": "SELECT NOT (generate_series(0, 1)::boolean)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of NOT must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "not_operand_user",
+      "sql": "SELECT NOT (sf() > 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of NOT must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "and_operand",
+      "sql": "SELECT (generate_series(0, 1)::boolean) AND true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of AND must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "or_operand",
+      "sql": "SELECT (generate_series(0, 1)::boolean) OR true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of OR must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "between_operand",
+      "sql": "SELECT generate_series(1, 2) BETWEEN 1 AND 2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of AND must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "between_bound",
+      "sql": "SELECT 1 BETWEEN generate_series(1, 2) AND 2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of AND must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "not_between",
+      "sql": "SELECT generate_series(1, 2) NOT BETWEEN 1 AND 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of OR must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "between_symmetric",
+      "sql": "SELECT generate_series(1, 2) BETWEEN SYMMETRIC 1 AND 2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of AND must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "in_single_item",
+      "sql": "SELECT 1 IN (generate_series(1, 2))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of IN must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "in_subquery",
+      "sql": "SELECT generate_series(1, 2) IN (SELECT 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "row comparison operator must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "any_subquery",
+      "sql": "SELECT generate_series(1, 2) = ANY (SELECT 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "row comparison operator must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "row_comparison",
+      "sql": "SELECT (generate_series(1, 2), 1) = (1, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "row comparison operator must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "boolean_test",
+      "sql": "SELECT generate_series(0, 1)::boolean IS TRUE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of IS TRUE must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "where",
+      "sql": "SELECT 1 WHERE generate_series(1, 2) > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "where_folded",
+      "sql": "SELECT 1 WHERE (generate_series(0, 1)::boolean) OR true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "where_inner_case",
+      "sql": "SELECT 1 WHERE CASE WHEN true THEN generate_series(1, 2) END > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "having",
+      "sql": "SELECT 1 HAVING generate_series(1, 2) > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in HAVING",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "limit",
+      "sql": "SELECT 1 LIMIT generate_series(1, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in LIMIT",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "offset",
+      "sql": "SELECT 1 OFFSET generate_series(1, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in OFFSET",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "join_on",
+      "sql": "SELECT 1 FROM t JOIN u ON generate_series(1, 2) > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in JOIN conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "values_query",
+      "sql": "VALUES (generate_series(1, 2))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in VALUES",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "values_from",
+      "sql": "SELECT * FROM (VALUES (generate_series(1, 2))) v(x)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in VALUES",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "from_nested",
+      "sql": "SELECT * FROM generate_series(1, generate_series(1, 2))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions must appear at top level of FROM",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "rows_from_nested",
+      "sql": "SELECT * FROM ROWS FROM (generate_series(1, 2), generate_series(generate_series(1, 2), 3))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions must appear at top level of FROM",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "lateral_nested",
+      "sql": "SELECT * FROM t, LATERAL generate_series(generate_series(1, 2), 3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions must appear at top level of FROM",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "for_update",
+      "sql": "SELECT generate_series(1, 2) FOR UPDATE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "FOR UPDATE is not allowed with set-returning functions in the target list",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "target_nested",
+      "sql": "SELECT generate_series(generate_series(1, 2), 3)",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "generate_series"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ],
+            [
+              "3"
+            ],
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "group_by",
+      "sql": "SELECT 1 GROUP BY generate_series(1, 2)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "order_by",
+      "sql": "SELECT 1 ORDER BY generate_series(1, 2)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_on",
+      "sql": "SELECT DISTINCT ON (generate_series(1, 2)) 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "in_array",
+      "sql": "SELECT generate_series(1, 2) IN (1, 2)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ],
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "in_array_items",
+      "sql": "SELECT 1 IN (generate_series(1, 2), 3)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ],
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "nullif",
+      "sql": "SELECT nullif(generate_series(1, 2), 1)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nullif"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              null
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "case_subquery",
+      "sql": "SELECT CASE WHEN (SELECT generate_series(1, 1)) = 1 THEN 1 END",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "case"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_wv",
+      "sql": "CREATE TABLE wv (x int)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_wv_rows",
+      "sql": "INSERT INTO wv VALUES (1), (2)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_partition",
+      "sql": "SELECT row_number() OVER (PARTITION BY generate_series(1, 2))",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row_number"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_order",
+      "sql": "SELECT row_number() OVER (ORDER BY generate_series(1, 2))",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row_number"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_partition_rows",
+      "sql": "SELECT x, row_number() OVER (PARTITION BY generate_series(1, 2) ORDER BY x) FROM wv ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "row_number"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_order_correlated",
+      "sql": "SELECT x, rank() OVER (ORDER BY generate_series(1, x)) FROM wv ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "rank"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_and_target",
+      "sql": "SELECT x, generate_series(1, 2) AS g, row_number() OVER (PARTITION BY generate_series(1, 3)) FROM wv ORDER BY 1, 2, 3",
+      "command_tags": [
+        "SELECT 12"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "g",
+            "row_number"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2",
+              "1"
+            ],
+            [
+              "1",
+              "2",
+              "1"
+            ],
+            [
+              "1",
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "2",
+              "2"
+            ],
+            [
+              "2",
+              "2",
+              "2"
+            ],
+            [
+              "2",
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_range_frame",
+      "sql": "SELECT sum(x) OVER (PARTITION BY generate_series(1, 2) ORDER BY x RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) FROM wv ORDER BY 1",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sum"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
+            ],
+            [
+              "3"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_named",
+      "sql": "SELECT x, row_number() OVER w FROM wv WINDOW w AS (PARTITION BY generate_series(1, 2) ORDER BY x) ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "row_number"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_inside_case",
+      "sql": "SELECT CASE WHEN true THEN row_number() OVER (PARTITION BY generate_series(1, 2)) END",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "case"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_inside_not",
+      "sql": "SELECT NOT (row_number() OVER (PARTITION BY generate_series(1, 2)) > 1)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ],
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_view",
+      "sql": "CREATE VIEW wv_keys AS SELECT x, row_number() OVER (PARTITION BY generate_series(1, 2) ORDER BY x) AS r FROM wv",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_view_rows",
+      "sql": "SELECT x, r FROM wv_keys ORDER BY x, r",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_partition",
+      "sql": "SELECT generate_series(1, 2) AS g, row_number() OVER (PARTITION BY generate_series(1, 2)) FROM (VALUES (1)) v ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "row_number"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_order",
+      "sql": "SELECT generate_series(1, 2) AS g, row_number() OVER (ORDER BY generate_series(1, 2)) FROM (VALUES (1)) v ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "row_number"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_descending",
+      "sql": "SELECT generate_series(1, 2) AS g, rank() OVER (ORDER BY generate_series(1, 2) DESC) FROM (VALUES (1)) v ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "rank"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_inside_expression",
+      "sql": "SELECT generate_series(1, 2) + 0 AS g, row_number() OVER (PARTITION BY generate_series(1, 2)) FROM (VALUES (1)) v ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "row_number"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_over_rows",
+      "sql": "SELECT count(*) OVER (PARTITION BY generate_series(1, 2)), generate_series(1, 2) FROM (VALUES (1), (2)) v(x) ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count",
+            "generate_series"
+          ],
+          "type_oids": [
+            20,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_two_windows",
+      "sql": "SELECT generate_series(1, 2) AS g, row_number() OVER (PARTITION BY generate_series(1, 2)), rank() OVER (ORDER BY generate_series(1, 2) DESC) FROM (VALUES (1)) v ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "g",
+            "row_number",
+            "rank"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_correlated",
+      "sql": "SELECT x, generate_series(1, x) AS g, count(*) OVER (PARTITION BY generate_series(1, x)) FROM (VALUES (1), (2), (3)) v(x) ORDER BY 1, 2, 3",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "g",
+            "count"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "1",
+              "3"
+            ],
+            [
+              "3",
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_sort_key",
+      "sql": "SELECT row_number() OVER (PARTITION BY generate_series(1, 2)) AS r FROM (VALUES (1)) v ORDER BY generate_series(1, 2), r",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_sort_expression",
+      "sql": "SELECT row_number() OVER (ORDER BY generate_series(1, 3)) AS r FROM (VALUES (1)) v ORDER BY generate_series(1, 3) * -1",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ],
+            [
+              "2"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "window_repeated_distinct_on",
+      "sql": "SELECT DISTINCT ON (generate_series(1, 2)) row_number() OVER (PARTITION BY generate_series(1, 2)) AS r FROM (VALUES (1), (2)) v",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_n",
+      "sql": "CREATE TABLE n (x int)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_series",
+      "sql": "INSERT INTO n VALUES (generate_series(1, 3))",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_series_rows",
+      "sql": "SELECT x FROM n ORDER BY x",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_ta",
+      "sql": "CREATE TABLE ta (a text[])",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_regexp",
+      "sql": "INSERT INTO ta VALUES (regexp_matches('aab', 'a', 'g'))",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_regexp_none",
+      "sql": "INSERT INTO ta VALUES (regexp_matches('abc', 'z'))",
+      "command_tags": [
+        "INSERT 0 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_regexp_rows",
+      "sql": "SELECT a FROM ta",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{a}"
+            ],
+            [
+              "{a}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_values_first",
+      "sql": "INSERT INTO n VALUES (generate_series(1, 2)), (5)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in VALUES",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "insert_values_second",
+      "sql": "INSERT INTO n VALUES (1), (generate_series(1, 2))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in VALUES",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_m",
+      "sql": "CREATE TABLE m (x int, y int DEFAULT 7)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_lockstep",
+      "sql": "INSERT INTO m VALUES (generate_series(1, 2), generate_series(1, 3))",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_default",
+      "sql": "INSERT INTO m VALUES (generate_series(4, 5), DEFAULT)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_default_first",
+      "sql": "INSERT INTO m (y, x) VALUES (DEFAULT, generate_series(6, 7)) RETURNING x, y",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "6",
+              "7"
+            ],
+            [
+              "7",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_expression",
+      "sql": "INSERT INTO m (x) VALUES (generate_series(8, 9) * 10) RETURNING *",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "80",
+              "7"
+            ],
+            [
+              "90",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_empty",
+      "sql": "INSERT INTO m VALUES (generate_series(1, 0), 1)",
+      "command_tags": [
+        "INSERT 0 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_m_rows",
+      "sql": "SELECT x, y FROM m ORDER BY x NULLS LAST, y",
+      "command_tags": [
+        "SELECT 9"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "4",
+              "7"
+            ],
+            [
+              "5",
+              "7"
+            ],
+            [
+              "6",
+              "7"
+            ],
+            [
+              "7",
+              "7"
+            ],
+            [
+              "80",
+              "7"
+            ],
+            [
+              "90",
+              "7"
+            ],
+            [
+              null,
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_user",
+      "sql": "INSERT INTO n VALUES (sf())",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_type_error",
+      "sql": "INSERT INTO n VALUES (generate_series(1, 2)::text)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"x\" is of type integer but expression is of type text",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_k",
+      "sql": "CREATE TABLE k (k int PRIMARY KEY, v int)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_conflict_nothing",
+      "sql": "INSERT INTO k VALUES (generate_series(1, 3), 0) ON CONFLICT (k) DO NOTHING",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_conflict_update",
+      "sql": "INSERT INTO k VALUES (generate_series(1, 4), 9) ON CONFLICT (k) DO UPDATE SET v = excluded.v",
+      "command_tags": [
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_conflict_twice",
+      "sql": "INSERT INTO k VALUES (1, generate_series(1, 2)) ON CONFLICT (k) DO UPDATE SET v = excluded.v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "21000",
+        "message": "ON CONFLICT DO UPDATE command cannot affect row a second time",
+        "detail": null,
+        "hint": "Ensure that no rows proposed for insertion within the same command have duplicate constrained values."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "insert_k_rows",
+      "sql": "SELECT k, v FROM k ORDER BY k",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "9"
+            ],
+            [
+              "2",
+              "9"
+            ],
+            [
+              "3",
+              "9"
+            ],
+            [
+              "4",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_cte",
+      "sql": "WITH w AS (INSERT INTO n VALUES (generate_series(30, 32)) RETURNING x) SELECT x FROM w ORDER BY x",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "30"
+            ],
+            [
+              "31"
+            ],
+            [
+              "32"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_select",
+      "sql": "INSERT INTO n SELECT generate_series(40, 41)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_scalar_subquery",
+      "sql": "INSERT INTO n VALUES ((SELECT generate_series(50, 50)))",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_nv",
+      "sql": "CREATE VIEW nv AS SELECT x FROM n",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_view",
+      "sql": "INSERT INTO nv VALUES (generate_series(60, 61))",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_ins",
+      "sql": "PREPARE ins(int) AS INSERT INTO n VALUES (generate_series(1, $1) + 70)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_prepared",
+      "sql": "EXECUTE ins(2)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_n_rows",
+      "sql": "SELECT x FROM n ORDER BY x",
+      "command_tags": [
+        "SELECT 14"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "1"
+            ],
+            [
+              "2"
+            ],
+            [
+              "3"
+            ],
+            [
+              "30"
+            ],
+            [
+              "31"
+            ],
+            [
+              "32"
+            ],
+            [
+              "40"
+            ],
+            [
+              "41"
+            ],
+            [
+              "50"
+            ],
+            [
+              "60"
+            ],
+            [
+              "61"
+            ],
+            [
+              "71"
+            ],
+            [
+              "72"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_d",
+      "sql": "CREATE TABLE d (x int, y int)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_d_function",
+      "sql": "CREATE FUNCTION d_fill() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.y := NEW.x * 100; RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_d_trigger",
+      "sql": "CREATE TRIGGER d_fill BEFORE INSERT ON d FOR EACH ROW EXECUTE FUNCTION d_fill()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_trigger",
+      "sql": "INSERT INTO d VALUES (generate_series(7, 8)) RETURNING *",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "y"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "700"
+            ],
+            [
+              "8",
+              "800"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_pt",
+      "sql": "CREATE TABLE pt (x int) PARTITION BY RANGE (x)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_pt_low",
+      "sql": "CREATE TABLE pt_low PARTITION OF pt FOR VALUES FROM (0) TO (10)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_pt_high",
+      "sql": "CREATE TABLE pt_high PARTITION OF pt FOR VALUES FROM (10) TO (20)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_partitioned",
+      "sql": "INSERT INTO pt VALUES (generate_series(8, 12))",
+      "command_tags": [
+        "INSERT 0 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_partitioned_rows",
+      "sql": "SELECT tableoid::regclass, x FROM pt ORDER BY x",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "tableoid",
+            "x"
+          ],
+          "type_oids": [
+            2205,
+            23
+          ],
+          "rows": [
+            [
+              "pt_low",
+              "8"
+            ],
+            [
+              "pt_low",
+              "9"
+            ],
+            [
+              "pt_high",
+              "10"
+            ],
+            [
+              "pt_high",
+              "11"
+            ],
+            [
+              "pt_high",
+              "12"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_rt",
+      "sql": "CREATE TABLE rt (x int, y int)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_rlog",
+      "sql": "CREATE TABLE rlog (x int)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_rt_rule",
+      "sql": "CREATE RULE rt_log AS ON INSERT TO rt DO ALSO INSERT INTO rlog VALUES (NEW.x)",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert_rule_reads_set",
+      "sql": "INSERT INTO rt VALUES (generate_series(1, 2), 5)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-valued function called in context that cannot accept a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "insert_rule_rows",
+      "sql": "SELECT (SELECT count(*) FROM rt) AS rt, (SELECT count(*) FROM rlog) AS rlog",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rt",
+            "rlog"
+          ],
+          "type_oids": [
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "coldef_regexp_matches",
+      "sql": "SELECT * FROM regexp_matches('a', 'a') AS m(x int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is only allowed for functions returning \"record\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_generate_series",
+      "sql": "SELECT * FROM generate_series(1, 2) AS g(x int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is only allowed for functions returning \"record\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_unnest",
+      "sql": "SELECT * FROM unnest(ARRAY[1]) AS u(x int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is only allowed for functions returning \"record\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_regexp_split",
+      "sql": "SELECT * FROM regexp_split_to_table('a', 'b') AS r(x text)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is only allowed for functions returning \"record\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_user_scalar",
+      "sql": "SELECT * FROM sf() AS f(x int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is only allowed for functions returning \"record\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_json_each",
+      "sql": "SELECT * FROM json_each('{\"a\":1}') AS j(k text, v json)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is redundant for a function with OUT parameters",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_ordinality",
+      "sql": "SELECT * FROM generate_series(1, 2) WITH ORDINALITY AS g(x int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "WITH ORDINALITY cannot be used with a column definition list",
+        "detail": null,
+        "hint": "Put the column definition list inside ROWS FROM()."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_unnest_multiple",
+      "sql": "SELECT * FROM unnest(ARRAY[1], ARRAY[2]) AS u(x int, y int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "UNNEST() with multiple arguments cannot have a column definition list",
+        "detail": null,
+        "hint": "Use separate UNNEST() calls inside ROWS FROM(), and attach a column definition list to each one."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_rows_from_multiple",
+      "sql": "SELECT * FROM ROWS FROM (generate_series(1, 2), generate_series(1, 3)) AS g(x int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "ROWS FROM() with multiple functions cannot have a column definition list",
+        "detail": null,
+        "hint": "Put a separate column definition list for each function inside ROWS FROM()."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_rows_from_single",
+      "sql": "SELECT * FROM ROWS FROM (generate_series(1, 2)) AS g(x int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is only allowed for functions returning \"record\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_rows_from_member",
+      "sql": "SELECT * FROM ROWS FROM (generate_series(1, 2) AS (x int))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is only allowed for functions returning \"record\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_rows_from_twice",
+      "sql": "SELECT * FROM ROWS FROM (generate_series(1, 2) AS (x int)) AS g(y int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "multiple column definition lists are not allowed for the same function",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_rf",
+      "sql": "CREATE FUNCTION rf() RETURNS SETOF record LANGUAGE sql AS 'SELECT 1, 2'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "coldef_record_required",
+      "sql": "SELECT * FROM rf()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is required for functions returning \"record\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_record",
+      "sql": "SELECT * FROM rf() AS r(p int, q int)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p",
+            "q"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "coldef_record_rows_from",
+      "sql": "SELECT * FROM ROWS FROM (rf()) AS r(p int, q int)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p",
+            "q"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "coldef_record_member_ordinality",
+      "sql": "SELECT * FROM ROWS FROM (rf() AS (p int, q int)) WITH ORDINALITY",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p",
+            "q",
+            "ordinality"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "coldef_record_ordinality",
+      "sql": "SELECT * FROM rf() WITH ORDINALITY AS r(p int, q int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "WITH ORDINALITY cannot be used with a column definition list",
+        "detail": null,
+        "hint": "Put the column definition list inside ROWS FROM()."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_record_setof",
+      "sql": "SELECT * FROM rf() AS r(p int, q setof int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "column \"q\" cannot be declared SETOF",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_outs",
+      "sql": "CREATE FUNCTION outs(OUT a int, OUT b int) RETURNS SETOF record LANGUAGE sql AS 'SELECT 1, 2'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "coldef_out_parameters",
+      "sql": "SELECT * FROM outs() AS o(a int, b int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is redundant for a function with OUT parameters",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_ct",
+      "sql": "CREATE TYPE ct AS (p int, q int)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_cf",
+      "sql": "CREATE FUNCTION cf() RETURNS SETOF ct LANGUAGE sql AS 'SELECT 1, 2'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "coldef_composite",
+      "sql": "SELECT * FROM cf() AS c(p int, q int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is redundant for a function returning a named composite type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_oc",
+      "sql": "CREATE FUNCTION oc(OUT a ct) RETURNS SETOF ct LANGUAGE sql AS 'SELECT ROW(1, 2)::ct'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "coldef_composite_out",
+      "sql": "SELECT * FROM oc() AS o(a int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is redundant for a function returning a named composite type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_dct",
+      "sql": "CREATE DOMAIN dct AS ct",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_dcf",
+      "sql": "CREATE FUNCTION dcf() RETURNS dct LANGUAGE sql AS 'SELECT ROW(1, 2)::ct'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "coldef_composite_domain",
+      "sql": "SELECT * FROM dcf() AS d(p int, q int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is redundant for a function returning a named composite type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_unnest_composite",
+      "sql": "SELECT * FROM unnest(ARRAY[ROW(1, 2)::ct]) AS u(p int, q int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is redundant for a function returning a named composite type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_poly_one",
+      "sql": "CREATE FUNCTION poly_one(x anyelement) RETURNS SETOF anyelement LANGUAGE sql AS 'SELECT x'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_poly_set",
+      "sql": "CREATE FUNCTION poly_set(VARIADIC items anyarray) RETURNS SETOF anyelement LANGUAGE sql AS 'SELECT unnest(items)'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_poly_table",
+      "sql": "CREATE FUNCTION poly_table(VARIADIC items anycompatiblearray) RETURNS TABLE (item anycompatible) LANGUAGE sql AS 'SELECT unnest(items)'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "poly_scalar_rows",
+      "sql": "SELECT * FROM poly_one(5)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "poly_one"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "poly_variadic_rows",
+      "sql": "SELECT * FROM poly_set(1::bigint, 2::bigint) AS r(v)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "poly_table_rows",
+      "sql": "SELECT item, pg_typeof(item) FROM poly_table(1::smallint, 2::bigint) ORDER BY item",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "item",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            20,
+            2206
+          ],
+          "rows": [
+            [
+              "1",
+              "bigint"
+            ],
+            [
+              "2",
+              "bigint"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "poly_composite_rows",
+      "sql": "SELECT * FROM poly_one(ROW(1, 2)::ct)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p",
+            "q"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "coldef_poly_scalar",
+      "sql": "SELECT * FROM poly_one(5) AS p(a int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is only allowed for functions returning \"record\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_poly_composite",
+      "sql": "SELECT * FROM poly_one(ROW(1, 2)::ct) AS c(p int, q int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is redundant for a function returning a named composite type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_poly_record_required",
+      "sql": "SELECT * FROM poly_one(ROW(1, 2))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "a column definition list is required for functions returning \"record\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "coldef_poly_record",
+      "sql": "SELECT * FROM poly_one(ROW(1, 2)) AS r(p int, q int)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p",
+            "q"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_regexp_matches",
+      "sql": "SELECT * FROM regexp_matches('abc', 'b', 'z') LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_generate_series",
+      "sql": "SELECT * FROM generate_series(1, 5, 0) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "generate_series"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_regexp_split",
+      "sql": "SELECT * FROM regexp_split_to_table('abc', 'b', 'z') LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_split_to_table"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_rows_from",
+      "sql": "SELECT * FROM ROWS FROM (generate_series(1, 5, 0), regexp_matches('a', 'a', 'z')) WITH ORDINALITY LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "generate_series",
+            "regexp_matches",
+            "ordinality"
+          ],
+          "type_oids": [
+            23,
+            1009,
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_aggregate",
+      "sql": "SELECT count(*) FROM generate_series(1, 5, 0) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_target_list",
+      "sql": "SELECT regexp_matches('abc', 'b', 'z') LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "regexp_matches"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_lateral",
+      "sql": "SELECT * FROM wv, LATERAL generate_series(wv.x, 5, 0) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "generate_series"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_fetched_generate_series",
+      "sql": "SELECT * FROM generate_series(1, 5, 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "step size cannot equal zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "lazy_fetched_regexp_matches",
+      "sql": "SELECT * FROM regexp_matches('abc', 'b', 'z')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid regular expression option: \"z\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "lazy_constant_folded",
+      "sql": "SELECT * FROM unnest(ARRAY[1 / 0]) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "lazy_ordinality",
+      "sql": "SELECT * FROM generate_series(1, 3) WITH ORDINALITY AS g(v, n) LIMIT 2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_rows_from_rows",
+      "sql": "SELECT * FROM ROWS FROM (generate_series(1, 2), regexp_matches('ab', '[ab]', 'g')) WITH ORDINALITY",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "generate_series",
+            "regexp_matches",
+            "ordinality"
+          ],
+          "type_oids": [
+            23,
+            1009,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "{a}",
+              "1"
+            ],
+            [
+              "2",
+              "{b}",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_lateral_rows",
+      "sql": "SELECT wv.x, g FROM wv, LATERAL generate_series(1, wv.x) g ORDER BY 1, 2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "g"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_view",
+      "sql": "CREATE VIEW lazy_view AS SELECT * FROM generate_series(1, 5, 0) AS g(v)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_view_unfetched",
+      "sql": "SELECT * FROM lazy_view LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_view_fetched",
+      "sql": "SELECT * FROM lazy_view",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "step size cannot equal zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_lazy_raise",
+      "sql": "CREATE FUNCTION lazy_raise() RETURNS SETOF int LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'lazy_raise evaluated'; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_lazy_divide",
+      "sql": "CREATE FUNCTION lazy_divide() RETURNS SETOF int LANGUAGE sql AS 'SELECT 1 / 0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_lazy_outs",
+      "sql": "CREATE FUNCTION lazy_outs(OUT a int, OUT b text) RETURNS SETOF record LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'lazy_outs evaluated'; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_lazy_record",
+      "sql": "CREATE FUNCTION lazy_record() RETURNS SETOF record LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'lazy_record evaluated'; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_lazy_composite",
+      "sql": "CREATE FUNCTION lazy_composite() RETURNS SETOF ct LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'lazy_composite evaluated'; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_lazy_scalar",
+      "sql": "CREATE FUNCTION lazy_scalar() RETURNS int LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'lazy_scalar evaluated'; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user",
+      "sql": "SELECT * FROM lazy_raise() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lazy_raise"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_sql",
+      "sql": "SELECT * FROM lazy_divide() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lazy_divide"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_out_parameters",
+      "sql": "SELECT * FROM lazy_outs() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_record",
+      "sql": "SELECT * FROM lazy_record() AS r(p int, q text) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p",
+            "q"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_composite",
+      "sql": "SELECT * FROM lazy_composite() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p",
+            "q"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_scalar",
+      "sql": "SELECT * FROM lazy_scalar() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lazy_scalar"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_ordinality",
+      "sql": "SELECT * FROM lazy_raise() WITH ORDINALITY AS l(v, n) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_rows_from",
+      "sql": "SELECT * FROM ROWS FROM (lazy_raise(), lazy_record() AS (p int, q text), generate_series(1, 2)) WITH ORDINALITY LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lazy_raise",
+            "p",
+            "q",
+            "generate_series",
+            "ordinality"
+          ],
+          "type_oids": [
+            23,
+            23,
+            25,
+            23,
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_aggregate",
+      "sql": "SELECT count(*) FROM lazy_raise() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_fetched",
+      "sql": "SELECT * FROM lazy_raise()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "P0001",
+        "message": "lazy_raise evaluated",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_fetched_sql",
+      "sql": "SELECT * FROM lazy_divide()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_fetched_scalar",
+      "sql": "SELECT * FROM lazy_scalar()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "P0001",
+        "message": "lazy_scalar evaluated",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_view",
+      "sql": "CREATE VIEW lazy_user_view AS SELECT * FROM lazy_raise() AS l(v)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_view_unfetched",
+      "sql": "SELECT * FROM lazy_user_view LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_view_fetched",
+      "sql": "SELECT * FROM lazy_user_view",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "P0001",
+        "message": "lazy_raise evaluated",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_lazy_poly",
+      "sql": "CREATE FUNCTION lazy_poly(x anyelement) RETURNS SETOF anyelement LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'lazy_poly evaluated'; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_polymorphic",
+      "sql": "SELECT * FROM lazy_poly(5) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lazy_poly"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "lazy_user_polymorphic_fetched",
+      "sql": "SELECT * FROM lazy_poly(5)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "P0001",
+        "message": "lazy_poly evaluated",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "user_alias_column",
+      "sql": "SELECT * FROM sf() AS f",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "f"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "user_alias_reference",
+      "sql": "SELECT f, f.f FROM sf() AS f",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "f",
+            "f"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "user_alias_ordinality",
+      "sql": "SELECT * FROM sf() WITH ORDINALITY AS f",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "f",
+            "ordinality"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "user_out_parameter_aliases",
+      "sql": "SELECT * FROM outs() AS o(x)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "user_composite_aliases",
+      "sql": "SELECT * FROM cf() AS c(m)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "q"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "user_rows_from_columns",
+      "sql": "SELECT * FROM ROWS FROM (sf(), rf() AS (p int, q int), outs()) WITH ORDINALITY AS z",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sf",
+            "p",
+            "q",
+            "a",
+            "b",
+            "ordinality"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "2",
+              "1",
+              "2",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_reader",
+      "sql": "CREATE ROLE srf_contexts_reader",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_private",
+      "sql": "CREATE FUNCTION srf_private() RETURNS SETOF int LANGUAGE sql AS 'SELECT 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_private_revoke",
+      "sql": "REVOKE EXECUTE ON FUNCTION srf_private() FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_series_revoke",
+      "sql": "REVOKE EXECUTE ON FUNCTION generate_series(integer, integer) FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_reader_role",
+      "sql": "SET ROLE srf_contexts_reader",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "execute_user_unfetched",
+      "sql": "SELECT * FROM srf_private() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function srf_private",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "execute_builtin_unfetched",
+      "sql": "SELECT * FROM generate_series(1, 2) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function generate_series",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "execute_rows_from_unfetched",
+      "sql": "SELECT * FROM ROWS FROM (generate_series(1, 2), srf_private()) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function generate_series",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "execute_lateral_unfetched",
+      "sql": "SELECT * FROM (SELECT 1) s, LATERAL srf_private() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function srf_private",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "execute_target_list_unfetched",
+      "sql": "SELECT generate_series(1, 2) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function generate_series",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "cleanup_reader",
+      "sql": "RESET ROLE; GRANT EXECUTE ON FUNCTION generate_series(integer, integer) TO PUBLIC; DROP ROLE srf_contexts_reader",
+      "command_tags": [
+        "RESET",
+        "GRANT",
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "setup_overload_series",
+      "sql": "CREATE FUNCTION generate_series(text) RETURNS int LANGUAGE sql AS 'SELECT 42'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_where",
+      "sql": "SELECT 1 AS r WHERE generate_series('x') > 0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_case",
+      "sql": "SELECT CASE WHEN true THEN generate_series('x') END AS r",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_values",
+      "sql": "SELECT * FROM (VALUES (generate_series('x')), (1)) AS v(a)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ],
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_execute",
+      "sql": "EXECUTE p(ARRAY[generate_series('x')::text])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{42}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_call",
+      "sql": "CALL pr(ARRAY[generate_series('x')::text])",
+      "command_tags": [
+        "CALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_from_argument",
+      "sql": "SELECT * FROM generate_series(1, generate_series('x') - 40)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "generate_series"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_builtin_where",
+      "sql": "SELECT 1 AS r WHERE generate_series(1, 2) > 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in WHERE",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "setup_overload_unnest",
+      "sql": "CREATE FUNCTION unnest(text) RETURNS text LANGUAGE sql AS 'SELECT $1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "overload_unnest_where",
+      "sql": "SELECT 1 AS r WHERE unnest('x') = 'x'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "cleanup_overloads",
+      "sql": "DROP FUNCTION generate_series(text); DROP FUNCTION unnest(text)",
+      "command_tags": [
+        "DROP FUNCTION",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_scalar_not_left",
+      "sql": "SELECT generate_series(1,2) IS NOT DISTINCT FROM 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ],
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_scalar_not_right",
+      "sql": "SELECT 1 IS NOT DISTINCT FROM generate_series(1,2)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ],
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_row_set",
+      "sql": "SELECT ROW(generate_series(1,2), 1) IS DISTINCT FROM ROW(1, 1)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ],
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_row_not_set",
+      "sql": "SELECT ROW(generate_series(1,2), 1) IS NOT DISTINCT FROM ROW(1, 1)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ],
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_row_table_set",
+      "sql": "SELECT ROW(a, generate_series(1,2)) IS DISTINCT FROM ROW(b, 1) FROM (VALUES (1,1)) t(a,b)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ],
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_written_not_set",
+      "sql": "SELECT NOT (generate_series(1,2) IS DISTINCT FROM 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of NOT must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "distinct_written_or_set",
+      "sql": "SELECT (ROW(generate_series(1,2), 1) IS DISTINCT FROM ROW(1,1)) OR false",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of OR must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "distinct_written_and_set",
+      "sql": "SELECT (generate_series(1,2) IS NOT DISTINCT FROM 1) AND true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of AND must not return a set",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "distinct_row_short_circuit",
+      "sql": "SELECT ROW(1, 1/0) IS DISTINCT FROM ROW(2, 0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "distinct_row_short_circuit_set",
+      "sql": "SELECT ROW(1, generate_series(1,2)) IS DISTINCT FROM ROW(2,0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_setup",
+      "sql": "CREATE FUNCTION review_one() RETURNS SETOF int LANGUAGE sql AS 'SELECT 1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_fetch",
+      "sql": "SELECT * FROM review_one() AS x(a,b)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 1 columns available but 2 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_unfetched",
+      "sql": "SELECT * FROM review_one() AS x(a,b) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 1 columns available but 2 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_projection",
+      "sql": "SELECT a,b FROM review_one() AS x(a,b)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 1 columns available but 2 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_ordinality",
+      "sql": "SELECT * FROM review_one() WITH ORDINALITY AS x(a,b,c)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 2 columns available but 3 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_lateral",
+      "sql": "SELECT * FROM generate_series(1,1) g, LATERAL review_one() AS x(a,b)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 1 columns available but 2 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_scalar_alias_group",
+      "sql": "SELECT * FROM ROWS FROM(review_one()) AS x(a,b) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"x\" has 1 columns available but 2 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_role",
+      "sql": "CREATE ROLE review_reader",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_plpgsql",
+      "sql": "CREATE FUNCTION review_g() RETURNS int LANGUAGE plpgsql AS 'BEGIN RETURN 1; END'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_sql",
+      "sql": "CREATE FUNCTION review_gs(x int) RETURNS int LANGUAGE sql AS 'SELECT x'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_lateral",
+      "sql": "CREATE FUNCTION review_g2(x int) RETURNS int LANGUAGE plpgsql AS 'BEGIN RETURN x; END'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_revoke_g",
+      "sql": "REVOKE EXECUTE ON FUNCTION review_g() FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_revoke_gs",
+      "sql": "REVOKE EXECUTE ON FUNCTION review_gs(int) FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_revoke_g2",
+      "sql": "REVOKE EXECUTE ON FUNCTION review_g2(int) FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_view_setup",
+      "sql": "CREATE VIEW review_v AS SELECT * FROM generate_series(1,review_g())",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_view_grant",
+      "sql": "GRANT SELECT ON review_v TO review_reader",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_lazy_setup",
+      "sql": "CREATE FUNCTION review_lazy() RETURNS int LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'not fetched'; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_set_role",
+      "sql": "SET ROLE review_reader",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_plpgsql_unfetched",
+      "sql": "SELECT * FROM generate_series(1,review_g()) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_g",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_sql_unfetched",
+      "sql": "SELECT * FROM generate_series(1,review_gs(2)) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_gs",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_view_unfetched",
+      "sql": "SELECT * FROM review_v LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_g",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_lateral_unfetched",
+      "sql": "SELECT * FROM (VALUES (1)) v(x), generate_series(1,review_g2(x)) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_g2",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_group_unfetched",
+      "sql": "SELECT * FROM ROWS FROM(generate_series(1,review_g())) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_g",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_nested_unfetched",
+      "sql": "SELECT * FROM generate_series(1,abs(review_g())) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function review_g",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_lazy_unfetched",
+      "sql": "SELECT * FROM generate_series(1,review_lazy()) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "generate_series"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_privilege_reset_role",
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_jsonb_unknown_input",
+      "sql": "SELECT * FROM jsonb_each('{bad') LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "Token \"bad\" is invalid.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_json_unknown_input",
+      "sql": "SELECT * FROM json_each('{bad') LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "Token \"bad\" is invalid.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_jsonb_array_unknown_input",
+      "sql": "SELECT * FROM jsonb_array_elements('[1,') LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "The input string ended unexpectedly.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_jsonb_keys_unknown_input",
+      "sql": "SELECT * FROM jsonb_object_keys('{\"a\":1') LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "The input string ended unexpectedly.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_record_type_before_setof",
+      "sql": "SELECT * FROM rf() AS (a nosuchtype,b setof int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nosuchtype\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_record_duplicate_column",
+      "sql": "SELECT * FROM rf() AS (a int,a int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column name \"a\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_record_pseudo_type",
+      "sql": "SELECT * FROM rf() AS (a int,b anyelement)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "column \"b\" has pseudo-type anyelement",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_record_duplicate_before_pseudo",
+      "sql": "SELECT * FROM rf() AS (a anyelement,a int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column name \"a\" specified more than once",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_record_nested_unfetched",
+      "sql": "SELECT * FROM rf() AS (a record,b int) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            2249,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_poly_out_setup",
+      "sql": "CREATE FUNCTION review_p(x anyelement,OUT y anyelement) RETURNS SETOF anyelement LANGUAGE sql AS 'SELECT x'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_poly_out_columns",
+      "sql": "SELECT * FROM review_p(ROW(1,2)) AS (a int,b int)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_procedural_record_setup",
+      "sql": "CREATE FUNCTION review_r() RETURNS SETOF record LANGUAGE plpgsql AS 'BEGIN RETURN NEXT ROW(1,2); END'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_procedural_record_width",
+      "sql": "SELECT * FROM review_r() AS (a int)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "returned record type does not match expected record type",
+        "detail": "Number of returned columns (2) does not match expected column count (1).",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_setup",
+      "sql": "CREATE FUNCTION review_plan_set(x int) RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT x/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_limit",
+      "sql": "SELECT * FROM review_plan_set(1) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_exists",
+      "sql": "SELECT EXISTS (SELECT * FROM review_plan_set(1) LIMIT 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_ordinality",
+      "sql": "SELECT * FROM review_plan_set(1) WITH ORDINALITY LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_set",
+            "ordinality"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_group",
+      "sql": "SELECT * FROM ROWS FROM(review_plan_set(1),review_one()) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_set",
+            "review_one"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_table_setup",
+      "sql": "CREATE FUNCTION review_plan_table() RETURNS TABLE(a int) LANGUAGE sql STABLE AS 'SELECT 1/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_table_limit",
+      "sql": "SELECT * FROM review_plan_table() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_atomic_setup",
+      "sql": "CREATE FUNCTION review_plan_atomic() RETURNS SETOF int LANGUAGE sql STABLE BEGIN ATOMIC SELECT 1/0; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_atomic_limit",
+      "sql": "SELECT * FROM review_plan_atomic() LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_scalar_setup",
+      "sql": "CREATE FUNCTION review_plan_scalar(x int) RETURNS int LANGUAGE sql AS 'SELECT x/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_scalar_limit",
+      "sql": "SELECT * FROM review_plan_scalar(1) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_scalar_ordinality",
+      "sql": "SELECT * FROM review_plan_scalar(1) WITH ORDINALITY LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_immutable_setup",
+      "sql": "CREATE FUNCTION review_plan_immutable(x int) RETURNS int IMMUTABLE LANGUAGE plpgsql AS 'BEGIN RETURN x/0; END'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_immutable_limit",
+      "sql": "SELECT * FROM review_plan_immutable(1) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_argument_limit",
+      "sql": "SELECT * FROM generate_series(1,review_plan_immutable(1)) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_volatile_setup",
+      "sql": "CREATE FUNCTION review_plan_volatile() RETURNS SETOF int LANGUAGE sql VOLATILE AS 'SELECT 1/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_volatile_limit",
+      "sql": "SELECT * FROM review_plan_volatile() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_volatile"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_strict_setup",
+      "sql": "CREATE FUNCTION review_plan_strict(x int) RETURNS SETOF int LANGUAGE sql STABLE STRICT AS 'SELECT x/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_strict_limit",
+      "sql": "SELECT * FROM review_plan_strict(1) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_strict"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_definer_setup",
+      "sql": "CREATE FUNCTION review_plan_definer() RETURNS SETOF int LANGUAGE sql STABLE SECURITY DEFINER AS 'SELECT 1/0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_definer_limit",
+      "sql": "SELECT * FROM review_plan_definer() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_definer"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_identity_setup",
+      "sql": "CREATE FUNCTION review_plan_identity(x int) RETURNS int LANGUAGE sql AS 'SELECT x+1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_identity_value",
+      "sql": "SELECT f.a,f.b FROM review_plan_identity(2) WITH ORDINALITY AS f(a,b)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_identity_null",
+      "sql": "SELECT * FROM review_plan_identity(NULL::int) AS f(a)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_rows_setup",
+      "sql": "CREATE FUNCTION review_plan_rows(x int) RETURNS TABLE(a int,b text) LANGUAGE sql STABLE AS 'SELECT x,v FROM (VALUES (''a''),(''b'')) t(v)'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_rows_value",
+      "sql": "SELECT * FROM review_plan_rows(2) AS f(n,s) ORDER BY s",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "a"
+            ],
+            [
+              "2",
+              "b"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_cast_setup",
+      "sql": "CREATE FUNCTION review_plan_cast(x int) RETURNS SETOF bigint LANGUAGE sql STABLE AS 'SELECT x'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_cast_value",
+      "sql": "SELECT * FROM review_plan_cast(4) AS f(n)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_json_expected_array",
+      "sql": "SELECT '[1,]'::json",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "Expected JSON value, but found \"]\".",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_json_expected_colon",
+      "sql": "SELECT '{\"a\" 1}'::jsonb",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "Expected \":\", but found \"1\".",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_json_invalid_keyword",
+      "sql": "SELECT '[nope]'::json",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type json",
+        "detail": "Token \"nope\" is invalid.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_setup",
+      "sql": "CREATE SEQUENCE review_plan_sequence",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_next_setup",
+      "sql": "CREATE FUNCTION review_plan_next() RETURNS bigint LANGUAGE sql AS $$SELECT nextval('review_plan_sequence')$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_next_unfetched",
+      "sql": "SELECT * FROM review_plan_next() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_next_unfetched_state",
+      "sql": "SELECT last_value,is_called FROM review_plan_sequence",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_next_first",
+      "sql": "SELECT * FROM review_plan_next()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_next_second",
+      "sql": "SELECT * FROM review_plan_next()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_identity_lateral",
+      "sql": "SELECT f.a FROM (VALUES (1),(2)) t(x), review_plan_identity(x) AS f(a) ORDER BY a",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_lateral_setup",
+      "sql": "CREATE FUNCTION review_plan_add(x int) RETURNS SETOF int LANGUAGE sql STABLE AS 'SELECT x+1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_set_lateral",
+      "sql": "SELECT f.a FROM (VALUES (1),(2)) t(x), review_plan_add(x) AS f(a) ORDER BY a",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_set_setup",
+      "sql": "CREATE FUNCTION review_plan_sequence_set() RETURNS SETOF bigint LANGUAGE sql STABLE AS $$SELECT nextval('review_plan_sequence')$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_set_unfetched",
+      "sql": "SELECT * FROM review_plan_sequence_set() LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_sequence_set"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_set_state",
+      "sql": "SELECT last_value,is_called FROM review_plan_sequence",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "2",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_set_first",
+      "sql": "SELECT * FROM review_plan_sequence_set()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_sequence_set"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_sequence_set_second",
+      "sql": "SELECT * FROM review_plan_sequence_set()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "review_plan_sequence_set"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_cast_source_alias",
+      "sql": "SELECT * FROM review_plan_cast(4) AS scalar_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "scalar_name"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_cast_named_column",
+      "sql": "SELECT scalar_name FROM review_plan_cast(4) AS scalar_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "scalar_name"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "review_plan_cast_qualified_column",
+      "sql": "SELECT scalar_name.scalar_name FROM review_plan_cast(4) AS scalar_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "scalar_name"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

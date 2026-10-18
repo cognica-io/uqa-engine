@@ -127,6 +127,9 @@ impl Preparation<'_> {
         right: &ScalarExpr,
         input: &RowSchema,
     ) -> Result<(), SQLError> {
+        if !crate::semantics::sets::placement_scope::placing_set_calls() {
+            return Ok(());
+        }
         let params = self.parameters.values();
         for operand in [left, right] {
             if crate::semantics::sets::validation::expression_may_return_set(
@@ -136,10 +139,7 @@ impl Preparation<'_> {
                 input,
                 &params,
             )? {
-                return Err(super::parameters::error(
-                    "42804",
-                    "argument of IN must not return a set".into(),
-                ));
+                return Err(crate::semantics::sets::placement::set_argument_error("IN"));
             }
         }
         Ok(())

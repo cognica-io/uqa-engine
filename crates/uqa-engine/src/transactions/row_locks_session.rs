@@ -55,6 +55,20 @@ impl Engine {
         self.row_write_transaction(table, Some((doc_id, strength)), true, f)
     }
 
+    /// Run a typed row write whose generated columns and expression-index keys evaluate SQL expressions. The evaluation runs under the session's statement thread context, entered inside the row-write transaction so its transaction clock is the start of any implicit transaction the write opens.
+    pub(crate) fn with_evaluating_row_write_transaction<R>(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+        strength: uqa_sql::ast::LockStrength,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        self.with_implicit_row_write_transaction(table, doc_id, strength, |engine| {
+            let _statement_thread = engine.statement_thread_context().enter();
+            f(engine)
+        })
+    }
+
     /// Run the write of an inserted row. One that may replace a row locks it as any typed row mutation does.
     ///
     /// A new row takes no lock of its own. No other transaction can address its identity before this one commits: a supplied identity is a unique key whose value this transaction has reserved, a generated one was reserved for the row, and a versioned transaction keeps the row private until it commits. `PostgreSQL` likewise locks no tuple it inserts and makes no session wait for a row that session cannot see. The row may still be written over the revision a deleted row left, which the write must expect as it stands now, so the storage target is refreshed unless the identity was never used.

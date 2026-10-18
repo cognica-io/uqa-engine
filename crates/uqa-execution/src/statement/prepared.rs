@@ -28,10 +28,12 @@ pub struct PreparedRegistrationContext<'a> {
     pub analysis: PreparedDefinitionContext<'a>,
     pub aggregates: &'a dyn AggregateClassifier,
     pub registry: &'a dyn PreparedDefinitionRegistry,
-    /// The session's active transaction clock, including direct host registration.
+    /// The session's active transaction clock, including direct host registration; `None` keeps the caller's clock.
     pub transaction_timestamp_micros: Option<i64>,
     pub date_order: Option<uqa_core::TemporalDateOrder>,
     pub interval_style: Option<uqa_core::TemporalIntervalStyle>,
+    /// The session's cancellation, which the definition's analysis observes.
+    pub cancellation: &'a uqa_core::CancellationToken,
     pub clock: fn() -> i64,
 }
 
@@ -51,14 +53,19 @@ pub fn register_plan(
     declared: &[ColumnType],
     source_sql: Option<&str>,
 ) -> Result<(), SQLError> {
-    let _temporal_input = uqa_sql::expr::TemporalInputContext {
-        transaction_clock_micros: context.transaction_timestamp_micros,
-        interval_style: context
-            .interval_style
-            .unwrap_or_else(uqa_sql::expr::temporal_interval_style),
-        date_order: context
-            .date_order
-            .unwrap_or_else(uqa_sql::expr::temporal_date_order),
+    let _statement_thread = super::thread_context::StatementThreadContext {
+        temporal_input: uqa_sql::expr::TemporalInputContext {
+            transaction_clock_micros: context
+                .transaction_timestamp_micros
+                .or_else(uqa_sql::expr::transaction_clock_micros),
+            interval_style: context
+                .interval_style
+                .unwrap_or_else(uqa_sql::expr::temporal_interval_style),
+            date_order: context
+                .date_order
+                .unwrap_or_else(uqa_sql::expr::temporal_date_order),
+        },
+        cancellation: Some(context.cancellation.clone()),
     }
     .enter();
     let source_plan = Arc::new(logical_plan.clone());

@@ -622,7 +622,9 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                 }
                 return inline(ColumnType::Boolean, control);
             }
-            FunctionDispatch::ValueNullTest { .. } => return inline(ColumnType::Boolean, control),
+            FunctionDispatch::ValueNullTest { .. }
+            | FunctionDispatch::DistinctNot
+            | FunctionDispatch::RowDistinct => return inline(ColumnType::Boolean, control),
             FunctionDispatch::BooleanTest(test) => {
                 super::super::boolean::require_argument_type(effective(0), test.label(), resolver)?;
                 return inline(ColumnType::Boolean, control);
@@ -711,7 +713,6 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "left"
         | "right"
         | "chr"
-        | "regexp_replace"
         | "lpad"
         | "rpad"
         | "repeat"
@@ -723,7 +724,6 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "quote_ident"
         | "quote_literal"
         | "quote_nullable"
-        | "regexp_substr"
         | "array_to_string"
         | "json_typeof"
         | "jsonb_typeof"
@@ -734,7 +734,6 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "set_config"
         | "merge_action"
         | "string_to_table"
-        | "regexp_split_to_table"
         | "json_object_keys"
         | "jsonb_object_keys"
         | "json_array_elements_text"
@@ -844,11 +843,11 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             |ty| matches!(base_type(ty), ColumnType::Boolean).then_some(ColumnType::Boolean),
             control,
         ),
-        "starts_with" | "like" | "ilike" | "similar_to" | "regexp_like" | "regex_match_op"
-        | "regex_imatch_op" | "isfinite" | "json_contains" | "json_contained_by"
-        | "json_has_key" | "json_has_any_key" | "json_has_all_keys" | "jsonb_path_exists"
-        | "jsonpath_exists" | "jsonb_path_match" | "jsonpath_match" | "array_overlap"
-        | "st_within" | "st_dwithin" | "overlaps" => inline(ColumnType::Boolean, control),
+        "starts_with" | "like" | "ilike" | "similar_to" | "regex_match_op" | "regex_imatch_op"
+        | "isfinite" | "json_contains" | "json_contained_by" | "json_has_key"
+        | "json_has_any_key" | "json_has_all_keys" | "jsonb_path_exists" | "jsonpath_exists"
+        | "jsonb_path_match" | "jsonpath_match" | "array_overlap" | "st_within" | "st_dwithin"
+        | "overlaps" => inline(ColumnType::Boolean, control),
         "coalesce" | "greatest" | "least" => common_argument_type(
             crate::type_resolution::CommonTypeContext::function(name)
                 .unwrap_or(crate::type_resolution::CommonTypeContext::Coalesce),
@@ -858,9 +857,10 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         ),
         // An `unknown` operand selects the other operand's `||` as `oper_select_candidate` does, so it is typed by its parser identity rather than by its string value.
         "concat_op" => concat_type(effective(0), effective(1), control),
-        "ntile" | "position" | "strpos" | "ascii" | "width_bucket" | "regexp_count"
-        | "regexp_instr" | "num_nulls" | "num_nonnulls" | "array_position"
-        | "json_array_length" | "jsonb_array_length" => inline(ColumnType::Integer, control),
+        "ntile" | "position" | "strpos" | "ascii" | "width_bucket" | "num_nulls"
+        | "num_nonnulls" | "array_position" | "json_array_length" | "jsonb_array_length" => {
+            inline(ColumnType::Integer, control)
+        }
         "abs" => copy(first().map(base_type), control),
         "round" | "trunc" | "ceil" | "ceiling" | "floor" | "sign" => {
             optional_inline(first().map(numeric_unary_result_type), control)
@@ -874,9 +874,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "exp" | "log2" | "degrees" | "radians" | "pi" | "st_distance" | "date_part" => {
             inline(ColumnType::DoublePrecision, control)
         }
-        "regexp_match" | "regexp_matches" | "string_to_array" => {
-            array(Some(&ColumnType::Text), control)
-        }
+        "string_to_array" => array(Some(&ColumnType::Text), control),
         "array_positions" => array(Some(&ColumnType::Integer), control),
         "decode" => inline(ColumnType::Bytea, control),
         "array_fill" => array(first(), control),

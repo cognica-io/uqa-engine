@@ -15,7 +15,9 @@ use super::ordering::{
 use super::{build_set_projection, RelationalContext, RelationalResjunk};
 use crate::query::projection::{physical_projections, physical_work_mem_bytes};
 use crate::query::CteScope;
-use crate::window::{prepare_window_plan, PhysicalWindowExecutor, PreparedWindowPlan};
+use crate::window::{
+    prepare_window_plan, read_set_returning_keys, PhysicalWindowExecutor, PreparedWindowPlan,
+};
 use crate::{ColumnSelection, PhysicalOperator, Project, RowSchema, Window};
 use std::sync::Arc;
 use uqa_sql::plan::QueryBlockPlan;
@@ -23,13 +25,44 @@ use uqa_sql::semantics::sets::validation::projections_may_return_set;
 use uqa_sql::{FunctionTypeResolver, SQLError, SQLParam, ScalarExpr};
 
 pub(super) fn attach_window_output<'a, S: Clone + 'static>(
-    operator: Box<dyn PhysicalOperator + 'a>,
+    mut operator: Box<dyn PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     resjunk: &mut RelationalResjunk,
     type_resolver: &dyn FunctionTypeResolver,
     execution: FinalProjectionExecution<'a, '_, S>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-    let plan = prepare_window_plan(&statement.projections);
+    let mut plan = prepare_window_plan(&statement.projections);
+    let input = operator.row_schema().clone();
+    let keys = plan.take_set_returning_keys(&mut |expression| {
+        uqa_sql::semantics::sets::validation::expression_may_return_set(
+            execution.context.catalog,
+            type_resolver,
+            expression,
+            &input,
+            execution.params,
+        )
+    })?;
+    if !keys.is_empty() {
+        // Set-returning partition and ordering keys expand the input rows before the windows see them.
+        operator = build_set_projection(
+            operator,
+            execution.context,
+            execution.params,
+            execution.ctes,
+            Arc::clone(&execution.evaluator),
+            crate::query::set_projection::SetProjectionOutput {
+                projections: keys
+                    .iter()
+                    .cloned()
+                    .map(|(column, expression)| {
+                        (crate::ProjectionTarget::Internal(column), expression)
+                    })
+                    .collect(),
+                pass_through: true,
+                batch_size: crate::DEFAULT_BATCH_SIZE,
+            },
+        )?;
+    }
     let window = WindowOutput {
         work_mem_bytes: physical_work_mem_bytes(execution.runtime)?,
         schema: plan.output_schema(
@@ -38,6 +71,7 @@ pub(super) fn attach_window_output<'a, S: Clone + 'static>(
             execution.params,
         )?,
         plan,
+        keys,
     };
     if statement.order_by.is_empty() {
         attach_unordered_output(operator, statement, resjunk, window, execution)
@@ -58,6 +92,17 @@ struct WindowOutput {
     plan: PreparedWindowPlan,
     schema: RowSchema,
     work_mem_bytes: usize,
+    /// The set-returning partition and ordering keys that the input expands, which expressions evaluated above the window read instead of calling them again.
+    keys: Vec<(uqa_sql::ast::InternalColumnRef, ScalarExpr)>,
+}
+
+impl WindowOutput {
+    /// Make the projections above the window, including the `DISTINCT ON` and `ORDER BY` expressions appended to them, read the set-returning keys they repeat.
+    fn read_keys(&self, projections: &mut [crate::query::PhysicalProjection]) {
+        for (_, expression) in projections {
+            read_set_returning_keys(expression, &self.keys);
+        }
+    }
 }
 
 /// Without `ORDER BY`, the target list replaces each row as the window results arrive.
@@ -80,6 +125,7 @@ fn attach_unordered_output<'a, S: Clone + 'static>(
         &output_columns,
         &mut projections,
     )?);
+    window.read_keys(&mut projections);
     operator = window_operator(
         operator,
         window,
@@ -126,6 +172,7 @@ fn attach_ordered_output<'a, S: Clone + 'static>(
         params,
     )?;
     resjunk.order_by.extend(order_columns);
+    window.read_keys(&mut physical);
     let order_statement = order_statement.as_ref().unwrap_or(statement);
     operator = window_operator(operator, window, (context, params, ctes));
     if ctes.streams_command_progress() {

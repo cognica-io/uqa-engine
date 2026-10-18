@@ -291,3 +291,36 @@ fn read_only_visits_reach_every_expression_of_a_command() {
 }
 
 mod assignment_targets;
+
+#[test]
+fn source_visitors_cover_retained_queries_and_data_modifying_ctes() {
+    for sql in [
+        "CREATE VIEW v AS SELECT * FROM generate_series(1,2)",
+        "CREATE TABLE t AS SELECT * FROM generate_series(1,2)",
+        "CREATE MATERIALIZED VIEW v AS SELECT * FROM generate_series(1,2)",
+        "DECLARE c CURSOR FOR SELECT * FROM generate_series(1,2)",
+        "PREPARE p AS SELECT * FROM generate_series(1,2)",
+        "EXPLAIN SELECT * FROM generate_series(1,2)",
+        "WITH x AS (INSERT INTO t SELECT * FROM generate_series(1,2) RETURNING *) SELECT * FROM x",
+        "UPDATE t SET a=1 FROM generate_series(1,2)",
+        "DELETE FROM t USING generate_series(1,2)",
+        "SELECT EXISTS (SELECT * FROM generate_series(1,2))",
+    ] {
+        let mut plan = one(sql);
+        let mut functions = 0;
+        plan.visit_sources(&mut |source| {
+            functions += usize::from(matches!(source, SourcePlan::Function { .. }));
+        });
+        assert_eq!(functions, 1, "{sql}");
+        plan.visit_sources_mut(&mut |source| {
+            if let SourcePlan::Function { alias, .. } = source {
+                *alias = Some("retained".into());
+            }
+        });
+        plan.visit_sources(&mut |source| {
+            if let SourcePlan::Function { alias, .. } = source {
+                assert_eq!(alias.as_deref(), Some("retained"), "{sql}");
+            }
+        });
+    }
+}

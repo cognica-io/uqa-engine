@@ -11,8 +11,8 @@ use super::{
     dispatch::build_table_function_rows_with_row,
     registered_table_function_row_stream,
     values::{
-        generate_series_values, json_array_values, json_each_row_stream, json_object_key_values,
-        regexp_split_values, string_to_table_values, unnest_row_stream,
+        generate_series_values, json_array_values, json_each_rows, json_object_key_values,
+        string_to_table_values, unnest_rows,
     },
     TableFunctionCall, TableFunctionRows,
 };
@@ -49,12 +49,9 @@ pub fn build_table_function_row_stream_with_row(
     if !ordinality {
         return Ok(output);
     }
-    output.columns.push(
-        call.column_aliases
-            .get(output.columns.len())
-            .cloned()
-            .unwrap_or_else(|| "ordinality".into()),
-    );
+    output
+        .columns
+        .push(ordinality_column(&call, output.columns.len()));
     let mut next = Some(1_i64);
     output.rows = Box::new(output.rows.map(move |row| {
         let row = row?;
@@ -70,136 +67,128 @@ pub fn build_table_function_row_stream_with_row(
     Ok(output)
 }
 
+/// The output columns of a built-in set-returning call, including its ordinality column. They follow from the call's name, aliases and argument count, never from argument values, so a FROM item can describe its rows before it evaluates the call, as `PostgreSQL` does until the first row is requested. `None` for a function whose columns only its result reveals.
+pub fn deferred_table_function_columns(
+    call: &TableFunctionCall<'_>,
+) -> Option<Result<Vec<String>, SQLError>> {
+    let lower = streaming_builtin(call)?;
+    Some(builtin_value_columns(&lower, call).map(|mut columns| {
+        if call.ordinality {
+            let column = ordinality_column(call, columns.len());
+            columns.push(column);
+        }
+        columns
+    }))
+}
+
+fn ordinality_column(call: &TableFunctionCall<'_>, position: usize) -> String {
+    call.column_aliases
+        .get(position)
+        .cloned()
+        .unwrap_or_else(|| "ordinality".into())
+}
+
+/// The dispatch name of a built-in set-returning function that this module streams.
+fn streaming_builtin(call: &TableFunctionCall<'_>) -> Option<String> {
+    if call.binding.is_some_and(|binding| !binding.builtin) {
+        return None;
+    }
+    let lower = uqa_sql::semantics::builtin_function_dispatch_name(&call.name.to_ascii_lowercase());
+    matches!(
+        lower.as_str(),
+        "generate_series"
+            | "pg_listening_channels"
+            | "unnest"
+            | "regexp_matches"
+            | "regexp_split_to_table"
+            | "string_to_table"
+            | "json_array_elements"
+            | "jsonb_array_elements"
+            | "json_array_elements_text"
+            | "jsonb_array_elements_text"
+            | "json_object_keys"
+            | "jsonb_object_keys"
+            | "json_each"
+            | "jsonb_each"
+            | "json_each_text"
+            | "jsonb_each_text"
+            | "aclexplode"
+    )
+    .then_some(lower)
+}
+
+/// The value columns of a streaming built-in, before any ordinality column.
+fn builtin_value_columns(
+    lower: &str,
+    call: &TableFunctionCall<'_>,
+) -> Result<Vec<String>, SQLError> {
+    Ok(match lower {
+        "unnest" => {
+            let aliases = if call.ordinality {
+                &call.column_aliases[..call.column_aliases.len().min(call.args.len())]
+            } else {
+                call.column_aliases
+            };
+            if call.args.is_empty() || aliases.len() > call.args.len() {
+                return Err(SQLError::BadArity {
+                    name: "unnest".into(),
+                    expected: "one output alias per array argument".into(),
+                    actual: call.args.len(),
+                });
+            }
+            uqa_sql::semantics::table_function_empty_schema(
+                "unnest",
+                call.output_name,
+                call.alias,
+                aliases,
+                call.args.len(),
+                false,
+            )
+        }
+        "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => vec![
+            call.column_aliases
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "key".into()),
+            call.column_aliases
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| "value".into()),
+        ],
+        "aclexplode" => super::acl::aclexplode_columns(call.column_aliases),
+        _ => vec![scalar_table_function_default_column(
+            lower,
+            call.output_name,
+            call.alias,
+            call.column_aliases,
+        )],
+    })
+}
+
 #[allow(clippy::similar_names)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves source schema and row identity"
-)]
 fn build_table_function_value_row_stream_with_row(
     context: &TableFunctionContext<'_>,
     call: TableFunctionCall<'_>,
     row: Option<&crate::OwnedPhysicalRow>,
 ) -> Result<TableFunctionRows, SQLError> {
+    if let Some(lower) = streaming_builtin(&call) {
+        let columns = builtin_value_columns(&lower, &call)?;
+        let evaluated = evaluate_builtin_arguments(context, &call, &lower, row)?;
+        // The regular-expression functions read the call's input collation, `PostgreSQL`'s `inputcollid`.
+        let collation = uqa_sql::ast::FunctionBinding::selected_input_collation(call.binding);
+        let rows = builtin_value_rows(context, &lower, evaluated, collation, &columns)?;
+        return Ok(TableFunctionRows::new(columns, rows));
+    }
     let TableFunctionCall {
         name,
         binding,
-        output_name,
-        args,
         alias,
         column_aliases,
-        ordinality,
+        args,
         ..
     } = call;
     let identity = name.to_ascii_lowercase();
     let lower = uqa_sql::semantics::builtin_function_dispatch_name(&identity);
-    if binding.is_none_or(|binding| binding.builtin)
-        && matches!(
-            lower.as_str(),
-            "generate_series"
-                | "pg_listening_channels"
-                | "unnest"
-                | "regexp_split_to_table"
-                | "string_to_table"
-                | "json_array_elements"
-                | "jsonb_array_elements"
-                | "json_array_elements_text"
-                | "jsonb_array_elements_text"
-                | "json_object_keys"
-                | "jsonb_object_keys"
-                | "json_each"
-                | "jsonb_each"
-                | "json_each_text"
-                | "jsonb_each_text"
-                | "aclexplode"
-        )
-    {
-        let subquery_arena =
-            PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
-        let scalar_context = match row {
-            Some(row) => ScalarEvalContext::from_row_lookup(row, context.params)
-                .with_physical_outer_row(&row.schema, &row.row),
-            None => ScalarEvalContext::new(None, context.params),
-        };
-        let mut scalar_context = scalar_context
-            .with_function_hook(context.eval_hook)
-            .with_subquery_runner(&subquery_arena);
-        if let Some(states) = call.function_states {
-            scalar_context = scalar_context.with_function_states(states);
-        }
-        // Arguments bind like any other expression: catalog-typed calls such as `enum_range(NULL::mood)` select their operation from declared types.
-        let empty = crate::RowSchema::default();
-        let schema = row.map_or(&empty, |row| &row.schema);
-        let bound = call.function_states.is_none().then(|| {
-            args.iter()
-                .map(|argument| {
-                    uqa_sql::bind_type_introspection_with_resolver(
-                        argument.clone(),
-                        schema,
-                        context.params,
-                        context.resolver,
-                    )
-                })
-                .collect::<Vec<_>>()
-        });
-        let call_args = eval_call_arguments(bound.as_deref().unwrap_or(args), &scalar_context)?;
-        if call_args.iter().any(|(name, _)| name.is_some()) {
-            return Err(uqa_sql::expr::unknown_function_error(&lower, &call_args));
-        }
-        let evaluated: Vec<Value> = call_args.into_iter().map(|(_, value)| value).collect();
-        if lower == "unnest" {
-            let aliases = if ordinality {
-                &column_aliases[..column_aliases.len().min(evaluated.len())]
-            } else {
-                column_aliases
-            };
-            return unnest_row_stream(evaluated, output_name, alias, aliases);
-        }
-        let default_col =
-            scalar_table_function_default_column(&lower, output_name, alias, column_aliases);
-
-        let values: Box<dyn Iterator<Item = Value> + Send> = match lower.as_str() {
-            "pg_listening_channels" => {
-                uqa_sql::semantics::table_function_arguments::require_no_arguments(
-                    &lower, &evaluated,
-                )?;
-                Box::new(
-                    context
-                        .session
-                        .listening_channels()
-                        .into_iter()
-                        .map(Value::Str),
-                )
-            }
-            "generate_series" => generate_series_values(evaluated)?,
-            "regexp_split_to_table" => regexp_split_values(evaluated)?,
-            "string_to_table" => string_to_table_values(evaluated)?,
-            "json_array_elements"
-            | "jsonb_array_elements"
-            | "json_array_elements_text"
-            | "jsonb_array_elements_text" => json_array_values(&lower, evaluated)?,
-            "json_object_keys" | "jsonb_object_keys" => json_object_key_values(&lower, evaluated)?,
-            "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
-                return json_each_row_stream(&lower, evaluated, alias, column_aliases);
-            }
-            "aclexplode" => {
-                return super::acl::aclexplode_row_stream(
-                    &|name| context.session.role_oid(name),
-                    evaluated,
-                    column_aliases,
-                );
-            }
-            _ => {
-                return Err(SQLError::Internal(format!(
-                    "streaming table function `{lower}` reached an unsupported dispatch branch"
-                )));
-            }
-        };
-        return Ok(TableFunctionRows::new(
-            vec![default_col],
-            Box::new(values.map(|value| Ok(crate::PhysicalRow::from_values(vec![value])))),
-        ));
-    }
-
     if binding.is_none_or(|binding| binding.builtin)
         && context.runtime.has_table_function(&identity)
     {
@@ -234,4 +223,114 @@ fn build_table_function_value_row_stream_with_row(
     }
 
     build_table_function_rows_with_row(context, call, row)
+}
+
+/// Evaluate a streaming built-in's arguments in its caller's row scope, placing named arguments at their declared positions as a scalar call does.
+fn evaluate_builtin_arguments(
+    context: &TableFunctionContext<'_>,
+    call: &TableFunctionCall<'_>,
+    lower: &str,
+    row: Option<&crate::OwnedPhysicalRow>,
+) -> Result<Vec<Value>, SQLError> {
+    let subquery_arena = PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
+    let scalar_context = match row {
+        Some(row) => ScalarEvalContext::from_row_lookup(row, context.params)
+            .with_physical_outer_row(&row.schema, &row.row),
+        None => ScalarEvalContext::new(None, context.params),
+    };
+    let mut scalar_context = scalar_context
+        .with_function_hook(context.eval_hook)
+        .with_subquery_runner(&subquery_arena);
+    if let Some(states) = call.function_states {
+        scalar_context = scalar_context.with_function_states(states);
+    }
+    // Arguments bind like any other expression: catalog-typed calls such as `enum_range(NULL::mood)` select their operation from declared types.
+    let empty = crate::RowSchema::default();
+    let schema = row.map_or(&empty, |row| &row.schema);
+    let bound = call.function_states.is_none().then(|| {
+        call.args
+            .iter()
+            .map(|argument| {
+                uqa_sql::bind_type_introspection_with_resolver(
+                    argument.clone(),
+                    schema,
+                    context.params,
+                    context.resolver,
+                )
+            })
+            .collect::<Vec<_>>()
+    });
+    let call_args = eval_call_arguments(bound.as_deref().unwrap_or(call.args), &scalar_context)?;
+    // Named arguments take their declared positions as in a scalar call; a function without such a signature is undefined.
+    if call_args.iter().any(|(name, _)| name.is_some()) {
+        return Ok(uqa_sql::expr::builtin_named_args(
+            lower,
+            &call_args,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .ok_or_else(|| uqa_sql::expr::unknown_function_error(lower, &call_args))?
+        .into_parts()
+        .0);
+    }
+    Ok(call_args.into_iter().map(|(_, value)| value).collect())
+}
+
+/// The rows of a streaming built-in over its evaluated arguments and input collation, in the layout `columns` names.
+fn builtin_value_rows(
+    context: &TableFunctionContext<'_>,
+    lower: &str,
+    evaluated: Vec<Value>,
+    collation: u32,
+    columns: &[String],
+) -> Result<crate::PhysicalProjectRows, SQLError> {
+    let values: Box<dyn Iterator<Item = Value> + Send> = match lower {
+        "unnest" => return unnest_rows(evaluated),
+        "pg_listening_channels" => {
+            uqa_sql::semantics::table_function_arguments::require_no_arguments(lower, &evaluated)?;
+            Box::new(
+                context
+                    .session
+                    .listening_channels()
+                    .into_iter()
+                    .map(Value::Str),
+            )
+        }
+        "generate_series" => generate_series_values(evaluated)?,
+        "regexp_matches" => {
+            return super::regular_expressions::regexp_matches_row_stream(
+                &evaluated,
+                collation,
+                columns[0].clone(),
+            )
+            .map(|output| output.rows);
+        }
+        "regexp_split_to_table" => {
+            return super::regular_expressions::regexp_split_to_table_row_stream(
+                &evaluated,
+                collation,
+                columns[0].clone(),
+            )
+            .map(|output| output.rows);
+        }
+        "string_to_table" => string_to_table_values(evaluated)?,
+        "json_array_elements"
+        | "jsonb_array_elements"
+        | "json_array_elements_text"
+        | "jsonb_array_elements_text" => json_array_values(lower, evaluated)?,
+        "json_object_keys" | "jsonb_object_keys" => json_object_key_values(lower, evaluated)?,
+        "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
+            return json_each_rows(lower, evaluated);
+        }
+        "aclexplode" => {
+            return super::acl::aclexplode_rows(&|name| context.session.role_oid(name), evaluated);
+        }
+        _ => {
+            return Err(SQLError::Internal(format!(
+                "streaming table function `{lower}` reached an unsupported dispatch branch"
+            )));
+        }
+    };
+    Ok(Box::new(values.map(|value| {
+        Ok(crate::PhysicalRow::from_values(vec![value]))
+    })))
 }

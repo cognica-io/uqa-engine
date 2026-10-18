@@ -93,6 +93,43 @@ impl PreparedWindowPlan {
         &self.projections
     }
 
+    /// Move every partition or ordering key that `returns_set` classifies as set-returning into an internal column the input must supply, and return those keys in first-use order. A window's PARTITION BY and ORDER BY are processed like a target list, so `PostgreSQL` evaluates their set-returning calls in a projection below the window, which expands its input rows; identical keys share one column. Every target-list subexpression equal to a key then reads the key's column, as `set_plan_references` makes an upper target list read an equal lower output, so a call that the target list repeats is evaluated once instead of expanding the rows again.
+    pub fn take_set_returning_keys(
+        &mut self,
+        returns_set: &mut dyn FnMut(&ScalarExpr) -> Result<bool, SQLError>,
+    ) -> Result<Vec<(uqa_sql::ast::InternalColumnRef, ScalarExpr)>, SQLError> {
+        let relation = uqa_sql::ast::InternalRelationId::allocate();
+        let mut keys: Vec<(uqa_sql::ast::InternalColumnRef, ScalarExpr)> = Vec::new();
+        for pass in &mut self.passes {
+            let expressions = pass
+                .partition_by
+                .iter_mut()
+                .chain(pass.order_by.iter_mut().map(|order| &mut order.expr));
+            for expression in expressions {
+                if !returns_set(expression)? {
+                    continue;
+                }
+                let column = match keys.iter().find(|(_, key)| key == expression) {
+                    Some((column, _)) => *column,
+                    None => {
+                        let column = relation.column(keys.len());
+                        keys.push((column, expression.clone()));
+                        column
+                    }
+                };
+                *expression = ScalarExpr::InternalColumn(column);
+            }
+            for slot in &mut pass.slots {
+                slot.spec.partition_by.clone_from(&pass.partition_by);
+                slot.spec.order_by.clone_from(&pass.order_by);
+            }
+        }
+        for projection in &mut self.projections {
+            read_set_returning_keys(&mut projection.expr, &keys);
+        }
+        Ok(keys)
+    }
+
     /// The input schema with one internal column per window call, in pass order.
     pub fn output_schema(
         &self,
@@ -107,6 +144,21 @@ impl PreparedWindowPlan {
         }
         Ok(schema)
     }
+}
+
+/// Make every subexpression of `expression` equal to one of the set-returning window `keys` read that key's internal column. The visit is pre-order, so a repeated call is replaced as a whole before its arguments are visited.
+pub fn read_set_returning_keys(
+    expression: &mut ScalarExpr,
+    keys: &[(uqa_sql::ast::InternalColumnRef, ScalarExpr)],
+) {
+    if keys.is_empty() {
+        return;
+    }
+    expression.visit_mut(&mut |node| {
+        if let Some((column, _)) = keys.iter().find(|(_, key)| key == node) {
+            *node = ScalarExpr::InternalColumn(*column);
+        }
+    });
 }
 
 pub struct PhysicalWindowExecutor<'a> {

@@ -4,17 +4,21 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `information_schema.routines`: built-in catalog routines, registered operator functions and stored SQL routines.
+//! `information_schema.routines`: built-in catalog routines, registered operator functions and stored SQL routines, as `PostgreSQL` 18's view derives them from `pg_proc`, `pg_type` and the routine's owner and `EXECUTE` privilege.
 
 use super::super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 use super::super::helpers::oids::split_schema_name;
 use super::super::helpers::rows::{catalog_name, row, str_value};
-use super::super::helpers::type_metadata::{catalog_regtype_name, catalog_type_name};
-use super::super::pg_proc::user_routine_catalog_oid;
+use super::super::pg_proc::{routine_result_type_oid, user_routine_catalog_oid};
+use super::super::regtypes::AliasConstantOutput;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_core::Value;
+use uqa_sql::ast::RoleAttribute;
+use uqa_sql::ast::RoutineAclEntry;
 use uqa_sql::catalog::languages::SQL_LANGUAGE;
+use uqa_sql::catalog::roles::{identity::RoleSubject, RoleIdentity, RoleReference};
 use uqa_sql::registry::registered_names;
+use uqa_sql::routines::security::{bound_routine_owner, routine_privilege_allowed};
 use uqa_sql::{ResultRow, SQLError};
 
 #[expect(
@@ -25,96 +29,81 @@ pub fn build_info_routines(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    let builtin_owner = catalog.role_is_enabled_for(
-        resolution.current_user(),
-        &uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-    );
-    let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINE_GROUPS
+    let current_user = resolution.current_user();
+    let builtin_owner = catalog.role_is_enabled_for(current_user, &RoleIdentity::BOOTSTRAP);
+    let privileges = ExecutePrivileges::new(catalog, current_user);
+    let types = AliasConstantOutput::build(catalog, resolution)?;
+    let definitions = &catalog.snapshot().definitions;
+    let mut rows = Vec::new();
+    for routine in PG18_BUILTIN_ROUTINE_GROUPS
         .iter()
         .flat_map(|group| group.iter())
-        .map(|routine| {
-            let regtype_name = catalog_regtype_name(routine.return_type);
-            row([
-                ("specific_catalog", catalog_name()),
-                ("specific_schema", str_value("pg_catalog")),
-                (
-                    "specific_name",
-                    str_value(format!("{}_{}", routine.name, routine.oid)),
-                ),
-                ("routine_catalog", catalog_name()),
-                ("routine_schema", str_value("pg_catalog")),
-                ("routine_name", str_value(routine.name)),
-                (
-                    "routine_type",
-                    if routine.kind == "f" {
-                        str_value("FUNCTION")
-                    } else {
-                        Value::Null
-                    },
-                ),
-                ("module_catalog", Value::Null),
-                ("module_schema", Value::Null),
-                ("module_name", Value::Null),
-                ("udt_catalog", Value::Null),
-                ("udt_schema", Value::Null),
-                ("udt_name", Value::Null),
-                (
-                    "data_type",
-                    str_value(catalog_type_name(routine.return_type)),
-                ),
-                (
-                    "type_udt_catalog",
-                    regtype_name.map_or(Value::Null, |_| catalog_name()),
-                ),
-                (
-                    "type_udt_schema",
-                    regtype_name.map_or(Value::Null, |_| str_value("pg_catalog")),
-                ),
-                ("type_udt_name", regtype_name.map_or(Value::Null, str_value)),
-                (
-                    "routine_body",
-                    str_value(if routine.language() == i64::from(SQL_LANGUAGE) {
-                        "SQL"
-                    } else {
-                        "EXTERNAL"
-                    }),
-                ),
-                (
-                    "routine_definition",
-                    if builtin_owner {
-                        str_value(routine.source)
-                    } else {
-                        Value::Null
-                    },
-                ),
-                ("external_name", Value::Null),
-                (
-                    "external_language",
-                    str_value(if routine.language() == i64::from(SQL_LANGUAGE) {
-                        "SQL"
-                    } else {
-                        "INTERNAL"
-                    }),
-                ),
-                (
-                    "is_deterministic",
-                    str_value(if routine.volatility == "i" {
-                        "YES"
-                    } else {
-                        "NO"
-                    }),
-                ),
-                ("sql_data_access", str_value("MODIFIES")),
-                (
-                    "is_null_call",
-                    str_value(if routine.strict { "YES" } else { "NO" }),
-                ),
-                ("schema_level_routine", str_value("YES")),
-                ("max_dynamic_result_sets", Value::Int(0)),
-                ("is_udt_dependent", str_value("NO")),
-            ])
-        })
-        .collect();
+    {
+        let oid = u32::try_from(routine.oid).expect("builtin catalog OID");
+        let acl = definitions
+            .builtin_routine_security
+            .get(&oid)
+            .map(|entry| entry.execute_acl.as_slice());
+        if !builtin_owner && !privileges.allowed(&RoleIdentity::BOOTSTRAP, acl) {
+            continue;
+        }
+        let procedure = routine.kind == "p";
+        rows.push(row([
+            ("specific_catalog", catalog_name()),
+            ("specific_schema", str_value("pg_catalog")),
+            (
+                "specific_name",
+                str_value(format!("{}_{}", routine.name, routine.oid)),
+            ),
+            ("routine_catalog", catalog_name()),
+            ("routine_schema", str_value("pg_catalog")),
+            ("routine_name", str_value(routine.name)),
+            ("routine_type", routine_type(routine.kind)),
+            (
+                "routine_body",
+                str_value(if routine.language() == i64::from(SQL_LANGUAGE) {
+                    "SQL"
+                } else {
+                    "EXTERNAL"
+                }),
+            ),
+            (
+                "routine_definition",
+                if builtin_owner {
+                    str_value(routine.source)
+                } else {
+                    Value::Null
+                },
+            ),
+            (
+                "external_language",
+                str_value(if routine.language() == i64::from(SQL_LANGUAGE) {
+                    "SQL"
+                } else {
+                    "INTERNAL"
+                }),
+            ),
+            (
+                "is_deterministic",
+                str_value(if routine.volatility == "i" {
+                    "YES"
+                } else {
+                    "NO"
+                }),
+            ),
+            ("sql_data_access", str_value("MODIFIES")),
+            ("is_null_call", null_call(procedure, routine.strict)),
+        ]
+        .into_iter()
+        .chain(result_columns(
+            &types,
+            procedure,
+            routine.return_type,
+            false,
+        )?)));
+    }
+    // Registered operator functions return `text`, as their `pg_proc` rows declare.
+    let registered_result = result_columns(&types, false, 25, false)?;
     rows.extend(registered_names().into_iter().map(|name| {
         row([
             ("specific_catalog", catalog_name()),
@@ -124,48 +113,37 @@ pub fn build_info_routines(
             ("routine_schema", str_value("pg_catalog")),
             ("routine_name", str_value(name)),
             ("routine_type", str_value("FUNCTION")),
-            ("module_catalog", Value::Null),
-            ("module_schema", Value::Null),
-            ("module_name", Value::Null),
-            ("udt_catalog", catalog_name()),
-            ("udt_schema", str_value("pg_catalog")),
-            ("udt_name", str_value("text")),
-            ("data_type", str_value("text")),
             ("routine_body", str_value("EXTERNAL")),
-            ("routine_definition", Value::Null),
-            ("external_name", Value::Null),
             ("external_language", str_value("rust")),
             ("is_deterministic", str_value("NO")),
             ("sql_data_access", str_value("READS SQL DATA")),
             ("is_null_call", str_value("YES")),
-            ("schema_level_routine", str_value("YES")),
-            ("max_dynamic_result_sets", Value::Int(0)),
-            ("is_udt_dependent", str_value("NO")),
-        ])
+        ]
+        .into_iter()
+        .chain(registered_result.iter().cloned()))
     }));
     for function in catalog.all_sql_functions() {
         let def = &function.def;
+        let owner = bound_routine_owner(def)?;
+        let owner_usage = catalog.role_is_enabled_for(current_user, &owner);
+        if !owner_usage && !privileges.allowed(&owner, def.execute_acl.as_deref()) {
+            continue;
+        }
         let (routine_schema, routine_name) = split_schema_name(&def.name)?;
         let catalog_oid = user_routine_catalog_oid(&function)?;
-        let routine_type = if def.is_procedure {
-            "PROCEDURE"
-        } else {
-            "FUNCTION"
-        };
         let (routine_body, external_language) = if def.language == "sql" {
             ("SQL", "SQL".to_string())
         } else {
             ("EXTERNAL", def.language.to_ascii_uppercase())
         };
-        let definition = match &def.body {
-            uqa_sql::ast::FunctionBody::Source(source) => str_value(source.clone()),
-            uqa_sql::ast::FunctionBody::Statements(_) => Value::Null,
-        };
-        let data_type = match &def.returns {
-            uqa_sql::ast::FunctionReturns::Scalar { type_name }
-            | uqa_sql::ast::FunctionReturns::SetOf { type_name } => str_value(type_name.clone()),
-            uqa_sql::ast::FunctionReturns::Table => str_value("record"),
-            uqa_sql::ast::FunctionReturns::None => Value::Null,
+        // `prosrc` of a SQL-standard body is empty; its parsed statements are `prosqlbody`.
+        let definition = if owner_usage {
+            match &def.body {
+                uqa_sql::ast::FunctionBody::Source(source) => str_value(source.clone()),
+                uqa_sql::ast::FunctionBody::Statements(_) => str_value(""),
+            }
+        } else {
+            Value::Null
         };
         rows.push(row([
             ("specific_catalog", catalog_name()),
@@ -177,17 +155,12 @@ pub fn build_info_routines(
             ("routine_catalog", catalog_name()),
             ("routine_schema", str_value(routine_schema)),
             ("routine_name", str_value(routine_name)),
-            ("routine_type", str_value(routine_type)),
-            ("module_catalog", Value::Null),
-            ("module_schema", Value::Null),
-            ("module_name", Value::Null),
-            ("udt_catalog", catalog_name()),
-            ("udt_schema", str_value("pg_catalog")),
-            ("udt_name", data_type.clone()),
-            ("data_type", data_type),
+            (
+                "routine_type",
+                routine_type(if def.is_procedure { "p" } else { "f" }),
+            ),
             ("routine_body", str_value(routine_body)),
             ("routine_definition", definition),
-            ("external_name", Value::Null),
             ("external_language", str_value(external_language)),
             (
                 "is_deterministic",
@@ -199,15 +172,95 @@ pub fn build_info_routines(
                     },
                 ),
             ),
-            ("sql_data_access", str_value("MODIFIES SQL DATA")),
-            (
-                "is_null_call",
-                str_value(if def.strict { "YES" } else { "NO" }),
-            ),
-            ("schema_level_routine", str_value("YES")),
-            ("max_dynamic_result_sets", Value::Int(0)),
-            ("is_udt_dependent", str_value("NO")),
-        ]));
+            ("sql_data_access", str_value("MODIFIES")),
+            ("is_null_call", null_call(def.is_procedure, def.strict)),
+        ]
+        .into_iter()
+        .chain(result_columns(
+            &types,
+            def.is_procedure,
+            routine_result_type_oid(catalog, def),
+            def.security.security_definer,
+        )?)));
     }
     Ok(rows)
 }
+
+fn routine_type(kind: &str) -> Value {
+    match kind {
+        "f" => str_value("FUNCTION"),
+        "p" => str_value("PROCEDURE"),
+        _ => Value::Null,
+    }
+}
+
+fn null_call(procedure: bool, strict: bool) -> Value {
+    if procedure {
+        Value::Null
+    } else {
+        str_value(if strict { "YES" } else { "NO" })
+    }
+}
+
+/// The result type, descriptor and calling-convention columns. A procedure has no result type: the view's outer join to `pg_type` excludes it, and `dtd_identifier` is NULL.
+fn result_columns(
+    types: &AliasConstantOutput,
+    procedure: bool,
+    return_type: i64,
+    security_definer: bool,
+) -> Result<Vec<(&'static str, Value)>, SQLError> {
+    let mut columns = Vec::with_capacity(8);
+    if !procedure {
+        if let Some((data_type, schema, name)) = types.routine_result_type(return_type)? {
+            columns.extend([
+                ("data_type", str_value(data_type)),
+                ("type_udt_catalog", catalog_name()),
+                ("type_udt_schema", str_value(schema)),
+                ("type_udt_name", str_value(name)),
+            ]);
+        }
+        columns.push(("dtd_identifier", str_value("0")));
+    }
+    columns.extend([
+        ("parameter_style", str_value("GENERAL")),
+        (
+            "security_type",
+            str_value(if security_definer {
+                "DEFINER"
+            } else {
+                "INVOKER"
+            }),
+        ),
+        ("as_locator", str_value("NO")),
+    ]);
+    Ok(columns)
+}
+
+/// `has_function_privilege(p.oid, 'EXECUTE')` for the session's current user.
+struct ExecutePrivileges<'a> {
+    catalog: &'a CatalogReadView,
+    current_user: &'a RoleReference,
+    superuser: bool,
+}
+
+impl<'a> ExecutePrivileges<'a> {
+    fn new(catalog: &'a CatalogReadView, current_user: &'a RoleReference) -> Self {
+        let superuser = current_user
+            .role_definition(&catalog.snapshot().definitions.roles)
+            .is_some_and(|role| role.attributes.contains(&RoleAttribute::Superuser));
+        Self {
+            catalog,
+            current_user,
+            superuser,
+        }
+    }
+
+    fn allowed(&self, owner: &RoleIdentity, acl: Option<&[RoutineAclEntry]>) -> bool {
+        routine_privilege_allowed(owner, acl, false, self.superuser, |role| {
+            self.catalog.role_is_enabled_for(self.current_user, role)
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests;

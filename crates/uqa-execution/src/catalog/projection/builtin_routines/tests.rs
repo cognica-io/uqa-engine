@@ -264,6 +264,161 @@ fn substring_metadata_and_sql_body_match_postgresql() {
     }
 }
 
+#[test]
+fn regexp_matches_metadata_and_set_estimates_match_postgresql() {
+    assert_set_returning_metadata(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/regexp_matches_rows_oracle.expected.json"
+        )),
+        2,
+    );
+}
+
+#[test]
+fn regexp_split_metadata_and_set_estimates_match_postgresql() {
+    assert_set_returning_metadata(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/regexp_split_functions_oracle.expected.json"
+        )),
+        4,
+    );
+}
+
+#[test]
+fn regular_expression_identities_match_postgresql_and_the_sql_signatures() {
+    let transcript = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/regular_expression_identities_oracle.expected.json"
+    ));
+    assert_catalog_metadata(transcript, 29);
+    let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    let arguments = &reference["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["id"] == "catalog_arguments")
+        .unwrap()["results"][0];
+    let rows = arguments["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 29);
+    for row in rows {
+        let oid = row[0].as_str().unwrap().parse::<i64>().unwrap();
+        let routine = PG18_BUILTIN_ROUTINE_GROUPS
+            .iter()
+            .flat_map(|group| group.iter())
+            .find(|routine| routine.oid == oid)
+            .unwrap();
+        let actual = serde_json::json!([
+            routine.oid.to_string(),
+            routine.argument_types.len().to_string(),
+            routine.default_arguments.to_string(),
+            boolean_text(routine.argument_defaults.is_none()),
+            format!("{{{}}}", routine.argument_names.join(",")),
+            boolean_text(routine.argument_modes().is_none()),
+            boolean_text(routine.all_argument_types().is_none()),
+            routine.variadic_type().to_string(),
+            boolean_text(routine.returns_set()),
+            routine.estimated_rows().to_string(),
+            "1",
+            routine.support_oid().to_string(),
+            routine.language().to_string(),
+            "f",
+            "t",
+        ]);
+        assert_eq!(&actual, row, "OID {oid}");
+        assert_selects_sql_signature(routine);
+    }
+}
+
+/// Positional and fully named calls select the SQL owner's declaration with this routine's argument and result types.
+fn assert_selects_sql_signature(routine: &super::BuiltinRoutineCatalogEntry) {
+    let argument_types = routine
+        .argument_types
+        .iter()
+        .map(|oid| {
+            uqa_sql::catalog::type_metadata::builtin_scalar_type(u32::try_from(*oid).unwrap())
+                .cloned()
+        })
+        .collect::<Vec<_>>();
+    let positional = vec![None; argument_types.len()];
+    let named = routine
+        .argument_names
+        .iter()
+        .map(|name| Some((*name).to_owned()))
+        .collect::<Vec<_>>();
+    for names in [positional, named] {
+        let selected = uqa_sql::type_resolution::resolve_fixed_builtin_call(
+            routine.name,
+            None,
+            &names,
+            &argument_types,
+            false,
+            None,
+        )
+        .unwrap()
+        .unwrap()
+        .selected;
+        assert_eq!(
+            selected.binding.name,
+            format!("pg_catalog.{}", routine.name)
+        );
+        assert_eq!(
+            selected
+                .binding
+                .argument_types
+                .iter()
+                .map(|name| uqa_sql::catalog::type_metadata::routine_type_oid(name))
+                .collect::<Vec<_>>(),
+            routine.argument_types,
+            "OID {}",
+            routine.oid
+        );
+        assert_eq!(
+            uqa_sql::catalog::type_metadata::pg_type_oid(&selected.return_type),
+            routine.return_type,
+            "OID {}",
+            routine.oid
+        );
+    }
+}
+
+/// Compare the `catalog` case's identities and the `catalog_set_metadata` case's `proretset`, `prorows` and `proargnames` with the routine catalog.
+fn assert_set_returning_metadata(transcript: &str, expected_count: usize) {
+    assert_catalog_metadata(transcript, expected_count);
+    let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    let rows = reference["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["id"] == "catalog_set_metadata")
+        .unwrap()["results"][0]["rows"]
+        .clone();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.len(), expected_count);
+    for row in rows {
+        let oid = row[0].as_str().unwrap().parse::<i64>().unwrap();
+        let routine = PG18_BUILTIN_ROUTINE_GROUPS
+            .iter()
+            .flat_map(|group| group.iter())
+            .find(|routine| routine.oid == oid)
+            .unwrap();
+        assert_eq!(
+            [
+                boolean_text(routine.returns_set()).to_string(),
+                routine.estimated_rows().to_string(),
+                format!("{{{}}}", routine.argument_names.join(",")),
+            ],
+            [
+                row[1].as_str().unwrap(),
+                row[2].as_str().unwrap(),
+                row[3].as_str().unwrap()
+            ],
+            "OID {oid}"
+        );
+    }
+}
+
 fn assert_catalog_metadata(transcript: &str, expected_count: usize) {
     let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
     let catalog = reference["cases"]

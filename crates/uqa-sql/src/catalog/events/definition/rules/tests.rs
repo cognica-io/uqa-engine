@@ -64,3 +64,47 @@ fn ordinary_rule_conditions_retain_analyzed_constants_without_composite_casts() 
 
 mod collations;
 mod diagnostics;
+
+#[test]
+fn rule_conditions_reject_set_returning_calls_only_when_created() {
+    let catalog = collated_catalog();
+    let context = catalog.context();
+    let columns = catalog.columns.as_ref().unwrap();
+    for sql in [
+        "CREATE RULE r AS ON INSERT TO items WHERE generate_series(1, 2) > NEW.n DO ALSO SELECT 1",
+        "CREATE RULE r AS ON UPDATE TO items WHERE regexp_matches(NEW.c, 'a') IS NOT NULL DO INSTEAD NOTHING",
+    ] {
+        let Statement::CreateRule(rule) = crate::compile(sql).unwrap().remove(0) else {
+            panic!("rule")
+        };
+        let mut condition = rule.condition.clone().unwrap();
+        let error = context
+            .validate_rule_condition(
+                &mut condition,
+                columns,
+                rule.event,
+                None,
+                None,
+                RelationLookupMode::Dynamic,
+            )
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("0A000"), "{sql}");
+        assert_eq!(
+            error.to_string(),
+            "set-returning functions are not allowed in WHERE",
+            "{sql}"
+        );
+        // A condition stored by an earlier release keeps loading.
+        let mut condition = rule.condition.clone().unwrap();
+        context
+            .validate_rule_condition(
+                &mut condition,
+                columns,
+                rule.event,
+                None,
+                None,
+                RelationLookupMode::Bound,
+            )
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+}

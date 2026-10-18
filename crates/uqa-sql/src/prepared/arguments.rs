@@ -13,6 +13,10 @@ pub struct ArgumentValidationContext<'a> {
     pub aggregates: &'a dyn crate::plan::AggregateClassifier,
     pub volatility: &'a dyn crate::semantics::volatility::VolatilityCatalog,
     pub cast_type: &'a dyn Fn(&str) -> Option<ColumnType>,
+    /// Routine metadata that classifies set-returning calls among the arguments.
+    pub routines: &'a dyn crate::routines::RoutineResolution,
+    /// The parameters of the statement that runs EXECUTE.
+    pub parameters: &'a [crate::SQLParam],
 }
 
 pub fn validate_assignment_type(
@@ -101,6 +105,23 @@ pub fn validate_argument(
             "42803",
             "aggregate functions are not allowed in EXECUTE parameters",
         ));
+    }
+    Ok(())
+}
+
+/// Reject a set-returning call in an argument, as `EvaluateParams` analyzes each argument as an EXECUTE parameter expression.
+pub fn reject_set_argument(
+    context: &ArgumentValidationContext<'_>,
+    argument: &ExpressionPlan,
+) -> Result<(), SQLError> {
+    if crate::semantics::sets::validation::expression_may_return_set(
+        context.routines,
+        context.routines,
+        &argument.scalar,
+        &crate::RowSchema::default(),
+        context.parameters,
+    )? {
+        crate::semantics::sets::placement::SetPlacement::ExecuteParameter.admit(true)?;
     }
     Ok(())
 }

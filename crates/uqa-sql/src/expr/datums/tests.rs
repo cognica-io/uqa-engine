@@ -11,6 +11,22 @@ mod bit_string;
 mod catalog_arrays;
 mod legacy_vectors;
 
+const DEFAULT_COLLATION: u32 = crate::catalog::collations::DEFAULT_COLLATION_OID as u32;
+
+/// The generated scalar kernels, with collation-dependent functions under the database default collation.
+fn eval(
+    name: &str,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+) -> crate::error::Result<uqa_core::memory::Produced<Value>> {
+    crate::expr::scalar_dispatch::eval_generated_scalar_function(
+        name,
+        args,
+        control,
+        DEFAULT_COLLATION,
+    )
+}
+
 #[test]
 fn constant_field_copy_observes_compression_before_scalar_consumers() {
     let malformed = Value::Datum(DatumValue::new(17, 0, vec![2, 0, 0, 0, 3, 0, 0, 0]));
@@ -35,7 +51,7 @@ fn constant_field_copy_observes_compression_before_scalar_consumers() {
         "unknown type of jsonb container"
     );
     for (start, length, expected) in [(-2, 1, None), (1, -1, Some("22011"))] {
-        let result = crate::expr::scalar_dispatch::eval_generated_scalar_function(
+        let result = eval(
             "substr",
             &[malformed.clone(), Value::Int(start), Value::Int(length)],
             &control,
@@ -50,7 +66,6 @@ fn constant_field_copy_observes_compression_before_scalar_consumers() {
 
 #[test]
 fn binary_consumers_borrow_physical_payload_and_retain_only_their_output() {
-    use crate::expr::scalar_dispatch::eval_generated_scalar_function as eval;
     let value = Value::Datum(DatumValue::new(17, 0, vec![11, 0x41, 0xc3, 0xa9, 0x7a]));
     let token = CancellationToken::new();
     let memory = MemoryBudget::new(4096);
@@ -216,7 +231,7 @@ fn retained_json_payload_is_not_revalidated_by_type_output() {
     ));
     let record = Value::Record(vec![("a".into(), retained), ("b".into(), Value::Int(7))].into());
     assert_eq!(
-        crate::expr::eval_scalar_function("to_json", &[record]).unwrap(),
+        crate::expr::eval_scalar_function("to_json", &[record], DEFAULT_COLLATION).unwrap(),
         Value::Json("{\"a\":hello,\"b\":7}".into())
     );
 }

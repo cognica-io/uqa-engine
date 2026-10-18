@@ -67,7 +67,7 @@ impl Binder<'_, '_> {
             }
             binding.argument_types = self.retain(names.finish()?);
         }
-        call.binding = Some(binding);
+        crate::ast::FunctionBinding::rebind(&mut call.binding, binding);
         Ok(())
     }
 }

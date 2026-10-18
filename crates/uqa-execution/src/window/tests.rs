@@ -10,6 +10,7 @@ use uqa_sql::expr::RowLookup as _;
 
 mod enums;
 mod range_peers;
+mod set_returning_keys;
 mod source_layout;
 
 struct NoSequences;

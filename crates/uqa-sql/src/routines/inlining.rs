@@ -10,6 +10,8 @@
 mod arguments;
 mod operators;
 mod properties;
+mod table;
+pub use table::InlineRoutineQuery;
 #[cfg(test)]
 mod tests;
 
@@ -26,7 +28,7 @@ use crate::{
     ast::{CreateFunction, FunctionBinding, FunctionBody, FunctionReturns},
     binding::{bind_routine_parameter_references, prepare_routine_body_inputs},
     plan::{ComputePlan, QueryBlockPlan, RelationalPlan, UnifiedPlan},
-    semantics::volatility::VolatilityCatalog,
+    semantics::{sets::placement_scope::SetPlacementScope, volatility::VolatilityCatalog},
     ColumnType, SQLError, ScalarExpr,
 };
 
@@ -195,31 +197,9 @@ impl RoutineInliningContext<'_> {
         function: &super::SQLUserFunction,
         definition: &CreateFunction,
     ) -> Result<Option<(ScalarExpr, Vec<crate::SQLParam>)>, SQLError> {
-        let Some(mut plan) = self.body_plan(function)? else {
+        let Some((plan, result, parameters)) = self.analyze_plan(function, definition)? else {
             return Ok(None);
         };
-        let parameters = routine_parameter_values(self.types, definition);
-        let names = matches!(definition.body, FunctionBody::Source(_))
-            .then(|| sql_body_parameter_scope(definition, &parameters))
-            .transpose()?;
-        let snapshot = self.catalog.binding_snapshot()?;
-        let result = prepare_routine_body_inputs(
-            self.routines,
-            &mut plan,
-            &parameters,
-            &snapshot.context(),
-            self.catalog,
-            names.as_ref(),
-        )?;
-        if let Some(names) = &names {
-            bind_routine_parameter_references(
-                self.routines,
-                &mut plan,
-                &parameters,
-                &snapshot.context(),
-                names,
-            )?;
-        }
         let UnifiedPlan::Query(query) = plan else {
             return Ok(None);
         };
@@ -252,6 +232,54 @@ impl RoutineInliningContext<'_> {
             };
         }
         Ok(Some((expression, parameters)))
+    }
+
+    fn analyze_plan(
+        &self,
+        function: &super::SQLUserFunction,
+        definition: &CreateFunction,
+    ) -> Result<
+        Option<(
+            UnifiedPlan,
+            crate::binding::statements::AnalyzedResult,
+            Vec<crate::SQLParam>,
+        )>,
+        SQLError,
+    > {
+        let Some(mut plan) = self.body_plan(function)? else {
+            return Ok(None);
+        };
+        let parameters = routine_parameter_values(self.types, definition);
+        let names = matches!(definition.body, FunctionBody::Source(_))
+            .then(|| sql_body_parameter_scope(definition, &parameters))
+            .transpose()?;
+        let snapshot = self.catalog.binding_snapshot()?;
+        let result = {
+            // A SQL-standard body is inlined as it was stored; a body compiled from source text places its set-returning calls as a new statement does.
+            let _placement = if matches!(definition.body, FunctionBody::Statements(_)) {
+                SetPlacementScope::stored_definition()
+            } else {
+                SetPlacementScope::compiled_source()
+            };
+            prepare_routine_body_inputs(
+                self.routines,
+                &mut plan,
+                &parameters,
+                &snapshot.context(),
+                self.catalog,
+                names.as_ref(),
+            )
+        }?;
+        if let Some(names) = &names {
+            bind_routine_parameter_references(
+                self.routines,
+                &mut plan,
+                &parameters,
+                &snapshot.context(),
+                names,
+            )?;
+        }
+        Ok(Some((plan, result, parameters)))
     }
 
     /// Expand defaults, named arguments and implicit casts before the planner
@@ -376,6 +404,19 @@ impl RoutineInliningContext<'_> {
                         })
                     });
             });
+        });
+        plan.visit_sources(&mut |source| {
+            if let crate::plan::SourcePlan::Function {
+                binding: Some(binding),
+                ..
+            } = source
+            {
+                required |= self.selected_function(binding).is_some_and(|function| {
+                    eligible_definition(&function.def)
+                        || table::eligible_definition(&function.def)
+                        || function.def.volatility == crate::ast::FunctionVolatility::Immutable
+                });
+            }
         });
         required
     }

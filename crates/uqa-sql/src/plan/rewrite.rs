@@ -100,8 +100,11 @@ pub(super) fn rewrite_query_scalars(
 /// Visit every `FROM` item a query owns, nested ones included: those of its `WITH` queries, set-operation members, joins, subqueries in `FROM` and scalar subqueries.
 pub(super) fn visit_query_sources(query: &mut QueryPlan, visit: &mut dyn FnMut(&mut SourcePlan)) {
     for cte in &mut query.ctes {
-        if let super::CtePlanBody::Query(query) = &mut cte.body {
-            visit_query_sources(query, visit);
+        match &mut cte.body {
+            super::CtePlanBody::Query(query) => visit_query_sources(query, visit),
+            super::CtePlanBody::Command(command) => {
+                super::source_visit::visit_command_mut(command, visit);
+            }
         }
     }
     let subqueries = match &mut query.root {
@@ -128,7 +131,7 @@ pub(super) fn visit_query_sources(query: &mut QueryPlan, visit: &mut dyn FnMut(&
     }
 }
 
-fn visit_source(source: &mut SourcePlan, visit: &mut dyn FnMut(&mut SourcePlan)) {
+pub(super) fn visit_source(source: &mut SourcePlan, visit: &mut dyn FnMut(&mut SourcePlan)) {
     visit(source);
     match source {
         SourcePlan::Join { left, right, .. } => {

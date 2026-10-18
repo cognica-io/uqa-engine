@@ -4,8 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{builtin_table_function_overloads, upgrade_legacy_table_function_binding};
+use super::{
+    builtin_table_function_overloads, upgrade_legacy_table_function_binding,
+    user_function_declared_columns, validate_table_function_column_definition,
+    ColumnDefinitionRequest,
+};
 use crate::ast::{ColumnType, FunctionBinding};
+use crate::routines::{RoutineBody, SQLUserFunction};
+use crate::{RowSchema, SQLError, ScalarExpr};
 
 fn legacy_binding(kind: &str) -> FunctionBinding {
     FunctionBinding {
@@ -17,6 +23,7 @@ fn legacy_binding(kind: &str) -> FunctionBinding {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     }
 }
 
@@ -92,4 +99,265 @@ fn legacy_series_upgrade_reaches_stored_statement_and_view_sources() {
     };
     assert!(crate::binding::view_dependencies::restoration::upgrade_legacy_view_dispatches(query));
     assert!(!crate::binding::view_dependencies::restoration::upgrade_legacy_view_dispatches(query));
+}
+
+#[test]
+fn regular_expression_set_functions_share_the_scalar_catalog_signatures() {
+    for (name, result) in [
+        (
+            "regexp_matches",
+            ColumnType::Array(Box::new(ColumnType::Text)),
+        ),
+        ("regexp_split_to_table", ColumnType::Text),
+    ] {
+        let overloads = builtin_table_function_overloads(name, &[]);
+        assert_eq!(
+            Some(&overloads),
+            crate::type_resolution::fixed_builtin_overloads(name).as_ref()
+        );
+        let declared = overloads
+            .iter()
+            .map(|overload| {
+                (
+                    overload.name.as_str(),
+                    overload
+                        .argument_names
+                        .iter()
+                        .map(|name| name.as_deref().unwrap())
+                        .collect::<Vec<_>>(),
+                    overload.argument_types.clone(),
+                    overload.default_arguments,
+                    overload.return_type.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let qualified = format!("pg_catalog.{name}");
+        assert_eq!(
+            declared,
+            [
+                (
+                    qualified.as_str(),
+                    vec!["string", "pattern"],
+                    vec![ColumnType::Text; 2],
+                    0,
+                    result.clone(),
+                ),
+                (
+                    qualified.as_str(),
+                    vec!["string", "pattern", "flags"],
+                    vec![ColumnType::Text; 3],
+                    0,
+                    result,
+                ),
+            ]
+        );
+    }
+}
+
+struct NoRoutines;
+
+impl crate::FunctionTypeResolver for NoRoutines {
+    fn resolve_function_type(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+        _: &[Option<String>],
+        _: &[Option<ColumnType>],
+        _: bool,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+}
+
+impl crate::routines::RoutineResolution for NoRoutines {}
+
+fn column_definition(name: &str, args: &[ScalarExpr], declared: &[&str]) -> Result<(), SQLError> {
+    let declared_types = declared.iter().map(ToString::to_string).collect::<Vec<_>>();
+    let column_names = (1..=declared.len())
+        .map(|position| format!("c{position}"))
+        .collect::<Vec<_>>();
+    validate_table_function_column_definition(
+        &NoRoutines,
+        ColumnDefinitionRequest {
+            name,
+            binding: None,
+            user_function: None,
+            user_invocation: None,
+            args,
+            declared_types: &declared_types,
+            column_names: &column_names,
+        },
+        &RowSchema::default(),
+        &[],
+        &NoRoutines,
+    )
+}
+
+#[test]
+fn built_in_results_decide_column_definition_lists() {
+    let integers = [ScalarExpr::Array(vec![ScalarExpr::Literal(
+        uqa_core::Value::Int(1),
+    )])];
+    for (name, args) in [
+        ("generate_series", &[][..]),
+        ("regexp_matches", &[][..]),
+        ("regexp_split_to_table", &[][..]),
+        ("pg_catalog.unnest", &integers[..]),
+        ("string_to_table", &[][..]),
+        ("json_array_elements", &[][..]),
+    ] {
+        let error = column_definition(name, args, &["int4"]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42601"), "{name}");
+        assert_eq!(
+            error.to_string(),
+            "a column definition list is only allowed for functions returning \"record\"",
+            "{name}"
+        );
+        column_definition(name, args, &[]).unwrap();
+    }
+    for name in ["json_each", "jsonb_each_text", "aclexplode"] {
+        assert_eq!(
+            column_definition(name, &[], &["text"])
+                .unwrap_err()
+                .to_string(),
+            "a column definition list is redundant for a function with OUT parameters"
+        );
+    }
+    // UQA extensions and host-registered functions describe their own results.
+    column_definition("cypher", &[], &["agtype"]).unwrap();
+}
+
+fn user_function(sql: &str) -> SQLUserFunction {
+    let crate::Statement::CreateFunction(definition) = crate::compile(sql).unwrap().remove(0)
+    else {
+        unreachable!("CREATE FUNCTION fixture")
+    };
+    SQLUserFunction::new(*definition, RoutineBody::Source)
+}
+
+#[test]
+fn user_functions_declare_their_from_columns_before_aliases() {
+    let declared =
+        |sql: &str| user_function_declared_columns(&NoRoutines, &user_function(sql), None).unwrap();
+    // OUT parameters, including the columns of RETURNS TABLE, name the columns; an unnamed one takes its position.
+    assert_eq!(
+        declared(
+            "CREATE FUNCTION f(OUT a int, OUT int) RETURNS SETOF record LANGUAGE sql AS 'SELECT 1, 2'"
+        ),
+        Some(vec!["a".to_string(), "column2".to_string()])
+    );
+    assert_eq!(
+        declared("CREATE FUNCTION f(n int) RETURNS TABLE (u int) LANGUAGE sql AS 'SELECT n'"),
+        Some(vec!["u".to_string()])
+    );
+    // The FROM item names the single column of any other result.
+    assert_eq!(
+        declared("CREATE FUNCTION f() RETURNS SETOF int LANGUAGE sql AS 'SELECT 1'"),
+        None
+    );
+    assert_eq!(
+        declared("CREATE FUNCTION f() RETURNS SETOF record LANGUAGE sql AS 'SELECT 1'"),
+        None
+    );
+}
+
+#[test]
+fn scalar_from_aliases_do_not_create_columns() {
+    for returns in ["int", "SETOF int", "TABLE (value int)"] {
+        let function = user_function(&format!(
+            "CREATE FUNCTION f() RETURNS {returns} LANGUAGE sql AS 'SELECT 1'"
+        ));
+        for ordinality in [false, true] {
+            let aliases = if ordinality {
+                vec!["a".into(), "b".into(), "c".into()]
+            } else {
+                vec!["a".into(), "b".into()]
+            };
+            let error = super::user_table_function_columns(
+                &NoRoutines,
+                &function,
+                None,
+                "f",
+                Some("x"),
+                &aliases,
+                ordinality,
+            )
+            .unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42P10"));
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "table \"x\" has {} columns available but {} columns specified",
+                    1 + usize::from(ordinality),
+                    aliases.len()
+                )
+            );
+        }
+    }
+    let function =
+        user_function("CREATE FUNCTION f() RETURNS SETOF record LANGUAGE sql AS 'SELECT 1, 2'");
+    assert_eq!(
+        super::user_table_function_columns(
+            &NoRoutines,
+            &function,
+            None,
+            "f",
+            Some("x"),
+            &["a".into(), "b".into()],
+            true
+        )
+        .unwrap(),
+        ["a", "b", "ordinality"]
+    );
+}
+
+#[test]
+fn record_column_definitions_keep_postgresql_validation_order() {
+    let function =
+        user_function("CREATE FUNCTION r() RETURNS SETOF record LANGUAGE sql AS 'SELECT 1, 2'");
+    for (names, types, state, message) in [
+        (
+            ["a", "b"],
+            ["nosuchtype", "setof int"],
+            "42704",
+            "type \"nosuchtype\" does not exist",
+        ),
+        (
+            ["a", "a"],
+            ["int", "int"],
+            "42701",
+            "column name \"a\" specified more than once",
+        ),
+        (
+            ["a", "b"],
+            ["int", "anyelement"],
+            "42P16",
+            "column \"b\" has pseudo-type anyelement",
+        ),
+        (
+            ["a", "a"],
+            ["anyelement", "int"],
+            "42701",
+            "column name \"a\" specified more than once",
+        ),
+    ] {
+        let error = validate_table_function_column_definition(
+            &NoRoutines,
+            ColumnDefinitionRequest {
+                name: "r",
+                binding: None,
+                user_function: Some(&function),
+                user_invocation: None,
+                args: &[],
+                declared_types: &types.map(String::from),
+                column_names: &names.map(String::from),
+            },
+            &RowSchema::default(),
+            &[],
+            &NoRoutines,
+        )
+        .expect_err(message);
+        assert_eq!(error.sqlstate(), Some(state));
+        assert_eq!(error.to_string(), message);
+    }
 }

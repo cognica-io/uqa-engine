@@ -4,8 +4,28 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{eval_core_functions, eval_core_functions_with_control};
-use uqa_core::Value;
+use super::{eval_collated_functions_with_control, eval_core_functions_with_control};
+use uqa_core::{memory::Produced, Value};
+
+/// The collation-dependent family runs under the database default collation; every other core function keeps its own dispatch.
+fn core(
+    name: &str,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+) -> Option<crate::error::Result<Produced<Value>>> {
+    eval_collated_functions_with_control(
+        name,
+        args,
+        crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
+        control,
+    )
+    .or_else(|| eval_core_functions_with_control(name, args, control))
+}
+
+fn core_ordinary(name: &str, args: &[Value]) -> Option<crate::error::Result<Value>> {
+    core(name, args, &ProductionControl::uncontrolled())
+        .map(|result| result.map(|value| value.into_uncontrolled().expect("ordinary core result")))
+}
 
 #[test]
 fn like_and_ilike_propagate_null_arguments() {
@@ -20,7 +40,7 @@ fn like_and_ilike_propagate_null_arguments() {
             ],
         ] {
             assert_eq!(
-                eval_core_functions(name, &arguments).unwrap().unwrap(),
+                core_ordinary(name, &arguments).unwrap().unwrap(),
                 Value::Null
             );
         }
@@ -41,9 +61,7 @@ fn assert_value(name: &str, args: &[Value], expected: Value) {
     let original = CancellationToken::new();
     let invoking = CancellationToken::new();
     let control = ProductionControl::new(&memory, &original, &invoking);
-    let result = eval_core_functions_with_control(name, args, &control)
-        .unwrap()
-        .unwrap();
+    let result = core(name, args, &control).unwrap().unwrap();
     assert_eq!(&*result, &expected, "{name}");
     assert_eq!(
         memory.used(),
@@ -55,7 +73,7 @@ fn assert_value(name: &str, args: &[Value], expected: Value) {
         Value::Bytes(value) => assert_eq!(memory.used(), value.capacity()),
         _ => {}
     }
-    assert_eq!(eval_core_functions(name, args).unwrap().unwrap(), expected);
+    assert_eq!(core_ordinary(name, args).unwrap().unwrap(), expected);
     drop(result);
     assert_eq!(memory.used(), 0);
 }
@@ -183,9 +201,7 @@ fn controlled_core_failures_release_scratch_and_preserve_other_owners() {
             ),
             ("like", vec![text("a"), text(&"%a".repeat(512))]),
         ] {
-            let error = eval_core_functions_with_control(name, &args, &control)
-                .unwrap()
-                .unwrap_err();
+            let error = core(name, &args, &control).unwrap().unwrap_err();
             assert_eq!(error.sqlstate(), Some("53200"), "{name}");
             assert_eq!(memory.used(), used);
         }
@@ -210,10 +226,7 @@ fn controlled_core_failures_release_scratch_and_preserve_other_owners() {
             ("like", vec![text("a"), text("a")]),
         ] {
             assert_eq!(
-                eval_core_functions_with_control(name, &args, &control)
-                    .unwrap()
-                    .unwrap_err()
-                    .sqlstate(),
+                core(name, &args, &control).unwrap().unwrap_err().sqlstate(),
                 Some("57014")
             );
             assert_eq!(memory.used(), 0);
@@ -241,10 +254,7 @@ fn controlled_core_preserves_error_precedence_and_zero_payload_results() {
         ("mod", vec![Value::Int(1), Value::Int(0)], "22012"),
     ] {
         assert_eq!(
-            eval_core_functions_with_control(name, &args, &control)
-                .unwrap()
-                .unwrap_err()
-                .sqlstate(),
+            core(name, &args, &control).unwrap().unwrap_err().sqlstate(),
             Some(state)
         );
         assert_eq!(memory.used(), 0);
@@ -252,7 +262,7 @@ fn controlled_core_preserves_error_precedence_and_zero_payload_results() {
     let zero = MemoryBudget::new(0);
     let control = ProductionControl::new(&zero, &token, &token);
     assert_eq!(
-        eval_core_functions_with_control("upper", &[text("a")], &control)
+        core("upper", &[text("a")], &control)
             .unwrap()
             .unwrap_err()
             .sqlstate(),
@@ -264,12 +274,7 @@ fn controlled_core_preserves_error_precedence_and_zero_payload_results() {
         ("coalesce", vec![Value::Null], Value::Null),
         ("abs", vec![Value::Int(-1)], Value::Int(1)),
     ] {
-        assert_eq!(
-            &*eval_core_functions_with_control(name, &args, &control)
-                .unwrap()
-                .unwrap(),
-            &expected
-        );
+        assert_eq!(&*core(name, &args, &control).unwrap().unwrap(), &expected);
         assert_eq!(zero.used(), 0);
     }
 }
@@ -287,4 +292,85 @@ fn selection_uses_record_equality_and_total_field_null_order() {
         assert_value("least", &arguments, present.clone());
         assert_value("greatest", &arguments, missing.clone());
     }
+}
+
+/// Strict calls never reach a provider for a NULL input, so an indeterminate collation is reported only for a value the function maps or matches, as `PostgreSQL` 18.4 reports it.
+#[test]
+fn an_indeterminate_collation_is_reported_only_for_values_that_need_it() {
+    let control = ProductionControl::uncontrolled();
+    for (name, arguments, subject) in [
+        ("lower", vec![text("A")], "lower() function"),
+        ("casefold", vec![text("A")], "lower() function"),
+        ("upper", vec![text("a")], "upper() function"),
+        ("initcap", vec![text("a")], "initcap() function"),
+        ("like", vec![text("a"), text("a")], "LIKE"),
+        ("ilike", vec![text("a"), text("a")], "ILIKE"),
+        ("ilike", vec![text("a"), text("a"), text("#")], "ILIKE"),
+    ] {
+        let error = eval_collated_functions_with_control(name, &arguments, 0, &control)
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42P22"), "{name}");
+        assert_eq!(
+            error.to_string(),
+            format!("could not determine which collation to use for {subject}")
+        );
+        let mut absent = arguments.clone();
+        absent[0] = Value::Null;
+        assert_eq!(
+            *eval_collated_functions_with_control(name, &absent, 0, &control)
+                .unwrap()
+                .unwrap(),
+            Value::Null,
+            "{name}"
+        );
+    }
+    // The escape rewrite precedes the strict operator, so an invalid escape is reported before a NULL input or the collation.
+    let error = eval_collated_functions_with_control(
+        "ilike",
+        &[Value::Null, text("a"), text("ab")],
+        0,
+        &control,
+    )
+    .unwrap()
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22025"));
+    // Every other function keeps its own dispatch.
+    assert!(eval_collated_functions_with_control("reverse", &[text("a")], 0, &control).is_none());
+}
+
+#[test]
+fn case_mapping_follows_the_input_collation() {
+    let control = ProductionControl::uncontrolled();
+    let mapped = |name: &str, input: &str, collation: u32| {
+        eval_collated_functions_with_control(name, &[text(input)], collation, &control)
+            .unwrap()
+            .unwrap()
+            .into_uncontrolled()
+            .unwrap()
+    };
+    assert_eq!(mapped("upper", "stra\u{df}e", 950), text("STRA\u{df}E"));
+    assert_eq!(mapped("upper", "stra\u{df}e", 811), text("STRA\u{df}E"));
+    assert_eq!(mapped("upper", "stra\u{df}e", 6411), text("STRASSE"));
+    assert_eq!(mapped("upper", "stra\u{df}e", 963), text("STRASSE"));
+    assert_eq!(mapped("lower", "\u{c9}A", 950), text("\u{c9}a"));
+    assert_eq!(mapped("lower", "\u{c9}A", 811), text("\u{e9}a"));
+    assert_eq!(
+        mapped("initcap", "o'neil \u{1c6}x", 950),
+        text("O'Neil \u{1c6}X")
+    );
+    assert_eq!(
+        mapped("initcap", "o'neil \u{1c6}x", 811),
+        text("O'Neil \u{1c4}x")
+    );
+    assert_eq!(
+        mapped("initcap", "o'neil \u{1c6}x", 6411),
+        text("O'Neil \u{1c5}x")
+    );
+    assert_eq!(
+        mapped("initcap", "o'neil \u{1c6}x", 963),
+        text("O'neil \u{1c5}x")
+    );
+    assert_eq!(mapped("casefold", "\u{df}", 6411), text("ss"));
+    assert_eq!(mapped("casefold", "\u{df}", 811), text("\u{df}"));
 }

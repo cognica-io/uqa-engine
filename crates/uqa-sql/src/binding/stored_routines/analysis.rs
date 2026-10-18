@@ -103,6 +103,22 @@ impl CatalogRoutineAnalysisContext<'_> {
             )
         })
     }
+
+    /// Record each call's input collation in a newly defined expression whose routines this binder bound.
+    pub fn assign_input_collations(
+        &self,
+        expression: &mut ExpressionPlan,
+        outer: &RowSchema,
+    ) -> Result<(), SQLError> {
+        self.with_scope_result(|scope| {
+            crate::binding::assign_stored_input_collations(
+                self.routines,
+                expression,
+                outer,
+                &scope.binding_context()?,
+            )
+        })
+    }
 }
 
 #[cfg(test)]

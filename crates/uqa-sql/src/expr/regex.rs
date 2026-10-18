@@ -4,75 +4,59 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL regular-expression result production. Native compiled state and search caches are local to one call; only admitted `Value` payloads cross the result boundary.
+//! SQL regular expressions, evaluated by `PostgreSQL` 18.4's Advanced Regular Expression engine as `src/backend/utils/adt/regexp.c` calls it. Compiled expressions and their working memory are local to one call and charged to its allowance; only admitted `Value` payloads cross the result boundary.
 
 use crate::error::{Result, SQLError};
+use std::borrow::Cow;
 use uqa_core::{
     memory::{Produced, ProductionControl},
     Value,
 };
 
-mod preparation;
+mod engine;
+mod flags;
+mod match_set;
+mod matches;
 mod query;
 mod replacement;
+mod split;
 mod substring;
+pub use matches::RegexMatches;
+pub use split::RegexSplit;
 pub use substring::check_constant_similar_translation;
 pub(super) use substring::evaluate_dispatched as eval_dispatched_substring;
 
+/// A function that returns a single result and so rejects the `g` flag with `PostgreSQL`'s diagnostic once every flag has been validated. `regexp_replace` and `regexp_matches` accept `g`.
 #[derive(Clone, Copy, Debug)]
-struct Options {
-    case_insensitive: bool,
-    multi_line: bool,
-    dot_matches_new_line: bool,
+struct SingleResult {
+    function: &'static str,
+    hint: Option<&'static str>,
 }
 
-/// No global cache or retained-row back-reference owns this native compiler result. Its private search pool dies with this call, before the admitted input pattern. This owner does not claim exact allocator-byte accounting for opaque native automata.
-#[derive(Debug)]
-pub(in crate::expr) struct LocalRegex {
-    regex: regex::Regex,
-    _pattern: Produced<String>,
-}
-
-impl std::ops::Deref for LocalRegex {
-    type Target = regex::Regex;
-
-    fn deref(&self) -> &Self::Target {
-        &self.regex
+impl SingleResult {
+    const fn named(function: &'static str) -> Self {
+        Self {
+            function,
+            hint: None,
+        }
     }
 }
 
-pub(in crate::expr) fn compile(
-    pattern: &str,
-    flags: &str,
-    global_allowed: bool,
-    control: &ProductionControl<'_>,
-) -> Result<LocalRegex> {
-    let prepared = preparation::prepare(pattern, flags, global_allowed, control)?;
-    control.check()?;
-    let mut builder = regex::RegexBuilder::new(&prepared.pattern);
-    builder
-        .case_insensitive(prepared.options.case_insensitive)
-        .multi_line(prepared.options.multi_line)
-        .dot_matches_new_line(prepared.options.dot_matches_new_line);
-    let regex = builder.build().map_err(|error| SQLError::Routine {
-        sqlstate: "2201B".into(),
-        message: format!("invalid regular expression: {error}"),
-    })?;
-    let output = LocalRegex {
-        regex,
-        _pattern: prepared.pattern,
-    };
-    control.check()?;
-    Ok(output)
-}
+/// A scalar regular-expression kernel, selected by function name, with the call's input collation.
+type Kernel = fn(&str, &[Value], u32, &ProductionControl<'_>) -> Result<Produced<Value>>;
 
+/// Evaluate a scalar regular-expression function or operator. `collation` is the call's input collation, `PostgreSQL`'s `inputcollid`: the selected collation OID, or zero when it is indeterminate.
 pub(super) fn evaluate(
     name: &str,
     args: &[Value],
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
-    let evaluate = match name {
-        "regexp_match" | "regexp_matches" => query::captures,
+    let evaluate: Kernel = match name {
+        "regexp_match" => |_, args, collation, control| query::captures(args, collation, control),
+        "regexp_split_to_array" => {
+            |_, args, collation, control| split::array(args, collation, control)
+        }
         "regexp_replace" => replacement::evaluate,
         "regexp_count" | "regexp_instr" | "regexp_like" | "regexp_substr" | "similar_to"
         | "regex_match_op" | "regex_imatch_op" => query::evaluate,
@@ -82,7 +66,7 @@ pub(super) fn evaluate(
         control
             .check()
             .map_err(SQLError::from)
-            .and_then(|()| evaluate(name, args, control)),
+            .and_then(|()| evaluate(name, args, collation, control)),
     )
 }
 
@@ -123,47 +107,33 @@ fn invalid_parameter(name: &str, value: i64) -> SQLError {
     }
 }
 
-fn flags(value: Option<&Value>, control: &ProductionControl<'_>) -> Result<Produced<String>> {
-    value.map_or_else(
-        || control.copy_text("").map_err(Into::into),
-        |value| super::conversion::value_to_string_with_control(value, control),
-    )
-}
-
-fn tail<'a>(
-    string: &'a str,
-    start: usize,
+/// The text of an argument: borrowed where the value holds text, and otherwise written as its cast to `text` writes it, so a call admits no second copy of a text argument.
+fn argument_text<'v>(
+    value: &'v Value,
     control: &ProductionControl<'_>,
-) -> Result<Option<(&'a str, usize)>> {
-    let Some(base_chars) = start.checked_sub(1) else {
-        return Ok(None);
-    };
-    if base_chars == 0 {
-        return Ok(Some((string, 0)));
-    }
-    for (offset, (byte, _)) in string.char_indices().enumerate() {
-        control.check()?;
-        if offset == base_chars {
-            return Ok(Some((&string[byte..], base_chars)));
-        }
-    }
-    Ok(None)
-}
-
-fn nth_capture<'h>(
-    regex: &regex::Regex,
-    haystack: &'h str,
-    occurrence: usize,
-    control: &ProductionControl<'_>,
-) -> Result<Option<regex::Captures<'h>>> {
-    for (index, capture) in regex.captures_iter(haystack).enumerate() {
-        control.check()?;
-        if index == occurrence - 1 {
-            return Ok(Some(capture));
-        }
-    }
+) -> Result<Produced<Cow<'v, str>>> {
     control.check()?;
-    Ok(None)
+    if let Value::Str(text) = value {
+        return control
+            .finish(Cow::Borrowed(text.as_str()), control.empty_reservation())
+            .map_err(Into::into);
+    }
+    let (text, memory) =
+        super::conversion::value_to_string_with_control(value, control)?.into_parts();
+    control.finish(Cow::Owned(text), memory).map_err(Into::into)
+}
+
+/// The text of an optional flags argument; a call without one uses no flags.
+fn flag_text<'v>(
+    value: Option<&'v Value>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Cow<'v, str>>> {
+    match value {
+        Some(value) => argument_text(value, control),
+        None => control
+            .finish(Cow::Borrowed(""), control.empty_reservation())
+            .map_err(Into::into),
+    }
 }
 
 #[cfg(test)]

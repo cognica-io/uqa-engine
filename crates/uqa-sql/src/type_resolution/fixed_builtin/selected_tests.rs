@@ -30,6 +30,7 @@ fn binding(name: &str, types: &[&str]) -> FunctionBinding {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     }
 }
 

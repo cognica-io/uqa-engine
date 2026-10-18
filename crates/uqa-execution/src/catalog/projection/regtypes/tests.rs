@@ -120,6 +120,7 @@ fn legacy_vector_array_type_lookup_uses_the_array_identity() {
                 argument_types: vec![],
                 array_oid,
                 element_oid,
+                length: -1,
             },
         );
     }
@@ -163,6 +164,7 @@ fn type_output_qualifies_shadowed_rows_and_arrays_by_first_visible_type() {
                 argument_types: vec![],
                 array_oid,
                 element_oid,
+                length: -1,
             },
         );
     }
@@ -218,6 +220,7 @@ fn builtin_output_distinguishes_keyword_aliases_from_catalog_identifiers() {
                 argument_types: vec![],
                 array_oid: 0,
                 element_oid: 0,
+                length: -1,
             },
         );
     }

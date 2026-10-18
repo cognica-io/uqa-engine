@@ -49,6 +49,6 @@ For existing installations, read the [0.5.4 upgrade guide](https://github.com/co
 
 ## License
 
-Official native packages embed the pinned Nori dictionary. `THIRD-PARTY/` contains the complete Lucene, MeCab-ko-dic, and JDK Unicode notices, modification attribution, and original resource/model manifests. The manifests describe source resources; the dictionary bytes are embedded in the native addon and require no separate download.
+Official native packages embed the pinned Nori dictionary. `THIRD-PARTY/` contains the complete Lucene, MeCab-ko-dic, and JDK Unicode notices, modification attribution, and original resource/model manifests. The manifests describe source resources; the dictionary bytes are embedded in the native addon and require no separate download. `THIRD-PARTY/` also contains the notices of the PostgreSQL code that the engine includes: the range sorting adaptation, and the PostgreSQL regular expression engine, whose notice reproduces its PostgreSQL License, Henry Spencer's license and the Tcl license unchanged.
 
 UQA Engine is licensed under AGPL-3.0-only with optional FOSS and noncommercial application exceptions. See `LICENSING.md` in this package.

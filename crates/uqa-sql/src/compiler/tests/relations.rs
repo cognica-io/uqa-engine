@@ -58,6 +58,53 @@ fn rows_from_preserves_members_column_definitions_aliases_and_ordinality() {
 }
 
 #[test]
+fn shared_column_definition_lists_follow_transform_range_function() {
+    for (sql, message, hint) in [
+        (
+            "SELECT * FROM rf() WITH ORDINALITY AS t(a int)",
+            "WITH ORDINALITY cannot be used with a column definition list",
+            Some("Put the column definition list inside ROWS FROM()."),
+        ),
+        (
+            "SELECT * FROM ROWS FROM (rf()) WITH ORDINALITY AS t(a int)",
+            "WITH ORDINALITY cannot be used with a column definition list",
+            Some("Put the column definition list inside ROWS FROM()."),
+        ),
+        (
+            "SELECT * FROM unnest(ARRAY[1], ARRAY[2]) AS u(x int, y int)",
+            "UNNEST() with multiple arguments cannot have a column definition list",
+            Some("Use separate UNNEST() calls inside ROWS FROM(), and attach a column definition list to each one."),
+        ),
+        (
+            "SELECT * FROM ROWS FROM (rf(), rf()) AS g(x int)",
+            "ROWS FROM() with multiple functions cannot have a column definition list",
+            Some("Put a separate column definition list for each function inside ROWS FROM()."),
+        ),
+        (
+            "SELECT * FROM ROWS FROM (rf() AS (x int)) AS g(y int)",
+            "multiple column definition lists are not allowed for the same function",
+            None,
+        ),
+    ] {
+        let error = crate::compile(sql).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42601"), "{sql}");
+        assert_eq!(error.to_string(), message, "{sql}");
+        assert_eq!(error.hint(), hint, "{sql}");
+    }
+    // The only function of ROWS FROM takes the list written after it, and a column declared SETOF keeps its marker for the result-class check.
+    let Statement::Select(select) =
+        first("SELECT * FROM ROWS FROM (rf()) AS t(a int, b setof text)")
+    else {
+        panic!("expected SELECT");
+    };
+    let Some(FromClause::FunctionGroup { functions, .. }) = select.from else {
+        panic!("expected function group");
+    };
+    assert_eq!(functions[0].column_aliases, ["a", "b"]);
+    assert_eq!(functions[0].column_types, ["int4", "setof text"]);
+}
+
+#[test]
 fn table_function_column_definitions_preserve_type_modifiers() {
     let Statement::Select(select) =
         first("SELECT * FROM f() AS (label varchar(8), amount numeric(10,2), labels varchar(3)[])")

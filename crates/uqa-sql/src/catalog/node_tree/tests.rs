@@ -460,6 +460,7 @@ fn quoted_nullif_keeps_the_catalog_routine_identity() {
                 invocation: None,
                 composite_field: None,
                 resolution_error: None,
+                input_collation: None,
             });
         }
         let routines = Routine {

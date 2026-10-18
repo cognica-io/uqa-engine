@@ -19,6 +19,44 @@ use uqa_core::{
     Value,
 };
 
+/// Evaluate Boolean nodes synthesized by DISTINCT syntax. Unlike written Boolean contexts, their already-Boolean field comparisons may contain set-returning inputs. Row comparisons retain `PostgreSQL`'s left-to-right short circuit.
+pub fn eval_distinct_boolean(
+    dispatch: FunctionDispatch,
+    count: usize,
+    mut evaluate: impl FnMut(usize) -> Result<Value>,
+) -> Option<Result<Value>> {
+    match dispatch {
+        FunctionDispatch::DistinctNot => Some((|| {
+            if count != 1 {
+                return Err(SQLError::Internal(
+                    "distinct negation takes one comparison".into(),
+                ));
+            }
+            match evaluate(0)? {
+                Value::Bool(value) => Ok(Value::Bool(!value)),
+                _ => Err(SQLError::Internal(
+                    "distinct comparison must be Boolean".into(),
+                )),
+            }
+        })()),
+        FunctionDispatch::RowDistinct => Some((|| {
+            for position in 0..count {
+                match evaluate(position)? {
+                    Value::Bool(true) => return Ok(Value::Bool(true)),
+                    Value::Bool(false) => {}
+                    _ => {
+                        return Err(SQLError::Internal(
+                            "distinct comparison must be Boolean".into(),
+                        ))
+                    }
+                }
+            }
+            Ok(Value::Bool(false))
+        })()),
+        _ => None,
+    }
+}
+
 pub(super) fn evaluate(
     dispatch: FunctionDispatch,
     args: &[Value],
@@ -33,6 +71,13 @@ pub(in crate::expr) fn evaluate_with_context(
     control: &ProductionControl<'_>,
     context: &EvalContext<'_>,
 ) -> Option<Result<Produced<Value>>> {
+    if let Some(result) =
+        eval_distinct_boolean(dispatch, args.len(), |index| Ok(args[index].clone()))
+    {
+        return Some(
+            result.and_then(|value| Ok(control.finish(value, control.empty_reservation())?)),
+        );
+    }
     let result = match dispatch {
         FunctionDispatch::AnyOperator => any_all(args, true, control, context),
         FunctionDispatch::AllOperator => any_all(args, false, control, context),

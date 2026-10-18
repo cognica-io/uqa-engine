@@ -88,7 +88,7 @@ impl Binder<'_, '_> {
         let binding = FunctionBinding::dispatched_with_control(dispatch, &self.control)?;
         let mut binding = self.retain(binding);
         binding.argument_types = self.retain(helper_types.finish()?);
-        call.binding = Some(binding);
+        FunctionBinding::rebind(&mut call.binding, binding);
         Ok(true)
     }
 }

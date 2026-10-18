@@ -11,7 +11,7 @@ use crate::{
     },
     catalog::{
         events::validation::{
-            is_boolean_type, validate_trigger_condition_references,
+            is_boolean_type, validate_trigger_condition_names, validate_trigger_condition_rows,
             validate_trigger_transition_relation, TriggerConditionTypeResolver,
         },
         resolution::{RelationLookupMode, RelationResolution},
@@ -207,6 +207,7 @@ impl EventAnalysisContext<'_> {
             invocation: None,
             composite_field: None,
             resolution_error: None,
+            input_collation: None,
         };
         let candidates = self
             .routines
@@ -438,7 +439,7 @@ impl EventAnalysisContext<'_> {
         let mut condition_routine_bindings_changed = false;
         if let Some(mut condition) = definition.when.take() {
             condition_routine_bindings_changed =
-                self.validate_trigger_condition(definition, &columns, &mut condition)?;
+                self.validate_trigger_condition(definition, &columns, &mut condition, lookup_mode)?;
             definition.when = Some(condition);
         }
         Ok((relation, condition_routine_bindings_changed))
@@ -495,13 +496,15 @@ impl EventAnalysisContext<'_> {
         Ok(())
     }
 
+    /// A new condition also records each call's input collation; a restored condition keeps the selections it was stored with, and one that an earlier release stored without them derives them as creation does.
     fn validate_trigger_condition(
         &self,
         definition: &CreateTrigger,
         columns: &[crate::ast::ColumnDef],
         condition: &mut Expr,
+        lookup_mode: RelationLookupMode,
     ) -> Result<bool, SQLError> {
-        validate_trigger_condition_references(definition, columns, condition)?;
+        validate_trigger_condition_names(columns, condition)?;
         let bound = bind_expr(condition, &mut TriggerConditionTypeResolver { columns })?;
         let lowered = crate::plan::ExpressionPlan::lower_with(bound, &|name: &str| {
             self.routines.has_registered_aggregate_function(name)
@@ -510,6 +513,24 @@ impl EventAnalysisContext<'_> {
         let ty =
             self.stored_routines
                 .bind_expression(&mut plan, &[], &crate::RowSchema::default())?;
+        if lookup_mode == RelationLookupMode::Dynamic {
+            // A condition stored by an earlier release keeps loading; evaluating a set-returning call in it reports the executor's diagnostic.
+            if crate::semantics::sets::validation::expression_may_return_set(
+                self.routines,
+                self.routines,
+                &plan.scalar,
+                &crate::RowSchema::default(),
+                &[],
+            )? {
+                crate::semantics::sets::placement::SetPlacement::TriggerWhen.admit(true)?;
+            }
+        }
+        if lookup_mode == RelationLookupMode::Dynamic
+            || crate::binding::legacy_collations::expression_lacks_input_collation(condition)
+        {
+            self.stored_routines
+                .assign_input_collations(&mut plan, &crate::RowSchema::default())?;
+        }
         // Bound identities and constants belong to the syntax as written, before a boolean coercion rewrites it.
         let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, &plan)?;
         let changed = crate::catalog::stored_ast::bind_stored_expression_sites(condition, &sites)?;
@@ -529,6 +550,7 @@ impl EventAnalysisContext<'_> {
                 };
             }
         }
+        validate_trigger_condition_rows(definition, columns, condition)?;
         crate::catalog::regrole_dependencies::reject_stored_regrole_constants_with(
             self.regroles,
             condition,

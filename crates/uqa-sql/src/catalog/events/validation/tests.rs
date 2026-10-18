@@ -114,25 +114,31 @@ fn trigger_subquery_restrictions_precede_unqualified_or_unavailable_row_errors()
     let definition = trigger();
     let condition = expression("SELECT missing AND EXISTS (SELECT OLD.missing)");
     routine_error(
-        validate_trigger_condition_references(&definition, &[], &condition).unwrap_err(),
+        validate_trigger_condition_names(&[], &condition).unwrap_err(),
         "0A000",
         "cannot use subquery in trigger WHEN condition",
     );
     let condition = expression("SELECT missing AND OLD.missing");
     routine_error(
-        validate_trigger_condition_references(&definition, &[], &condition).unwrap_err(),
+        validate_trigger_condition_names(&[], &condition).unwrap_err(),
         "42P01",
         "trigger WHEN condition must qualify row columns with OLD or NEW",
     );
+    // A row the trigger cannot supply is rejected once the names resolve, after the condition is analyzed.
+    let columns = [crate::ast::ColumnDef::nullable("id", ColumnType::Integer)];
+    let old = Expr::qualified_column("old", "id");
+    validate_trigger_condition_names(&columns, &old).unwrap();
     routine_error(
-        validate_trigger_condition_references(
-            &definition,
-            &[],
-            &Expr::qualified_column("old", "missing"),
-        )
-        .unwrap_err(),
+        validate_trigger_condition_rows(&definition, &columns, &old).unwrap_err(),
         "42P17",
         "INSERT trigger's WHEN condition cannot reference OLD values",
+    );
+    let mut statement = definition;
+    statement.row = false;
+    routine_error(
+        validate_trigger_condition_rows(&statement, &columns, &old).unwrap_err(),
+        "42P17",
+        "statement trigger's WHEN condition cannot reference column values",
     );
 }
 

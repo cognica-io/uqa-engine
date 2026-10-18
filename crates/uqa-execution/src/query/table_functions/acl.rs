@@ -9,8 +9,6 @@
 use uqa_core::Value;
 use uqa_sql::SQLError;
 
-use super::TableFunctionRows;
-
 /// Privilege letters in `AclMode` bit order with the names `convert_aclright_to_string` reports.
 const PRIVILEGES: &[(char, &str)] = &[
     ('a', "INSERT"),
@@ -30,11 +28,24 @@ const PRIVILEGES: &[(char, &str)] = &[
     ('m', "MAINTAIN"),
 ];
 
-pub fn aclexplode_row_stream(
+/// The output columns of `aclexplode`, named by any column aliases.
+pub fn aclexplode_columns(column_aliases: &[String]) -> Vec<String> {
+    ["grantor", "grantee", "privilege_type", "is_grantable"]
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            column_aliases
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| (*name).to_string())
+        })
+        .collect()
+}
+
+pub fn aclexplode_rows(
     role_oid: &dyn Fn(&str) -> Result<Option<i64>, SQLError>,
     evaluated: Vec<Value>,
-    column_aliases: &[String],
-) -> Result<TableFunctionRows, SQLError> {
+) -> Result<crate::PhysicalProjectRows, SQLError> {
     let [acl] = evaluated.as_slice() else {
         return Err(SQLError::BadArity {
             name: "aclexplode".into(),
@@ -81,20 +92,7 @@ pub fn aclexplode_row_stream(
             ]));
         }
     }
-    let columns = ["grantor", "grantee", "privilege_type", "is_grantable"]
-        .iter()
-        .enumerate()
-        .map(|(index, name)| {
-            column_aliases
-                .get(index)
-                .cloned()
-                .unwrap_or_else(|| (*name).to_string())
-        })
-        .collect();
-    Ok(TableFunctionRows::new(
-        columns,
-        Box::new(rows.into_iter().map(Ok)),
-    ))
+    Ok(Box::new(rows.into_iter().map(Ok)))
 }
 
 fn missing_role(name: &str) -> SQLError {

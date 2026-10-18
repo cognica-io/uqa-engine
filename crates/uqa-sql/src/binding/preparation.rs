@@ -26,6 +26,7 @@ pub(crate) use routines::{
     prepare_routine_body_inputs,
 };
 mod schema_expressions;
+mod set_contexts;
 mod sources;
 #[cfg(test)]
 mod tests;
@@ -376,6 +377,65 @@ pub(super) fn projection_metadata(
     })
 }
 
+/// Record the input collation of each call in a stored expression whose routines are already bound for storage, as analysis records it for an executable statement. Nothing else in the expression changes, so a definition that has no other analysis pass, such as an index key or a trigger condition, keeps each call's selection.
+pub(crate) fn assign_stored_input_collations(
+    routines: &dyn RoutineResolution,
+    expression: &mut crate::plan::ExpressionPlan,
+    input: &RowSchema,
+    binding: &BindingContext<'_>,
+) -> Result<(), SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope: &mut SchemaScope::for_analysis(binding)?,
+        parameters: ParameterTypes::fixed(&[]).with_call_collations(),
+        schema_expression: None,
+    };
+    analysis.expression(&expression.scalar, input, &expression.subqueries)?;
+    analysis
+        .parameters
+        .take_call_collations()
+        .apply(&mut expression.scalar, &mut expression.subqueries)
+}
+
+/// Record the input collation of each call in a stored query whose routines are already bound for storage, such as a view that an earlier release stored without selections. Nothing else in the query changes.
+pub fn assign_stored_query_input_collations(
+    routines: &dyn RoutineResolution,
+    query: &mut QueryPlan,
+    binding: &BindingContext<'_>,
+) -> Result<(), SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope: &mut SchemaScope::for_analysis(binding)?,
+        parameters: ParameterTypes::fixed(&[]).with_call_collations(),
+        schema_expression: None,
+    };
+    analysis.query(query, None)?;
+    analysis
+        .parameters
+        .take_call_collations()
+        .apply_query(query)
+}
+
+/// The input collation of a call whose binding is selected after statement analysis, such as a table function in `FROM`, derived from its arguments as analysis derives every other call's.
+pub(super) fn call_input_collation(
+    scope: &mut SchemaScope,
+    routines: &dyn RoutineResolution,
+    name: &str,
+    args: &[ScalarExpr],
+    input: &RowSchema,
+    subqueries: &[QueryPlan],
+    params: &[crate::SQLParam],
+) -> Result<Option<crate::catalog::collations::CollationSelection>, SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope,
+        parameters: ParameterTypes::fixed(params),
+        schema_expression: None,
+    };
+    let arguments = analysis.observe_function_arguments(name, args, &[], input, subqueries)?;
+    arguments.input_collation(args.len(), None, false)
+}
+
 pub(super) fn condition_metadata(
     scope: &mut SchemaScope,
     routines: &dyn RoutineResolution,
@@ -391,7 +451,15 @@ pub(super) fn condition_metadata(
         parameters: ParameterTypes::fixed(params),
         schema_expression: None,
     };
-    analysis.boolean_expression(expression, input, subqueries, construct)?;
+    let placement = match construct {
+        "WHERE" => crate::semantics::sets::placement::SetPlacement::Where,
+        "HAVING" => crate::semantics::sets::placement::SetPlacement::Having,
+        "JOIN/ON" => crate::semantics::sets::placement::SetPlacement::JoinCondition,
+        _ => analysis.scope.set_placement,
+    };
+    analysis.in_placement(placement, |analysis| {
+        analysis.boolean_expression(expression, input, subqueries, construct)
+    })?;
     analysis
         .scope
         .collations
@@ -576,6 +644,7 @@ impl Preparation<'_> {
             .map(|_| ())
     }
 
+    /// Analyze an operand a construct requires to be boolean, as `coerce_to_boolean` does: its type first, then whether it returns a set.
     fn boolean_expression(
         &mut self,
         expression: &ScalarExpr,
@@ -583,6 +652,7 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
         context: &str,
     ) -> Result<ExpressionType, SQLError> {
+        let calls = self.set_calls();
         let mut observed = self.expression(expression, input, subqueries)?;
         self.parameters
             .coerce_unknown(&mut observed, &ColumnType::Boolean)?;
@@ -594,6 +664,9 @@ impl Preparation<'_> {
         if let ScalarExpr::Literal(value @ uqa_core::Value::Str(_)) = expression {
             crate::expr::cast_value(value, "boolean")?;
         }
+        self.reject_set_inputs(calls, || {
+            crate::semantics::sets::placement::set_argument_error(context)
+        })?;
         Ok(observed)
     }
 }

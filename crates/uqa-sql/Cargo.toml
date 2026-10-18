@@ -17,6 +17,7 @@ exclude.workspace = true
 [dependencies]
 uqa-core = { workspace = true }
 uqa-pg-query = { workspace = true }
+uqa-pg-regex = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true }
 chrono = { workspace = true }
@@ -25,6 +26,7 @@ getrandom = { workspace = true }
 icu_casemap = { workspace = true }
 icu_collator = { workspace = true }
 icu_collections = { workspace = true }
+icu_locale_core = { workspace = true }
 icu_normalizer = { workspace = true }
 icu_properties = { workspace = true }
 icu_provider = { workspace = true }
@@ -32,9 +34,6 @@ zerovec = { workspace = true }
 writeable = { workspace = true }
 libm = { workspace = true }
 lz4_flex = { workspace = true }
-regex = { workspace = true }
-regex-automata = { workspace = true }
-regex-syntax = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]

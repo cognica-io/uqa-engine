@@ -40,6 +40,7 @@ struct Inputs {
     transaction_clock: Cell<Option<i64>>,
     date_order: Cell<Option<uqa_core::TemporalDateOrder>>,
     planning_clocks: RefCell<Vec<Option<i64>>>,
+    planning_cancellation: RefCell<Vec<bool>>,
 }
 
 impl Inputs {
@@ -151,6 +152,10 @@ impl ExecutablePlanOptimizer for Inputs {
         self.planning_clocks
             .borrow_mut()
             .push(uqa_sql::expr::transaction_clock_micros());
+        self.planning_cancellation.borrow_mut().push(
+            uqa_sql::expr::statement_cancellation()
+                .is_some_and(|current| current.shares_signal(&self.cancellation)),
+        );
         self.record(format!("optimize.{}", self.snapshot.get()));
         Err(SQLError::Internal("injected planning failure".into()))
     }
@@ -470,6 +475,33 @@ fn absent_transaction_clock_keeps_the_callers_clock_through_planning() {
     assert!(error.to_string().contains("injected planning failure"));
     assert_eq!(&*inputs.planning_clocks.borrow(), &[Some(7)]);
     assert_eq!(transaction_clock_micros(), Some(7));
+}
+
+#[test]
+fn planning_and_result_consumers_observe_the_batch_cancellation_and_restore_the_callers() {
+    use uqa_sql::expr::{statement_cancellation, StatementCancellationScope};
+
+    let caller = CancellationToken::new();
+    let _caller = StatementCancellationScope::enter(caller.clone());
+    let inputs = Inputs::default();
+    let mut delivered = 0;
+    let error = execute_simple_query(
+        &inputs.context(),
+        "COMMIT; DELETE FROM items",
+        &[],
+        false,
+        &mut |_| {
+            delivered += 1;
+            assert!(statement_cancellation()
+                .is_some_and(|current| current.shares_signal(&inputs.cancellation)));
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("injected planning failure"));
+    assert_eq!(delivered, 1);
+    assert_eq!(&*inputs.planning_cancellation.borrow(), &[true]);
+    assert!(statement_cancellation().is_some_and(|current| current.shares_signal(&caller)));
 }
 
 #[test]

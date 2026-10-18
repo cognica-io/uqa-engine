@@ -226,6 +226,7 @@ mod tests {
             argument_types: arguments.to_vec(),
             array_oid: 0,
             element_oid: 0,
+            length: 0,
         }
     }
 

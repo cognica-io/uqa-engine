@@ -45,6 +45,7 @@ fn binding(id: Option<[u8; 16]>, name: &str) -> FunctionBinding {
         invocation: None,
         composite_field: None,
         resolution_error: None,
+        input_collation: None,
     }
 }
 fn call(binding: FunctionBinding) -> Expr {

@@ -135,6 +135,7 @@ fn retained_ordinary_calls_and_registered_callbacks_are_not_native_patterns() {
             invocation: None,
             composite_field: None,
             resolution_error: None,
+            input_collation: None,
         });
         let before = stored.clone();
         assert!(!restore_expression(&mut stored, &Callbacks(false)).unwrap());

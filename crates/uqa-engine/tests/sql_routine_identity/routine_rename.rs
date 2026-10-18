@@ -669,7 +669,7 @@ fn assert_migrated_identity_metadata(database: &std::path::Path) {
     assert_eq!(remove_function_binding_identities(&mut columns), 2);
     assert_eq!(remove_function_binding_identities(&mut constraints), 1);
     let rules = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
-    assert!(rules.contains(r#""format_version":3"#));
+    assert!(rules.contains(r#""format_version":4"#));
     assert!(rules.contains("object_id"));
     let triggers = catalog.get_metadata("sql_triggers_json").unwrap().unwrap();
     assert!(triggers.contains("function_object_id"));

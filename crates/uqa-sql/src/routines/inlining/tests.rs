@@ -13,6 +13,7 @@ use std::sync::{atomic::Ordering, Arc};
 use uqa_core::Value;
 mod concatenation;
 mod fixture;
+mod table;
 use fixture::Catalog;
 
 fn integer(value: i64) -> ScalarExpr {
@@ -439,4 +440,23 @@ fn assigned_default_type_does_not_replace_the_default_expression_type() {
             ScalarExpr::Cast { implicit: true, .. }
         ));
     }
+}
+
+#[test]
+fn set_returning_defaults_keep_the_call_from_expanding() {
+    // CREATE FUNCTION rejects such a default; a catalog written while regexp_matches returned one value can still hold one.
+    let catalog = Catalog::new(
+        "CREATE FUNCTION f(v text[] DEFAULT regexp_matches('zz', 'z')) RETURNS text[] LANGUAGE SQL AS 'SELECT v'",
+    );
+    let binding = catalog.binding("f", &[]);
+    assert!(catalog
+        .context()
+        .prepare(&binding, &[], &[])
+        .unwrap()
+        .is_none());
+    assert!(catalog
+        .context()
+        .materialize_call(&binding, &[])
+        .unwrap()
+        .is_none());
 }

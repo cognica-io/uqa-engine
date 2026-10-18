@@ -9,6 +9,7 @@
 mod binding;
 pub(super) use binding::bind_call_in_place_with_control;
 mod registry;
+mod regular_expressions;
 mod selected;
 mod selection;
 mod standard;
@@ -374,7 +375,7 @@ pub(super) fn bind_call(
         Err(_) => return name,
     };
     if !selected.binding.builtin {
-        *binding = Some(selected.binding);
+        FunctionBinding::rebind(binding, selected.binding);
         return name;
     }
     let Some(matched) = builtins
@@ -401,7 +402,7 @@ pub(super) fn bind_call(
         selected.binding.dispatch = Some(dispatch);
     }
     selected.binding.dispatch = runtime_dispatch(&selected.binding);
-    *binding = Some(selected.binding);
+    FunctionBinding::rebind(binding, selected.binding);
     name
 }
 

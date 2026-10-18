@@ -31,6 +31,7 @@ mod query;
 mod rewrite;
 mod scalar;
 mod source_metadata;
+mod source_visit;
 mod statement;
 pub mod subqueries;
 mod visit;

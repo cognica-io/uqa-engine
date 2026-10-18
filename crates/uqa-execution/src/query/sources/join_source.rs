@@ -9,10 +9,10 @@
 use super::{
     alias_join_operator, bind_source_plan_schema, build_join_operator_with_ctes_at_path,
     combine_filters, join_using_predicate, null_row_for_schema, physical_exec_error,
-    physical_work_mem_bytes, qualifier_filter, resolve_join_using, shape_join_using_output,
-    unproduced_column, validate_join_on_schema, ColumnPrune, CteScope, JoinExecutionStrategy,
-    PhysicalOperator, QualifierFilters, QueryLateralSource, RowSchemaExecution, SQLError, SQLParam,
-    SourceContext, SourcePlan,
+    physical_work_mem_bytes, qualifier_filter, require_lateral_function_execute,
+    resolve_join_using, shape_join_using_output, unproduced_column, validate_join_on_schema,
+    ColumnPrune, CteScope, JoinExecutionStrategy, PhysicalOperator, QualifierFilters,
+    QueryLateralSource, RowSchemaExecution, SQLError, SQLParam, SourceContext, SourcePlan,
 };
 use crate::{HashJoin, LateralJoin, NestedLoopJoin};
 use uqa_sql::semantics::from_qualifier_set;
@@ -104,6 +104,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     ctes,
                     Some(&left_schema),
                 )?;
+                require_lateral_function_execute(context, right, &left_schema, params, ctes)?;
                 validate_join_on_schema(
                     context,
                     on.as_ref(),

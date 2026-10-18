@@ -54,11 +54,12 @@ impl Engine {
             analysis: self.prepared_definition_context(),
             aggregates: self,
             registry: self,
-            transaction_timestamp_micros: Some(self.transaction_timestamp_micros()),
+            transaction_timestamp_micros: self.session_transaction_clock_micros(),
             interval_style: Some(self.session.interval_style()),
             date_order: Some(uqa_sql::semantics::parameters::datestyle::date_order(
                 &self.session.setting("DateStyle"),
             )),
+            cancellation: &self.runtime.cancellation,
             clock: uqa_sql::expr::clock_timestamp_micros,
         }
     }
@@ -91,6 +92,8 @@ impl PreparedArgumentScopes for Engine {
                 aggregates: self,
                 volatility: self,
                 cast_type: &cast_type,
+                routines: self,
+                parameters,
             },
             assignment: self,
             analyze_type: &mut analyze_type,

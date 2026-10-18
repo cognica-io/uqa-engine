@@ -5,7 +5,8 @@
 //
 
 use super::arguments::{
-    immutable_argument, validate_argument, validate_assignment_type, ArgumentValidationContext,
+    immutable_argument, reject_set_argument, validate_argument, validate_assignment_type,
+    ArgumentValidationContext,
 };
 use super::{declared_parameter_types, is_unknown_type, prepared_result_schema_matches};
 use crate::semantics::volatility::VolatilityCatalog;
@@ -148,6 +149,19 @@ fn execute_constant_classification_keeps_domains_and_runtime_inputs_deferred() {
             Ok(None)
         }
     }
+    impl crate::FunctionTypeResolver for Catalog {
+        fn resolve_function_type(
+            &self,
+            _: &str,
+            _: Option<&crate::ast::FunctionBinding>,
+            _: &[Option<String>],
+            _: &[Option<ColumnType>],
+            _: bool,
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(None)
+        }
+    }
+    impl crate::routines::RoutineResolution for Catalog {}
     let aggregates = |_: &str| false;
     let cast_type = |name: &str| {
         let parsed = crate::parse_regtype_name(name).ok().flatten()?;
@@ -165,7 +179,23 @@ fn execute_constant_classification_keeps_domains_and_runtime_inputs_deferred() {
         aggregates: &aggregates,
         volatility: &Catalog,
         cast_type: &cast_type,
+        routines: &Catalog,
+        parameters: &[],
     };
+    // Every set-returning call is rejected where EXECUTE analyzes its arguments, including one nested in another expression.
+    for sql in [
+        "EXECUTE p(generate_series(1, 2))",
+        "EXECUTE p(ARRAY[regexp_matches('a', 'a')])",
+    ] {
+        let error = reject_set_argument(&context, &argument(sql)).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("0A000"), "{sql}");
+        assert_eq!(
+            error.to_string(),
+            "set-returning functions are not allowed in EXECUTE parameters",
+            "{sql}"
+        );
+    }
+    reject_set_argument(&context, &argument("EXECUTE p(abs(-1))")).unwrap();
     assert!(immutable_argument(
         &context,
         &argument("EXECUTE p(1 + 2)").scalar

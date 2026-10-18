@@ -132,6 +132,7 @@ graph TD
 | `uqa-graph` | Named graph stores, Cypher, RPQ automata, graph algebra, centrality, message passing, temporal traversal, and graph indexes |
 | `uqa-joins` | Relational and cross-paradigm join algorithms for text, vectors, graphs, and structured values |
 | `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin; library name stays `pg_query` |
+| `uqa-pg-regex` | Imported PostgreSQL 18.4 Advanced Regular Expression engine with UQA shims for admitted memory, cancellation, stack limits, and collation-specific character classes and case folding |
 | `uqa-sql` | `uqa-pg-query` parsing, syntax ASTs, PostgreSQL 18-compatible statement compilation across the verified surface, scalar IR, and SQL function registry |
 | `uqa-execution` | Volcano-style physical operators, columnar result batches, spill formats, sorting, aggregation, joins, and bounded materialization |
 | `uqa-planner` | Cardinality and cost models, DPccp join enumeration, unified-plan optimization, and physical text top-K selection |

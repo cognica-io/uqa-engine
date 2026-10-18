@@ -51,6 +51,7 @@ done
 
 crates=(
   uqa-pg-query
+  uqa-pg-regex
   uqa-nori-data
   uqa-kuromoji-data
   uqa-core
@@ -78,6 +79,7 @@ crates=(
 
 bootstrap_crates=(
   uqa-pg-query
+  uqa-pg-regex
   uqa-nori-data
   uqa-kuromoji-data
   uqa-core

@@ -46,7 +46,8 @@ class CLIReleaseTest(unittest.TestCase):
         paths = ["scripts/" + name for name in CLI.INSTALLERS]
         paths += [str(path.relative_to(ROOT)) for path in (ROOT / "scripts/usql-release/licenses").glob("*.txt")]
         paths += ["scripts/fixtures/usql-release/rows.arrow"]
-        paths += ["crates/uqa-sql/THIRD-PARTY/POSTGRESQL-SORT-NOTICE.txt"]
+        paths += ["crates/uqa-sql/THIRD-PARTY/POSTGRESQL-SORT-NOTICE.txt",
+                  "crates/uqa-pg-regex/THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt"]
         with tempfile.TemporaryDirectory() as temporary:
             destination = pathlib.Path(temporary)
             subprocess.run(["git", "-c", "core.autocrlf=true", "checkout-index",

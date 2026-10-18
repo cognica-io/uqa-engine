@@ -37,7 +37,8 @@ pub(super) fn bind_call(
     };
     if let Ok(Some(selected)) = select_binding(&name, binding.as_ref(), args, &mut infer, &control)
     {
-        *binding = Some(
+        crate::ast::FunctionBinding::rebind(
+            binding,
             selected
                 .into_uncontrolled()
                 .expect("ordinary range binding"),
@@ -77,7 +78,7 @@ pub(super) fn bind_call_in_place_with_control(
     };
     let (selected, extra) = selected.into_parts();
     *memory = control.combine(memory.take(), extra);
-    call.binding = Some(selected);
+    crate::ast::FunctionBinding::rebind(&mut call.binding, selected);
     control.check()?;
     Ok(())
 }

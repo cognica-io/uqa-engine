@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::Value;
 use uqa_sql::ast::{RuleEvent, Statement};
 use uqa_sql::plpgsql::VariableResolver;
+use uqa_sql::semantics::sets::placement_scope::SetPlacementScope;
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
@@ -336,7 +337,11 @@ impl PreparedRuleBatch {
                 } else if action_returns {
                     clear_statement_returning(&mut bound);
                 }
-                let result = context.statements.execute(bound, &privilege_subject)?;
+                // A rule action runs as it was stored; its set-returning calls are not placed again.
+                let result = {
+                    let _stored = SetPlacementScope::stored_definition();
+                    context.statements.execute(bound, &privilege_subject)
+                }?;
                 if prepared.rule.definition.instead
                     && prepared.rule.definition.condition.is_none()
                     && matches!(

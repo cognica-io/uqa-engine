@@ -13,6 +13,62 @@ use super::{
     TableFunctionCall,
 };
 
+/// Enforce EXECUTE on each function of a lateral FROM item, which the join calls once per outer row, as `PostgreSQL` checks it when it initializes the scan, before any outer row is read.
+pub(super) fn require_lateral_function_execute<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    source: &SourcePlan,
+    input_schema: &crate::RowSchema,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+) -> Result<(), SQLError> {
+    let calls = match source {
+        SourcePlan::Function {
+            name,
+            binding,
+            args,
+            ..
+        } => vec![(name.as_str(), binding.as_ref(), args.as_slice())],
+        SourcePlan::FunctionGroup { functions, .. } => functions
+            .iter()
+            .map(|function| {
+                (
+                    function.name.as_str(),
+                    function.binding.as_ref(),
+                    function.args.as_slice(),
+                )
+            })
+            .collect(),
+        _ => return Ok(()),
+    };
+    let hook = context.relational.expression_scope(ctes.clone());
+    for (name, binding, args) in calls {
+        match resolve_user_table_function(
+            context.relational.catalog,
+            name,
+            binding,
+            args,
+            input_schema,
+            params,
+            hook.as_ref(),
+        )? {
+            Some(resolved) => hook.require_user_function_execute(&resolved.function)?,
+            None => {
+                if let Some(binding) = binding.filter(|binding| binding.builtin) {
+                    hook.require_builtin_execute(binding)?;
+                }
+            }
+        }
+        super::function_source::require_argument_function_execute(
+            context.relational.catalog,
+            hook.as_ref(),
+            args,
+            input_schema,
+            params,
+        )?;
+    }
+    Ok(())
+}
+
 pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) context: SourceContext<'a, S>,
     pub(super) right: SourcePlan,
@@ -113,10 +169,21 @@ impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSour
                 hook.as_ref(),
             )?;
             validate_table_function_column_definition(
-                name,
-                binding.as_ref(),
-                resolved.as_ref().map(|resolved| resolved.function.as_ref()),
-                column_types,
+                self.context.relational.catalog,
+                uqa_sql::semantics::ColumnDefinitionRequest {
+                    name,
+                    binding: binding.as_ref(),
+                    user_function: resolved.as_ref().map(|resolved| resolved.function.as_ref()),
+                    user_invocation: resolved
+                        .as_ref()
+                        .and_then(|resolved| resolved.binding.invocation.as_deref()),
+                    args,
+                    declared_types: column_types,
+                    column_names: column_aliases,
+                },
+                &left_row.schema,
+                self.params,
+                hook.as_ref(),
             )?;
             let call = TableFunctionCall {
                 name,

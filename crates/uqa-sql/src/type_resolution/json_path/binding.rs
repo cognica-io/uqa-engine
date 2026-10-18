@@ -97,7 +97,7 @@ pub(in crate::type_resolution) fn bind_call(
     let (selected, extra) = selected.into_parts();
     *memory = control.combine(memory.take(), extra);
     if !selected.binding.builtin {
-        call.binding = Some(selected.binding);
+        crate::ast::FunctionBinding::rebind(&mut call.binding, selected.binding);
         return Ok(());
     }
     let mut binding = selected.binding;
@@ -109,7 +109,7 @@ pub(in crate::type_resolution) fn bind_call(
         memory,
         control,
     )?;
-    call.binding = Some(binding);
+    crate::ast::FunctionBinding::rebind(&mut call.binding, binding);
     Ok(())
 }
 

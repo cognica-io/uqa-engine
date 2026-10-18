@@ -100,6 +100,41 @@ fn arithmetic_does_not_require_parser_ast() {
 }
 
 #[test]
+fn set_returning_built_ins_fail_before_scalar_arguments_are_evaluated() {
+    let binding = FunctionBinding {
+        object_id: None,
+        name: "pg_catalog.generate_series".into(),
+        argument_types: vec!["integer".into(), "integer".into()],
+        builtin: true,
+        dispatch: None,
+        invocation: None,
+        composite_field: None,
+        resolution_error: None,
+        input_collation: None,
+    };
+    let failing = ScalarExpr::Binary {
+        op: BinaryOp::Divide,
+        lhs: Box::new(ScalarExpr::Literal(Value::Int(1))),
+        rhs: Box::new(ScalarExpr::Literal(Value::Int(0))),
+    };
+    let expression = ScalarExpr::Func {
+        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
+        name: "generate_series".into(),
+        binding: Some(binding),
+        args: vec![failing, ScalarExpr::Literal(Value::Int(2))],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let error = eval_scalar(&expression, &ScalarEvalContext::new(None, &[])).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert_eq!(
+        error.to_string(),
+        "set-valued function called in context that cannot accept a set"
+    );
+}
+
+#[test]
 fn nested_real_arithmetic_retains_width_without_a_row_schema() {
     let real = |value| ScalarExpr::TypedLiteral {
         collation_oid: None,

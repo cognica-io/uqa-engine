@@ -33,7 +33,33 @@ pub(super) fn evaluate_expression(
     if let Some(clause) = uqa_sql::catalog::collations::expression::scalar_clause(expression)? {
         return eval_scalar_inner(clause.argument, context, control);
     }
+    initialize_call(name, binding, context)?;
+    if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
+        if let Some(result) = uqa_sql::expr::eval_distinct_boolean(dispatch, args.len(), |index| {
+            let value = eval_scalar_inner(&args[index], context, control)?;
+            Ok((*value).clone())
+        }) {
+            return plain(result?, control);
+        }
+    }
     evaluate_function(name, binding, args, context, control)
+}
+
+/// Check a call before any argument is evaluated, as `PostgreSQL`'s `ExecInitFunc` does: EXECUTE on the selected built-in, then whether the built-in returns a set, which the one value this expression needs cannot accept.
+fn initialize_call(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    context: &ScalarEvalContext<'_>,
+) -> Result<(), SQLError> {
+    if let (Some(binding), Some(hook)) = (binding, context.function_hook()) {
+        hook.require_builtin_execute(binding)?;
+    }
+    if binding.is_some_and(|binding| binding.builtin)
+        && uqa_sql::semantics::sets::static_setness::builtin_call_returns_set(name, binding)
+    {
+        return Err(uqa_sql::semantics::sets::placement::set_valued_call_error());
+    }
+    Ok(())
 }
 
 fn evaluate_function(
@@ -43,9 +69,6 @@ fn evaluate_function(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    if let (Some(binding), Some(hook)) = (binding, context.function_hook()) {
-        hook.require_builtin_execute(binding)?;
-    }
     if let Some((binding, FunctionDispatch::NumericOperator(operator))) =
         binding.and_then(|binding| binding.dispatch.map(|dispatch| (binding, dispatch)))
     {

@@ -18,6 +18,7 @@ use uqa_sql::{
         regclass::{self, RoutineRegclassCatalog},
         CompiledFunctionBody, RoutineBody,
     },
+    semantics::sets::placement_scope::SetPlacementScope,
     SQLError,
 };
 
@@ -62,6 +63,9 @@ pub fn compile_catalog_bound_routine(
     def: &mut CreateFunction,
     bodies: RoutineBodyCompilation,
 ) -> Result<BoundRoutine, SQLError> {
+    // A stored body is bound again as it was created; its set-returning calls are not placed again.
+    let _stored =
+        matches!(bodies, RoutineBodyCompilation::Stored).then(SetPlacementScope::stored_definition);
     let mode = bodies.mode();
     if matches!(mode, RoutineCompilationMode::Definition) {
         if matches!(def.body, FunctionBody::Statements(_))

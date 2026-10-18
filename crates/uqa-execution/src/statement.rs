@@ -14,6 +14,8 @@ pub mod portal;
 pub mod prepared;
 pub mod show;
 pub mod table_locks;
+pub mod thread_context;
+pub mod thread_scope;
 pub mod transactions;
 
 pub mod context;

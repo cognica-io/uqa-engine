@@ -9,6 +9,8 @@ use crate::expr::{eval_builtin_function_call, eval_function_call, EngineHook};
 use std::cell::Cell;
 use uqa_core::{memory::MemoryBudget, CancellationToken, TemporalInfinity};
 
+const DEFAULT_COLLATION: u32 = crate::catalog::collations::DEFAULT_COLLATION_OID as u32;
+
 struct Session {
     zone: Cell<&'static str>,
     reads: Cell<usize>,
@@ -94,7 +96,8 @@ fn controlled_zone_conversion_preserves_inline_results_and_cancellation() {
         TemporalValue::parse_timestamp_tz("2024-07-15 03:34:56.123456+00").unwrap(),
     );
     let args = [Value::Str("Asia/Seoul".into()), value.clone()];
-    let result = eval_generated_scalar_function("timezone", &args, &control).unwrap();
+    let result =
+        eval_generated_scalar_function("timezone", &args, &control, DEFAULT_COLLATION).unwrap();
     assert_eq!(*result, expected);
     assert_eq!(result.reserved_bytes(), 0);
     assert_eq!(budget.used(), 0);
@@ -104,9 +107,14 @@ fn controlled_zone_conversion_preserves_inline_results_and_cancellation() {
         reads: Cell::new(0),
     };
     let context = EvalContext::new(None, &[]).with_engine(&session);
-    let result =
-        eval_generated_scalar_function_with_context("timezone", &[value], &control, &context)
-            .unwrap();
+    let result = eval_generated_scalar_function_with_context(
+        "timezone",
+        &[value],
+        &control,
+        &context,
+        DEFAULT_COLLATION,
+    )
+    .unwrap();
     assert_eq!(*result, expected);
     assert_eq!(result.reserved_bytes(), 0);
     assert_eq!(session.reads.get(), 1);
@@ -121,7 +129,7 @@ fn controlled_zone_conversion_preserves_inline_results_and_cancellation() {
         }
         let control = ProductionControl::new(&budget, &original, &invoking);
         assert_eq!(
-            eval_generated_scalar_function("timezone", &args, &control)
+            eval_generated_scalar_function("timezone", &args, &control, DEFAULT_COLLATION)
                 .unwrap_err()
                 .sqlstate(),
             Some("57014")

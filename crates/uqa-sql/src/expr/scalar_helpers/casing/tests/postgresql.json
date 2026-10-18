@@ -1,0 +1,1105 @@
+{
+ "provenance": {
+  "reference": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu with ICU 76.1 and Unicode 16.0",
+  "single_characters": "For every code point from U+0001 to U+10FFFF except surrogates, in ascending order, each changed single-character result is written as the code point and its result code points in lowercase hexadecimal, `cp:r1 r2;`; `changed` counts those code points and `crc32` is PostgreSQL's crc32 of the concatenation.",
+  "strings": "Results of initcap and lower under each collation."
+ },
+ "single_characters": [
+  {
+   "collation": 950,
+   "function": "casefold",
+   "changed": 26,
+   "crc32": 399081604
+  },
+  {
+   "collation": 950,
+   "function": "initcap",
+   "changed": 26,
+   "crc32": 1800517091
+  },
+  {
+   "collation": 950,
+   "function": "lower",
+   "changed": 26,
+   "crc32": 399081604
+  },
+  {
+   "collation": 950,
+   "function": "upper",
+   "changed": 26,
+   "crc32": 1800517091
+  },
+  {
+   "collation": 811,
+   "function": "casefold",
+   "changed": 1484,
+   "crc32": 2401711868
+  },
+  {
+   "collation": 811,
+   "function": "initcap",
+   "changed": 1477,
+   "crc32": 128433786
+  },
+  {
+   "collation": 811,
+   "function": "lower",
+   "changed": 1460,
+   "crc32": 38170329
+  },
+  {
+   "collation": 811,
+   "function": "upper",
+   "changed": 1477,
+   "crc32": 128433786
+  },
+  {
+   "collation": 6411,
+   "function": "casefold",
+   "changed": 1557,
+   "crc32": 1317192192
+  },
+  {
+   "collation": 6411,
+   "function": "initcap",
+   "changed": 1479,
+   "crc32": 1219204522
+  },
+  {
+   "collation": 6411,
+   "function": "lower",
+   "changed": 1460,
+   "crc32": 1714378773
+  },
+  {
+   "collation": 6411,
+   "function": "upper",
+   "changed": 1552,
+   "crc32": 3399197549
+  },
+  {
+   "collation": 951,
+   "function": "casefold",
+   "changed": 26,
+   "crc32": 399081604
+  },
+  {
+   "collation": 951,
+   "function": "initcap",
+   "changed": 26,
+   "crc32": 1800517091
+  },
+  {
+   "collation": 951,
+   "function": "lower",
+   "changed": 26,
+   "crc32": 399081604
+  },
+  {
+   "collation": 951,
+   "function": "upper",
+   "changed": 26,
+   "crc32": 1800517091
+  },
+  {
+   "collation": 962,
+   "function": "casefold",
+   "changed": 26,
+   "crc32": 399081604
+  },
+  {
+   "collation": 962,
+   "function": "initcap",
+   "changed": 26,
+   "crc32": 1800517091
+  },
+  {
+   "collation": 962,
+   "function": "lower",
+   "changed": 26,
+   "crc32": 399081604
+  },
+  {
+   "collation": 962,
+   "function": "upper",
+   "changed": 26,
+   "crc32": 1800517091
+  },
+  {
+   "collation": 963,
+   "function": "casefold",
+   "changed": 1557,
+   "crc32": 1317192192
+  },
+  {
+   "collation": 963,
+   "function": "initcap",
+   "changed": 1478,
+   "crc32": 29941602
+  },
+  {
+   "collation": 963,
+   "function": "lower",
+   "changed": 1460,
+   "crc32": 1714378773
+  },
+  {
+   "collation": 963,
+   "function": "upper",
+   "changed": 1552,
+   "crc32": 3399197549
+  }
+ ],
+ "strings": [
+  {
+   "input": "hello world",
+   "unicode": {
+    "initcap": "Hello World",
+    "lower": "hello world"
+   },
+   "pg_unicode_fast": {
+    "initcap": "Hello World",
+    "lower": "hello world"
+   },
+   "pg_c_utf8": {
+    "initcap": "Hello World",
+    "lower": "hello world"
+   },
+   "C": {
+    "initcap": "Hello World",
+    "lower": "hello world"
+   }
+  },
+  {
+   "input": "hello-world",
+   "unicode": {
+    "initcap": "Hello-World",
+    "lower": "hello-world"
+   },
+   "pg_unicode_fast": {
+    "initcap": "Hello-World",
+    "lower": "hello-world"
+   },
+   "pg_c_utf8": {
+    "initcap": "Hello-World",
+    "lower": "hello-world"
+   },
+   "C": {
+    "initcap": "Hello-World",
+    "lower": "hello-world"
+   }
+  },
+  {
+   "input": "o'neil",
+   "unicode": {
+    "initcap": "O'neil",
+    "lower": "o'neil"
+   },
+   "pg_unicode_fast": {
+    "initcap": "O'Neil",
+    "lower": "o'neil"
+   },
+   "pg_c_utf8": {
+    "initcap": "O'Neil",
+    "lower": "o'neil"
+   },
+   "C": {
+    "initcap": "O'Neil",
+    "lower": "o'neil"
+   }
+  },
+  {
+   "input": "a.b.c",
+   "unicode": {
+    "initcap": "A.b.c",
+    "lower": "a.b.c"
+   },
+   "pg_unicode_fast": {
+    "initcap": "A.B.C",
+    "lower": "a.b.c"
+   },
+   "pg_c_utf8": {
+    "initcap": "A.B.C",
+    "lower": "a.b.c"
+   },
+   "C": {
+    "initcap": "A.B.C",
+    "lower": "a.b.c"
+   }
+  },
+  {
+   "input": "a:b",
+   "unicode": {
+    "initcap": "A:B",
+    "lower": "a:b"
+   },
+   "pg_unicode_fast": {
+    "initcap": "A:B",
+    "lower": "a:b"
+   },
+   "pg_c_utf8": {
+    "initcap": "A:B",
+    "lower": "a:b"
+   },
+   "C": {
+    "initcap": "A:B",
+    "lower": "a:b"
+   }
+  },
+  {
+   "input": "3abc",
+   "unicode": {
+    "initcap": "3abc",
+    "lower": "3abc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "3abc",
+    "lower": "3abc"
+   },
+   "pg_c_utf8": {
+    "initcap": "3abc",
+    "lower": "3abc"
+   },
+   "C": {
+    "initcap": "3abc",
+    "lower": "3abc"
+   }
+  },
+  {
+   "input": "abc3def",
+   "unicode": {
+    "initcap": "Abc3def",
+    "lower": "abc3def"
+   },
+   "pg_unicode_fast": {
+    "initcap": "Abc3def",
+    "lower": "abc3def"
+   },
+   "pg_c_utf8": {
+    "initcap": "Abc3def",
+    "lower": "abc3def"
+   },
+   "C": {
+    "initcap": "Abc3def",
+    "lower": "abc3def"
+   }
+  },
+  {
+   "input": "1,000.50x",
+   "unicode": {
+    "initcap": "1,000.50x",
+    "lower": "1,000.50x"
+   },
+   "pg_unicode_fast": {
+    "initcap": "1,000.50x",
+    "lower": "1,000.50x"
+   },
+   "pg_c_utf8": {
+    "initcap": "1,000.50x",
+    "lower": "1,000.50x"
+   },
+   "C": {
+    "initcap": "1,000.50x",
+    "lower": "1,000.50x"
+   }
+  },
+  {
+   "input": "\u0e44\u0e17\u0e22abc",
+   "unicode": {
+    "initcap": "\u0e44\u0e17\u0e22abc",
+    "lower": "\u0e44\u0e17\u0e22abc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u0e44\u0e17\u0e22abc",
+    "lower": "\u0e44\u0e17\u0e22abc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u0e44\u0e17\u0e22abc",
+    "lower": "\u0e44\u0e17\u0e22abc"
+   },
+   "C": {
+    "initcap": "\u0e44\u0e17\u0e22Abc",
+    "lower": "\u0e44\u0e17\u0e22abc"
+   }
+  },
+  {
+   "input": "\ud55cabc",
+   "unicode": {
+    "initcap": "\ud55cAbc",
+    "lower": "\ud55cabc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\ud55cabc",
+    "lower": "\ud55cabc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\ud55cabc",
+    "lower": "\ud55cabc"
+   },
+   "C": {
+    "initcap": "\ud55cAbc",
+    "lower": "\ud55cabc"
+   }
+  },
+  {
+   "input": "abc\ud55c",
+   "unicode": {
+    "initcap": "Abc\ud55c",
+    "lower": "abc\ud55c"
+   },
+   "pg_unicode_fast": {
+    "initcap": "Abc\ud55c",
+    "lower": "abc\ud55c"
+   },
+   "pg_c_utf8": {
+    "initcap": "Abc\ud55c",
+    "lower": "abc\ud55c"
+   },
+   "C": {
+    "initcap": "Abc\ud55c",
+    "lower": "abc\ud55c"
+   }
+  },
+  {
+   "input": "\u65e5\u672cabc",
+   "unicode": {
+    "initcap": "\u65e5\u672cAbc",
+    "lower": "\u65e5\u672cabc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u65e5\u672cabc",
+    "lower": "\u65e5\u672cabc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u65e5\u672cabc",
+    "lower": "\u65e5\u672cabc"
+   },
+   "C": {
+    "initcap": "\u65e5\u672cAbc",
+    "lower": "\u65e5\u672cabc"
+   }
+  },
+  {
+   "input": "\u30ab\u30bf\u30ab\u30caabc",
+   "unicode": {
+    "initcap": "\u30ab\u30bf\u30ab\u30caAbc",
+    "lower": "\u30ab\u30bf\u30ab\u30caabc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u30ab\u30bf\u30ab\u30caabc",
+    "lower": "\u30ab\u30bf\u30ab\u30caabc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u30ab\u30bf\u30ab\u30caabc",
+    "lower": "\u30ab\u30bf\u30ab\u30caabc"
+   },
+   "C": {
+    "initcap": "\u30ab\u30bf\u30ab\u30caAbc",
+    "lower": "\u30ab\u30bf\u30ab\u30caabc"
+   }
+  },
+  {
+   "input": "x_y",
+   "unicode": {
+    "initcap": "X_y",
+    "lower": "x_y"
+   },
+   "pg_unicode_fast": {
+    "initcap": "X_Y",
+    "lower": "x_y"
+   },
+   "pg_c_utf8": {
+    "initcap": "X_Y",
+    "lower": "x_y"
+   },
+   "C": {
+    "initcap": "X_Y",
+    "lower": "x_y"
+   }
+  },
+  {
+   "input": "\u01c6emal",
+   "unicode": {
+    "initcap": "\u01c5emal",
+    "lower": "\u01c6emal"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u01c5emal",
+    "lower": "\u01c6emal"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u01c4emal",
+    "lower": "\u01c6emal"
+   },
+   "C": {
+    "initcap": "\u01c6Emal",
+    "lower": "\u01c6emal"
+   }
+  },
+  {
+   "input": "'twixt",
+   "unicode": {
+    "initcap": "'Twixt",
+    "lower": "'twixt"
+   },
+   "pg_unicode_fast": {
+    "initcap": "'Twixt",
+    "lower": "'twixt"
+   },
+   "pg_c_utf8": {
+    "initcap": "'Twixt",
+    "lower": "'twixt"
+   },
+   "C": {
+    "initcap": "'Twixt",
+    "lower": "'twixt"
+   }
+  },
+  {
+   "input": "\u02bcn",
+   "unicode": {
+    "initcap": "\u02bcN",
+    "lower": "\u02bcn"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u02bcn",
+    "lower": "\u02bcn"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u02bcn",
+    "lower": "\u02bcn"
+   },
+   "C": {
+    "initcap": "\u02bcN",
+    "lower": "\u02bcn"
+   }
+  },
+  {
+   "input": "\u03c3 \u03a3\u0391\u03a3",
+   "unicode": {
+    "initcap": "\u03a3 \u03a3\u03b1\u03c2",
+    "lower": "\u03c3 \u03c3\u03b1\u03c2"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u03a3 \u03a3\u03b1\u03c2",
+    "lower": "\u03c3 \u03c3\u03b1\u03c2"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u03a3 \u03a3\u03b1\u03c3",
+    "lower": "\u03c3 \u03c3\u03b1\u03c3"
+   },
+   "C": {
+    "initcap": "\u03c3 \u03a3\u0391\u03a3",
+    "lower": "\u03c3 \u03a3\u0391\u03a3"
+   }
+  },
+  {
+   "input": "\u0391\u03a3^\u0391",
+   "unicode": {
+    "initcap": "\u0391\u03c3^\u0391",
+    "lower": "\u03b1\u03c3^\u03b1"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u0391\u03c3^\u0391",
+    "lower": "\u03b1\u03c3^\u03b1"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u0391\u03c3^\u0391",
+    "lower": "\u03b1\u03c3^\u03b1"
+   },
+   "C": {
+    "initcap": "\u0391\u03a3^\u0391",
+    "lower": "\u0391\u03a3^\u0391"
+   }
+  },
+  {
+   "input": "\ud83d\ude00abc",
+   "unicode": {
+    "initcap": "\ud83d\ude00Abc",
+    "lower": "\ud83d\ude00abc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\ud83d\ude00Abc",
+    "lower": "\ud83d\ude00abc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\ud83d\ude00Abc",
+    "lower": "\ud83d\ude00abc"
+   },
+   "C": {
+    "initcap": "\ud83d\ude00Abc",
+    "lower": "\ud83d\ude00abc"
+   }
+  },
+  {
+   "input": "abc\ud83d\ude00def",
+   "unicode": {
+    "initcap": "Abc\ud83d\ude00Def",
+    "lower": "abc\ud83d\ude00def"
+   },
+   "pg_unicode_fast": {
+    "initcap": "Abc\ud83d\ude00Def",
+    "lower": "abc\ud83d\ude00def"
+   },
+   "pg_c_utf8": {
+    "initcap": "Abc\ud83d\ude00Def",
+    "lower": "abc\ud83d\ude00def"
+   },
+   "C": {
+    "initcap": "Abc\ud83d\ude00Def",
+    "lower": "abc\ud83d\ude00def"
+   }
+  },
+  {
+   "input": "\ud83c\uddfa\ud83c\uddf8abc",
+   "unicode": {
+    "initcap": "\ud83c\uddfa\ud83c\uddf8Abc",
+    "lower": "\ud83c\uddfa\ud83c\uddf8abc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\ud83c\uddfa\ud83c\uddf8Abc",
+    "lower": "\ud83c\uddfa\ud83c\uddf8abc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\ud83c\uddfa\ud83c\uddf8Abc",
+    "lower": "\ud83c\uddfa\ud83c\uddf8abc"
+   },
+   "C": {
+    "initcap": "\ud83c\uddfa\ud83c\uddf8Abc",
+    "lower": "\ud83c\uddfa\ud83c\uddf8abc"
+   }
+  },
+  {
+   "input": "a\u0301b c",
+   "unicode": {
+    "initcap": "A\u0301b C",
+    "lower": "a\u0301b c"
+   },
+   "pg_unicode_fast": {
+    "initcap": "A\u0301B C",
+    "lower": "a\u0301b c"
+   },
+   "pg_c_utf8": {
+    "initcap": "A\u0301B C",
+    "lower": "a\u0301b c"
+   },
+   "C": {
+    "initcap": "A\u0301B C",
+    "lower": "a\u0301b c"
+   }
+  },
+  {
+   "input": "\u01c8",
+   "unicode": {
+    "initcap": "\u01c8",
+    "lower": "\u01c9"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u01c8",
+    "lower": "\u01c9"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u01c7",
+    "lower": "\u01c9"
+   },
+   "C": {
+    "initcap": "\u01c8",
+    "lower": "\u01c8"
+   }
+  },
+  {
+   "input": "\u00df",
+   "unicode": {
+    "initcap": "Ss",
+    "lower": "\u00df"
+   },
+   "pg_unicode_fast": {
+    "initcap": "Ss",
+    "lower": "\u00df"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u00df",
+    "lower": "\u00df"
+   },
+   "C": {
+    "initcap": "\u00df",
+    "lower": "\u00df"
+   }
+  },
+  {
+   "input": "\ufb01x",
+   "unicode": {
+    "initcap": "Fix",
+    "lower": "\ufb01x"
+   },
+   "pg_unicode_fast": {
+    "initcap": "Fix",
+    "lower": "\ufb01x"
+   },
+   "pg_c_utf8": {
+    "initcap": "\ufb01x",
+    "lower": "\ufb01x"
+   },
+   "C": {
+    "initcap": "\ufb01X",
+    "lower": "\ufb01x"
+   }
+  },
+  {
+   "input": "x1.2y",
+   "unicode": {
+    "initcap": "X1.2y",
+    "lower": "x1.2y"
+   },
+   "pg_unicode_fast": {
+    "initcap": "X1.2y",
+    "lower": "x1.2y"
+   },
+   "pg_c_utf8": {
+    "initcap": "X1.2y",
+    "lower": "x1.2y"
+   },
+   "C": {
+    "initcap": "X1.2y",
+    "lower": "x1.2y"
+   }
+  },
+  {
+   "input": "a\u00adb",
+   "unicode": {
+    "initcap": "A\u00adb",
+    "lower": "a\u00adb"
+   },
+   "pg_unicode_fast": {
+    "initcap": "A\u00adB",
+    "lower": "a\u00adb"
+   },
+   "pg_c_utf8": {
+    "initcap": "A\u00adB",
+    "lower": "a\u00adb"
+   },
+   "C": {
+    "initcap": "A\u00adB",
+    "lower": "a\u00adb"
+   }
+  },
+  {
+   "input": "\u0301a",
+   "unicode": {
+    "initcap": "\u0301A",
+    "lower": "\u0301a"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u0301A",
+    "lower": "\u0301a"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u0301A",
+    "lower": "\u0301a"
+   },
+   "C": {
+    "initcap": "\u0301A",
+    "lower": "\u0301a"
+   }
+  },
+  {
+   "input": "\u216babc",
+   "unicode": {
+    "initcap": "\u216babc",
+    "lower": "\u217babc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u216babc",
+    "lower": "\u217babc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u216babc",
+    "lower": "\u217babc"
+   },
+   "C": {
+    "initcap": "\u216bAbc",
+    "lower": "\u216babc"
+   }
+  },
+  {
+   "input": "\u24d0\u24d1",
+   "unicode": {
+    "initcap": "\u24b6\u24d1",
+    "lower": "\u24d0\u24d1"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u24b6\u24d1",
+    "lower": "\u24d0\u24d1"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u24b6\u24d1",
+    "lower": "\u24d0\u24d1"
+   },
+   "C": {
+    "initcap": "\u24d0\u24d1",
+    "lower": "\u24d0\u24d1"
+   }
+  },
+  {
+   "input": "h\u2019llo",
+   "unicode": {
+    "initcap": "H\u2019llo",
+    "lower": "h\u2019llo"
+   },
+   "pg_unicode_fast": {
+    "initcap": "H\u2019Llo",
+    "lower": "h\u2019llo"
+   },
+   "pg_c_utf8": {
+    "initcap": "H\u2019Llo",
+    "lower": "h\u2019llo"
+   },
+   "C": {
+    "initcap": "H\u2019Llo",
+    "lower": "h\u2019llo"
+   }
+  },
+  {
+   "input": "x\"y",
+   "unicode": {
+    "initcap": "X\"Y",
+    "lower": "x\"y"
+   },
+   "pg_unicode_fast": {
+    "initcap": "X\"Y",
+    "lower": "x\"y"
+   },
+   "pg_c_utf8": {
+    "initcap": "X\"Y",
+    "lower": "x\"y"
+   },
+   "C": {
+    "initcap": "X\"Y",
+    "lower": "x\"y"
+   }
+  },
+  {
+   "input": "a\r\nb",
+   "unicode": {
+    "initcap": "A\r\nB",
+    "lower": "a\r\nb"
+   },
+   "pg_unicode_fast": {
+    "initcap": "A\r\nB",
+    "lower": "a\r\nb"
+   },
+   "pg_c_utf8": {
+    "initcap": "A\r\nB",
+    "lower": "a\r\nb"
+   },
+   "C": {
+    "initcap": "A\r\nB",
+    "lower": "a\r\nb"
+   }
+  },
+  {
+   "input": "a  b",
+   "unicode": {
+    "initcap": "A  B",
+    "lower": "a  b"
+   },
+   "pg_unicode_fast": {
+    "initcap": "A  B",
+    "lower": "a  b"
+   },
+   "pg_c_utf8": {
+    "initcap": "A  B",
+    "lower": "a  b"
+   },
+   "C": {
+    "initcap": "A  B",
+    "lower": "a  b"
+   }
+  },
+  {
+   "input": "\u0130stanbul",
+   "unicode": {
+    "initcap": "\u0130stanbul",
+    "lower": "i\u0307stanbul"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u0130stanbul",
+    "lower": "i\u0307stanbul"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u0130stanbul",
+    "lower": "istanbul"
+   },
+   "C": {
+    "initcap": "\u0130Stanbul",
+    "lower": "\u0130stanbul"
+   }
+  },
+  {
+   "input": "\u03a3\u0391\u03a3 \u03a3",
+   "unicode": {
+    "initcap": "\u03a3\u03b1\u03c2 \u03a3",
+    "lower": "\u03c3\u03b1\u03c2 \u03c3"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u03a3\u03b1\u03c2 \u03a3",
+    "lower": "\u03c3\u03b1\u03c2 \u03c3"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u03a3\u03b1\u03c3 \u03a3",
+    "lower": "\u03c3\u03b1\u03c3 \u03c3"
+   },
+   "C": {
+    "initcap": "\u03a3\u0391\u03a3 \u03a3",
+    "lower": "\u03a3\u0391\u03a3 \u03a3"
+   }
+  },
+  {
+   "input": "\u02b0\u03a3",
+   "unicode": {
+    "initcap": "\u02b0\u03c3",
+    "lower": "\u02b0\u03c3"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u02b0\u03c2",
+    "lower": "\u02b0\u03c2"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u02b0\u03c3",
+    "lower": "\u02b0\u03c3"
+   },
+   "C": {
+    "initcap": "\u02b0\u03a3",
+    "lower": "\u02b0\u03a3"
+   }
+  },
+  {
+   "input": "'\u03a3",
+   "unicode": {
+    "initcap": "'\u03a3",
+    "lower": "'\u03c3"
+   },
+   "pg_unicode_fast": {
+    "initcap": "'\u03a3",
+    "lower": "'\u03c2"
+   },
+   "pg_c_utf8": {
+    "initcap": "'\u03a3",
+    "lower": "'\u03c3"
+   },
+   "C": {
+    "initcap": "'\u03a3",
+    "lower": "'\u03a3"
+   }
+  },
+  {
+   "input": "a\u0660b",
+   "unicode": {
+    "initcap": "A\u0660b",
+    "lower": "a\u0660b"
+   },
+   "pg_unicode_fast": {
+    "initcap": "A\u0660b",
+    "lower": "a\u0660b"
+   },
+   "pg_c_utf8": {
+    "initcap": "A\u0660B",
+    "lower": "a\u0660b"
+   },
+   "C": {
+    "initcap": "A\u0660B",
+    "lower": "a\u0660b"
+   }
+  },
+  {
+   "input": "\u0660a",
+   "unicode": {
+    "initcap": "\u0660a",
+    "lower": "\u0660a"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u0660a",
+    "lower": "\u0660a"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u0660A",
+    "lower": "\u0660a"
+   },
+   "C": {
+    "initcap": "\u0660A",
+    "lower": "\u0660a"
+   }
+  },
+  {
+   "input": "\u05d0\"\u05d1",
+   "unicode": {
+    "initcap": "\u05d0\"\u05d1",
+    "lower": "\u05d0\"\u05d1"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u05d0\"\u05d1",
+    "lower": "\u05d0\"\u05d1"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u05d0\"\u05d1",
+    "lower": "\u05d0\"\u05d1"
+   },
+   "C": {
+    "initcap": "\u05d0\"\u05d1",
+    "lower": "\u05d0\"\u05d1"
+   }
+  },
+  {
+   "input": "\u05d0'",
+   "unicode": {
+    "initcap": "\u05d0'",
+    "lower": "\u05d0'"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u05d0'",
+    "lower": "\u05d0'"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u05d0'",
+    "lower": "\u05d0'"
+   },
+   "C": {
+    "initcap": "\u05d0'",
+    "lower": "\u05d0'"
+   }
+  },
+  {
+   "input": "a\u200d\ud83d\ude00b",
+   "unicode": {
+    "initcap": "A\u200d\ud83d\ude00B",
+    "lower": "a\u200d\ud83d\ude00b"
+   },
+   "pg_unicode_fast": {
+    "initcap": "A\u200d\ud83d\ude00B",
+    "lower": "a\u200d\ud83d\ude00b"
+   },
+   "pg_c_utf8": {
+    "initcap": "A\u200d\ud83d\ude00B",
+    "lower": "a\u200d\ud83d\ude00b"
+   },
+   "C": {
+    "initcap": "A\u200d\ud83d\ude00B",
+    "lower": "a\u200d\ud83d\ude00b"
+   }
+  },
+  {
+   "input": "\ud83d\udc69\u200d\ud83d\udc69abc",
+   "unicode": {
+    "initcap": "\ud83d\udc69\u200d\ud83d\udc69Abc",
+    "lower": "\ud83d\udc69\u200d\ud83d\udc69abc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\ud83d\udc69\u200d\ud83d\udc69Abc",
+    "lower": "\ud83d\udc69\u200d\ud83d\udc69abc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\ud83d\udc69\u200d\ud83d\udc69Abc",
+    "lower": "\ud83d\udc69\u200d\ud83d\udc69abc"
+   },
+   "C": {
+    "initcap": "\ud83d\udc69\u200d\ud83d\udc69Abc",
+    "lower": "\ud83d\udc69\u200d\ud83d\udc69abc"
+   }
+  },
+  {
+   "input": "\u3042\u3044abc",
+   "unicode": {
+    "initcap": "\u3042\u3044Abc",
+    "lower": "\u3042\u3044abc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u3042\u3044abc",
+    "lower": "\u3042\u3044abc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u3042\u3044abc",
+    "lower": "\u3042\u3044abc"
+   },
+   "C": {
+    "initcap": "\u3042\u3044Abc",
+    "lower": "\u3042\u3044abc"
+   }
+  },
+  {
+   "input": "a\u3000b",
+   "unicode": {
+    "initcap": "A\u3000B",
+    "lower": "a\u3000b"
+   },
+   "pg_unicode_fast": {
+    "initcap": "A\u3000B",
+    "lower": "a\u3000b"
+   },
+   "pg_c_utf8": {
+    "initcap": "A\u3000B",
+    "lower": "a\u3000b"
+   },
+   "C": {
+    "initcap": "A\u3000B",
+    "lower": "a\u3000b"
+   }
+  },
+  {
+   "input": "\u1100\u1161abc",
+   "unicode": {
+    "initcap": "\u1100\u1161abc",
+    "lower": "\u1100\u1161abc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u1100\u1161abc",
+    "lower": "\u1100\u1161abc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u1100\u1161abc",
+    "lower": "\u1100\u1161abc"
+   },
+   "C": {
+    "initcap": "\u1100\u1161Abc",
+    "lower": "\u1100\u1161abc"
+   }
+  },
+  {
+   "input": "\u0e01\u0e33abc",
+   "unicode": {
+    "initcap": "\u0e01\u0e33abc",
+    "lower": "\u0e01\u0e33abc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u0e01\u0e33abc",
+    "lower": "\u0e01\u0e33abc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u0e01\u0e33abc",
+    "lower": "\u0e01\u0e33abc"
+   },
+   "C": {
+    "initcap": "\u0e01\u0e33Abc",
+    "lower": "\u0e01\u0e33abc"
+   }
+  },
+  {
+   "input": "\u0e46abc",
+   "unicode": {
+    "initcap": "\u0e46Abc",
+    "lower": "\u0e46abc"
+   },
+   "pg_unicode_fast": {
+    "initcap": "\u0e46abc",
+    "lower": "\u0e46abc"
+   },
+   "pg_c_utf8": {
+    "initcap": "\u0e46abc",
+    "lower": "\u0e46abc"
+   },
+   "C": {
+    "initcap": "\u0e46Abc",
+    "lower": "\u0e46abc"
+   }
+  }
+ ]
+}

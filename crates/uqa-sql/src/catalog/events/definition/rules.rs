@@ -20,7 +20,10 @@ use crate::{
         view::StoredViewKind,
     },
     plpgsql::bind_expr,
-    semantics::rules::action_binding::rule_action_has_set_operation,
+    semantics::{
+        rules::action_binding::rule_action_has_set_operation,
+        sets::placement_scope::SetPlacementScope,
+    },
     SQLError,
 };
 use uqa_core::{RelationIdentity, Value};
@@ -221,15 +224,29 @@ impl EventAnalysisContext<'_> {
         Ok(())
     }
 
-    fn validate_rule_condition(
+    /// A new rule's WHERE condition is analyzed as a WHERE clause, which admits no set-returning call. A condition stored by an earlier release keeps loading; evaluating a set-returning call in it reports the executor's diagnostic.
+    fn reject_rule_condition_sets(
         &self,
-        condition: &mut Expr,
-        columns: &[crate::ast::ColumnDef],
-        event: RuleEvent,
-        stored_plan: Option<&crate::plan::ExpressionPlan>,
-        stored_binding: Option<&RuleConditionBinding>,
-    ) -> Result<Option<(crate::plan::ExpressionPlan, RuleConditionBinding)>, SQLError> {
-        let has_subquery = rule_condition_has_subquery(condition);
+        condition: &crate::ScalarExpr,
+        schema: &crate::RowSchema,
+        lookup_mode: RelationLookupMode,
+    ) -> Result<(), SQLError> {
+        if lookup_mode != RelationLookupMode::Bound
+            && crate::semantics::sets::validation::expression_may_return_set(
+                self.routines,
+                self.routines,
+                condition,
+                schema,
+                &[],
+            )?
+        {
+            crate::semantics::sets::placement::SetPlacement::Where.admit(true)?;
+        }
+        Ok(())
+    }
+
+    /// A rule WHERE condition admits no aggregate or window function call.
+    fn reject_rule_condition_aggregates(&self, condition: &Expr) -> Result<(), SQLError> {
         if condition.contains_aggregate()
             || condition.contains_window()
             || condition.any_node(&|node| {
@@ -242,6 +259,20 @@ impl EventAnalysisContext<'_> {
                     .into(),
             });
         }
+        Ok(())
+    }
+
+    fn validate_rule_condition(
+        &self,
+        condition: &mut Expr,
+        columns: &[crate::ast::ColumnDef],
+        event: RuleEvent,
+        stored_plan: Option<&crate::plan::ExpressionPlan>,
+        stored_binding: Option<&RuleConditionBinding>,
+        lookup_mode: RelationLookupMode,
+    ) -> Result<Option<(crate::plan::ExpressionPlan, RuleConditionBinding)>, SQLError> {
+        let has_subquery = rule_condition_has_subquery(condition);
+        self.reject_rule_condition_aggregates(condition)?;
         if !has_subquery && condition.any_node(&|node| matches!(node, Expr::Column(_))) {
             *condition = bind_expr(condition, &mut RuleConditionNameResolver { columns, event })?;
         }
@@ -257,6 +288,11 @@ impl EventAnalysisContext<'_> {
                 &mut RuleRowTypeResolver::for_condition(columns, event),
             )?;
             let lowered = crate::plan::ExpressionPlan::lower(bound);
+            self.reject_rule_condition_sets(
+                &lowered.scalar,
+                &crate::RowSchema::default(),
+                lookup_mode,
+            )?;
             match crate::common_context_expression_type(
                 &lowered.scalar,
                 &crate::RowSchema::default(),
@@ -313,6 +349,10 @@ impl EventAnalysisContext<'_> {
         let ty = self
             .stored_routines
             .bind_rule_condition(&mut plan, &schema, event)?;
+        self.reject_rule_condition_sets(&plan.scalar, &schema, lookup_mode)?;
+        // A new or restored condition records each call's input collation; a rule catalog stored before conditions recorded them migrates once.
+        self.stored_routines
+            .assign_input_collations(&mut plan, &schema)?;
         if let Some(ty) = ty {
             if !is_boolean_type(&ty) {
                 return Err(SQLError::TypeMismatch(format!(
@@ -540,6 +580,9 @@ impl EventAnalysisContext<'_> {
         ),
         SQLError,
     > {
+        // A stored rule is analyzed as it was created; its set-returning calls are not placed again.
+        let _stored =
+            (lookup_mode == RelationLookupMode::Bound).then(SetPlacementScope::stored_definition);
         let (relation, _) =
             self.resolve_rule_event_relation_kind(&definition.table, lookup_mode)?;
         definition.table = relation.qualified_name();
@@ -584,6 +627,7 @@ impl EventAnalysisContext<'_> {
                     definition.event,
                     stored_condition_plan,
                     stored_condition_binding,
+                    lookup_mode,
                 )
             })
             .transpose()?

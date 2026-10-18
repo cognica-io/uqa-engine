@@ -146,7 +146,7 @@ fn restore_call<T: PatternNode>(
         oid: None,
     });
     name.clone_from(&restored.name);
-    *binding = Some(restored);
+    FunctionBinding::rebind(binding, restored);
     true
 }
 

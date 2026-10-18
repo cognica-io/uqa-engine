@@ -21,6 +21,7 @@ pub mod composite_rename;
 mod cte_controls;
 mod ctes;
 mod dependencies;
+pub mod legacy_collations;
 pub mod legacy_patterns;
 mod merge_scopes;
 mod ordered_calls;
@@ -37,14 +38,17 @@ mod type_resolution;
 mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
-pub use preparation::{analyze_column_type_transform, infer_prepared_parameter_types};
+pub use preparation::{
+    analyze_column_type_transform, assign_stored_query_input_collations,
+    infer_prepared_parameter_types,
+};
 pub(crate) use preparation::{
     analyze_default_inputs, analyze_routine_body_argument, analyze_routine_body_inputs,
     prepare_routine_body_inputs,
 };
 pub(crate) use preparation::{
     analyze_domain_check, analyze_stored_expression_inputs, analyze_table_check,
-    read_prepared_inputs,
+    assign_stored_input_collations, read_prepared_inputs,
 };
 
 #[cfg(test)]
@@ -90,6 +94,7 @@ use crate::ast::ColumnType;
 use crate::catalog::analysis::CatalogReadView;
 use crate::catalog::resolution::RelationNameResolution;
 use crate::routines::RoutineResolution;
+use crate::semantics::sets::placement_scope::SetPlacementScope;
 use crate::semantics::{
     apply_table_function_aliases, table_function_column_types, table_function_empty_schema,
     validate_table_function_alias_count, validate_table_function_column_definition,
@@ -118,6 +123,10 @@ struct SchemaScope {
     rule_condition_event: Option<crate::ast::RuleEvent>,
     /// Native MERGE action syntax is legal in a RETURNING expression and its descendant queries.
     merge_returning: bool,
+    /// The kind of expression under analysis at this query level, which decides where a set-returning call may appear, as `PostgreSQL`'s `p_expr_kind` does.
+    set_placement: crate::semantics::sets::placement::SetPlacement,
+    /// The set-returning calls analyzed so far at this query level. Two readings differ exactly when an expression analyzed between them contains one, as `PostgreSQL` compares `p_last_srf`.
+    set_calls: usize,
     stored_whole_rows: BTreeMap<String, ScalarExpr>,
     /// The parameters of the SQL routine whose body is bound, as the outermost scope: a reference that resolves into them, because no column of any query level takes its name, becomes the positional parameter it names.
     routine_parameters: Option<RoutineParameterScope>,
@@ -151,6 +160,8 @@ impl SchemaScope {
             stored_expression_outer: None,
             rule_condition_event: None,
             merge_returning: false,
+            set_placement: crate::semantics::sets::placement::SetPlacement::Expanding,
+            set_calls: 0,
             stored_whole_rows: BTreeMap::new(),
             routine_parameters: None,
             scalar_binding: ScalarBindingMode::Stored,
@@ -180,6 +191,8 @@ impl SchemaScope {
             stored_expression_outer: None,
             rule_condition_event: None,
             merge_returning: false,
+            set_placement: crate::semantics::sets::placement::SetPlacement::Expanding,
+            set_calls: 0,
             stored_whole_rows: BTreeMap::new(),
             routine_parameters: None,
             scalar_binding: ScalarBindingMode::Stored,
@@ -432,16 +445,19 @@ impl SchemaScope {
                         )));
                     }
                     self.record_stored_query_dependencies(&view.query);
-                    let result = self
-                        .bind_query(routines, &view.query, params, outer)
-                        .and_then(|schema| {
-                            let schema = rename_schema(
-                                &schema,
-                                view.output_columns.as_deref().unwrap_or(&[]),
-                                Some(qualifier),
-                            );
-                            self.alias_relation_schema(&schema, name, qualifier, column_aliases)
-                        });
+                    // A view's stored query is bound as it was created; its set-returning calls are not placed again.
+                    let result = {
+                        let _stored = SetPlacementScope::stored_definition();
+                        self.bind_query(routines, &view.query, params, outer)
+                    }
+                    .and_then(|schema| {
+                        let schema = rename_schema(
+                            &schema,
+                            view.output_columns.as_deref().unwrap_or(&[]),
+                            Some(qualifier),
+                        );
+                        self.alias_relation_schema(&schema, name, qualifier, column_aliases)
+                    });
                     self.visiting_views.remove(&key);
                     return result;
                 }
@@ -567,12 +583,23 @@ impl SchemaScope {
                     )?
                 };
                 validate_table_function_column_definition(
-                    name,
-                    binding.as_ref(),
-                    user_function
-                        .as_ref()
-                        .map(|resolved| resolved.function.as_ref()),
-                    column_types,
+                    routines,
+                    crate::semantics::ColumnDefinitionRequest {
+                        name,
+                        binding: binding.as_ref(),
+                        user_function: user_function
+                            .as_ref()
+                            .map(|resolved| resolved.function.as_ref()),
+                        user_invocation: user_function
+                            .as_ref()
+                            .and_then(|resolved| resolved.binding.invocation.as_deref()),
+                        args,
+                        declared_types: column_types,
+                        column_names: column_aliases,
+                    },
+                    &input,
+                    params,
+                    &type_resolver,
                 )?;
                 if let Some(function) = &user_function {
                     self.record_routine_dependency(&function.binding);
@@ -582,34 +609,18 @@ impl SchemaScope {
                 } else {
                     None
                 };
-                let columns = user_function
-                    .as_ref()
-                    .map(|resolved| {
-                        crate::semantics::user_function_composite_result(
-                            routines,
-                            &resolved.function,
-                            resolved.binding.invocation.as_deref(),
-                        )
-                        .map(|descriptor| {
-                            descriptor
-                                .map(|descriptor| {
-                                    descriptor
-                                        .attributes
-                                        .iter()
-                                        .map(|attribute| attribute.name.clone())
-                                        .collect()
-                                })
-                                .or_else(|| {
-                                    crate::semantics::user_function_output_columns_for(
-                                        &resolved.function,
-                                    )
-                                })
-                        })
-                    })
-                    .transpose()?
-                    .flatten()
-                    .or(catalog_columns)
-                    .map_or_else(
+                let columns = if let Some(resolved) = &user_function {
+                    crate::semantics::user_table_function_columns(
+                        routines,
+                        &resolved.function,
+                        resolved.binding.invocation.as_deref(),
+                        output_name,
+                        alias.as_deref(),
+                        column_aliases,
+                        *ordinality,
+                    )?
+                } else {
+                    catalog_columns.map_or_else(
                         || {
                             table_function_empty_schema(
                                 name,
@@ -623,7 +634,8 @@ impl SchemaScope {
                         |columns| {
                             apply_table_function_aliases(columns, column_aliases, *ordinality)
                         },
-                    );
+                    )
+                };
                 validate_table_function_alias_count(
                     alias.as_deref().unwrap_or(output_name),
                     columns.len(),

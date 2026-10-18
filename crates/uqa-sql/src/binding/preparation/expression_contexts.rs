@@ -11,6 +11,7 @@ use super::{
 };
 use crate::ast::BinaryOp;
 use crate::catalog::collations::derivation::Derivation;
+use crate::semantics::sets::placement::SetPlacement;
 use uqa_core::Value;
 
 impl Preparation<'_> {
@@ -121,6 +122,7 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
+        let calls = self.set_calls();
         let mut base = base
             .map(|base| self.expression(base, input, subqueries))
             .transpose()?;
@@ -134,8 +136,13 @@ impl Preparation<'_> {
         let mut values = Vec::new();
         for (index, (condition, value)) in when.iter().enumerate() {
             let selected = if let Some(base) = &mut base {
+                // The test compares a placeholder for the base, so only the WHEN value can make it return a set.
+                let before = self.set_calls();
                 let mut condition = self.expression(condition, input, subqueries)?;
                 self.binary(BinaryOp::Equal, base, &mut condition)?;
+                self.reject_set_inputs(before, || {
+                    crate::semantics::sets::placement::set_argument_error("CASE/WHEN")
+                })?;
                 base.derivation.combine(condition.derivation).error_only()
             } else {
                 self.boolean_expression(condition, input, subqueries, "CASE/WHEN")?
@@ -155,6 +162,11 @@ impl Preparation<'_> {
                 .unwrap_or_else(ExpressionType::unknown),
         );
         let ty = self.common(crate::type_resolution::CommonTypeContext::Case, &mut values)?;
+        self.reject_set_inputs(calls, || {
+            crate::semantics::sets::placement::conditional_set_error(
+                "set-returning functions are not allowed in CASE",
+            )
+        })?;
         // ELSE participates first in common-type selection but last in collation assignment.
         values.rotate_left(1);
         let mut conditions = conditions.into_iter().peekable();
@@ -238,7 +250,9 @@ impl Preparation<'_> {
                             Some(ColumnType::BigInteger)
                         }
                     };
-                    let mut value = self.expression(value, input, subqueries)?;
+                    let mut value = self.in_placement(SetPlacement::WindowFrame, |analysis| {
+                        analysis.expression(value, input, subqueries)
+                    })?;
                     if let Some(target) = &target {
                         self.parameters.coerce_unknown(&mut value, target)?;
                     }

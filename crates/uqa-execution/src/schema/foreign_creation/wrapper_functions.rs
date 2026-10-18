@@ -67,6 +67,7 @@ impl ForeignCreationContext<'_> {
                     invocation: None,
                     composite_field: None,
                     resolution_error: None,
+                    input_collation: None,
                 },
             });
         }
@@ -91,6 +92,7 @@ impl ForeignCreationContext<'_> {
                     invocation: None,
                     composite_field: None,
                     resolution_error: None,
+                    input_collation: None,
                 },
             });
             identities.push(RoutineCatalogIdentity {

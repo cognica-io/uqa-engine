@@ -22,6 +22,7 @@ scripts/install-usql.ps1 text eol=lf
 scripts/usql-release/licenses/*.txt -text -whitespace linguist-vendored
 scripts/fixtures/usql-release/rows.arrow binary
 crates/uqa-sql/THIRD-PARTY/POSTGRESQL-SORT-NOTICE.txt text eol=lf
+crates/uqa-pg-regex/THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt text eol=lf
 
 # Imported PostgreSQL 18 parser snapshot. Preserve upstream bytes exactly;
 # SHA256SUMS, rather than Git's whitespace heuristic, verifies this tree.
@@ -31,6 +32,10 @@ crates/uqa-pg-query/src/node_enum.rs linguist-generated
 crates/uqa-pg-query/src/node_mut.rs linguist-generated
 crates/uqa-pg-query/src/node_ref.rs linguist-generated
 crates/uqa-pg-query/src/node_structs.rs linguist-generated
+
+# Imported PostgreSQL 18.4 regular expression engine. Keep upstream bytes on
+# every checkout; SHA256SUMS verifies this tree.
+crates/uqa-pg-regex/postgres/** -text -whitespace linguist-vendored
 
 # Imported morphology dictionaries and notices retain their exact upstream contents.
 # The resource manifest verifies their hashes across platforms.

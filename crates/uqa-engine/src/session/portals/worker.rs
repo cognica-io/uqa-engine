@@ -21,13 +21,7 @@ pub(crate) fn start_session_portal_worker(
         let _statement_gate = engine.runtime.statement_gate.delegate_to_current_thread();
         uqa_execution::statement::portal::worker::run(
             &engine,
-            uqa_sql::expr::TemporalInputContext {
-                transaction_clock_micros: Some(engine.transaction_timestamp_micros()),
-                interval_style: engine.session.interval_style(),
-                date_order: uqa_sql::semantics::parameters::datestyle::date_order(
-                    &engine.session.setting("DateStyle"),
-                ),
-            },
+            &engine.statement_thread_context(),
             &query,
             &params,
             directional,

@@ -135,6 +135,7 @@ fn local_acl_publication_and_peer_refresh_preserve_mixed_builtin_plans() {
                     invocation: None,
                     composite_field: None,
                     resolution_error: None,
+                    input_collation: None,
                 });
             }
         });

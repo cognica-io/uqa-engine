@@ -19,6 +19,8 @@ pub struct CompiledStatementContext<'a, S: Clone + 'static> {
     pub aggregates: &'a dyn AggregateClassifier,
     pub planning: &'a dyn ExecutablePlanOptimizer,
     pub statements: &'a dyn StatementExecutionInputs<S>,
+    /// The session's cancellation, which the statement's analysis, planning and execution observe.
+    pub cancellation: &'a uqa_core::CancellationToken,
 }
 
 pub fn execute<S: Clone + Send + Sync + 'static>(
@@ -35,7 +37,8 @@ pub fn execute_plan<S: Clone + Send + Sync + 'static>(
     plan: UnifiedPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let _temporal_input = super::context::temporal_input_scope(context.statements);
+    let _statement_thread =
+        super::context::statement_thread_scope(context.statements, context.cancellation);
     let plan = context.planning.plan_for_execution(plan, params)?;
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
         .execute(&plan)
@@ -48,7 +51,8 @@ pub fn execute_selected_plan<S: Clone + Send + Sync + 'static>(
     plan: &UnifiedPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let _temporal_input = super::context::temporal_input_scope(context.statements);
+    let _statement_thread =
+        super::context::statement_thread_scope(context.statements, context.cancellation);
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
         .execute(plan)
 }
@@ -60,7 +64,8 @@ pub fn execute_checked_plan<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     check: &dyn Fn(&AnalyzedResult) -> Result<(), SQLError>,
 ) -> Result<SQLResult, SQLError> {
-    let _temporal_input = super::context::temporal_input_scope(context.statements);
+    let _statement_thread =
+        super::context::statement_thread_scope(context.statements, context.cancellation);
     let (plan, result) = context.planning.plan_with_result(plan, params)?;
     check(&result)?;
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
@@ -73,7 +78,8 @@ pub fn execute_with_privilege_subject<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     privilege_subject: &RoleReference,
 ) -> Result<SQLResult, SQLError> {
-    let _temporal_input = super::context::temporal_input_scope(context.statements);
+    let _statement_thread =
+        super::context::statement_thread_scope(context.statements, context.cancellation);
     let mut plan = UnifiedPlan::lower_with(statement, context.aggregates);
     mark_catalog_statement_relations_bound(&mut plan)?;
     let plan = context.planning.plan_for_execution(plan, params)?;
@@ -83,12 +89,13 @@ pub fn execute_with_privilege_subject<S: Clone + Send + Sync + 'static>(
 }
 
 pub fn execute_optimized_command<S: Clone + Send + Sync + 'static>(
-    statements: &dyn StatementExecutionInputs<S>,
+    context: &CompiledStatementContext<'_, S>,
     command: &CommandPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let _temporal_input = super::context::temporal_input_scope(statements);
-    UnifiedPlanExecutor::new_nested(statements.statement_execution_context(), params)
+    let _statement_thread =
+        super::context::statement_thread_scope(context.statements, context.cancellation);
+    UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
         .execute(&UnifiedPlan::Command(Box::new(command.clone())))
 }
 

@@ -122,6 +122,8 @@ impl Engine {
         table: &str,
         options: &LearnOptions,
     ) -> Result<DeepLearnOutput, SQLError> {
+        // Reading the training rows materializes virtual generated columns, which evaluates SQL expressions under the session's statement context.
+        let _statement_thread = self.statement_thread_context().enter();
         self.model_training_context()
             .train_table(name, table, options)
     }

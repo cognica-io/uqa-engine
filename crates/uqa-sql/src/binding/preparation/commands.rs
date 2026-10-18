@@ -9,7 +9,10 @@
 use super::{error, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::assignment::targets;
 use crate::ast::AssignmentTarget;
-use crate::plan::{AssignmentPlan, CommandPlan, ConflictActionPlan, MergeWhenPlan};
+use crate::plan::{
+    AssignmentPlan, CommandPlan, ConflictActionPlan, ConflictPlan, InsertPlan, MergeWhenPlan,
+};
+use crate::semantics::sets::placement::SetPlacement;
 use std::borrow::Cow;
 
 impl Preparation<'_> {
@@ -22,7 +25,7 @@ impl Preparation<'_> {
                 .as_ref()
                 .map(crate::binding::RoutineParameterScope::schema);
             let previous = self.ctes(command.ctes(), outer)?;
-            let result = self.command_inner(command);
+            let result = self.in_query_level(|analysis| analysis.command_inner(command));
             self.scope.restore_cte_schemas(previous);
             let result = result?;
             self.parameters.collations.validate_command(command)?;
@@ -57,71 +60,49 @@ impl Preparation<'_> {
         let subqueries = command.scalar_subqueries();
         match command {
             CommandPlan::Insert(insert) => {
-                targets::validate_repeated_targets(&insert.columns, true)?;
-                validate_target_columns(&insert.table, insert.columns.iter(), &target)?;
-                let values_input = outer.cloned().unwrap_or_default();
-                for row in &insert.rows {
-                    self.insert_row(row, &insert.columns, &target, &values_input, subqueries)?;
-                }
-                if let Some(source) = &insert.source {
-                    let mut output = self.query_output(source, outer, true)?;
-                    self.insert_values(
-                        &mut output.types,
-                        &insert.columns,
-                        &target,
-                        &input,
-                        subqueries,
-                    )?;
-                }
-                if let Some(conflict) = &insert.on_conflict {
-                    for expression in &conflict.expressions {
-                        self.expression(expression, &input, subqueries)?;
-                    }
-                    if let Some(predicate) = &conflict.predicate {
-                        self.expression(predicate, &input, subqueries)?;
-                    }
-                    if let ConflictActionPlan::Update {
-                        assignments,
-                        predicate,
-                    } = &conflict.action
-                    {
-                        let excluded = RowSchema::with_relation_qualifier(&target, "excluded");
-                        let conflict_input =
-                            RowSchema::join(&input, &excluded, std::iter::empty::<String>());
-                        self.assignments(
-                            &insert.table,
-                            assignments,
-                            &target,
-                            &conflict_input,
-                            subqueries,
-                        )?;
-                        if let Some(predicate) = predicate {
-                            self.require_boolean(predicate, &conflict_input, subqueries, "WHERE")?;
-                        }
-                    }
-                }
+                self.insert(insert, &target, &input, outer, subqueries)?;
             }
             CommandPlan::Update(update) => {
                 if let Some(predicate) = &update.predicate {
-                    self.require_boolean(predicate, &input, subqueries, "WHERE")?;
+                    self.placed_condition(
+                        SetPlacement::Where,
+                        predicate,
+                        &input,
+                        subqueries,
+                        "WHERE",
+                    )?;
                 }
                 let result = self.command_result(command, &target, &input, source.as_ref())?;
-                self.assignments(
-                    &update.table,
-                    &update.assignments,
-                    &target,
-                    &input,
-                    subqueries,
-                )?;
+                self.in_placement(SetPlacement::Update, |analysis| {
+                    analysis.assignments(
+                        &update.table,
+                        &update.assignments,
+                        &target,
+                        &input,
+                        subqueries,
+                    )
+                })?;
                 return Ok(result);
             }
             CommandPlan::Delete(delete) => {
                 if let Some(predicate) = &delete.predicate {
-                    self.require_boolean(predicate, &input, subqueries, "WHERE")?;
+                    self.placed_condition(
+                        SetPlacement::Where,
+                        predicate,
+                        &input,
+                        subqueries,
+                        "WHERE",
+                    )?;
                 }
             }
             CommandPlan::Merge(merge) => {
-                self.require_boolean(&merge.join_condition, &input, subqueries, "JOIN/ON")?;
+                self.placed_condition(
+                    SetPlacement::JoinCondition,
+                    &merge.join_condition,
+                    &input,
+                    subqueries,
+                    "JOIN/ON",
+                )?;
                 let result = self.command_result(command, &target, &input, source.as_ref())?;
                 self.merge(merge, &target, &input, subqueries)?;
                 return Ok(result);
@@ -129,6 +110,107 @@ impl Preparation<'_> {
             _ => {}
         }
         self.command_result(command, &target, &input, source.as_ref())
+    }
+
+    /// Analyze an INSERT's VALUES rows or source query and its ON CONFLICT clause.
+    fn insert(
+        &mut self,
+        insert: &InsertPlan,
+        target: &RowSchema,
+        input: &RowSchema,
+        outer: Option<&RowSchema>,
+        subqueries: &[QueryPlan],
+    ) -> Result<(), SQLError> {
+        targets::validate_repeated_targets(&insert.columns, true)?;
+        validate_target_columns(&insert.table, insert.columns.iter(), target)?;
+        let values_input = outer.cloned().unwrap_or_default();
+        // A single VALUES row is processed like a target list, so its set-returning calls expand rows; a multiple-row list admits none.
+        let placement = if insert.rows.len() > 1 {
+            SetPlacement::Values
+        } else {
+            SetPlacement::Expanding
+        };
+        for row in &insert.rows {
+            self.insert_row(
+                row,
+                placement,
+                &insert.columns,
+                target,
+                &values_input,
+                subqueries,
+            )?;
+        }
+        if let Some(source) = &insert.source {
+            let mut output = self.query_output(source, outer, true)?;
+            self.insert_values(
+                &mut output.types,
+                &insert.columns,
+                target,
+                input,
+                subqueries,
+            )?;
+        }
+        if let Some(conflict) = &insert.on_conflict {
+            self.conflict(&insert.table, conflict, target, input, subqueries)?;
+        }
+        Ok(())
+    }
+
+    /// Analyze an ON CONFLICT clause: its inference expressions and predicate as index expressions and predicates, then a DO UPDATE action as an UPDATE.
+    fn conflict(
+        &mut self,
+        table: &str,
+        conflict: &ConflictPlan,
+        target: &RowSchema,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<(), SQLError> {
+        self.in_placement(SetPlacement::IndexExpression, |analysis| {
+            for expression in &conflict.expressions {
+                analysis.expression(expression, input, subqueries)?;
+            }
+            Ok(())
+        })?;
+        if let Some(predicate) = &conflict.predicate {
+            self.in_placement(SetPlacement::IndexPredicate, |analysis| {
+                analysis.expression(predicate, input, subqueries)
+            })?;
+        }
+        if let ConflictActionPlan::Update {
+            assignments,
+            predicate,
+        } = &conflict.action
+        {
+            let excluded = RowSchema::with_relation_qualifier(target, "excluded");
+            let conflict_input = RowSchema::join(input, &excluded, std::iter::empty::<String>());
+            self.in_placement(SetPlacement::Update, |analysis| {
+                analysis.assignments(table, assignments, target, &conflict_input, subqueries)
+            })?;
+            if let Some(predicate) = predicate {
+                self.placed_condition(
+                    SetPlacement::Where,
+                    predicate,
+                    &conflict_input,
+                    subqueries,
+                    "WHERE",
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Analyze a condition `construct` requires to be boolean as the expression kind `placement`.
+    fn placed_condition(
+        &mut self,
+        placement: SetPlacement,
+        condition: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        construct: &str,
+    ) -> Result<(), SQLError> {
+        self.in_placement(placement, |analysis| {
+            analysis.require_boolean(condition, input, subqueries, construct)
+        })
     }
 
     fn command_result(
@@ -148,12 +230,14 @@ impl Preparation<'_> {
             crate::semantics::returning::command_returning_star_schema(command, target, source)?;
         let previous = self.scope.merge_returning;
         self.scope.merge_returning |= matches!(command, CommandPlan::Merge(_));
-        let result = self.projections(
-            returning.iter().map(AsRef::as_ref),
-            &star,
-            input,
-            command.scalar_subqueries(),
-        );
+        let result = self.in_placement(SetPlacement::Returning, |analysis| {
+            analysis.projections(
+                returning.iter().map(AsRef::as_ref),
+                &star,
+                input,
+                command.scalar_subqueries(),
+            )
+        });
         self.scope.merge_returning = previous;
         let mut output = result?;
         crate::semantics::returning::validate_returning_width(
@@ -172,7 +256,7 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
         if let Some(predicate) = &merge.target_predicate {
-            self.require_boolean(predicate, input, subqueries, "WHERE")?;
+            self.placed_condition(SetPlacement::Where, predicate, input, subqueries, "WHERE")?;
         }
         let parameters = self.scope.routine_parameters.clone();
         let outer = parameters
@@ -206,18 +290,33 @@ impl Preparation<'_> {
                 | MergeWhenPlan::NothingNotMatchedBySource { condition } => condition,
             };
             if let Some(condition) = condition {
-                self.require_boolean(condition, input, subqueries, "WHEN")?;
+                self.placed_condition(
+                    SetPlacement::MergeWhen,
+                    condition,
+                    input,
+                    subqueries,
+                    "WHEN",
+                )?;
             }
             match clause {
                 MergeWhenPlan::UpdateMatched { assignments, .. }
                 | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                    self.assignments(&merge.target, assignments, target, input, subqueries)?;
+                    self.in_placement(SetPlacement::Update, |analysis| {
+                        analysis.assignments(&merge.target, assignments, target, input, subqueries)
+                    })?;
                 }
                 MergeWhenPlan::InsertNotMatched {
                     columns, values, ..
                 } => {
                     validate_target_columns(&merge.target, columns.iter(), target)?;
-                    self.insert_row(values, columns, target, input, subqueries)?;
+                    self.insert_row(
+                        values,
+                        SetPlacement::Expanding,
+                        columns,
+                        target,
+                        input,
+                        subqueries,
+                    )?;
                 }
                 _ => {}
             }
@@ -294,18 +393,21 @@ impl Preparation<'_> {
         Ok(())
     }
 
+    /// Analyze one VALUES row as `placement`, then its target columns, whose subscripts may expand rows as INSERT targets do.
     fn insert_row(
         &mut self,
         row: &[ScalarExpr],
+        placement: SetPlacement,
         columns: &[crate::ast::AssignmentTarget<ScalarExpr>],
         target: &RowSchema,
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
-        let mut values = row
-            .iter()
-            .map(|expression| self.expression(expression, input, subqueries))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut values = self.in_placement(placement, |analysis| {
+            row.iter()
+                .map(|expression| analysis.expression(expression, input, subqueries))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
         for (expression, target) in row.iter().zip(columns) {
             if matches!(expression, ScalarExpr::Default) {
                 targets::validate_assignment_default(target)?;

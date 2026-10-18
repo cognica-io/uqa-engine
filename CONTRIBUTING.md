@@ -125,7 +125,7 @@ The workspace lives under `crates/`. New crates follow the existing shape:
 2. `crates/<name>/src/lib.rs`.
 3. Add `crates/<name>` to the `members` list in the root `Cargo.toml`.
 4. Add a workspace-internal `[workspace.dependencies]` entry of the form `uqa-foo = { version = "0.5.4", path = "crates/uqa-foo" }` so other crates can depend on it via `workspace = true` without a wildcard pin (cargo deny will reject wildcards).
-5. Run `python3 scripts/sync-crate-legal-files.py` so a publishable crate carries `LICENSE`, `LICENSING.md`, `LICENSE-NOTICE.md`, and both exception texts. Do not give `uqa-pg-query` those AGPL copies; it keeps its MIT and libpg_query licenses.
+5. Run `python3 scripts/sync-crate-legal-files.py` so a publishable crate carries `LICENSE`, `LICENSING.md`, `LICENSE-NOTICE.md`, and both exception texts. Do not give `uqa-pg-query` or `uqa-pg-regex` those AGPL copies; they keep their upstream licenses, MIT and libpg_query for the parser and the PostgreSQL, Henry Spencer and Tcl licenses for the regular expression engine.
 6. Document the new crate and its dependency boundary in `docs/design/architecture.md`; keep the repository `README.md` focused on user-facing capabilities and entry points.
 
 ## Commit messages

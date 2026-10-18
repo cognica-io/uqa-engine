@@ -84,6 +84,8 @@ mod array_transforms;
 mod assignment_subscripts;
 #[path = "pg18_semantics/checksums.rs"]
 mod checksums;
+#[path = "pg18_semantics/collation_case_mapping.rs"]
+mod collation_case_mapping;
 #[path = "pg18_semantics/comparisons_and_arrays.rs"]
 mod comparisons_and_arrays;
 #[path = "pg18_semantics/concatenation.rs"]
@@ -128,10 +130,22 @@ mod range_peers;
 mod range_rowsets;
 #[path = "pg18_semantics/range_subtype_distance.rs"]
 mod range_subtype_distance;
+#[path = "pg18_semantics/regexp_matches.rs"]
+mod regexp_matches;
+#[path = "pg18_semantics/regexp_search_loop.rs"]
+mod regexp_search_loop;
+#[path = "pg18_semantics/regexp_split.rs"]
+mod regexp_split;
+#[path = "pg18_semantics/regular_expression_engine.rs"]
+mod regular_expression_engine;
+#[path = "pg18_semantics/regular_expression_identities.rs"]
+mod regular_expression_identities;
 #[path = "pg18_semantics/reverse_overloads.rs"]
 mod reverse_overloads;
 #[path = "pg18_semantics/review_regressions.rs"]
 mod review_regressions;
+#[path = "pg18_semantics/set_returning_contexts.rs"]
+mod set_returning_contexts;
 #[path = "pg18_semantics/sql_value_clock.rs"]
 mod sql_value_clock;
 #[path = "pg18_semantics/string_binary_lengths.rs"]

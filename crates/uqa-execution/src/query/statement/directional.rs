@@ -165,8 +165,10 @@ impl DirectionalQueryPlanOperator {
         let (response_tx, response_rx) = std::sync::mpsc::channel();
         let schema = self.schema.clone();
         let diagnostics = self.diagnostics.as_ref().map(QueryDiagnostics::request);
+        let thread_context = crate::statement::thread_context::StatementThreadContext::current();
         let join = std::thread::spawn({
             move || {
+                let _statement_thread = thread_context.enter();
                 let consumer = Rc::new(DirectionalPlanRowConsumer {
                     diagnostics: QueryDiagnostics::request_scope(diagnostics),
                     requests: request_rx,

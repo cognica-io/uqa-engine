@@ -7,14 +7,19 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken};
 
+mod match_rows;
+mod search_loop;
+mod split_pieces;
 mod substring_patterns;
+
+const DEFAULT_COLLATION: u32 = crate::catalog::collations::DEFAULT_COLLATION_OID as u32;
 
 fn text(value: &str) -> Value {
     Value::Str(value.into())
 }
 
 fn run(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
-    evaluate(name, args, control).expect("known regular-expression family")
+    evaluate(name, args, DEFAULT_COLLATION, control).expect("known regular-expression family")
 }
 
 #[test]
@@ -104,8 +109,8 @@ fn regex_outputs_keep_capture_nulls_unicode_offsets_and_replacement_selection() 
 }
 
 #[test]
-fn regex_failure_order_preserves_native_errors_and_outside_start_behavior() {
-    let budget = MemoryBudget::new(16 * 1024);
+fn regex_failure_order_compiles_before_searching_past_the_start() {
+    let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
     for (name, args, state) in [
@@ -138,9 +143,20 @@ fn regex_failure_order_preserves_native_errors_and_outside_start_behavior() {
         );
         assert_eq!(budget.used(), 0);
     }
+    // `replace_text_regexp` compiles the pattern before it searches, so a start past the end still reports an invalid pattern and otherwise copies the input.
+    assert_eq!(
+        run(
+            "regexp_replace",
+            &[text("a"), text("["), text("x"), Value::Int(3)],
+            &control,
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("2201B")
+    );
     let result = run(
         "regexp_replace",
-        &[text("a"), text("["), text("x"), Value::Int(3)],
+        &[text("a"), text("a"), text("x"), Value::Int(3)],
         &control,
     )
     .unwrap();
@@ -151,22 +167,34 @@ fn regex_failure_order_preserves_native_errors_and_outside_start_behavior() {
 
 #[test]
 fn regex_output_quota_failure_releases_partial_replacements_and_keeps_earlier_values() {
-    let budget = MemoryBudget::new(8192);
     let token = CancellationToken::new();
+    let input = text(&"a".repeat(64));
+    // Measure the call's working memory, its input, compiled pattern and search, with one-character replacements.
+    let measured = MemoryBudget::new(1 << 20);
+    let measured_control = ProductionControl::new(&measured, &token, &token);
+    drop(
+        run(
+            "regexp_replace",
+            &[input.clone(), text("a"), text("x"), text("g")],
+            &measured_control,
+        )
+        .unwrap(),
+    );
+    // Leave room for that working memory and a few kilobyte-long replacements, but not for all 64 of them.
+    let budget = MemoryBudget::new(measured.peak() + 8192);
     let control = ProductionControl::new(&budget, &token, &token);
     let held = control.copy_text("earlier value").unwrap();
     let retained = budget.used();
-    let args = [
-        text(&"a".repeat(64)),
-        text("a"),
-        text(&"x".repeat(1024)),
-        text("g"),
-    ];
+    let args = [input, text("a"), text(&"x".repeat(1024)), text("g")];
     assert_eq!(
         run("regexp_replace", &args, &control)
             .unwrap_err()
             .sqlstate(),
         Some("53200")
+    );
+    assert!(
+        budget.peak() > retained + measured.peak(),
+        "partial replacements were admitted before the output was refused"
     );
     assert_eq!(budget.used(), retained);
     assert_eq!(&*held, "earlier value");
@@ -176,7 +204,7 @@ fn regex_output_quota_failure_releases_partial_replacements_and_keeps_earlier_va
 
 #[test]
 fn regex_production_observes_both_cancellation_scopes() {
-    let budget = MemoryBudget::new(8192);
+    let budget = MemoryBudget::new(1 << 20);
     for cancel_original in [true, false] {
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();

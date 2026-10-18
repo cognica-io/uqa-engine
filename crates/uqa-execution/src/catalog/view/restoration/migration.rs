@@ -12,6 +12,7 @@ use super::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::RelationIdentity;
+use uqa_sql::semantics::sets::placement_scope::SetPlacementScope;
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 pub(super) fn migrate_persisted_views(
@@ -105,6 +106,8 @@ fn migrate_bound_definitions(
     routine_binding_migrations: &BTreeSet<RelationIdentity>,
     missing_collations: &BTreeSet<RelationIdentity>,
 ) -> StorageBackendResult<()> {
+    // Stored queries are bound as they were created: their set-returning calls are not placed again, so a view stored by an earlier release keeps loading.
+    let _stored = SetPlacementScope::stored_definition();
     let binding_targets = routine_binding_migrations
         .union(missing_collations)
         .cloned()
@@ -127,6 +130,17 @@ fn migrate_bound_definitions(
             .map_err(|error| {
                 StorageBackendError::Other(format!("restore view `{view_name}` bindings: {error}"))
             })?;
+        // A query stored by an earlier release records no input collations; derive them as creation does.
+        if routine_binding_migrations.contains(relation) {
+            context
+                .bindings
+                .assign_input_collations(&mut view.query)
+                .map_err(|error| {
+                    StorageBackendError::Other(format!(
+                        "restore view `{view_name}` input collations: {error}"
+                    ))
+                })?;
+        }
         if missing_collations.contains(relation) {
             view.restore_materialized_collations(&schema)
                 .map_err(|error| {

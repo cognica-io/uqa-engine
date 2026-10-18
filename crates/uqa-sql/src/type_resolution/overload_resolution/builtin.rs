@@ -333,6 +333,7 @@ fn resolved(
                     invocation,
                     composite_field: None,
                     resolution_error: None,
+                    input_collation: None,
                 },
                 return_type,
                 exact_matches: matched.signature.exact_matches,
