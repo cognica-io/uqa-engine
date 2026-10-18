@@ -270,6 +270,18 @@ impl FunctionTypeResolver for Catalog {
     }
 }
 impl RoutineResolution for Catalog {
+    fn resolve_static_sql_function_match(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        names: &[Option<String>],
+        types: &[Option<ColumnType>],
+        variadic: bool,
+    ) -> Result<Option<crate::routines::StaticFunctionMatch>, SQLError> {
+        RoutineOverloadContext { catalog: self }
+            .resolve_static_sql_function_match(name, binding, names, types, variadic)
+    }
+
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
