@@ -519,6 +519,50 @@
     {
       "id": "domain_constraint_fetched",
       "sql": "SELECT * FROM domain_values(-1)"
+    },
+    {
+      "id": "create_assignment_distinct",
+      "sql": "CREATE FUNCTION assignment_distinct() RETURNS SETOF integer LANGUAGE sql STABLE AS $$SELECT DISTINCT v FROM (VALUES (1.2),(1.4)) d(v)$$"
+    },
+    {
+      "id": "assignment_distinct",
+      "sql": "SELECT * FROM assignment_distinct()"
+    },
+    {
+      "id": "create_assignment_distinct_on",
+      "sql": "CREATE FUNCTION assignment_distinct_on() RETURNS TABLE(n integer, label text) LANGUAGE sql STABLE AS $$SELECT DISTINCT ON(v) v,label FROM (VALUES (1.4,'a'),(1.2,'z'),(1.4,'b')) d(v,label) ORDER BY v,label$$"
+    },
+    {
+      "id": "assignment_distinct_on",
+      "sql": "SELECT * FROM assignment_distinct_on()"
+    },
+    {
+      "id": "create_assignment_ordered",
+      "sql": "CREATE FUNCTION assignment_ordered() RETURNS TABLE(n integer, label text) LANGUAGE sql STABLE AS $$SELECT v,label FROM (VALUES (1.4,'a'),(1.2,'z')) d(v,label) ORDER BY v$$"
+    },
+    {
+      "id": "assignment_ordered",
+      "sql": "SELECT * FROM assignment_ordered()"
+    },
+    {
+      "id": "create_assignment_grouped",
+      "sql": "CREATE FUNCTION assignment_grouped() RETURNS TABLE(n integer, count integer) LANGUAGE sql STABLE AS $$SELECT v,count(*)::int FROM (VALUES (1.2),(1.4),(1.4)) d(v) GROUP BY v ORDER BY v$$"
+    },
+    {
+      "id": "assignment_grouped",
+      "sql": "SELECT * FROM assignment_grouped()"
+    },
+    {
+      "id": "create_assignment_grouping_sets",
+      "sql": "CREATE FUNCTION assignment_grouping_sets() RETURNS TABLE(n integer, count integer) LANGUAGE sql STABLE AS $$SELECT v,count(*)::int FROM (VALUES (1.2),(1.4),(1.4)) d(v) GROUP BY GROUPING SETS((v),()) ORDER BY v NULLS LAST$$"
+    },
+    {
+      "id": "assignment_grouping_sets",
+      "sql": "SELECT * FROM assignment_grouping_sets()"
+    },
+    {
+      "id": "assignment_lateral",
+      "sql": "SELECT d.x,f.n FROM data d, assignment_distinct() f(n) ORDER BY 1,2"
     }
   ]
 }

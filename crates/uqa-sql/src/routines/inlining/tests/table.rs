@@ -7,6 +7,45 @@
 use super::*;
 
 #[test]
+fn result_assignment_follows_body_distinct_grouping_and_ordering() {
+    for body in [
+        "SELECT DISTINCT v FROM (VALUES (1.2),(1.4)) d(v)",
+        "SELECT DISTINCT ON(v) v FROM (VALUES (1.2),(1.4)) d(v) ORDER BY v",
+        "SELECT v FROM (VALUES (1.2),(1.4)) d(v) GROUP BY v",
+        "SELECT v FROM (VALUES (1.2),(1.4)) d(v) GROUP BY GROUPING SETS((v),())",
+        "SELECT v FROM (VALUES (1.2),(1.4)) d(v) ORDER BY v",
+    ] {
+        let catalog = Catalog::new(&format!(
+            "CREATE FUNCTION assigned() RETURNS SETOF integer LANGUAGE sql STABLE AS $${body}$$"
+        ));
+        let binding = catalog.binding("assigned", &[]);
+        let result = catalog
+            .context()
+            .prepare_table(&binding, &[], &[], &[], &[])
+            .unwrap()
+            .unwrap();
+        let RelationalPlan::QueryBlock(wrapper) = &result.query.root else {
+            panic!("assignment projection")
+        };
+        assert!(
+            matches!(wrapper.projections[0].expr, ScalarExpr::Cast { .. }),
+            "{body}"
+        );
+        let Some(crate::plan::SourcePlan::Subquery { body: original, .. }) = &wrapper.from else {
+            panic!("assignment must follow the query body: {body}")
+        };
+        let RelationalPlan::QueryBlock(original) = &original.root else {
+            panic!("original SELECT")
+        };
+        assert!(
+            !matches!(original.projections[0].expr, ScalarExpr::Cast { .. }),
+            "{body}"
+        );
+        assert_eq!(catalog.evaluations.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[test]
 fn from_overloads_use_argument_subquery_types_before_attempting_expansion() {
     let catalog = Catalog::new("CREATE FUNCTION picked(value integer) RETURNS TABLE(int4_value text) LANGUAGE SQL AS 'SELECT ''int4'''; CREATE FUNCTION picked(value bigint) RETURNS TABLE(int8_value text) LANGUAGE SQL AS 'SELECT ''int8'''");
     let context = crate::binding::fixture::empty_binding_context();

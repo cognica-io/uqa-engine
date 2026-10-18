@@ -49,6 +49,12 @@ fn from_routine_planning_matches_postgresql_and_reopen(#[case] provider: usize) 
         matches!(
             case["id"].as_str().unwrap(),
             "domain_unfetched"
+                | "assignment_distinct"
+                | "assignment_distinct_on"
+                | "assignment_ordered"
+                | "assignment_grouped"
+                | "assignment_grouping_sets"
+                | "assignment_lateral"
                 | "domain_rows"
                 | "correlated"
                 | "correlated_implicit"
@@ -82,7 +88,7 @@ fn from_routine_planning_matches_postgresql_and_reopen(#[case] provider: usize) 
                 | "perform_error"
         )
     });
-    assert_eq!(reference["cases"].as_array().unwrap().len(), 32);
+    assert_eq!(reference["cases"].as_array().unwrap().len(), 38);
     crate::pg18_oracle::verify(&engine, &reference.to_string());
 }
 

@@ -102,7 +102,17 @@ pub(super) fn coerce_result(
     {
         return query;
     }
-    if !matches!(query.root, RelationalPlan::QueryBlock(_)) {
+    let needs_wrapper = match &query.root {
+        RelationalPlan::QueryBlock(block) => {
+            block.distinct
+                || !block.distinct_on.is_empty()
+                || !block.order_by.is_empty()
+                || !block.group_by.is_empty()
+                || !block.grouping_sets.is_empty()
+        }
+        _ => true,
+    };
+    if needs_wrapper {
         query = project(Box::new(query), targets.len());
     }
     let RelationalPlan::QueryBlock(block) = &mut query.root else {
