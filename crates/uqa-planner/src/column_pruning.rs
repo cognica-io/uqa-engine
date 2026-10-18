@@ -30,6 +30,7 @@ pub struct ColumnPruneContext<'a> {
     pub resolution: &'a RelationNameResolution,
     pub volatility: &'a dyn VolatilityCatalog,
     pub is_visible_cte: &'a dyn Fn(&str) -> bool,
+    pub source_schema: Option<&'a uqa_sql::RowSchema>,
 }
 
 fn has_window(projections: &[uqa_sql::plan::ProjectionPlan]) -> bool {
@@ -80,6 +81,7 @@ pub fn column_prune_for_stmt_with_filter(
         single_local_table_metadata_binding(catalog, resolution, from, context.is_visible_cte)?;
     let scope = PruneScope {
         qualifiers: &qualifiers,
+        source_schema: context.source_schema,
         metadata_qualifier: metadata_binding
             .as_ref()
             .map(|binding| binding.qualifier.as_str()),
@@ -118,6 +120,7 @@ pub fn column_prune_for_stmt_with_filter(
 #[derive(Clone, Copy)]
 struct PruneScope<'a> {
     qualifiers: &'a [String],
+    source_schema: Option<&'a uqa_sql::RowSchema>,
     metadata_qualifier: Option<&'a str>,
     legacy_doc_id: bool,
     legacy_score: bool,
@@ -530,7 +533,21 @@ fn collect_expr_prune_columns(
                     return;
                 }
             }
+            // A statically bound input has one owner even when an open document source could supply the same name. Preserve that binding instead of inventing a competing document field.
+            let bound_owner = scope.source_schema.and_then(|schema| {
+                let slot = schema.column_slot(column)?;
+                scope
+                    .qualifiers
+                    .iter()
+                    .any(|qualifier| schema.qualified_slot(qualifier, column) == Some(slot))
+                    .then_some((schema, slot))
+            });
             for qualifier in scope.qualifiers {
+                if bound_owner.is_some_and(|(schema, slot)| {
+                    schema.qualified_slot(qualifier, column) != Some(slot)
+                }) {
+                    continue;
+                }
                 if let Some(columns) = prune.get_mut(qualifier) {
                     columns.insert(column.clone());
                 }

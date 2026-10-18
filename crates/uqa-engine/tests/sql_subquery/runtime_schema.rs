@@ -27,6 +27,107 @@ fn verify_streamed_document_fields(engine: &Engine) {
         assert_eq!(actual.columns, direct.columns, "{sql}");
         assert_eq!(actual.rows, direct.rows, "{sql}");
     }
+    verify_streamed_document_values(engine);
+    verify_streamed_document_boundaries(engine);
+}
+
+fn verify_streamed_document_values(engine: &Engine) {
+    for (body, expected) in [
+        (
+            "SELECT d.value, d.missing AS absent FROM docs d",
+            vec![Value::Int(7), Value::Null],
+        ),
+        (
+            "SELECT d.n, d.label FROM (SELECT value, tag FROM docs) d(n,label)",
+            vec![Value::Int(7), Value::Str("seven".into())],
+        ),
+        (
+            "SELECT value + (random()*0)::int AS value FROM docs",
+            vec![Value::Int(7)],
+        ),
+        (
+            "SELECT value FROM docs WHERE EXISTS(SELECT 1)",
+            vec![Value::Int(7)],
+        ),
+        (
+            "SELECT d.value, k.known FROM docs d CROSS JOIN known k",
+            vec![Value::Int(7), Value::Int(11)],
+        ),
+        (
+            "SELECT value, known FROM docs d CROSS JOIN known k",
+            vec![Value::Int(7), Value::Int(11)],
+        ),
+        (
+            "SELECT _doc_id, value FROM docs",
+            vec![Value::Int(1), Value::Int(7)],
+        ),
+    ] {
+        for sql in [
+            body.to_string(),
+            format!("WITH rows AS MATERIALIZED ({body}) SELECT * FROM rows"),
+            format!("SELECT * FROM ({body}) d"),
+        ] {
+            let actual = engine
+                .sql(&sql, &[])
+                .unwrap_or_else(|error| panic!("{sql}: {error}"));
+            assert_eq!(actual.rows.len(), 1, "{sql}");
+            for (position, expected) in expected.iter().enumerate() {
+                assert_eq!(actual.value_at(0, position), Some(expected), "{sql}");
+            }
+        }
+    }
+}
+
+fn verify_streamed_document_boundaries(engine: &Engine) {
+    let body = "SELECT _doc_id, _score, xmin, tableoid, value FROM docs";
+    let direct = engine.sql(body, &[]).unwrap();
+    for sql in [
+        format!("WITH rows AS MATERIALIZED ({body}) SELECT * FROM rows"),
+        format!("SELECT * FROM ({body}) d"),
+    ] {
+        let actual = engine
+            .sql(&sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        assert_eq!(actual.columns, direct.columns, "{sql}");
+        assert_eq!(actual.rows, direct.rows, "{sql}");
+    }
+    let wildcard = engine.sql("SELECT * FROM docs", &[]).unwrap();
+    let mut explicit_columns = wildcard.columns.clone();
+    explicit_columns.push("value".into());
+    for sql in [
+        "SELECT *, value FROM docs",
+        "SELECT * FROM (SELECT *, value FROM docs) d",
+        "WITH rows AS MATERIALIZED (SELECT *, value FROM docs) SELECT * FROM rows",
+    ] {
+        let actual = engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        assert_eq!(actual.columns, explicit_columns, "{sql}");
+        assert_eq!(
+            actual.value_at(0, actual.columns.len() - 1),
+            Some(&Value::Int(7)),
+            "{sql}"
+        );
+    }
+    // Independently checked on PostgreSQL 18.4: an explicitly declared empty table is closed, including materialized and aliased sources.
+    for (sql, state) in [
+        ("SELECT missing FROM empty", "42703"),
+        (
+            "WITH rows AS MATERIALIZED (SELECT missing FROM empty) SELECT * FROM rows",
+            "42703",
+        ),
+        ("SELECT * FROM empty e(a)", "42P10"),
+    ] {
+        assert_eq!(
+            engine.sql(sql, &[]).unwrap_err().sqlstate(),
+            Some(state),
+            "{sql}"
+        );
+    }
+    let count = engine
+        .sql("SELECT COUNT(*) FROM (SELECT * FROM empty) e", &[])
+        .unwrap();
+    assert_eq!(count.value_at(0, 0), Some(&Value::Int(1)));
 }
 
 #[rstest::rstest]
@@ -39,6 +140,18 @@ fn streamed_document_fields_survive_ctes_and_reopen(#[case] provider: usize) {
     let path = directory.path().join("streamed-fields.db");
     let engine = open(provider, &path);
     engine.create_default_table("docs", Vec::new()).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE known(known integer); INSERT INTO known VALUES(11)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TABLE empty(); INSERT INTO empty DEFAULT VALUES",
+            &[],
+        )
+        .unwrap();
     engine
         .add_document(
             "docs",

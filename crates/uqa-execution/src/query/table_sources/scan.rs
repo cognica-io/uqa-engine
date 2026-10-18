@@ -123,18 +123,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
     let open_document = root_table.columns.is_empty() && !root_table.columns_declared;
     if open_document {
         if let Some(wanted) = &wanted {
-            table_columns.extend(
-                wanted
-                    .requested_columns()
-                    .filter(|column| {
-                        !matches!(*column, XMIN_COLUMN | TABLE_OID_COLUMN)
-                            && !(*column == uqa_sql::semantics::DOC_ID_COLUMN
-                                && metadata.includes_doc_id())
-                            && !(*column == uqa_sql::semantics::SCORE_COLUMN
-                                && metadata.includes_score())
-                    })
-                    .map(str::to_owned),
-            );
+            table_columns.extend(requested_document_fields(wanted));
         }
     }
     // The name a filter writes for each column of the table: its alias, or its own name.
@@ -404,6 +393,20 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
 fn expression_references_tableoid(expression: &crate::ScalarExpr) -> bool {
     let mut columns = std::collections::BTreeSet::new();
     expression.collect_columns(&mut columns) && columns.contains(TABLE_OID_COLUMN)
+}
+
+fn requested_document_fields(projection: &SourceProjection) -> Vec<String> {
+    let metadata = projection.metadata();
+    projection
+        .requested_columns()
+        .filter(|column| match *column {
+            XMIN_COLUMN | TABLE_OID_COLUMN => false,
+            uqa_sql::semantics::DOC_ID_COLUMN => !metadata.includes_doc_id(),
+            uqa_sql::semantics::SCORE_COLUMN => !metadata.includes_score(),
+            _ => true,
+        })
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Keep a scan's selected stored fields, public aliases and system-column metadata in one positional layout.

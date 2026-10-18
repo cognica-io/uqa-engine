@@ -15,7 +15,7 @@ use super::{
     validate_query_block_references, validate_query_set_contexts,
     validate_source_set_contexts_before_build, with_query_table_pseudo_columns, ComputePlan,
     CteScope, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
-    SingleRelation, SourceContext, SourcePlan, SourceProjection,
+    SingleRelation, SourceContext, SourcePlan,
 };
 
 pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 'static>(
@@ -168,7 +168,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
             let schemaless = local_table.is_some()
                 && catalog
                     .table_resolved(&resolution, name)?
-                    .is_some_and(|table| table.columns.is_empty());
+                    .is_some_and(|table| table.columns.is_empty() && !table.columns_declared);
             // Only the overlay of this block's own table changes what it reads; changes of other tables leave its storage view as the single-table path reads it.
             let command_overlay = match local_table.as_deref() {
                 Some(table) if ctes.reads_command_overlay() => {
@@ -249,7 +249,9 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
             outer,
         )?;
     }
-    let column_prune = context.planning.column_prune(stmt, from, ctes)?;
+    let column_prune = context
+        .planning
+        .column_prune(stmt, from, ctes, Some(expression_schema))?;
     let qualifier_filters = context.planning.qualifier_filters(stmt, from, ctes)?;
     let source_row_locks = crate::query::locking::resolve_row_locks(
         context.locking,
@@ -359,15 +361,17 @@ fn schemaless_reference_schema<S: Clone + Send + Sync + 'static>(
 ) -> Result<crate::RowSchema, SQLError> {
     let columns = context
         .planning
-        .column_prune(statement, source, ctes)?
+        .column_prune(statement, source, ctes, None)?
         .and_then(|prune| prune.get(qualifier).cloned())
-        .and_then(SourceProjection::explicit_columns)
-        .map_or_else(Vec::new, |columns| columns.into_iter().collect());
+        .map_or_else(Vec::new, |projection| {
+            projection.requested_columns().map(str::to_owned).collect()
+        });
     let schema = crate::RowSchema::with_qualified_types(
         qualifier,
         columns.clone(),
         vec![None; columns.len()],
     );
+    let schema = crate::RowSchema::with_wildcard_hidden_positions(&schema, 0..columns.len());
     let schema = with_query_table_pseudo_columns(&schema);
     Ok(overlay_outer_schema(&schema, outer))
 }

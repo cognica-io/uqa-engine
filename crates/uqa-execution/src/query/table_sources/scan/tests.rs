@@ -10,7 +10,7 @@ use super::projected_scan_schema;
 use crate::query::scored_input::{ScoredDocumentSource, ScoredInput};
 use crate::query::table_read::TableRead;
 use crate::RowSource;
-use parking_lot::RwLockReadGuard;
+use parking_lot::{RwLock, RwLockReadGuard};
 use std::sync::Arc;
 use uqa_sql::ast::{ColumnDef, ColumnType};
 use uqa_sql::schema::ScalarTypeSchema;
@@ -124,4 +124,73 @@ fn empty_scored_sources_retain_selected_collations_without_reading_values() {
     assert_eq!(schema.collation_of("plain"), Some(100));
     assert_eq!(schema.column_collation(3), Some(0));
     assert_eq!(schema.column_collation(4), Some(0));
+}
+
+struct DocumentTable(RwLock<Box<dyn DocumentStore>>);
+
+impl TableRead for DocumentTable {
+    fn column_definitions(&self) -> Vec<ColumnDef> {
+        Vec::new()
+    }
+    fn maps_integer_keys(&self) -> bool {
+        false
+    }
+    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+        self.0.read()
+    }
+}
+
+#[test]
+fn document_field_projection_does_not_copy_unrequested_payload() {
+    use crate::query::local_table::{LocalTableRowSource, LocalTableScanConfig};
+    use uqa_core::Value;
+    use uqa_sql::plan::source_projection::SourceProjection;
+    use uqa_storage::{MemoryDocumentStore, StoredDocument};
+
+    let mut rows = MemoryDocumentStore::new();
+    rows.put_stored(
+        1,
+        StoredDocument::new(
+            [
+                ("value".into(), Value::Int(7)),
+                ("body".into(), Value::Str("x".repeat(2 * 1024 * 1024))),
+            ]
+            .into(),
+        ),
+    )
+    .unwrap();
+    let mut projection = SourceProjection::retaining_all();
+    projection.extend(["value".into(), "absent".into()]);
+    let columns = super::requested_document_fields(&projection);
+    let schema = projected_scan_schema("d", &columns, &columns, &[], false, None).unwrap();
+    let mut scan = LocalTableRowSource::new(LocalTableScanConfig {
+        cancellation: uqa_core::CancellationToken::new(),
+        serializable: None,
+        table_name: "docs".into(),
+        table: Arc::new(DocumentTable(RwLock::new(Box::new(rows)))),
+        column_definitions: Arc::new(Vec::new()),
+        columns: columns.clone(),
+        schema: columns,
+        physical_schema: schema,
+        metadata: projection.metadata(),
+        table_oid: None,
+        predicate: None,
+        estimated_cardinality: 1,
+        lock_origin: None,
+        recheck_pins: None,
+        candidates: None,
+        command_changes: None,
+    });
+    let allocations = allocation_counter::measure(|| {
+        let selected = scan.next_batch(1).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0]["value"], Value::Int(7));
+        assert_eq!(selected[0]["absent"], Value::Null);
+        assert_eq!(selected[0].len(), 2);
+    });
+    assert!(
+        allocations.bytes_total < 64 * 1024,
+        "a two-field projection copied the 2 MiB payload: {allocations:?}"
+    );
+    assert!(scan.next_batch(1).unwrap().is_empty());
 }

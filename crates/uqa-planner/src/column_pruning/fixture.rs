@@ -53,6 +53,7 @@ impl Fixture {
             resolution: &self.resolution,
             volatility: self,
             is_visible_cte: &|_| false,
+            source_schema: None,
         }
     }
 }
