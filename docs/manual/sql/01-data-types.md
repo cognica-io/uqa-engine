@@ -32,7 +32,7 @@ UQA Engine maps PostgreSQL 18 type identities to the value carriers implemented 
 | `JSON` | Validated JSON value |
 | `JSONB` | Canonical JSON value with JSONB operations |
 | `BYTEA` | Byte string |
-| `BIT(n)`, `BIT VARYING(n)`, `VARBIT(n)` | Packed bit sequence with an exact logical length; [development-source bit-string support](#bit-strings) |
+| `BIT(n)`, `BIT VARYING(n)`, `VARBIT(n)` | Packed bit sequence with an exact logical length; [bit-string support](#bit-strings) |
 | `REFCURSOR` | PostgreSQL cursor-name identity over a text-compatible carrier for PL/pgSQL session portals |
 | `type[]`, `ARRAY` | Homogeneous array of a supported element type |
 | `INT4RANGE`, `INT8RANGE`, `NUMRANGE`, `DATERANGE`, `TSRANGE`, `TSTZRANGE` | PostgreSQL built-in range identities with canonical text I/O over their scalar subtype |
@@ -60,18 +60,18 @@ Serial declarations allocate generated integer values through an owned sequence.
 
 ## Bit strings
 
-The development source after 0.5.4 supports `BIT(n)`, `BIT VARYING(n)` and its alias `VARBIT(n)`. The length is a number of bits. An omitted length on the `BIT` keyword means one bit; unmodified quoted `"bit"` or catalog-qualified `pg_catalog.bit` has no length constraint. An omitted varying length also has no declared bound. Binary literals use `B'101'`, hexadecimal literals use `X'9a'`, and both produce a `bit` value with the literal's exact length, including an empty literal.
+UQA Engine 0.6.0 supports `BIT(n)`, `BIT VARYING(n)` and its alias `VARBIT(n)`. The length is a number of bits. An omitted length on the `BIT` keyword means one bit; unmodified quoted `"bit"` or catalog-qualified `pg_catalog.bit` has no length constraint. An omitted varying length also has no declared bound. Binary literals use `B'101'`, hexadecimal literals use `X'9a'`, and both produce a `bit` value with the literal's exact length, including an empty literal.
 
 Assignment to `BIT(n)` requires exactly `n` bits, while assignment to `BIT VARYING(n)` accepts at most `n`. An explicit cast to `BIT(n)` truncates excess bits on the right or pads with zeroes on the right; a varying-length cast truncates excess bits without padding. Text output contains exactly the logical binary digits, preserving leading zeroes and empty values. Arrays and composite fields retain that value and their declared fixed/varying type. Equality compares the bit sequence; ordering is lexicographic with zero before one and a shorter prefix before its extension. Grouping, joins and indexes preserve the same equality classes.
 
-Writes retain the ordinary transaction and rollback contract, including persistent reopening. Existing databases require the [development-source all-owner upgrade](../reference/10-upgrading.md#development-source). The declared length must be from 1 through 83,886,080; invalid lengths report `22023`. A fixed-length assignment mismatch reports `22026`, an overlong varying assignment reports `22001`, and an invalid binary or hexadecimal digit reports `22P02`. Explicit casts validate the entire input before truncating it.
+Writes retain the ordinary transaction and rollback contract, including persistent reopening. Existing databases require the [0.6.0 all-owner upgrade](../reference/10-upgrading.md#060). The declared length must be from 1 through 83,886,080; invalid lengths report `22023`. A fixed-length assignment mismatch reports `22026`, an overlong varying assignment reports `22001`, and an invalid binary or hexadecimal digit reports `22P02`. Explicit casts validate the entire input before truncating it.
 
 ```sql execute
 SELECT B'101' AS b, X'9a' AS x, B'' AS empty,
        pg_typeof(B'101')::text AS type;
 ```
 
-The result is `101`, `10011010`, an empty string, and `bit`. Rust exposes `Value::BitString(BitStringValue)` with packed bytes and an exact bit length; the [source upgrade notes](../reference/10-upgrading.md#development-source) describe adapter requirements. Python, Node.js and WASM SQL results render binary text. HTTP text parameters require an explicit SQL cast to select the bit type.
+The result is `101`, `10011010`, an empty string, and `bit`. Rust exposes `Value::BitString(BitStringValue)` with packed bytes and an exact bit length; the [0.6.0 upgrade notes](../reference/10-upgrading.md#060) describe adapter requirements. Python, Node.js and WASM SQL results render binary text. HTTP text parameters require an explicit SQL cast to select the bit type.
 
 ## Array dimensions and input
 
