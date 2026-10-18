@@ -38,6 +38,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reduce the native stack retained by PL/pgSQL statement locations so finite recursive functions execute in unoptimized builds, while preserving routine CONTEXT, cancellation and the existing frame-count and native stack limits.
+
 - Preserve the declared retrieval score type during metadata-only query binding, so positive-evidence pooling and text/vector results compose through derived tables, joins, CTEs and UNION branches without an output descriptor mismatch.
 
 - Reconstruct generated row DISTINCT comparisons and DISTINCT negation with PostgreSQL Boolean syntax and precedence in view, rule and trigger definitions, preserving ordinary quoted function calls.

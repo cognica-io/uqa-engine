@@ -12,7 +12,7 @@ use super::{
 };
 
 impl Interpreter<'_> {
-    #[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
+    // Source locations carry diagnostics through a small entry frame.
     pub(super) fn exec_stmt(&mut self, stmt: &PLpgSQLStmt) -> Result<Flow, SQLError> {
         self.services.runtime.cancellation_token().check()?;
         match stmt {
@@ -29,6 +29,16 @@ impl Interpreter<'_> {
                     }
                     error => error,
                 }
+            }
+            _ => self.exec_statement_body(stmt),
+        }
+    }
+
+    #[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
+    fn exec_statement_body(&mut self, stmt: &PLpgSQLStmt) -> Result<Flow, SQLError> {
+        match stmt {
+            PLpgSQLStmt::Located { .. } => {
+                unreachable!("statement entry handles source locations")
             }
             PLpgSQLStmt::Block(block) => self.exec_block(block),
             PLpgSQLStmt::Assign { target, expr } => self.exec_assignment(*target, expr),

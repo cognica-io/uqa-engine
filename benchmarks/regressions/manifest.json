@@ -14014,6 +14014,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "recursive_factorial",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_plpgsql/dynamic_recursion.rs",
+      "capability": "Routine recursion stack and state",
+      "workload": "A PL/pgSQL function recursively evaluates factorial(10) through located RETURN statements.",
+      "invariant": "Finite routine recursion preserves the exact integer output within the unchanged native stack budget.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "infinite_recursion_hits_depth_limit",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_plpgsql/dynamic_recursion.rs",
+      "capability": "Routine recursion stack and state",
+      "workload": "Infinite recursion, a tightened routine frame cap and a finite Fibonacci call after restoring the cap.",
+      "invariant": "Unbounded calls fail with SQLSTATE 54001; configured depth remains effective and a later finite call succeeds.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
