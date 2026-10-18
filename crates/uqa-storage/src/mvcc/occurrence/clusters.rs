@@ -209,11 +209,8 @@ impl Resolver<'_> {
                 write.value(),
                 peer.map(|peer| (peer.key(), peer.value())),
             )?;
-            self.preserve(write)?;
-            if let Some(peer) = peer {
-                self.preserve(peer)?;
-            }
-            return Ok(());
+            // A split peer is preserved separately at its own input position; validation of the complete pair remains here.
+            return self.preserve(write);
         }
         let (base_value, base_peer) = self.cluster_view(self.base, write, peer)?;
         let (current_value, current_peer) = self.cluster_view(self.current, write, peer)?;

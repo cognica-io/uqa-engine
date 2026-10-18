@@ -83,7 +83,7 @@ pub(super) fn revision(
 
 impl Resolver<'_> {
     pub(super) fn preserve(&self, write: &PreparedRecordWrite) -> VersionResult<()> {
-        self.changes.replace(
+        self.changes.preserve(
             write.clone().with_kind(self.mode.kind(write.kind())),
             self.control,
         )
@@ -180,6 +180,8 @@ impl Resolver<'_> {
                         .preserve(write.clone().with_kind(RecordWriteKind::Canonical), control)?;
                 } else if let Kind::Score(cluster) = kind {
                     self.merge_cluster(mutation, write, Some(&paired), cluster)?;
+                } else if base.sequence() == current.sequence() {
+                    self.preserve(write)?;
                 }
             }
             (RecordWriteKind::Occurrence, Kind::Cluster(cluster)) => {
