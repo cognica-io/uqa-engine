@@ -8,6 +8,14 @@
 
 use super::*;
 
+#[test]
+fn factorial_numeric_range_and_signatures_match_postgresql() {
+    crate::pg18_oracle::verify(
+        &engine(),
+        include_str!("../../../../tests/parity/pg18/factorial_oracle.expected.json"),
+    );
+}
+
 // ---------------------------------------------------------------------
 // Arithmetic guards
 // ---------------------------------------------------------------------

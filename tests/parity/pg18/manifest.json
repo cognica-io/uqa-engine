@@ -164,7 +164,8 @@
       "query.set-returning-contexts",
       "functions.type-observation-arguments",
       "query.set-operation-ordering",
-      "query.constant-group-output-slots"
+      "query.constant-group-output-slots",
+      "function.factorial-bigint-numeric"
     ],
     "M2": [
       "protocol.frontend-backend-3.2"
@@ -1491,6 +1492,14 @@
       "postgresql_reference": "34 independently captured PostgreSQL 18.4 observations in aggregate_output_slots_oracle.expected.json, including the five original #1010 reproductions.",
       "uqa_test": "cargo test -p uqa-execution --lib aggregation::output::tests; cargo test -p uqa-engine --test integration grouped_constant_outputs_match_postgresql",
       "supported_version": "Unreleased: constant and nested finalized group outputs over one-row VALUES and source-free derived relations, typed and NULL constants, aggregate finalizer offsets, grouping sets, HAVING, hidden ORDER BY and empty-input cardinality. All 34 observations match memory, native SQLite, SQLite Key/Value and redb; two Execution owner tests preserve borrowed slot lookup without an input row.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "function.factorial-bigint-numeric",
+      "postgresql_reference": "37 independently captured PostgreSQL 18.4 observations in factorial_oracle.expected.json, plus the separately retained pg_proc reference establishing factorial(bigint) RETURNS numeric.",
+      "uqa_test": "cargo test -p uqa-sql --lib factorial; cargo test -p uqa-sql --lib scalar_and_integer_dispatch_check_both_cancellation_owners; cargo test -p uqa-engine --test integration factorial_numeric_range_and_signatures_match_postgresql",
+      "supported_version": "Unreleased: exact factorial values from 0 through 32177, PostgreSQL negative and overflow diagnostics, bigint-only fixed signature, NULL and unknown input, inferred and explicitly typed prepared parameters, row inputs and coexistence with a user-defined text overload. The maximum full output matches PostgreSQL under a 4 MiB production budget; partial-product failure releases reservations. Builtin catalog completeness is tracked separately in #1033.",
       "status": "verified",
       "open_issue": null
     }

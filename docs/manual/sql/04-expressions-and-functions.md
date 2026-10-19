@@ -247,6 +247,14 @@ The query returns `{abc,0,""}`, `2`, `a12bc3` and `{one,two,three}`: the non-gre
 | Random | `random`, `setseed` |
 | Formatting | `to_bin`, `to_oct`, `to_hex`, `to_number` |
 
+`factorial(bigint)` returns an exact `numeric`. Smallint and integer arguments widen to bigint; untyped text and NULL resolve through that signature. Typed numeric, floating-point, text and Boolean arguments and unsupported arities report SQLSTATE `42883`. The function is strict and immutable and does not change database state. It returns 1 for 0 and 1, accepts integer inputs through 32177, and reports `22003` for negative inputs or larger arguments. Invalid untyped integer text reports `22P02`. Numeric construction preserves the caller's memory allowance and cancellation scope.
+
+```sql execute
+SELECT factorial(34) AS exact_factorial;
+```
+
+The result is `295232799039604140847618609643520000000`.
+
 `round(double precision)` and `round(numeric)` return the same type as the selected argument. `round(numeric, integer)` returns a numeric value rounded to the requested number of decimal places; floating-point values need an explicit cast to numeric when a precision argument is supplied. These functions do not change database state. A two-argument call with `real` or `double precision` reports SQLSTATE `42883`, including when the first argument is NULL.
 
 ```sql execute

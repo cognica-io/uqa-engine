@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Correct factorial numeric range, bigint argument binding and PostgreSQL diagnostics, retaining exact results through 32177! with memory admission and cancellation.
+
 - Fix GROUP BY output errors for constant and nested expressions over single-row VALUES and subqueries, including grouping sets, HAVING and ORDER BY.
 
 - Preserve normal argument evaluation in `pg_typeof`, including volatile effects, errors, privileges, NULL and declared type identities through stored views and provider reopening.

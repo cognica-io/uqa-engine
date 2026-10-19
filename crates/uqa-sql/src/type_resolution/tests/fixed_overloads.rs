@@ -8,6 +8,52 @@ use super::super::*;
 use crate::ast::FunctionDispatch;
 
 #[test]
+fn factorial_binds_postgresql_bigint_arguments_and_numeric_result() {
+    let numeric = ColumnType::from_sql_name("numeric").unwrap();
+    for argument in [
+        None,
+        Some(ColumnType::SmallInteger),
+        Some(ColumnType::Integer),
+        Some(ColumnType::BigInteger),
+    ] {
+        let resolved = resolve_fixed_builtin_call(
+            "PG_CATALOG.FACTORIAL",
+            None,
+            &[None],
+            &[argument],
+            false,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(resolved.selected.return_type, numeric);
+        assert_eq!(resolved.selected.binding.name, "pg_catalog.factorial");
+        assert_eq!(resolved.selected.binding.argument_types, ["bigint"]);
+        assert!(!resolved.builtin_non_immutable);
+    }
+    for arguments in [
+        vec![],
+        vec![None, None],
+        vec![Some(numeric)],
+        vec![Some(ColumnType::Real)],
+        vec![Some(ColumnType::DoublePrecision)],
+        vec![Some(ColumnType::Text)],
+        vec![Some(ColumnType::Boolean)],
+    ] {
+        let error = resolve_fixed_builtin_call(
+            "factorial",
+            None,
+            &vec![None; arguments.len()],
+            &arguments,
+            false,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42883"));
+    }
+}
+
+#[test]
 fn timestamp_zone_binding_retains_postgresql_result_types_and_volatility() {
     // Six pg_proc identities independently captured in the timezone reference.
     for (arguments, expected) in [
