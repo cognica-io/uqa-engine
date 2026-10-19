@@ -14802,6 +14802,71 @@
       "capability": "Cypher parser stack and depth",
       "workload": "Boolean, arithmetic, comparison, membership, postfix and power expressions compared with explicit grouping, plus illegal NOT positions.",
       "invariant": "Existing operator precedence and left associativity survive bounded precedence parsing without admitting invalid syntax."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_call_observation_preserves_collations_on_an_ordinary_thread_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/input_collations.rs",
+      "capability": "SQL preparation stack use",
+      "workload": "Thirty-two nested chr/concatenation inputs under lower with explicit C collation on a 2 MiB thread stack.",
+      "invariant": "Ordinary unoptimized preparation fits the existing thread stack and retains every observed call and its input collation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_collated_call_types_fit_an_ordinary_thread_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/tests.rs",
+      "capability": "SQL scalar type inference stack",
+      "workload": "Thirty-two concatenation calls with retained type/collation wrappers on a 2 MiB thread stack.",
+      "invariant": "Recursive result-type inference returns the original text identity without retaining stack storage for unrelated expression variants."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_collated_call_binding_fits_an_ordinary_thread_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/introspection/tests.rs",
+      "capability": "SQL scalar binding stack",
+      "workload": "Thirty-two nested retained concatenation calls through ordinary executable type/coercion binding on a 2 MiB stack.",
+      "invariant": "Calls and retained metadata bind without a native stack overflow and preserve the declared text result."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "nested_collated_calls_fold_on_an_ordinary_thread_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/collations.rs",
+      "capability": "Scalar optimizer stack and retained metadata",
+      "workload": "Thirty-two chr/concatenation calls under lower and explicit C collation, analyzed, optimized and observed on a 2 MiB stack.",
+      "invariant": "Call simplification returns the exact lowercase value and retains its original result schema and collation without enlarging the stack."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "diskann_and_existing_vector_cache_rebinding_uses_registered_dimensions",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
+      "capability": "Vector cache owner liveness and retained dimensions",
+      "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -13,6 +13,8 @@ use crate::ast::{BinaryOp, FunctionBinding};
 use crate::catalog::collations::derivation::Derivation;
 use uqa_core::Value;
 
+mod nodes;
+
 impl Preparation<'_> {
     /// The common type of the inputs of the construct `context`, as `select_common_type` chooses it, with the unknown inputs coerced to it.
     pub(super) fn common(
@@ -167,142 +169,52 @@ impl Preparation<'_> {
             }
         }
         self.check_schema_column(expression)?;
-        let ty = match expression {
+        match expression {
             ScalarExpr::ScalarSubquery(index) => {
-                let query = subqueries.get(*index).ok_or_else(|| {
-                    error("XX000", "scalar subquery slot is outside its plan".into())
-                })?;
-                let schema = self.query(query, Some(input))?;
-                let mut result = ExpressionType::leaf(schema.column_type(0).cloned());
-                if let Some(oid) = schema.column_collation(0) {
-                    result.derivation = Derivation::implicit(i64::from(oid));
-                    result.initial_collation = oid;
-                }
-                result.record_fields = schema.record_fields(0).cloned();
-                return Ok(result);
+                self.scalar_subquery_expression(*index, input, subqueries)
             }
-            ScalarExpr::Param(index) => return self.parameters.reference(*index),
-            ScalarExpr::Literal(Value::Null) => return Ok(ExpressionType::unknown()),
+            ScalarExpr::Param(index) => self.parameters.reference(*index),
+            ScalarExpr::Literal(Value::Null) => Ok(ExpressionType::unknown()),
             ScalarExpr::Literal(Value::Str(text)) => {
-                return Ok(ExpressionType::unknown_literal(expression, text.clone()));
+                Ok(ExpressionType::unknown_literal(expression, text.clone()))
             }
             ScalarExpr::Collated {
                 expr,
                 ty,
                 collation,
-            } => {
-                // The wrapped node has already been assigned. Analyze its inputs without scheduling another wrapper around that same node.
-                let mut value = self.expression_inner(expr, input, subqueries)?;
-                collation.validate(ty)?;
-                // Collation assignment retains type identity, while a simplified arm keeps its own modifier.
-                if value.ty.as_ref().is_none_or(|inner| {
-                    inner != ty && inner.without_type_modifiers() != ty.without_type_modifiers()
-                }) {
-                    value.ty = Some(ty.clone());
-                }
-                value.derivation = value
-                    .derivation
-                    .error_only()
-                    .combine(collation.derivation());
-                value.initial_collation = collation.initial_oid();
-                return Ok(value);
-            }
-            ScalarExpr::Cast { expr, ty, .. } => {
-                return self.cast_expression(expr, ty, input, subqueries);
-            }
+            } => self.collated_expression(expr, ty, *collation, input, subqueries),
+            ScalarExpr::Cast { expr, ty, .. } => self.cast_expression(expr, ty, input, subqueries),
             ScalarExpr::Binary { op, lhs, rhs } => {
-                let calls = self.set_calls();
-                let mut left = self.expression(lhs, input, subqueries)?;
-                let mut right = self.expression(rhs, input, subqueries)?;
-                if matches!(
-                    (lhs.as_ref(), rhs.as_ref()),
-                    (ScalarExpr::Row(_), ScalarExpr::Row(_))
-                ) {
-                    self.coerce_row_comparison(*op, &mut left, &mut right, false)?;
-                    self.reject_set_inputs(
-                        calls,
-                        crate::semantics::sets::placement::row_comparison_set_error,
-                    )?;
-                    let mut result = ExpressionType::resolved(Some(ColumnType::Boolean));
-                    result.derivation = ExpressionType::comparison(&left, &right);
-                    return Ok(result);
-                }
-                let ty = self.binary(*op, &mut left, &mut right)?;
-                return Ok(ExpressionType::combined(Some(ty), &[left, right]));
+                self.binary_expression(*op, lhs, rhs, input, subqueries)
             }
-            ScalarExpr::Not(inner) => {
-                let value = self.boolean_expression(inner, input, subqueries, "NOT")?;
-                return Ok(ExpressionType::independent(
-                    Some(ColumnType::Boolean),
-                    &[value],
-                ));
+            ScalarExpr::Not(inner) => self.not_expression(inner, input, subqueries),
+            ScalarExpr::And(items) => {
+                self.boolean_chain_expression(items, "AND", input, subqueries)
             }
-            ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-                let context = if matches!(expression, ScalarExpr::And(_)) {
-                    "AND"
-                } else {
-                    "OR"
-                };
-                let mut selected = Derivation::None;
-                for item in items {
-                    let value = self.boolean_expression(item, input, subqueries, context)?;
-                    selected = selected.combine(value.derivation.error_only());
-                }
-                let mut result = ExpressionType::resolved(Some(ColumnType::Boolean));
-                result.derivation = selected;
-                return Ok(result);
-            }
-            ScalarExpr::IsNull { expr, .. } => {
-                let value = self.expression(expr, input, subqueries)?;
-                return Ok(ExpressionType::independent(
-                    Some(ColumnType::Boolean),
-                    &[value],
-                ));
-            }
+            ScalarExpr::Or(items) => self.boolean_chain_expression(items, "OR", input, subqueries),
+            ScalarExpr::IsNull { expr, .. } => self.null_test_expression(expr, input, subqueries),
             ScalarExpr::UnaryMinus(inner) => {
-                let inner = self.expression(inner, input, subqueries)?;
-                if inner.ty.is_none() {
-                    return Err(crate::type_resolution::ambiguous_prefix_operator(
-                        "-", "unknown",
-                    ));
-                }
-                let ty = self.known_type(expression, input, subqueries)?;
-                return Ok(ExpressionType::independent(ty, &[inner]));
+                self.unary_minus_expression(expression, inner, input, subqueries)
             }
-            ScalarExpr::Array(items) => {
-                let mut items = items
-                    .iter()
-                    .map(|item| self.expression(item, input, subqueries))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let ty = self
-                    .common(crate::type_resolution::CommonTypeContext::Array, &mut items)?
-                    .map(|element| ColumnType::Array(Box::new(element)));
-                return Ok(ExpressionType::combined(ty, &items));
-            }
+            ScalarExpr::Array(items) => self.array_expression(items, input, subqueries),
             ScalarExpr::CompositeRow { items, binding, .. } => {
-                let mut selected = Derivation::None;
-                for item in items {
-                    selected = selected.combine(
-                        self.expression(item, input, subqueries)?
-                            .derivation
-                            .error_only(),
-                    );
-                }
-                let mut result = ExpressionType::resolved(Some(self.type_name(&binding.ty)?));
-                result.derivation = selected;
-                return Ok(result);
+                self.composite_row_expression(items, binding, input, subqueries)
             }
-            ScalarExpr::Row(items) => return self.row_expression(items, input, subqueries),
+            ScalarExpr::Row(items) => self.row_expression(items, input, subqueries),
+            ScalarExpr::Func { .. } => {
+                let mut result = self.function_expression(expression, input, subqueries)?;
+                self.expression_record_fields(&mut result, expression, input, subqueries)?;
+                Ok(result)
+            }
             ScalarExpr::Between { .. }
             | ScalarExpr::InList { .. }
             | ScalarExpr::Case { .. }
             | ScalarExpr::Exists { .. }
             | ScalarExpr::InSubquery { .. }
-            | ScalarExpr::Func { .. }
             | ScalarExpr::WindowCall { .. } => {
                 let mut result = self.compound_expression(expression, input, subqueries)?;
                 self.expression_record_fields(&mut result, expression, input, subqueries)?;
-                return Ok(result);
+                Ok(result)
             }
             ScalarExpr::Column(_)
             | ScalarExpr::QualifiedColumn { .. }
@@ -312,21 +224,8 @@ impl Preparation<'_> {
             | ScalarExpr::TypedLiteral { .. }
             | ScalarExpr::Star
             | ScalarExpr::QualifiedStar(_)
-            | ScalarExpr::Default => self.known_type(expression, input, subqueries)?,
-        };
-        let mut result = ExpressionType::leaf(ty);
-        if let ScalarExpr::TypedLiteral { collation_oid, .. } = expression {
-            crate::catalog::collations::expression::validate_literal_collation(
-                result.ty.as_ref(),
-                *collation_oid,
-            )?;
+            | ScalarExpr::Default => self.leaf_expression(expression, input, subqueries),
         }
-        if let Some(oid) = input.input_collation(expression) {
-            result.derivation = Derivation::implicit(i64::from(oid));
-            result.initial_collation = oid;
-        }
-        self.expression_record_fields(&mut result, expression, input, subqueries)?;
-        Ok(result)
     }
 
     fn expression_record_fields(
@@ -367,10 +266,10 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
-        let fields = items
-            .iter()
-            .map(|item| self.expression(item, input, subqueries))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut fields = Vec::new();
+        for item in items {
+            fields.push(self.expression(item, input, subqueries)?);
+        }
         let mut value = ExpressionType::independent(Some(ColumnType::Record), &fields);
         value.record_fields = Some(fields.iter().map(|field| field.ty.clone()).collect());
         value.record_descriptor = Some(std::sync::Arc::new(crate::schema::RecordDescriptor {
@@ -447,7 +346,6 @@ impl Preparation<'_> {
                 )?;
                 ExpressionType::combined(Some(ColumnType::Boolean), &[value, result])
             }
-            ScalarExpr::Func { .. } => self.function_expression(expression, input, subqueries)?,
             ScalarExpr::WindowCall {
                 name,
                 args,

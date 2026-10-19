@@ -13,6 +13,7 @@ use uqa_sql::SQLError;
 
 mod conditional;
 pub(super) mod constants;
+mod nodes;
 
 use conditional::{optimize_boolean, optimize_case, optimize_coalesce};
 use constants::fold_authorized_literal;
@@ -62,82 +63,42 @@ fn optimize_list(
     items: Vec<ScalarExpr>,
     config: &OptimizerConfig,
 ) -> Result<Vec<ScalarExpr>, SQLError> {
-    items
-        .into_iter()
-        .map(|item| optimize_scalar(item, config))
-        .collect()
+    let mut items = items;
+    for item in &mut items {
+        let original = std::mem::replace(item, ScalarExpr::Literal(Value::Null));
+        *item = optimize_scalar(original, config)?;
+    }
+    Ok(items)
 }
 
 fn optimize_optional(
     expression: Option<Box<ScalarExpr>>,
     config: &OptimizerConfig,
 ) -> Result<Option<Box<ScalarExpr>>, SQLError> {
-    expression
-        .map(|expression| optimize_scalar(*expression, config).map(Box::new))
-        .transpose()
+    match expression {
+        Some(expression) => Ok(Some(Box::new(optimize_scalar(*expression, config)?))),
+        None => Ok(None),
+    }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "optimizer rewrite preserves exhaustive variants and fixed-point order"
-)]
 fn optimize_scalar(
+    expression: ScalarExpr,
+    config: &OptimizerConfig,
+) -> Result<ScalarExpr, SQLError> {
+    match expression {
+        expression @ ScalarExpr::Collated { .. } => nodes::optimize_collated(expression, config),
+        expression @ ScalarExpr::Func { .. } => nodes::optimize_call(expression, config),
+        other => optimize_noncall_scalar(other, config),
+    }
+}
+
+fn optimize_noncall_scalar(
     expression: ScalarExpr,
     config: &OptimizerConfig,
 ) -> Result<ScalarExpr, SQLError> {
     let integer_syntax = matches!(&expression, ScalarExpr::Literal(Value::Int(_)));
     let row_syntax = matches!(&expression, ScalarExpr::Row(_));
     let optimized = match expression {
-        ScalarExpr::Collated {
-            expr,
-            ty,
-            collation,
-        } => {
-            let selected_arm = matches!(*expr, ScalarExpr::Case { .. });
-            let mut expr = optimize_scalar(*expr, config)?;
-            if let Some(oid) = collation.implicit_oid() {
-                match &mut expr {
-                    ScalarExpr::TypedLiteral {
-                        ty: name,
-                        bound_type,
-                        collation_oid,
-                        ..
-                    } => {
-                        // Simplification may select an arm whose modifier is more specific than the original CASE result.
-                        let ty = bound_type
-                            .take()
-                            .filter(|inner| {
-                                selected_arm
-                                    && inner.without_type_modifiers() == ty.without_type_modifiers()
-                            })
-                            .unwrap_or(ty);
-                        *name = ty.catalog_name();
-                        *bound_type = Some(ty);
-                        *collation_oid = Some(oid);
-                        return Ok(expr);
-                    }
-                    ScalarExpr::Literal(_) => {
-                        let ScalarExpr::Literal(value) = expr else {
-                            unreachable!()
-                        };
-                        return Ok(ScalarExpr::TypedLiteral {
-                            value,
-                            ty: ty.catalog_name(),
-                            bound_type: Some(ty),
-                            collation_oid: Some(oid),
-                            composite_source: None,
-                            parameter_index: None,
-                        });
-                    }
-                    _ => {}
-                }
-            }
-            return Ok(ScalarExpr::Collated {
-                expr: Box::new(expr),
-                ty,
-                collation,
-            });
-        }
         ScalarExpr::Array(items) => ScalarExpr::Array(optimize_list(items, config)?),
         ScalarExpr::Row(items) => ScalarExpr::Row(optimize_list(items, config)?),
         ScalarExpr::Binary { op, lhs, rhs } => {
@@ -185,53 +146,6 @@ fn optimize_scalar(
             list: optimize_list(list, config)?,
             negated,
         },
-        ScalarExpr::Func {
-            order_syntax,
-            name,
-            mut binding,
-            mut args,
-            distinct,
-            mut order_by,
-            filter,
-        } => {
-            if !distinct && order_by.is_empty() && filter.is_none() {
-                if let (Some(context), Some(selected)) =
-                    (config.routine_inlining.as_ref(), binding.as_ref())
-                {
-                    if let Some((selected, materialized)) =
-                        context.materialize_call(selected, &args)?
-                    {
-                        binding = Some(selected);
-                        args = materialized;
-                    }
-                }
-            }
-            for order in &mut order_by {
-                optimize_scalar_slot(&mut order.expr, config)?;
-            }
-            let args = if binding.as_ref().is_some_and(|binding| {
-                binding.dispatch == Some(uqa_sql::ast::FunctionDispatch::RowDistinct)
-            }) {
-                // PostgreSQL simplifies the generated disjunction in order, including an unreachable set-returning field after a constant true comparison.
-                match optimize_boolean(args, false, config)? {
-                    ScalarExpr::Or(items) => items,
-                    simplified => return Ok(simplified),
-                }
-            } else if constants::is_coalesce(&name, binding.as_ref()) {
-                optimize_coalesce(args, config)?
-            } else {
-                optimize_list(args, config)?
-            };
-            ScalarExpr::Func {
-                order_syntax,
-                name,
-                binding,
-                args,
-                distinct,
-                order_by,
-                filter: optimize_optional(filter, config)?,
-            }
-        }
         ScalarExpr::WindowCall {
             name,
             args,
@@ -276,6 +190,15 @@ fn optimize_scalar(
         },
         other => other,
     };
+    finish_scalar(optimized, integer_syntax, row_syntax, config)
+}
+
+fn finish_scalar(
+    optimized: ScalarExpr,
+    integer_syntax: bool,
+    row_syntax: bool,
+    config: &OptimizerConfig,
+) -> Result<ScalarExpr, SQLError> {
     if let (
         Some(context),
         ScalarExpr::Func {

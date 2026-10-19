@@ -224,3 +224,46 @@ fn simplified_case_retains_selected_branch_modifiers_and_collation() {
         assert_eq!(schema.column_collation(0), Some(100));
     }
 }
+
+#[test]
+fn nested_collated_calls_fold_on_an_ordinary_thread_stack() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            use uqa_sql::binding::statements::{analyze_plan_result, AnalyzedResult};
+            use uqa_sql::plan::{RelationalPlan, UnifiedPlan};
+
+            let concatenation = vec!["chr(65)"; 32].join(" || ");
+            let sql = format!("SELECT lower(({concatenation}) COLLATE \"C\")");
+            let mut plan = UnifiedPlan::lower(uqa_sql::compile(&sql).unwrap().remove(0));
+            let catalog = fixture::NoRoutines;
+            let before = analyze_plan_result(&catalog, &catalog, &mut plan, &[], &catalog).unwrap();
+            let AnalyzedResult::Schema(schema) = &before else {
+                panic!("query schema");
+            };
+            assert_eq!(schema.column_collation(0), Some(950));
+            let UnifiedPlan::Query(query) = &mut plan else {
+                panic!("query plan");
+            };
+            let RelationalPlan::QueryBlock(block) = &mut query.root else {
+                panic!("query block");
+            };
+            let projection = &mut block.projections[0];
+            let label = uqa_sql::semantics::projection_label_at(projection);
+            let expression = &mut projection.expr;
+            let config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+            crate::optimizer::optimize_scalar_expression(expression, &config).unwrap();
+            assert_eq!(
+                uqa_execution::scalar::eval_constant_scalar(expression).unwrap(),
+                Value::Str("a".repeat(32))
+            );
+            projection.alias = Some(label);
+            assert_eq!(
+                analyze_plan_result(&catalog, &catalog, &mut plan, &[], &catalog).unwrap(),
+                before
+            );
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

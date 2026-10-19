@@ -361,3 +361,40 @@ fn unknown_common_input_relabels_a_domain_but_identical_domains_survive() {
         }
     }
 }
+
+#[test]
+fn nested_collated_call_binding_fits_an_ordinary_thread_stack() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let binding =
+                FunctionBinding::dispatched(crate::ast::FunctionDispatch::Concat { oid: None });
+            let mut expression = ScalarExpr::Literal(Value::Str("a".into()));
+            for _ in 0..32 {
+                expression = ScalarExpr::Collated {
+                    expr: Box::new(ScalarExpr::Func {
+                        name: binding.name.clone(),
+                        binding: Some(binding.clone()),
+                        args: vec![expression, ScalarExpr::Literal(Value::Str("a".into()))],
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
+                        order_by: Vec::new(),
+                        distinct: false,
+                        filter: None,
+                    }),
+                    ty: ColumnType::Text,
+                    collation: crate::ir::ResultCollation::new(
+                        crate::catalog::collations::derivation::Derivation::implicit(100),
+                        100,
+                    ),
+                };
+            }
+            let bound = bind_type_introspection(expression, &RowSchema::default(), &[]);
+            assert_eq!(
+                crate::type_resolution::scalar_type(&bound, &RowSchema::default(), &[]).unwrap(),
+                Some(ColumnType::Text)
+            );
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

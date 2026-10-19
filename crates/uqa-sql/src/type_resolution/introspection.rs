@@ -208,13 +208,9 @@ struct Binder<'a, 'b> {
 }
 
 impl Binder<'_, '_> {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one expression transform preserves traversal and coercion order"
-    )]
     fn bind(&mut self, expression: ScalarExpr) -> Result<ScalarExpr, SQLError> {
         self.control.check()?;
-        Ok(match expression {
+        match expression {
             ScalarExpr::Func {
                 name,
                 binding,
@@ -231,7 +227,29 @@ impl Binder<'_, '_> {
                 order_syntax,
                 order_by,
                 filter,
-            })?,
+            }),
+            ScalarExpr::Collated {
+                mut expr,
+                ty,
+                collation,
+            } => {
+                self.in_place(&mut expr)?;
+                Ok(ScalarExpr::Collated {
+                    expr,
+                    ty,
+                    collation,
+                })
+            }
+            other => self.bind_structural(other),
+        }
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one expression transform preserves traversal and coercion order"
+    )]
+    fn bind_structural(&mut self, expression: ScalarExpr) -> Result<ScalarExpr, SQLError> {
+        Ok(match expression {
             ScalarExpr::Array(mut items) => {
                 self.items(&mut items)?;
                 self.common_expressions(&mut items)?;
@@ -438,18 +456,6 @@ impl Binder<'_, '_> {
                     base,
                     when,
                     else_branch,
-                }
-            }
-            ScalarExpr::Collated {
-                mut expr,
-                ty,
-                collation,
-            } => {
-                self.in_place(&mut expr)?;
-                ScalarExpr::Collated {
-                    expr,
-                    ty,
-                    collation,
                 }
             }
             ScalarExpr::Cast {

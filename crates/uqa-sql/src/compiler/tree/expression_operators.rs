@@ -62,213 +62,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
     use pg_query::protobuf::AExprKind;
     let kind = a.kind();
     match kind {
-        AExprKind::AexprOp => {
-            let names = extract_strings(&a.name)?;
-            let op_name = match names.as_slice() {
-                [schema, operator] if schema == "pg_catalog" => operator.clone(),
-                _ => names.join("."),
-            };
-            if a.lexpr.is_none() {
-                let rhs = a
-                    .rexpr
-                    .as_ref()
-                    .ok_or_else(|| SQLError::Internal("AExpr missing rhs".into()))?;
-                let rhs = compile_expr(rhs)?;
-                let numeric_operator = |operator, argument| {
-                    dispatched_call(FunctionDispatch::NumericOperator(operator), vec![argument])
-                };
-                return match op_name.as_str() {
-                    "+" => Ok(numeric_operator(NumericOperator::Plus, rhs)),
-                    "-" => Ok(Expr::UnaryMinus(Box::new(rhs))),
-                    "|/" => Ok(numeric_operator(NumericOperator::SquareRoot, rhs)),
-                    "||/" => Ok(numeric_operator(NumericOperator::CubeRoot, rhs)),
-                    "@" => Ok(numeric_operator(NumericOperator::Absolute, rhs)),
-                    other => Err(SQLError::Unsupported(format!("unary operator `{other}`"))),
-                };
-            }
-            let lhs = a
-                .lexpr
-                .as_ref()
-                .ok_or_else(|| SQLError::Internal("AExpr missing lhs".into()))?;
-            let rhs = a
-                .rexpr
-                .as_ref()
-                .ok_or_else(|| SQLError::Internal("AExpr missing rhs".into()))?;
-            let op = match op_name.as_str() {
-                "=" => BinaryOp::Equal,
-                "<>" | "!=" => BinaryOp::NotEqual,
-                "<" => BinaryOp::Less,
-                "<=" => BinaryOp::LessEqual,
-                ">" => BinaryOp::Greater,
-                ">=" => BinaryOp::GreaterEqual,
-                "+" => BinaryOp::Add,
-                "-" => BinaryOp::Subtract,
-                "*" => BinaryOp::Multiply,
-                "/" => BinaryOp::Divide,
-                "||" => {
-                    return Ok(dispatched_call(
-                        FunctionDispatch::Concat { oid: None },
-                        vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    ));
-                }
-                "@@" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "fts_match".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "@?" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "jsonpath_exists".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "%" | "^" => {
-                    let operator = if op_name == "%" {
-                        NumericOperator::Modulo
-                    } else {
-                        NumericOperator::Power
-                    };
-                    return Ok(dispatched_call(
-                        FunctionDispatch::NumericOperator(operator),
-                        vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    ));
-                }
-                "~" | "~*" | "!~" | "!~*" | "~~" | "!~~" | "~~*" | "!~~*" => {
-                    return Ok(dispatched_call(
-                        FunctionDispatch::Pattern {
-                            operator: PatternOperator::from_symbol(&op_name)
-                                .expect("pattern symbol"),
-                            oid: None,
-                        },
-                        vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    ));
-                }
-                // Array overlap.
-                "&&" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "array_overlap".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "-|-" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "range_adjacent".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "->" | "->>" => {
-                    return Ok(dispatched_call(
-                        FunctionDispatch::JsonExtract {
-                            as_text: op_name == "->>",
-                            path: false,
-                        },
-                        vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    ));
-                }
-                "#>" | "#>>" => {
-                    return Ok(dispatched_call(
-                        FunctionDispatch::JsonExtract {
-                            as_text: op_name == "#>>",
-                            path: true,
-                        },
-                        vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    ));
-                }
-                "#-" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "json_delete_path".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "@>" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "contains_op".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "<@" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "contained_by_op".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "?" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "json_has_key".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "?|" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "json_has_any_key".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "?&" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "json_has_all_keys".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                other => return Err(SQLError::Unsupported(format!("operator `{other}`"))),
-            };
-            Ok(Expr::Binary {
-                op,
-                lhs: Box::new(compile_expr(lhs)?),
-                rhs: Box::new(compile_expr(rhs)?),
-            })
-        }
+        AExprKind::AexprOp => compile_operator(a),
         AExprKind::AexprBetween
         | AExprKind::AexprNotBetween
         | AExprKind::AexprBetweenSym
@@ -435,6 +229,120 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
             })
         }
         other => Err(SQLError::Unsupported(format!("AExpr kind: {other:?}"))),
+    }
+}
+
+// Select the output node before reading children, then lower each operand once. Recursive calls retain two operand slots instead of a separate pair for every operator spelling.
+enum OperatorLowering {
+    Binary(BinaryOp),
+    Dispatched(FunctionDispatch),
+    Call(&'static str),
+}
+
+impl OperatorLowering {
+    fn select(name: &str) -> Result<Self> {
+        Ok(match name {
+            "=" => Self::Binary(BinaryOp::Equal),
+            "<>" | "!=" => Self::Binary(BinaryOp::NotEqual),
+            "<" => Self::Binary(BinaryOp::Less),
+            "<=" => Self::Binary(BinaryOp::LessEqual),
+            ">" => Self::Binary(BinaryOp::Greater),
+            ">=" => Self::Binary(BinaryOp::GreaterEqual),
+            "+" => Self::Binary(BinaryOp::Add),
+            "-" => Self::Binary(BinaryOp::Subtract),
+            "*" => Self::Binary(BinaryOp::Multiply),
+            "/" => Self::Binary(BinaryOp::Divide),
+            "||" => Self::Dispatched(FunctionDispatch::Concat { oid: None }),
+            "%" => Self::Dispatched(FunctionDispatch::NumericOperator(NumericOperator::Modulo)),
+            "^" => Self::Dispatched(FunctionDispatch::NumericOperator(NumericOperator::Power)),
+            "~" | "~*" | "!~" | "!~*" | "~~" | "!~~" | "~~*" | "!~~*" => {
+                Self::Dispatched(FunctionDispatch::Pattern {
+                    operator: PatternOperator::from_symbol(name).expect("pattern symbol"),
+                    oid: None,
+                })
+            }
+            "->" | "->>" => Self::Dispatched(FunctionDispatch::JsonExtract {
+                as_text: name == "->>",
+                path: false,
+            }),
+            "#>" | "#>>" => Self::Dispatched(FunctionDispatch::JsonExtract {
+                as_text: name == "#>>",
+                path: true,
+            }),
+            "@@" => Self::Call("fts_match"),
+            "@?" => Self::Call("jsonpath_exists"),
+            "&&" => Self::Call("array_overlap"),
+            "-|-" => Self::Call("range_adjacent"),
+            "#-" => Self::Call("json_delete_path"),
+            "@>" => Self::Call("contains_op"),
+            "<@" => Self::Call("contained_by_op"),
+            "?" => Self::Call("json_has_key"),
+            "?|" => Self::Call("json_has_any_key"),
+            "?&" => Self::Call("json_has_all_keys"),
+            other => return Err(SQLError::Unsupported(format!("operator `{other}`"))),
+        })
+    }
+
+    fn finish(self, lhs: Expr, rhs: Expr) -> Expr {
+        match self {
+            Self::Binary(op) => Expr::Binary {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            },
+            Self::Dispatched(dispatch) => dispatched_call(dispatch, vec![lhs, rhs]),
+            Self::Call(name) => Expr::Func {
+                order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
+                binding: None,
+                name: name.into(),
+                args: vec![lhs, rhs],
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            },
+        }
+    }
+}
+
+fn compile_operator(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
+    let names = extract_strings(&a.name)?;
+    let op_name = match names.as_slice() {
+        [schema, operator] if schema == "pg_catalog" => operator.clone(),
+        _ => names.join("."),
+    };
+    if a.lexpr.is_none() {
+        let rhs = a
+            .rexpr
+            .as_ref()
+            .ok_or_else(|| SQLError::Internal("AExpr missing rhs".into()))?;
+        return compile_unary_operator(&op_name, rhs);
+    }
+    let lhs = a
+        .lexpr
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("AExpr missing lhs".into()))?;
+    let rhs = a
+        .rexpr
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("AExpr missing rhs".into()))?;
+    let target = OperatorLowering::select(&op_name)?;
+    let left = compile_expr(lhs)?;
+    let right = compile_expr(rhs)?;
+    Ok(target.finish(left, right))
+}
+
+fn compile_unary_operator(name: &str, rhs: &pg_query::protobuf::Node) -> Result<Expr> {
+    let rhs = compile_expr(rhs)?;
+    let numeric_operator = |operator, argument| {
+        dispatched_call(FunctionDispatch::NumericOperator(operator), vec![argument])
+    };
+    match name {
+        "+" => Ok(numeric_operator(NumericOperator::Plus, rhs)),
+        "-" => Ok(Expr::UnaryMinus(Box::new(rhs))),
+        "|/" => Ok(numeric_operator(NumericOperator::SquareRoot, rhs)),
+        "||/" => Ok(numeric_operator(NumericOperator::CubeRoot, rhs)),
+        "@" => Ok(numeric_operator(NumericOperator::Absolute, rhs)),
+        other => Err(SQLError::Unsupported(format!("unary operator `{other}`"))),
     }
 }
 

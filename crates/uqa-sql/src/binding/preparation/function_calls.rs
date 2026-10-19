@@ -160,17 +160,15 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<ObservedFunctionArguments, SQLError> {
         let arguments = crate::scalar_call_arguments(args)?;
-        let mut values = arguments
-            .iter()
-            .enumerate()
-            .map(|(index, argument)| {
-                if crate::semantics::is_semantic_field_argument(name, args, index)? {
-                    Ok(ExpressionType::resolved(Some(ColumnType::Text)))
-                } else {
-                    self.expression(argument.value, input, subqueries)
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut values = Vec::new();
+        for (index, argument) in arguments.iter().enumerate() {
+            let value = if crate::semantics::is_semantic_field_argument(name, args, index)? {
+                ExpressionType::resolved(Some(ColumnType::Text))
+            } else {
+                self.expression(argument.value, input, subqueries)?
+            };
+            values.push(value);
+        }
         let mut names = arguments
             .iter()
             .map(|argument| argument.name.map(str::to_string))

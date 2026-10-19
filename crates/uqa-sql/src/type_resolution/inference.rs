@@ -11,6 +11,8 @@ use crate::{ast::ColumnType, schema::ScalarTypeSchema, SQLError, SQLParam, Scala
 use uqa_core::memory::{Produced, ProductionControl};
 use uqa_core::Value;
 
+mod nodes;
+
 #[expect(
     clippy::too_many_lines,
     reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
@@ -59,17 +61,8 @@ pub(super) fn scalar_type_inner_with_control(
             qualified_column::resolve_with_control(schema, qualifier, column, control)
         }
         ScalarExpr::Literal(value) => common::value_type_with_control(value, control),
-        ScalarExpr::Collated { expr, ty, .. } => {
-            let inner = scalar_type_inner_with_control(expr, schema, params, resolver, control)?;
-            if let Some(inner) = inner {
-                if *inner == *ty
-                    || *inner.without_type_modifiers_with_control(control)?
-                        == *ty.without_type_modifiers_with_control(control)?
-                {
-                    return Ok(Some(inner));
-                }
-            }
-            copy_type(Some(ty), control)
+        ScalarExpr::Collated { .. } => {
+            nodes::collated_type_with_control(expression, schema, params, resolver, control)
         }
         ScalarExpr::TypedLiteral {
             bound_type: Some(ty),
@@ -85,26 +78,8 @@ pub(super) fn scalar_type_inner_with_control(
             .map(|parameter| common::parameter_type_with_control(parameter, control))
             .transpose()
             .map(Option::flatten),
-        ScalarExpr::Cast { expr, ty, .. } => {
-            let source = scalar_type_inner_with_control(expr, schema, params, resolver, control)?;
-            let target = resolved_type_name(ty, resolver, control)?;
-            if let Some(target) = target.as_ref() {
-                cast_compatibility::validate_explicit_cast_with_control(
-                    source.as_deref(),
-                    target,
-                    control,
-                )?;
-            }
-            if source
-                .as_deref()
-                .zip(target.as_deref())
-                .is_some_and(|(source, target)| {
-                    cast_compatibility::preserves_record_identity(source, target)
-                })
-            {
-                return Ok(source);
-            }
-            Ok(target)
+        ScalarExpr::Cast { .. } => {
+            nodes::cast_type_with_control(expression, schema, params, resolver, control)
         }
         ScalarExpr::Array(items) => {
             array_element_type_with_control(items, schema, params, resolver, control)?
@@ -135,42 +110,8 @@ pub(super) fn scalar_type_inner_with_control(
             }
             copy_type(Some(&ColumnType::Record), control)
         }
-        ScalarExpr::Binary { op, lhs, rhs } => {
-            let left = common::common_context_expression_type_with_control(
-                lhs, schema, params, resolver, control,
-            )?;
-            let right = common::common_context_expression_type_with_control(
-                rhs, schema, params, resolver, control,
-            )?;
-            // An operator's `unknown` literal is read by the input function of the operand type the selected operator declares, as `coerce_type` reads it when the operator is resolved: a `regclass` column compared with `'name'` reads the literal as `oid`, and `1 + '1'` reads `'1'` as an integer.
-            if left.is_some() != right.is_some()
-                && left
-                    .as_deref()
-                    .into_iter()
-                    .chain(right.as_deref())
-                    .all(|ty| {
-                        !matches!(
-                            common::base_type(ty),
-                            ColumnType::Vector(_) | ColumnType::Tensor(_)
-                        )
-                    })
-            {
-                let selected = operators::binary_operator_types_with_control(
-                    *op,
-                    left.as_deref(),
-                    right.as_deref(),
-                    control,
-                )?;
-                let [left_target, right_target, _] = &*selected;
-                common::read_unknown_literals(std::iter::once(lhs.as_ref()), left_target)?;
-                common::read_unknown_literals(std::iter::once(rhs.as_ref()), right_target)?;
-            }
-            operators::binary_result_type_with_control(
-                *op,
-                left.as_deref(),
-                right.as_deref(),
-                control,
-            )
+        ScalarExpr::Binary { .. } => {
+            nodes::binary_type_with_control(expression, schema, params, resolver, control)
         }
         ScalarExpr::UnaryMinus(inner) => {
             // The negations of the numeric types and of interval all accept an `unknown` operand, so `-'1'` selects none of them, as `oper_select_candidate` reports.
@@ -193,69 +134,11 @@ pub(super) fn scalar_type_inner_with_control(
             copy_type(Some(&ColumnType::Boolean), control)
         }
         // `unknown` operands take the type selected by each comparison operator.
-        ScalarExpr::Between { expr, low, high } => {
-            let value = common::common_context_expression_type_with_control(
-                expr, schema, params, resolver, control,
-            )?;
-            let low = common::common_context_expression_type_with_control(
-                low, schema, params, resolver, control,
-            )?;
-            let high = common::common_context_expression_type_with_control(
-                high, schema, params, resolver, control,
-            )?;
-            operators::binary_result_type_with_control(
-                crate::ast::BinaryOp::GreaterEqual,
-                value.as_deref(),
-                low.as_deref(),
-                control,
-            )?;
-            operators::binary_result_type_with_control(
-                crate::ast::BinaryOp::LessEqual,
-                value.as_deref(),
-                high.as_deref(),
-                control,
-            )?;
-            copy_type(Some(&ColumnType::Boolean), control)
+        ScalarExpr::Between { .. } => {
+            nodes::between_type_with_control(expression, schema, params, resolver, control)
         }
-        ScalarExpr::InList { expr, list, .. } => {
-            let needle = common::common_context_expression_type_with_control(
-                expr, schema, params, resolver, control,
-            )?;
-            let mut candidates = Vec::with_capacity(list.len());
-            for item in list {
-                candidates.push(common::common_context_expression_type_with_control(
-                    item, schema, params, resolver, control,
-                )?);
-            }
-            // `transformAExprIn` compares the needle with the list coerced to the inputs' common type; without one, each item is compared separately.
-            let inputs = std::iter::once(needle.as_deref())
-                .chain(candidates.iter().map(Option::as_deref))
-                .collect::<Vec<_>>();
-            match common::select_common_input_type_with_control(&inputs, control)? {
-                Some(common) => {
-                    common::read_unknown_literals(
-                        std::iter::once(expr.as_ref()).chain(list.iter()),
-                        &common,
-                    )?;
-                    operators::binary_result_type_with_control(
-                        crate::ast::BinaryOp::Equal,
-                        needle.as_deref(),
-                        Some(&common),
-                        control,
-                    )?;
-                }
-                None => {
-                    for candidate in &candidates {
-                        operators::binary_result_type_with_control(
-                            crate::ast::BinaryOp::Equal,
-                            needle.as_deref(),
-                            candidate.as_deref(),
-                            control,
-                        )?;
-                    }
-                }
-            }
-            copy_type(Some(&ColumnType::Boolean), control)
+        ScalarExpr::InList { .. } => {
+            nodes::membership_type_with_control(expression, schema, params, resolver, control)
         }
         ScalarExpr::InSubquery { expr, subquery, .. } => {
             let needle = scalar_type_inner_with_control(expr, schema, params, resolver, control)?;
@@ -277,88 +160,8 @@ pub(super) fn scalar_type_inner_with_control(
             copy_type(Some(&ColumnType::Boolean), control)
         }
         ScalarExpr::Exists { .. } => copy_type(Some(&ColumnType::Boolean), control),
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            let simple = base.is_some();
-            let base_type = base
-                .as_deref()
-                .map(|base| {
-                    common::common_context_expression_type_with_control(
-                        base, schema, params, resolver, control,
-                    )
-                })
-                .transpose()?
-                .flatten();
-            let mut results = Vec::with_capacity(when.len() + 1);
-            for (condition, value) in when {
-                let condition_type = if simple {
-                    common::common_context_expression_type_with_control(
-                        condition, schema, params, resolver, control,
-                    )?
-                } else {
-                    scalar_type_inner_with_control(condition, schema, params, resolver, control)?
-                };
-                if simple {
-                    operators::binary_result_type_with_control(
-                        crate::ast::BinaryOp::Equal,
-                        base_type.as_deref(),
-                        condition_type.as_deref(),
-                        control,
-                    )?;
-                }
-                results.push(common::common_context_expression_type_with_control(
-                    value, schema, params, resolver, control,
-                )?);
-            }
-            // `transformCaseExpr` selects the result type with the ELSE result first, including its implicit NULL.
-            results.insert(
-                0,
-                else_branch
-                    .as_deref()
-                    .map(|value| {
-                        common::common_context_expression_type_with_control(
-                            value, schema, params, resolver, control,
-                        )
-                    })
-                    .transpose()?
-                    .flatten(),
-            );
-            if results.iter().all(Option::is_none)
-                && !when
-                    .iter()
-                    .map(|(_, value)| value)
-                    .chain(else_branch.as_deref())
-                    .all(super::is_unknown_literal)
-            {
-                return Ok(None);
-            }
-            let mut selection = common::CommonInputType::new();
-            let expressions = std::iter::once(else_branch.as_deref())
-                .chain(when.iter().map(|(_, value)| Some(value)));
-            for (ty, expression) in results.into_iter().zip(expressions) {
-                if ty.is_some() || expression.is_none_or(common::unknown_input) {
-                    selection.include_owned(common::CommonTypeContext::Case, ty, control)?;
-                }
-            }
-            let result = selection.finish(control)?;
-            common::read_unknown_literals(
-                when.iter()
-                    .map(|(_, value)| value)
-                    .chain(else_branch.as_deref()),
-                &result,
-            )?;
-            common::case::case_output_type_with_control(
-                expression,
-                &result,
-                &mut |expression| {
-                    scalar_type_inner_with_control(expression, schema, params, resolver, control)
-                },
-                control,
-            )
-            .map(Some)
+        ScalarExpr::Case { .. } => {
+            nodes::conditional_type_with_control(expression, schema, params, resolver, control)
         }
         ScalarExpr::Func { .. } | ScalarExpr::WindowCall { .. } => {
             super::function_inputs::call_type_with_control(
