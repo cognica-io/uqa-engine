@@ -28,6 +28,9 @@ use uqa_sql::{
     SQLError, SQLParam, SQLResult,
 };
 
+mod rows;
+pub use rows::ReturningRows;
+
 #[derive(Clone)]
 pub struct ReturningExecutionContext<'a, S: Clone + 'static> {
     pub rows: MutationRowContext<'a>,
@@ -230,7 +233,7 @@ pub fn returning_projection_context<S: Clone + 'static>(
 pub fn dml_returning_result<S: Clone + 'static>(
     services: ReturningExecutionContext<'_, S>,
     shape: DmlReturningShape<'_, S>,
-    rows: Vec<OwnedPhysicalRow>,
+    rows: ReturningRows,
     affected_rows: u64,
 ) -> Result<SQLResult, SQLError> {
     let projections = expanded_returning_projections(
@@ -247,7 +250,7 @@ pub fn dml_returning_result_with_projections<S: Clone + 'static>(
     services: ReturningExecutionContext<'_, S>,
     shape: DmlReturningShape<'_, S>,
     projections: &[ProjectionPlan],
-    rows: Vec<OwnedPhysicalRow>,
+    rows: ReturningRows,
     affected_rows: u64,
 ) -> Result<SQLResult, SQLError> {
     let star_schema = returning_target_schema(services.catalog, shape.table)?;
@@ -270,7 +273,8 @@ pub fn dml_returning_result_with_projections<S: Clone + 'static>(
         output.columns().iter().collect::<BTreeSet<_>>().len() != output.columns().len();
     let mut named_rows = Vec::with_capacity(rows.len());
     let mut positional_rows = preserve_positions.then(|| Vec::with_capacity(rows.len()));
-    for row in rows {
+    for row in rows.into_rows()? {
+        let row = row?;
         if let Some(positional_rows) = positional_rows.as_mut() {
             positional_rows.push(row.view().iter().map(|(_, value)| value.clone()).collect());
         }

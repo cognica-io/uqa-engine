@@ -15938,6 +15938,61 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "returning_rows_spill_without_retaining_complete_output",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/returning/rows/tests.rs",
+      "capability": "Bounded RETURNING accumulation",
+      "workload": "A 32MiB RETURNING result under a 64KiB producer budget with duplicate output labels.",
+      "invariant": "Exact row order, positions, count and SHA-256; peak allocation below 1MiB and complete spill cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "returning_rows_detach_unselected_source_fragments",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/returning/rows/tests.rs",
+      "capability": "Bounded RETURNING accumulation",
+      "workload": "Sixty-four 1.05MiB OLD/NEW source fragments with only their integer output slot selected.",
+      "invariant": "Only selected values remain retained; all IDs survive and peak allocation remains below 3MiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "returning_rows_release_spills_after_cancellation_and_write_failure",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/returning/rows/tests.rs",
+      "capability": "Bounded RETURNING accumulation",
+      "workload": "Oversized RETURNING rows spill, then delivery is cancelled or spill creation fails.",
+      "invariant": "Cancellation preserves SQLSTATE 57014, the reader terminates, temporary files are removed and unrelated files remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_spilled_returning_preserves_values_and_row_images",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "Spilled mutation output",
+      "workload": "INSERT SELECT, UPDATE, UPDATE FROM, MERGE and DELETE USING return large text under 1KiB work memory across all four providers.",
+      "invariant": "Independent PostgreSQL 18.4 bytes, duplicate labels, OLD/NEW values, empty headers and persistent reopening are preserved.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

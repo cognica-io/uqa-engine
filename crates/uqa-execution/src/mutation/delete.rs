@@ -138,7 +138,9 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
             let cancel = context.query.source.relational.runtime.cancellation_token();
             let mut qualified_targets: Vec<MutationCandidate<Option<crate::OwnedPhysicalRow>>> =
                 Vec::new();
-            let mut returning_rows = Vec::new();
+            let mut returning_rows = crate::mutation::returning::ReturningRows::new(
+                context.query.source.relational.runtime,
+            )?;
             let ctes = statement_scope.insert(read_context.mutation.scopes.command_scope(
                 stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,
@@ -645,7 +647,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                             &stmt.returning,
                             params,
                             &snapshot_ctes,
-                        )?);
+                        )?)?;
                     }
                     prepared_deletes.push(PreparedMutationAction::Delete(prepared));
                 }

@@ -365,7 +365,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                         ctes,
                         supplemental_schema: None,
                     },
-                    Vec::new(),
+                    crate::mutation::returning::ReturningRows::default(),
                     0,
                 );
             }
@@ -640,7 +640,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                             .as_ref()
                             .map(crate::SharedSpill::row_schema),
                     },
-                    Vec::new(),
+                    crate::mutation::returning::ReturningRows::default(),
                     affected,
                 );
             }
@@ -668,7 +668,9 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 scope: ctes,
             };
             let mut affected = 0_u64;
-            let mut returning_rows = Vec::new();
+            let mut returning_rows = crate::mutation::returning::ReturningRows::new(
+                context.query.source.relational.runtime,
+            )?;
             for (index, row) in pending.into_iter().enumerate() {
                 if rule_batch.suppresses(index) {
                     continue;
@@ -701,7 +703,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                         &stmt.returning,
                         params,
                         ctes,
-                    )?);
+                    )?)?;
                 }
             }
             crate::mutation::statement_end::end_command(

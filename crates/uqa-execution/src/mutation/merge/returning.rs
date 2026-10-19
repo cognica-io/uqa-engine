@@ -54,7 +54,7 @@ pub struct ViewMergeReturningResult<'a, S: Clone + 'static> {
     pub source_relation: uqa_sql::ast::InternalRelationId,
     pub params: &'a [SQLParam],
     pub ctes: &'a CteScope<S>,
-    pub rows: Vec<crate::OwnedPhysicalRow>,
+    pub rows: crate::mutation::returning::ReturningRows,
     pub affected: u64,
 }
 

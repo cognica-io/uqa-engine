@@ -304,7 +304,9 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 scope: ctes,
             };
             let mut affected = 0_u64;
-            let mut returning_rows = Vec::new();
+            let mut returning_rows = crate::mutation::returning::ReturningRows::new(
+                context.query.source.relational.runtime,
+            )?;
             for (index, new) in proposed_rows.into_iter().enumerate() {
                 if rule_batch.suppresses(index) {
                     continue;
@@ -337,7 +339,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                         &stmt.returning,
                         params,
                         ctes,
-                    )?);
+                    )?)?;
                 }
             }
             if original_query_survives {

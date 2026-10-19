@@ -208,7 +208,9 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 &mut ctes,
             )?;
             let mut affected = 0_u64;
-            let mut returning_rows = Vec::new();
+            let mut returning_rows = crate::mutation::returning::ReturningRows::new(
+                context.query.source.relational.runtime,
+            )?;
 
             let pair_schema = merge_pair_schema(source_rows.row_schema());
             let work_mem = crate::query::projection::physical_work_mem_bytes(
@@ -610,7 +612,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 &stmt.returning,
                                 params,
                                 &snapshot_ctes,
-                            )?);
+                            )?)?;
                         }
                         affected += u64::from(row_affected);
                         has_mutation = true;
@@ -694,7 +696,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 &stmt.returning,
                                 params,
                                 &snapshot_ctes,
-                            )?);
+                            )?)?;
                         }
                         affected += 1;
                         has_mutation = true;
@@ -874,7 +876,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 &stmt.returning,
                                 params,
                                 &snapshot_ctes,
-                            )?);
+                            )?)?;
                         }
                         affected += 1;
                         has_mutation = true;

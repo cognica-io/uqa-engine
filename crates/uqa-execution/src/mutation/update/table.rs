@@ -308,7 +308,9 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 }
             }
             let mut affected = 0u64;
-            let mut returning_rows = Vec::new();
+            let mut returning_rows = crate::mutation::returning::ReturningRows::new(
+                context.query.source.relational.runtime,
+            )?;
             let cancel = context.query.source.relational.runtime.cancellation_token();
             // A non-volatile predicate can still use the accelerated candidate set. A VOLATILE predicate must stay in the row loop because PostgreSQL exposes each preceding logical rewrite before qualifying the next candidate.
             let predicate_is_volatile = stmt.predicate.as_ref().is_some_and(|predicate| {
@@ -593,7 +595,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     None,
                 )? {
                     if let Some(returning) = prepared.returning {
-                        returning_rows.push(returning);
+                        returning_rows.push(returning)?;
                     }
                     affected += u64::from(prepared.affected);
                     prepared_updates.push((
@@ -719,7 +721,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                         None,
                     )? {
                         if let Some(returning) = prepared.returning {
-                            returning_rows.push(returning);
+                            returning_rows.push(returning)?;
                         }
                         affected += u64::from(prepared.affected);
                         prepared_updates.push((

@@ -404,7 +404,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
             ctes,
             supplemental_schema: None,
         },
-        Vec::new(),
+        crate::mutation::returning::ReturningRows::default(),
         outcome.affected_rows,
     )
 }
@@ -412,7 +412,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
 fn finish_view_dml<S: Clone + 'static>(
     returning: &crate::mutation::returning::ReturningExecutionContext<'_, S>,
     shape: DmlReturningShape<'_, S>,
-    returning_rows: Vec<OwnedPhysicalRow>,
+    returning_rows: crate::mutation::returning::ReturningRows,
     affected: u64,
 ) -> Result<SQLResult, SQLError> {
     if shape.returning.is_empty() {

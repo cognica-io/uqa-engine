@@ -178,7 +178,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                         ctes,
                         supplemental_schema: None,
                     },
-                    Vec::new(),
+                    crate::mutation::returning::ReturningRows::default(),
                     0,
                 );
             }
@@ -331,7 +331,9 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                 });
             }
             let mut affected = 0_u64;
-            let mut returning_rows = Vec::new();
+            let mut returning_rows = crate::mutation::returning::ReturningRows::new(
+                context.query.source.relational.runtime,
+            )?;
             for (index, (old, source_context)) in pending.into_iter().enumerate() {
                 if rule_batch.suppresses(index) {
                     continue;
@@ -364,7 +366,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                         &stmt.returning,
                         params,
                         ctes,
-                    )?);
+                    )?)?;
                 }
             }
             if original_query_survives {

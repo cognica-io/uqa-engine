@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Accumulate mutation RETURNING values in bounded spill batches and detach unselected OLD/NEW payloads, preserving output positions and statement rollback. Public SQL results still materialize their requested rows.
+
 - Deliver COPY SELECT rows through the bounded query spool and keep sink output and flush inside the statement transaction, preserving the selected rows and rolling back failed or cancelled mutating exports.
 
 - Reuse resolved builtin numeric row casts within their prepared expression and input schema, preserving current callbacks, cancellation, memory admission, rounding and overflow diagnostics.

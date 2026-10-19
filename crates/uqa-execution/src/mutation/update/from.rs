@@ -47,7 +47,8 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
     )?;
     let cancel = context.query.source.relational.runtime.cancellation_token();
     let mut affected = 0u64;
-    let mut returning_rows = Vec::new();
+    let mut returning_rows =
+        crate::mutation::returning::ReturningRows::new(context.query.source.relational.runtime)?;
     let target = stmt.table.clone();
     let assigned_columns = stmt
         .assignments
@@ -335,7 +336,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             Some(&source_context),
         )? {
             if let Some(returning) = prepared.returning {
-                returning_rows.push(returning);
+                returning_rows.push(returning)?;
             }
             affected += u64::from(prepared.affected);
             prepared_updates.push((
@@ -460,7 +461,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             Some(&candidate.context),
         )? {
             if let Some(returning) = prepared.returning {
-                returning_rows.push(returning);
+                returning_rows.push(returning)?;
             }
             affected += u64::from(prepared.affected);
             prepared_updates.push((

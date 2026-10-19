@@ -523,14 +523,15 @@ fn build_action_returning<S: Clone + 'static>(
 fn execute_view_merge_pairs<S: Clone + 'static>(
     context: &ViewMergeActionContext<'_, S>,
     pairings: &crate::SharedSpill,
-) -> Result<(u64, Vec<OwnedPhysicalRow>), SQLError> {
+) -> Result<(u64, crate::mutation::returning::ReturningRows), SQLError> {
     let null_target = target_row(
         context.target,
         &context.plan.target_qualifier,
         &vec![Value::Null; context.target.columns.len()],
     )?;
     let mut affected = 0_u64;
-    let mut returning = Vec::new();
+    let mut returning =
+        crate::mutation::returning::ReturningRows::new(context.returning.relational.runtime)?;
     for pair in pairings
         .read_rows()
         .map_err(crate::physical::physical_exec_error)?
@@ -560,7 +561,7 @@ fn execute_view_merge_pairs<S: Clone + 'static>(
         let result = execute_selected_action(context, &pair, action)?;
         affected += u64::from(result.affected);
         if let Some(row) = result.returning {
-            returning.push(row);
+            returning.push(row)?;
         }
     }
     Ok((affected, returning))
