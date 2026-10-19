@@ -54,7 +54,7 @@ VIRTUAL generated columns permit built-in immutable functions but reject user-de
 | 19 | [#128](https://github.com/cognica-io/uqa-engine/issues/128), current schema | Return SQL NULL for an empty effective path and respect temporary namespace allocation. |
 | 20 | [#127](https://github.com/cognica-io/uqa-engine/issues/127), AGE regclass | Resolve label identities consistently across catalogs, casts, names and search paths. |
 | 21 | [#119](https://github.com/cognica-io/uqa-engine/issues/119), catalog expressions | Complete remaining typed expression/Datum codecs and constraint projections after their operand semantics are corrected. |
-| 22 | [#132](https://github.com/cognica-io/uqa-engine/issues/132), debug WASM parser | Resolve cold Node stack failure without warm-up retries or larger runtime stacks. |
+| 22 | [#132](https://github.com/cognica-io/uqa-engine/issues/132), debug WASM parser | Closed after PR #911: the preserved ordinary debug artifact passes all 24 original cold Node transaction schedules and the minimal CREATE/INSERT reproduction on Node 22.12.0 without warm-up or a larger runtime stack. Both actual Linux/macOS regression artifacts for the delivered correction were verified. |
 | 23 | [#125](https://github.com/cognica-io/uqa-engine/issues/125), macOS test startup | Closed at the maintainer's request on 2026-10-08 pending recurrence. The historical pre-harness loader wait remains unexplained. |
 
 The Nori baseline failures were [#141](https://github.com/cognica-io/uqa-engine/issues/141) for native indexing allocation ceilings and [#142](https://github.com/cognica-io/uqa-engine/issues/142) for 48 retained redb bytes after a completed transaction. Main `7ab04890` and PR #137 `b7e57006` reported identical counters. PR #149 fixed these issues and #150 before assignment-target review continued: all five native and four WASM allocation/output gates pass at unchanged limits, together with complete Linux/macOS CI. All three issues are closed; no timing measurements or allocation-limit exceptions were used.
@@ -139,7 +139,7 @@ The following compact ledger is the readable projection of the machine-readable 
 
 <!-- pg18-manifest-status:start -->
 
-Manifest inventory: 152 evidence items — 94 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
+Manifest inventory: 153 evidence items — 95 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
 
 | Milestone | Name | Status | Exit gate |
 | --- | --- | --- | --- |
@@ -305,6 +305,7 @@ Manifest inventory: 152 evidence items — 94 `verified`, 57 `partial`, 0 `expli
 | `query.set-returning-contexts` | `M1` | `partial` |
 | `functions.type-observation-arguments` | `M1` | `verified` |
 | `query.set-operation-ordering` | `M1` | `verified` |
+| `query.constant-group-output-slots` | `M1` | `verified` |
 
 <!-- pg18-manifest-status:end -->
 

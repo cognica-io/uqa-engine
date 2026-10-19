@@ -37,7 +37,6 @@ enum AggregateProjectionPlan {
 
 struct AggregateExpressionPlan {
     expression: crate::scalar::PreparedExpressions<ScalarExpr>,
-    uses_lookup: bool,
     uses_group_row: bool,
 }
 
@@ -106,26 +105,14 @@ impl AggregateOutputPlan {
                     slot_relation,
                     finalizers.len(),
                 )?;
-                if aggregate_cursor != first_aggregate {
+                if aggregate_cursor != first_aggregate
+                    || contained_aggregate
+                    || !expr_references_columns(&projection.expr)
+                {
                     let uses_group_row = references_external_row(&expression, slot_relation);
                     return Ok(AggregateProjectionPlan::Evaluate(AggregateExpressionPlan {
                         expression: crate::scalar::PreparedExpressions::scalar(expression),
-                        uses_lookup: true,
                         uses_group_row,
-                    }));
-                }
-                if contained_aggregate {
-                    return Ok(AggregateProjectionPlan::Evaluate(AggregateExpressionPlan {
-                        expression: crate::scalar::PreparedExpressions::scalar(expression),
-                        uses_lookup: false,
-                        uses_group_row: false,
-                    }));
-                }
-                if !expr_references_columns(&projection.expr) {
-                    return Ok(AggregateProjectionPlan::Evaluate(AggregateExpressionPlan {
-                        expression: crate::scalar::PreparedExpressions::scalar(expression),
-                        uses_lookup: false,
-                        uses_group_row: false,
                     }));
                 }
                 if let Some(index) = statement
@@ -173,7 +160,6 @@ impl AggregateOutputPlan {
                 let uses_group_row = references_external_row(&expression, slot_relation);
                 Ok::<_, SQLError>(AggregateExpressionPlan {
                     expression: crate::scalar::PreparedExpressions::scalar(expression),
-                    uses_lookup: true,
                     uses_group_row,
                 })
             })
@@ -225,7 +211,7 @@ pub(super) fn finish_group(
 
     for projection in &output_plan.projections {
         match projection {
-            AggregateProjectionPlan::Evaluate(plan) if plan.uses_lookup => {
+            AggregateProjectionPlan::Evaluate(plan) => {
                 let row = plan
                     .uses_group_row
                     .then(|| {
@@ -244,15 +230,6 @@ pub(super) fn finish_group(
                 if let Some(row) = row {
                     context = context.with_physical_outer_row(&row.schema, &row.row);
                 }
-                values.push(eval_scalar(
-                    &plan.expression,
-                    &context.with_function_states(plan.expression.calls()),
-                )?);
-            }
-            AggregateProjectionPlan::Evaluate(plan) => {
-                let context = ScalarEvalContext::new(None, params)
-                    .with_function_hook(hook)
-                    .with_subquery_runner(&subquery_arena);
                 values.push(eval_scalar(
                     &plan.expression,
                     &context.with_function_states(plan.expression.calls()),
@@ -436,3 +413,6 @@ pub(super) fn flush_output_rows(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
