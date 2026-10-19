@@ -189,7 +189,8 @@ fn retained_patterns_keep_original_charges_and_use_each_invocations_resources() 
     let mut original = SharedResources::default();
     let charged = original.live.clone();
     let expression =
-        Regex::compile("(a|ab)+", REG_ADVANCED, RegexCollation::C, &mut original).unwrap();
+        Regex::compile_with_resources("(a|ab)+", REG_ADVANCED, RegexCollation::C, &mut original)
+            .unwrap();
     let mut retained = expression.into_retained(std::mem::take);
     let compiled_bytes = charged.load(Ordering::SeqCst);
     assert_eq!(compiled_bytes, retained.reserved_bytes());
@@ -218,15 +219,17 @@ fn retained_patterns_keep_original_charges_and_use_each_invocations_resources() 
     assert_eq!(scratch_live.load(Ordering::SeqCst), 0);
     assert_eq!(charged.load(Ordering::SeqCst), compiled_bytes);
     // No compiled allocation or resource callback refers to the compiling thread.
-    std::thread::spawn(move || {
+    let use_and_drop = move || {
         let mut scratch = SharedResources::default();
         assert!(retained
             .exec(&code_points("ab"), 0, &mut spans, &mut scratch)
             .unwrap());
         drop(retained);
-    })
-    .join()
-    .unwrap();
+    };
+    #[cfg(not(target_family = "wasm"))]
+    std::thread::spawn(use_and_drop).join().unwrap();
+    #[cfg(target_family = "wasm")]
+    use_and_drop();
     assert_eq!(charged.load(Ordering::SeqCst), 0);
 }
 
@@ -235,7 +238,9 @@ fn a_failed_resource_transfer_releases_the_still_borrowed_compiled_context() {
     use std::sync::atomic::Ordering;
     let mut resources = SharedResources::default();
     let live = resources.live.clone();
-    let expression = Regex::compile("a+", REG_ADVANCED, RegexCollation::C, &mut resources).unwrap();
+    let expression =
+        Regex::compile_with_resources("a+", REG_ADVANCED, RegexCollation::C, &mut resources)
+            .unwrap();
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         expression.into_retained::<SharedResources>(|_| panic!("owner admission failed"));
     }))

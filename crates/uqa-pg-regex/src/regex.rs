@@ -49,13 +49,25 @@ impl Stop {
     }
 }
 
-impl<'r, R: RegexResources + ?Sized> Regex<'r, R> {
+impl<'r> Regex<'r> {
     /// Compile `pattern` with `flags` under `collation`, as `pg_regcomp` does for `PostgreSQL`'s SQL functions.
     ///
     /// Like `RE_compile_and_cache`, the wrapper converts the pattern into a buffer of one code point slot per pattern byte plus one and gives the compiled expression its own memory context, both in memory charged to `resources`. Their requests fail as `palloc` and context creation fail in `PostgreSQL`: a pattern of 268,435,455 bytes or more with [`RegexError::InvalidAllocationSize`] before anything is allocated, and a refused reservation with [`RegexError::OutOfMemory`].
     ///
     /// The engine's own failures return [`RegexError::Code`], which `PostgreSQL` reports as `invalid regular expression: <explanation>`, including `REG_ESPACE` when `resources` refuse an engine allocation and `REG_ETOOBIG` beyond [`crate::MAX_STACK_DEPTH`] or a lower limit of `resources`; [`RegexError::Cancelled`] when `resources` request cancellation; and [`RegexError::InvalidAllocationSize`] or [`RegexError::InvalidAllocationProduct`] when the engine requests an invalid size.
     pub fn compile(
+        pattern: &str,
+        flags: CompileFlags,
+        collation: RegexCollation,
+        resources: &'r mut dyn RegexResources,
+    ) -> Result<Self, RegexError> {
+        Self::compile_with_resources(pattern, flags, collation, resources)
+    }
+}
+
+impl<'r, R: RegexResources + ?Sized> Regex<'r, R> {
+    /// Compile while retaining the concrete resource type for an owned transfer. This has the same validation, allocation and cancellation contract as [`Regex::compile`].
+    pub fn compile_with_resources(
         pattern: &str,
         flags: CompileFlags,
         collation: RegexCollation,
@@ -131,10 +143,7 @@ impl<'r, R: RegexResources + ?Sized> Regex<'r, R> {
         )
     }
 
-    /// Transfer the compiled context and its existing reservation to a retained owner.
-    /// The transfer moves the resource charge, without releasing or readmitting it. The
-    /// callback must leave the borrowed hooks able to release any bytes it does not transfer.
-    /// Each later execution receives its own scratch/cancellation hooks.
+    /// Transfer the compiled context and its existing reservation to a retained owner. The transfer moves the resource charge, without releasing or readmitting it. The callback must leave the borrowed hooks able to release any bytes it does not transfer. Each later execution receives its own scratch/cancellation hooks.
     pub fn into_retained<T: RegexResources>(
         mut self,
         transfer: impl FnOnce(&mut R) -> T,
@@ -167,9 +176,7 @@ impl<R: RegexResources + ?Sized> Drop for Regex<'_, R> {
     }
 }
 
-/// A compiled expression with its owned resource reservation. Matching uses only the
-/// invoking call's hooks; dropping the expression releases the original reservation.
-/// A retained expression may move between threads but is never executed concurrently.
+/// A compiled expression with its owned resource reservation. Matching uses only the invoking call's hooks; dropping the expression releases the original reservation. A retained expression may move between threads but is never executed concurrently.
 pub struct RetainedRegex<R: RegexResources> {
     expression: NonNull<RegexT>,
     context: Option<OwnedContext>,
@@ -177,10 +184,7 @@ pub struct RetainedRegex<R: RegexResources> {
     subexpressions: usize,
 }
 
-// SAFETY: all mutable compiled allocations belong to the heap context, whose address
-// is stable. Compilation retains no stack, thread-local operation frame or resource
-// pointer. Shared character-class vectors are immutable process-lifetime allocations.
-// Execution requires exclusive access and creates its frame and scratch on its caller.
+// SAFETY: all mutable compiled allocations belong to the heap context, whose address is stable. Compilation retains no stack, thread-local operation frame or resource pointer. Shared character-class vectors are immutable process-lifetime allocations. Execution requires exclusive access and creates its frame and scratch on its caller.
 unsafe impl<R: RegexResources + Send> Send for RetainedRegex<R> {}
 
 impl<R: RegexResources> RetainedRegex<R> {

@@ -6,9 +6,11 @@
 
 //! One call's use of the `PostgreSQL` engine: compilation and execution with `PostgreSQL`'s diagnostics, and the code-point form of text the engine searches.
 
+use super::cache::{current_regex_cache, Entry, RegexCache};
 use crate::error::{Result, SQLError};
 use std::cell::Cell;
 use std::ops::Range;
+use std::sync::Arc;
 use uqa_core::memory::{MemoryError, Produced, ProductionControl, ProductionString, ProductionVec};
 use uqa_pg_regex::{
     CompileFlags, MatchSpan, Regex, RegexCollation, RegexError, MAX_ALLOC_SIZE, REG_ESPACE,
@@ -37,33 +39,75 @@ impl<'c> RegexCall<'c> {
     }
 
     /// Compile `pattern` as `RE_compile_and_cache` does: the collation is applied first, as `pg_regcomp` calls `pg_set_regex_collation` before parsing, and a failure is `invalid regular expression: <explanation>`.
-    pub(super) fn compile<'r>(
+    pub(super) fn compile<'r, 'a>(
         &self,
         pattern: &str,
         flags: CompileFlags,
         collation: u32,
-        allowance: &'r mut Allowance<'_, 'c>,
-    ) -> Result<Regex<'r>> {
+        allowance: &'r mut Allowance<'a, 'c>,
+    ) -> Result<Invocation<'r, 'a, 'c>> {
         self.check()?;
         // `RE_compile_and_cache` converts the pattern before `pg_regcomp` applies the collation.
         code_point_buffer_bytes(pattern.len())?;
+        let collation_oid = collation;
         let collation = RegexCollation::from_oid(collation)
             .map_err(|error| self.failure(error, "invalid regular expression"))?;
-        Regex::compile(pattern, flags, collation, allowance)
+        if let Some(cache) = current_regex_cache() {
+            if let Some(entry) = cache.take(pattern, flags, collation_oid) {
+                return Ok(Invocation::Cached {
+                    entry: Some(entry),
+                    cache,
+                });
+            }
+            let generation = cache.prepare()?;
+            let mut key = uqa_core::memory::BudgetedString::new(&cache.budget);
+            loop {
+                match key.push_str(pattern) {
+                    Ok(()) => break,
+                    Err(_) if cache.evict() => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            let mut retained = Allowance::cached(self, &cache);
+            let compiled = Regex::compile_with_resources(pattern, flags, collation, &mut retained)
+                .map_err(|error| self.failure(error, "invalid regular expression"))?;
+            #[cfg(test)]
+            super::cache::tests::compiled();
+            let regex = compiled.into_retained(Allowance::retain);
+            return Ok(Invocation::Cached {
+                entry: Some(Entry {
+                    pattern: key,
+                    flags,
+                    collation: collation_oid,
+                    generation,
+                    regex,
+                }),
+                cache,
+            });
+        }
+        Regex::compile_with_resources(pattern, flags, collation, allowance)
+            .map(Invocation::Fresh)
             .map_err(|error| self.failure(error, "invalid regular expression"))
     }
 
     /// Search `input` from code point `start` as `RE_wchar_execute` does, filling one span per slot of `spans`; a failure is `regular expression failed: <explanation>`.
     pub(super) fn execute(
         &self,
-        regex: &mut Regex<'_>,
+        regex: &mut Invocation<'_, '_, '_>,
         input: &[u32],
         start: usize,
         spans: &mut [MatchSpan],
     ) -> Result<bool> {
-        regex
-            .exec(input, start, spans)
-            .map_err(|error| self.failure(error, "regular expression failed"))
+        self.check()?;
+        let result = match regex {
+            Invocation::Fresh(regex) => regex.exec(input, start, spans),
+            Invocation::Cached { entry, .. } => entry
+                .as_mut()
+                .expect("active cached expression")
+                .regex
+                .exec(input, start, spans, &mut self.allowance()),
+        };
+        result.map_err(|error| self.failure(error, "regular expression failed"))
     }
 
     /// `CHECK_FOR_INTERRUPTS` between engine operations: the call's own cancellation scopes and the running statement's, which ordinary evaluation, planning and table functions leave to the statement.
@@ -106,6 +150,38 @@ impl<'c> RegexCall<'c> {
                 ),
             },
             other => diagnostic(other),
+        }
+    }
+}
+
+/// A borrowed ordinary expression or an owned cache entry checked out until this call ends.
+pub(super) enum Invocation<'r, 'a, 'c> {
+    Fresh(Regex<'r, Allowance<'a, 'c>>),
+    Cached {
+        entry: Option<Entry>,
+        cache: Arc<RegexCache>,
+    },
+}
+
+impl Invocation<'_, '_, '_> {
+    pub(super) fn subexpression_count(&self) -> usize {
+        match self {
+            Self::Fresh(regex) => regex.subexpression_count(),
+            Self::Cached { entry, .. } => entry
+                .as_ref()
+                .expect("active cached expression")
+                .regex
+                .subexpression_count(),
+        }
+    }
+}
+
+impl Drop for Invocation<'_, '_, '_> {
+    fn drop(&mut self) {
+        if let Self::Cached { entry, cache } = self {
+            if let Some(entry) = entry.take() {
+                cache.keep(entry);
+            }
         }
     }
 }

@@ -874,6 +874,7 @@ mod unified_plan_tests {
 
 mod cache;
 mod operators;
+mod regex_cache;
 mod retrieval_planning;
 mod scope;
 mod score_ordering;

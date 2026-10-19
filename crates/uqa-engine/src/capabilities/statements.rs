@@ -108,6 +108,9 @@ impl context::PhysicalExplainPlanning for Engine {
     }
 }
 impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
+    fn regex_cache(&self) -> Option<std::sync::Arc<uqa_sql::expr::RegexCache>> {
+        Some(self.session_regex_cache())
+    }
     fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
         Engine::parser_settings(self)
     }

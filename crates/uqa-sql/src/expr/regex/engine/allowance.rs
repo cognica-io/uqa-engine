@@ -14,6 +14,7 @@ use uqa_pg_regex::RegexResources;
 pub(in crate::expr::regex) struct Allowance<'a, 'c> {
     call: &'a RegexCall<'c>,
     lease: Option<MemoryReservation>,
+    cache: Option<&'a super::super::cache::RegexCache>,
 }
 
 impl<'a, 'c> Allowance<'a, 'c> {
@@ -21,7 +22,22 @@ impl<'a, 'c> Allowance<'a, 'c> {
         Self {
             call,
             lease: call.control.empty_reservation(),
+            cache: None,
         }
+    }
+    pub(super) fn cached(
+        call: &'a RegexCall<'c>,
+        cache: &'a super::super::cache::RegexCache,
+    ) -> Self {
+        Self {
+            call,
+            lease: Some(cache.budget.empty_reservation()),
+            cache: Some(cache),
+        }
+    }
+
+    pub(super) fn retain(&mut self) -> super::super::cache::RetainedAllowance {
+        super::super::cache::RetainedAllowance(self.lease.take())
     }
 }
 
@@ -30,11 +46,19 @@ impl RegexResources for Allowance<'_, '_> {
         let Some(lease) = self.lease.as_mut() else {
             return true;
         };
-        match lease.grow(bytes) {
-            Ok(()) => true,
-            Err(error) => {
-                self.call.refuse(error);
-                false
+        loop {
+            match lease.grow(bytes) {
+                Ok(()) => return true,
+                Err(error) => {
+                    if self
+                        .cache
+                        .is_some_and(super::super::cache::RegexCache::evict)
+                    {
+                        continue;
+                    }
+                    self.call.refuse(error);
+                    return false;
+                }
             }
         }
     }
