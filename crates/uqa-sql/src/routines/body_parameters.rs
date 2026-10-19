@@ -78,16 +78,7 @@ pub fn record_sql_standard_body_parameters(
     let FunctionBody::Statements(statements) = &def.body else {
         return Ok(false);
     };
-    let params = routine_parameter_values(context.types, def);
-    let recording = ParameterRecording {
-        context,
-        scope: sql_body_parameter_scope(def, &params)?,
-        params,
-        sites: ParameterSites {
-            function: routine_local_name(&def.name)?,
-            names: sql_body_parameter_names(def),
-        },
-    };
+    let recording = ParameterRecording::new(context, def)?;
     let mut recorded = statements.clone();
     let mut changed = false;
     for statement in &mut recorded {
@@ -161,16 +152,32 @@ impl ParameterSites {
 }
 
 /// What finding the parameter references of a SQL-standard body needs: the body's names are resolved by the same analysis that compiles the body.
-struct ParameterRecording<'a> {
+pub(super) struct ParameterRecording<'a> {
     context: &'a RoutineCompilationContext<'a>,
     scope: RoutineParameterScope,
     params: Vec<SQLParam>,
     sites: ParameterSites,
 }
 
-impl ParameterRecording<'_> {
+impl<'a> ParameterRecording<'a> {
+    pub(super) fn new(
+        context: &'a RoutineCompilationContext<'a>,
+        def: &CreateFunction,
+    ) -> Result<Self, SQLError> {
+        let params = routine_parameter_values(context.types, def);
+        Ok(Self {
+            context,
+            scope: sql_body_parameter_scope(def, &params)?,
+            params,
+            sites: ParameterSites {
+                function: routine_local_name(&def.name)?,
+                names: sql_body_parameter_names(def),
+            },
+        })
+    }
+
     /// Record the parameter references of one statement. A name is a parameter reference exactly when writing the parameter in its place removes one of the references analysis resolves to that parameter by name; a name that resolves to a column leaves them as they were, or makes the statement invalid when the parameter does not type as the column does.
-    fn record(&self, statement: &mut Statement) -> Result<bool, SQLError> {
+    pub(super) fn record(&self, statement: &mut Statement) -> Result<bool, SQLError> {
         let candidates = self.sites.collect(statement)?;
         if candidates.is_empty() {
             return Ok(false);

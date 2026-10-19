@@ -30,6 +30,8 @@ mod scalar_overloads;
 mod security_roles;
 #[path = "sql_routine_identity/trigger_when_dependencies.rs"]
 mod trigger_when_dependencies;
+#[path = "sql_routine_identity/utility_bodies.rs"]
+mod utility_bodies;
 
 fn scalar(engine: &Engine, sql: &str) -> Value {
     engine

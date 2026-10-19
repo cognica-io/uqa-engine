@@ -14261,6 +14261,49 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sql_standard_utilities_use_postgresql_command_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/compilation/tests.rs",
+      "capability": "SQL-standard routine utility diagnostics",
+      "workload": "261 independent PostgreSQL 18.4 command/result/error observations, covering utility families, nested query analysis, CALL, preceding errors, quoted bodies and transaction rollback.",
+      "invariant": "Definition analysis follows statement order, reports the PostgreSQL diagnostic and preserves catalog and row state without executing body commands.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "sql_standard_utility_bodies_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/utility_bodies.rs",
+      "capability": "SQL-standard routine utility diagnostics",
+      "workload": "261 independent PostgreSQL 18.4 command/result/error observations, covering utility families, nested query analysis, CALL, preceding errors, quoted bodies and transaction rollback.",
+      "invariant": "Definition analysis follows statement order, reports the PostgreSQL diagnostic and preserves catalog and row state without executing body commands.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "target": "integration"
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "prepared_input_constants_keep_their_original_stored_syntax_sites",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_routines/analysis/tests.rs",
+      "capability": "Stored routine input identity",
+      "workload": "Bind converted and unchanged literal inputs, serialize their original SQL syntax and rebind the restored statement.",
+      "invariant": "Input conversion retains original syntax correspondence and subsequent binding is idempotent.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -341,37 +341,113 @@ pub fn lower_sql_routine_statement(
     Ok(plan)
 }
 
-/// Foreign server and table utilities are analyzed when it executes and cannot be retained as an analyzed SQL-standard body. Quoted source bodies keep their separate execution-time path.
+/// SQL-standard bodies retain analyzed queries and DML, never utility commands. Use the same command name as ordinary SQL diagnostics.
 pub(super) fn validate_sql_standard_statement(statement: &Statement) -> Result<(), SQLError> {
-    if matches!(statement, Statement::Drop(drop) if drop.kind == crate::ast::DropKind::ForeignServer)
+    match sql_standard_utility(statement) {
+        Some(command) => Err(sql_standard_utility_error(&command)),
+        None => Ok(()),
+    }
+}
+
+fn sql_standard_utility(statement: &Statement) -> Option<Box<crate::plan::CommandPlan>> {
+    match statement {
+        Statement::Select(_)
+        | Statement::Values { .. }
+        | Statement::Insert(_)
+        | Statement::Update(_)
+        | Statement::Delete(_)
+        | Statement::Merge(_) => None,
+        _ => match UnifiedPlan::lower(statement.clone()) {
+            UnifiedPlan::Command(command) => Some(command),
+            UnifiedPlan::Query(_) => None,
+        },
+    }
+}
+
+fn sql_standard_utility_error(command: &crate::plan::CommandPlan) -> SQLError {
+    SQLError::Unsupported(format!(
+        "{} is not yet supported in unquoted SQL function body",
+        crate::result::completion::command_tag_name(command)
+    ))
+}
+
+/// PostgreSQL transforms the query inputs of CTAS, EXPLAIN and cursors, and resolves CALL, before rejecting the resulting utility. Other utility targets remain unexamined.
+pub(super) fn validate_sql_standard_statement_inputs(
+    context: &RoutineCompilationContext<'_>,
+    overloads: &super::resolution::RoutineOverloadContext<'_>,
+    statement: &Statement,
+    params: &[crate::SQLParam],
+    parameters: &crate::binding::RoutineParameterScope,
+) -> Result<(), SQLError> {
+    use crate::plan::CommandPlan;
+    let Some(command) = sql_standard_utility(statement) else {
+        return Ok(());
+    };
+    let error = sql_standard_utility_error(&command);
+    let plan = match *command {
+        CommandPlan::Explain { body, .. } => *body,
+        CommandPlan::CreateTableAs { query, .. }
+        | CommandPlan::CreateMaterializedView { query, .. }
+        | CommandPlan::DeclareCursor { query, .. } => UnifiedPlan::Query(query),
+        command @ CommandPlan::Call { .. } => UnifiedPlan::Command(Box::new(command)),
+        _ => return Err(error),
+    };
+    analyze_sql_standard_utility_input(context, overloads, plan, params, parameters)?;
+    Err(error)
+}
+
+fn analyze_sql_standard_utility_input(
+    context: &RoutineCompilationContext<'_>,
+    overloads: &super::resolution::RoutineOverloadContext<'_>,
+    mut plan: UnifiedPlan,
+    params: &[crate::SQLParam],
+    parameters: &crate::binding::RoutineParameterScope,
+) -> Result<(), SQLError> {
+    use crate::plan::CommandPlan;
+    if let UnifiedPlan::Command(command) = plan {
+        match *command {
+            CommandPlan::Explain { body, .. } => {
+                return analyze_sql_standard_utility_input(
+                    context, overloads, *body, params, parameters,
+                )
+            }
+            CommandPlan::CreateTableAs { query, .. }
+            | CommandPlan::CreateMaterializedView { query, .. }
+            | CommandPlan::DeclareCursor { query, .. } => plan = UnifiedPlan::Query(query),
+            command => plan = UnifiedPlan::Command(Box::new(command)),
+        }
+    }
+    let binding = context.catalog.binding_snapshot()?;
+    if matches!(&plan, UnifiedPlan::Command(command) if matches!(command.as_ref(), CommandPlan::Call { .. }))
     {
-        return Err(SQLError::Unsupported(
-            "DROP SERVER is not yet supported in unquoted SQL function body".into(),
-        ));
-    }
-    if matches!(statement, Statement::Drop(drop) if drop.kind == crate::ast::DropKind::ForeignWrapper)
-    {
-        return Err(SQLError::Unsupported(
-            "DROP FOREIGN DATA WRAPPER is not yet supported in unquoted SQL function body".into(),
-        ));
-    }
-    if matches!(statement, Statement::CreateForeignWrapper(_)) {
-        return Err(SQLError::Unsupported(
-            "CREATE FOREIGN DATA WRAPPER is not yet supported in unquoted SQL function body".into(),
-        ));
-    }
-    if matches!(statement, Statement::CreateForeignServer(_)) {
-        return Err(SQLError::Unsupported(
-            "CREATE SERVER is not yet supported in unquoted SQL function body".into(),
-        ));
-    }
-    if matches!(
-        statement,
-        Statement::CreateForeignTable(_) | Statement::CreateForeignTableDefinition(_)
-    ) {
-        return Err(SQLError::Unsupported(
-            "CREATE FOREIGN TABLE is not yet supported in unquoted SQL function body".into(),
-        ));
+        crate::binding::bind_routine_parameter_references(
+            context.routines,
+            &mut plan,
+            params,
+            &binding.context(),
+            parameters,
+        )?;
+        super::body_validation::analyze_body_statement(
+            &super::body_validation::SQLBodyValidationContext {
+                compilation: *context,
+                overloads: super::resolution::RoutineOverloadContext {
+                    catalog: overloads.catalog,
+                },
+            },
+            &plan,
+            params,
+            &binding,
+            false,
+        )?;
+    } else {
+        crate::binding::analyze_routine_body_inputs(
+            context.routines,
+            &plan,
+            params,
+            &binding.context(),
+            context.catalog,
+            Some(parameters),
+        )?;
     }
     Ok(())
 }

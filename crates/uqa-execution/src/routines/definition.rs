@@ -12,7 +12,6 @@ use uqa_sql::{
     ast::{CreateFunction, FunctionBody},
     binding::stored_columns::StoredSourceCatalog,
     routines::{
-        body_parameters::record_sql_standard_body_parameters,
         compilation::{compile_function_body, defer_function_body},
         dependencies::{self, RoutineCompilationMode},
         regclass::{self, RoutineRegclassCatalog},
@@ -25,6 +24,7 @@ use uqa_sql::{
 pub struct RoutineDefinitionContext<'a> {
     pub compilation: StoredRoutineCompilationContext<'a>,
     pub sources: &'a dyn StoredSourceCatalog,
+    pub overloads: &'a dyn uqa_sql::routines::resolution::RoutineOverloadCatalog,
     pub regclasses: &'a dyn RoutineRegclassCatalog,
 }
 
@@ -80,14 +80,6 @@ pub fn compile_catalog_bound_routine(
         }
     }
     let mut changed = bind_routine_definition_dependencies(context, def, mode)?;
-    if matches!(mode, RoutineCompilationMode::Definition) {
-        changed |= record_sql_standard_body_parameters(&context.compilation.analysis, def)?;
-    }
-    // Keep definition-time input values in syntax before compiling the executable body, so domain-array input checks run once rather than in two discarded copies.
-    let body_changed = with_creation_search_path(context, def, |def| {
-        dependencies::bind_sql_standard_body_routines(&context.compilation.analysis, def, mode)
-    })?;
-    changed |= body_changed;
     let mut compiled = compile_routine_body(&context.compilation, def, bodies)?;
     let regclass_changed = bind_routine_regclass_constants(context, def)?;
     changed |= regclass_changed;
@@ -150,6 +142,9 @@ fn bind_routine_definition_dependencies(
         dependencies::bind_routine_definition_dependencies(
             &context.compilation.analysis,
             context.sources,
+            &uqa_sql::routines::resolution::RoutineOverloadContext {
+                catalog: context.overloads,
+            },
             def,
             mode,
         )

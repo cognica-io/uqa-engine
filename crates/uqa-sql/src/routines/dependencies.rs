@@ -13,7 +13,7 @@ use crate::{
         bind_expression_plan_routines_for_storage,
         stored_columns::StoredSourceCatalog,
         stored_relations::bind_stored_statement_relations,
-        stored_routines::{bind_catalog_statement_routines, CatalogRoutineContext},
+        stored_routines::{bind_prepared_catalog_statement_routines, CatalogRoutineContext},
         syntax_sites::expression_syntax_sites,
     },
     catalog::{resolution::RelationLookupMode, stored_ast},
@@ -30,6 +30,7 @@ pub enum RoutineCompilationMode {
 pub fn bind_routine_definition_dependencies(
     context: &RoutineCompilationContext<'_>,
     sources: &dyn StoredSourceCatalog,
+    overloads: &super::resolution::RoutineOverloadContext<'_>,
     def: &mut CreateFunction,
     mode: RoutineCompilationMode,
 ) -> Result<bool, SQLError> {
@@ -53,7 +54,7 @@ pub fn bind_routine_definition_dependencies(
                     .map_err(SQLError::Internal)?;
         }
     }
-    changed |= bind_sql_standard_body_relations(context, sources, def, mode)?;
+    changed |= bind_sql_standard_body(context, sources, overloads, def, mode)?;
     for parameter in &mut def.params {
         let Some(default) = &mut parameter.default else {
             continue;
@@ -101,18 +102,42 @@ pub fn bind_routine_definition_dependencies(
     Ok(changed)
 }
 
-fn bind_sql_standard_body_relations(
+/// Bind a copy of every statement of a SQL-standard body and carry the bound routine identities, user-defined type identities and enum constants back into the stored statements, then convert the result literals the final statement assigns to the declared result. A name resolves to a parameter only when no column of its statement takes it, as `sql_fn_post_column_ref` resolves it; the final statement's result is checked when the body is validated.
+fn bind_sql_standard_body(
     context: &RoutineCompilationContext<'_>,
     sources: &dyn StoredSourceCatalog,
+    overloads: &super::resolution::RoutineOverloadContext<'_>,
     def: &mut CreateFunction,
     mode: RoutineCompilationMode,
 ) -> Result<bool, SQLError> {
+    if !matches!(def.body, FunctionBody::Statements(_)) {
+        return Ok(false);
+    }
+    // Declaration errors precede body input functions, which can execute domain checks.
+    super::compilation::validate_routine_signature(context, def)?;
+    let positional = super::body_validation::routine_parameter_values(context.types, def);
+    let parameters = super::body_parameters::sql_body_parameter_scope(def, &positional)?;
+    let result_types = def_result_types(context, &def.params, &def.returns)?;
+    let recording = matches!(mode, RoutineCompilationMode::Definition)
+        .then(|| super::body_parameters::ParameterRecording::new(context, def))
+        .transpose()?;
     let FunctionBody::Statements(statements) = &mut def.body else {
         return Ok(false);
     };
+    let lowering = super::compilation::SQLRoutineLowering {
+        bind_catalog_dependencies: true,
+        persisted_definition: matches!(mode, RoutineCompilationMode::Persisted),
+        preserve_target_expressions: true,
+    };
     let mut changed = false;
-    for statement in statements {
-        super::compilation::validate_sql_standard_statement(statement)?;
+    for statement in statements.iter_mut() {
+        super::compilation::validate_sql_standard_statement_inputs(
+            context,
+            overloads,
+            statement,
+            &positional,
+            &parameters,
+        )?;
         changed |= bind_stored_statement_relations(
             context.relations,
             statement,
@@ -126,34 +151,9 @@ fn bind_sql_standard_body_relations(
         changed |=
             super::merge_columns::bind_stored_merge_target_columns(context.merge, statement)?;
         changed |= sources.stored_source_columns().bind_statement(statement)?;
-    }
-    Ok(changed)
-}
-
-/// Bind a copy of every statement of a SQL-standard body and carry the bound routine identities, user-defined type identities and enum constants back into the stored statements, then convert the result literals the final statement assigns to the declared result. A name resolves to a parameter only when no column of its statement takes it, as `sql_fn_post_column_ref` resolves it; the final statement's result is checked when the body is validated.
-pub fn bind_sql_standard_body_routines(
-    context: &RoutineCompilationContext<'_>,
-    def: &mut CreateFunction,
-    mode: RoutineCompilationMode,
-) -> Result<bool, SQLError> {
-    if !matches!(def.body, FunctionBody::Statements(_)) {
-        return Ok(false);
-    }
-    // Declaration errors precede body input functions, which can execute domain checks.
-    super::compilation::validate_routine_signature(context, def)?;
-    let positional = super::body_validation::routine_parameter_values(context.types, def);
-    let parameters = super::body_parameters::sql_body_parameter_scope(def, &positional)?;
-    let result_types = def_result_types(context, &def.params, &def.returns)?;
-    let FunctionBody::Statements(statements) = &mut def.body else {
-        return Ok(false);
-    };
-    let lowering = super::compilation::SQLRoutineLowering {
-        bind_catalog_dependencies: true,
-        persisted_definition: matches!(mode, RoutineCompilationMode::Persisted),
-        preserve_target_expressions: true,
-    };
-    let mut changed = false;
-    for statement in statements.iter_mut() {
+        if let Some(recording) = &recording {
+            changed |= recording.record(statement)?;
+        }
         let mut lowered =
             super::compilation::lower_sql_routine_statement(context, statement.clone(), lowering)?;
         let binding = context.catalog.binding_snapshot()?;
@@ -164,11 +164,22 @@ pub fn bind_sql_standard_body_routines(
             &binding.context(),
             &parameters,
         )?;
-        let routines = bind_catalog_statement_routines(
+        let syntax = lowered.clone();
+        // Complete this statement's input and target analysis before a later utility can reject the body. Keep converted constants in the same plan whose sites are stored below.
+        crate::binding::prepare_routine_body_inputs(
+            context.routines,
+            &mut lowered,
+            &positional,
+            &binding.context(),
+            context.catalog,
+            None,
+        )?;
+        let routines = bind_prepared_catalog_statement_routines(
             &CatalogRoutineContext {
                 routines: context.routines,
                 binding: &binding.context(),
             },
+            &syntax,
             &lowered,
             &positional,
         )?;
