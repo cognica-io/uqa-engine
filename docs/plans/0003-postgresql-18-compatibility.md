@@ -139,7 +139,7 @@ The following compact ledger is the readable projection of the machine-readable 
 
 <!-- pg18-manifest-status:start -->
 
-Manifest inventory: 155 evidence items — 97 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
+Manifest inventory: 156 evidence items — 98 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
 
 | Milestone | Name | Status | Exit gate |
 | --- | --- | --- | --- |
@@ -308,6 +308,7 @@ Manifest inventory: 155 evidence items — 97 `verified`, 57 `partial`, 0 `expli
 | `query.constant-group-output-slots` | `M1` | `verified` |
 | `function.factorial-bigint-numeric` | `M1` | `verified` |
 | `types.date-timestamp-comparison` | `M1` | `verified` |
+| `expressions.text-prefix-operator` | `M1` | `verified` |
 
 <!-- pg18-manifest-status:end -->
 

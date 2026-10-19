@@ -19,6 +19,7 @@ fn collation_dependent_calls_stored_without_a_selection_are_found() {
         r#"{"name":"pg_catalog.lower","argument_types":["text"],"builtin":true}"#,
         r#"{"name":"pg_catalog.upper","argument_types":["text"],"builtin":true}"#,
         r#"{"name":"pg_catalog.casefold","argument_types":["text"],"builtin":true}"#,
+        r#"{"name":"pg_catalog.starts_with","argument_types":["text","text"],"builtin":true}"#,
         r#"{"name":"pg_catalog.regexp_like","argument_types":["text","text"],"builtin":true}"#,
         r#"{"name":"ILIKE","argument_types":[],"builtin":true,"dispatch":{"Pattern":{"operator":"ILike","oid":1627}}}"#,
         r#"{"name":"~","argument_types":[],"builtin":true,"dispatch":{"Pattern":{"operator":"Regex","oid":641}}}"#,
@@ -46,6 +47,7 @@ fn collation_dependent_calls_stored_without_a_selection_are_found() {
         "pg_catalog.regexp_matches",
         "initcap",
         "casefold",
+        "starts_with",
     ] {
         assert!(call_lacks_input_collation(name, None), "{name}");
     }

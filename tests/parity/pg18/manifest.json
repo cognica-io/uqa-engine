@@ -166,7 +166,8 @@
       "query.set-operation-ordering",
       "query.constant-group-output-slots",
       "function.factorial-bigint-numeric",
-      "types.date-timestamp-comparison"
+      "types.date-timestamp-comparison",
+      "expressions.text-prefix-operator"
     ],
     "M2": [
       "protocol.frontend-backend-3.2"
@@ -1509,6 +1510,14 @@
       "postgresql_reference": "PostgreSQL 18.4: 60 operand pairs in crates/uqa-sql/src/expr/binary/comparison/temporal/postgresql.json; 181 public observations in date_timestamp_comparison_oracle.expected.json and 39 search-filter observations in temporal_retrieval_oracle.expected.json; pg_operator merge/hash capabilities for all nine datetime equality pairs.",
       "uqa_test": "cargo test -p uqa-sql --lib expr::binary::comparison::temporal; cargo test -p uqa-execution --lib query::sources::join_keys; cargo test -p uqa-execution --lib query::subqueries::tests; cargo test -p uqa-engine --test integration date_timestamp_comparison",
       "supported_version": "Unreleased: DATE against TIMESTAMP/TIMESTAMPTZ through all six operators in both directions, live session zones and DST, infinities and finite dates beyond timestamp range. Selected join keys, cached/correlated IN, NOT IN, ANY/ALL, scan/index predicates, DISTINCT, CASE/NULLIF, domain casts, routine results, enum controls and prepared values and session-dependent cast predicates match 181 independent observations on four providers, with 118 observations repeated after each persistent reopen. A separate 39-observation search fixture retains SQL comparison and range predicates beside full-text retrieval on all four providers and after durable reopen. Scalar record membership preserves PostgreSQL field-type errors and operand order. Core carrier equality/order/hash is unchanged.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "expressions.text-prefix-operator",
+      "postgresql_reference": "PostgreSQL 18.4: 51 observations in crates/uqa-engine/tests/pg18_semantics/prefix_operator.json and pg_operator identity in crates/uqa-sql/src/type_resolution/pattern/tests/overloads.json.",
+      "uqa_test": "cargo test -p uqa-sql --lib type_resolution::pattern; cargo test -p uqa-sql --lib expr::scalar_core; cargo test -p uqa-engine --test integration prefix_operator_and_stored_definitions_match_postgresql",
+      "supported_version": "Unreleased: binary text ^@ text, implicit character input conversions, strict NULL behavior, input collation diagnostics, prepared parameters and stored CHECK/index/view definitions match 51 independent observations on four providers; 16 observations are repeated after durable reopening. Quantified ^@ ANY/ALL remains tracked by #1032.",
       "status": "verified",
       "open_issue": null
     }

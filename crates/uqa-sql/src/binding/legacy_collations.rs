@@ -22,7 +22,8 @@ pub fn call_lacks_input_collation(name: &str, binding: Option<&FunctionBinding>)
         // `lower` and `upper` of a range stay unbound by design, so only a name without such an overload identifies an unbound call stored by an earlier release.
         None => matches!(
             local_name(name),
-            "initcap"
+            "starts_with"
+                | "initcap"
                 | "casefold"
                 | "ilike"
                 | "similar_to"
@@ -75,7 +76,8 @@ fn reads_input_collation(binding: &FunctionBinding) -> bool {
             binding.builtin
                 && matches!(
                     local_name(&binding.name),
-                    "lower"
+                    "starts_with"
+                        | "lower"
                         | "upper"
                         | "initcap"
                         | "casefold"

@@ -12,7 +12,10 @@ mod elements;
 mod mapping;
 mod stream;
 
-use crate::SQLError;
+use crate::{
+    catalog::collations::{builtin_collation_order, BuiltinCollationOrder},
+    SQLError,
+};
 use elements::{
     CollationElement, CE_BUFFER_SIZE, NO_CE_PRIMARY, NO_CE_SECONDARY, NO_CE_TERTIARY, TERTIARY_MASK,
 };
@@ -24,6 +27,22 @@ use uqa_core::{
     compare_bytes_with_control,
     memory::{ProductionControl, ProductionSmallVec},
 };
+
+/// Select the deterministic string-comparison provider. Callers preserve strict NULL handling before reaching this selection, as `PostgreSQL`'s `check_collation_set` does.
+pub(in crate::expr) fn string_comparison_order(
+    collation: u32,
+) -> Result<BuiltinCollationOrder, SQLError> {
+    if collation == 0 {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42P22".into(),
+            message: "could not determine which collation to use for string comparison".into(),
+            detail: None,
+            hint: Some("Use the COLLATE clause to set the collation explicitly.".into()),
+        });
+    }
+    builtin_collation_order(collation)
+        .ok_or_else(|| SQLError::Internal(format!("cache lookup failed for collation {collation}")))
+}
 
 /// Compare the deterministic `PostgreSQL` `unicode` built-in (root ICU, tertiary strength, normalization checking off). Byte-distinct strings retain distinct equality classes even when their Unicode weights match.
 pub fn compare_unicode_with_control(

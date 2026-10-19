@@ -255,7 +255,7 @@ impl OperatorLowering {
             "||" => Self::Dispatched(FunctionDispatch::Concat { oid: None }),
             "%" => Self::Dispatched(FunctionDispatch::NumericOperator(NumericOperator::Modulo)),
             "^" => Self::Dispatched(FunctionDispatch::NumericOperator(NumericOperator::Power)),
-            "~" | "~*" | "!~" | "!~*" | "~~" | "!~~" | "~~*" | "!~~*" => {
+            "~" | "~*" | "!~" | "!~*" | "~~" | "!~~" | "~~*" | "!~~*" | "^@" => {
                 Self::Dispatched(FunctionDispatch::Pattern {
                     operator: PatternOperator::from_symbol(name).expect("pattern symbol"),
                     oid: None,

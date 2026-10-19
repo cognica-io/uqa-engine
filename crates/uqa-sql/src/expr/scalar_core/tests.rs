@@ -47,6 +47,63 @@ fn like_and_ilike_propagate_null_arguments() {
     }
 }
 
+#[test]
+fn prefix_comparison_borrows_inputs_and_preserves_both_cancellation_scopes() {
+    let memory = MemoryBudget::new(0);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    let input = "한글".repeat(8192);
+    let arguments = [text(&input), text(&input)];
+    for collation in [100, 811, 950, 951, 962, 963, 6411] {
+        for (source, prefix, expected) in [
+            ("abc", "a", true),
+            ("abc", "b", false),
+            ("abc", "", true),
+            ("", "a", false),
+            ("", "", true),
+            ("한글문자", "한글", true),
+            ("éabc", "e", false),
+            ("abc", "a%", false),
+            ("abc", "A", false),
+        ] {
+            assert_eq!(
+                *eval_collated_functions_with_control(
+                    "starts_with",
+                    &[text(source), text(prefix)],
+                    collation,
+                    &control,
+                )
+                .unwrap()
+                .unwrap(),
+                Value::Bool(expected)
+            );
+        }
+        assert_eq!(
+            *eval_collated_functions_with_control("starts_with", &arguments, collation, &control)
+                .unwrap()
+                .unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(memory.used(), 0);
+    }
+    for cancel_original in [false, true] {
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        let control = ProductionControl::new(&memory, &original, &invoking);
+        let error = eval_collated_functions_with_control("starts_with", &arguments, 100, &control)
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("57014"));
+        assert_eq!(memory.used(), 0);
+    }
+}
+
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken, DecimalValue,
@@ -306,6 +363,17 @@ fn an_indeterminate_collation_is_reported_only_for_values_that_need_it() {
         ("like", vec![text("a"), text("a")], "LIKE"),
         ("ilike", vec![text("a"), text("a")], "ILIKE"),
         ("ilike", vec![text("a"), text("a"), text("#")], "ILIKE"),
+        (
+            "starts_with",
+            vec![text("abc"), text("a")],
+            "string comparison",
+        ),
+        ("starts_with", vec![text(""), text("")], "string comparison"),
+        (
+            "starts_with",
+            vec![text("a"), text("longer")],
+            "string comparison",
+        ),
     ] {
         let error = eval_collated_functions_with_control(name, &arguments, 0, &control)
             .unwrap()

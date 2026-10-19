@@ -19,7 +19,7 @@ use uqa_core::{
     Value,
 };
 
-/// Case mapping and LIKE/ILIKE under the call's input collation, `PostgreSQL`'s `inputcollid`.
+/// Text operations under the call's input collation, `PostgreSQL`'s `inputcollid`.
 pub(super) fn evaluate_collated(
     name: &str,
     args: &[Value],
@@ -29,6 +29,7 @@ pub(super) fn evaluate_collated(
     match name {
         "upper" | "lower" | "casefold" | "initcap" => case_mapping(name, args, collation, control),
         "like" | "ilike" => like(args, name == "ilike", collation, control),
+        "starts_with" => starts_with(args, collation, control),
         _ => unreachable!("collated text family membership was checked"),
     }
 }
@@ -51,7 +52,12 @@ pub(super) fn evaluate(
         "replace" => replace(args, control),
         "substring" | "substr" => substring(args, control),
         "left" | "right" => left_or_right(args, name == "right", control),
-        "starts_with" | "position" | "strpos" => search(name, args, control),
+        "starts_with" => starts_with(
+            args,
+            crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
+            control,
+        ),
+        "position" | "strpos" => search(args, control),
         "ascii" => {
             let source = value_to_string_with_control(&args[0], control)?;
             plain(
@@ -432,16 +438,43 @@ fn slice(
     string(control.copy_text(&source[start..end])?, control)
 }
 
-fn search(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn starts_with(
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let [source, prefix] = args else {
+        return Err(SQLError::TypeMismatch("starts_with takes 2 args".into()));
+    };
+    if matches!(source, Value::Null) || matches!(prefix, Value::Null) {
+        return plain(Value::Null, control);
+    }
+    // Every admitted built-in collation is deterministic. Its identity must still be valid before even an empty or longer prefix returns.
+    crate::expr::collation::string_comparison_order(collation)?;
+    let compare = |source: &[u8], prefix: &[u8]| -> Result<Produced<Value>> {
+        let matches = match source.get(..prefix.len()) {
+            Some(head) => uqa_core::compare_bytes_with_control(head, prefix, control)?.is_eq(),
+            None => false,
+        };
+        plain(Value::Bool(matches), control)
+    };
+    if let (Value::Str(source), Value::Str(prefix)) = (source, prefix) {
+        return compare(source.as_bytes(), prefix.as_bytes());
+    }
+    if let (Some(source), Some(prefix)) = (
+        binary_payload(source, control)?,
+        binary_payload(prefix, control)?,
+    ) {
+        return compare(source.bytes(), prefix.bytes());
+    }
+    let source = value_to_string_with_control(source, control)?;
+    let prefix = value_to_string_with_control(prefix, control)?;
+    compare(source.as_bytes(), prefix.as_bytes())
+}
+
+fn search(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
     if args.len() != 2 {
-        return Err(SQLError::TypeMismatch(
-            if name == "starts_with" {
-                "starts_with takes 2 args"
-            } else {
-                "position takes 2 args"
-            }
-            .into(),
-        ));
+        return Err(SQLError::TypeMismatch("position takes 2 args".into()));
     }
     if args.iter().any(|value| matches!(value, Value::Null)) {
         return plain(Value::Null, control);
@@ -452,9 +485,6 @@ fn search(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result
     ) {
         let source = source.bytes();
         let needle = needle.bytes();
-        if name == "starts_with" {
-            return plain(Value::Bool(source.starts_with(needle)), control);
-        }
         let mut position = 0;
         if needle.is_empty() {
             position = 1;
@@ -472,9 +502,6 @@ fn search(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result
     let source = value_to_string_with_control(&args[0], control)?;
     let needle = value_to_string_with_control(&args[1], control)?;
     control.check()?;
-    if name == "starts_with" {
-        return plain(Value::Bool(source.starts_with(needle.as_str())), control);
-    }
     let position = if needle.is_empty() {
         1
     } else if let Some(index) = source.find(needle.as_str()) {

@@ -18,6 +18,7 @@ pub enum PatternOperator {
     NotRegex,
     RegexInsensitive,
     NotRegexInsensitive,
+    StartsWith,
 }
 
 impl PatternOperator {
@@ -32,6 +33,7 @@ impl PatternOperator {
             "!~" => Self::NotRegex,
             "~*" => Self::RegexInsensitive,
             "!~*" => Self::NotRegexInsensitive,
+            "^@" => Self::StartsWith,
             _ => return None,
         })
     }
@@ -48,6 +50,7 @@ impl PatternOperator {
             Self::NotRegex => "!~",
             Self::RegexInsensitive => "~*",
             Self::NotRegexInsensitive => "!~*",
+            Self::StartsWith => "^@",
         }
     }
 
