@@ -1956,18 +1956,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
-name = "libsqlite3-sys"
-version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1"
-dependencies = [
- "cc",
- "openssl-sys",
- "pkg-config",
- "vcpkg",
-]
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2900,21 +2888,6 @@ checksum = "50a0e551c1e27e1731aba276dbeaeac73f53c7cd34d1bda485d02bd1e0f36844"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "rusqlite"
-version = "0.39.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0d2b0146dd9661bf67bb107c0bb2a55064d556eeb3fc314151b957f313bcd4e"
-dependencies = [
- "bitflags",
- "fallible-iterator",
- "fallible-streaming-iterator",
- "hashlink 0.11.1",
- "libsqlite3-sys",
- "smallvec",
- "sqlite-wasm-rs",
 ]
 
 [[package]]
@@ -3875,7 +3848,6 @@ dependencies = [
  "proptest",
  "regex",
  "rstest",
- "rusqlite",
  "serde",
  "serde_json",
  "sha2",
@@ -3893,6 +3865,7 @@ dependencies = [
  "uqa-ml",
  "uqa-operators",
  "uqa-planner",
+ "uqa-rusqlite",
  "uqa-scoring",
  "uqa-sql",
  "uqa-storage",
@@ -3913,7 +3886,6 @@ dependencies = [
  "parking_lot",
  "proptest",
  "rayon",
- "rusqlite",
  "serde",
  "serde_json",
  "sha2",
@@ -3928,6 +3900,7 @@ dependencies = [
  "uqa-joins",
  "uqa-ml",
  "uqa-operators",
+ "uqa-rusqlite",
  "uqa-scoring",
  "uqa-sql",
  "uqa-storage",
@@ -4010,6 +3983,18 @@ dependencies = [
  "ureq",
  "vcpkg",
  "zip",
+]
+
+[[package]]
+name = "uqa-libsqlite3-sys"
+version = "0.37.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f13f9541e3b56e61065f868e4e011a54cc7fa9c1e4927374da2db4b056e427d"
+dependencies = [
+ "cc",
+ "openssl-sys",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -4148,6 +4133,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "uqa-rusqlite"
+version = "0.39.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "803d9d388f1a91a80038d5e540404cb0e501075033d6569f7cb5f3d7cdacf844"
+dependencies = [
+ "bitflags",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink 0.11.1",
+ "smallvec",
+ "sqlite-wasm-rs",
+ "uqa-libsqlite3-sys",
+]
+
+[[package]]
 name = "uqa-scoring"
 version = "0.6.0"
 dependencies = [
@@ -4249,7 +4249,6 @@ dependencies = [
  "lz4_flex",
  "parking_lot",
  "rstest",
- "rusqlite",
  "serde",
  "serde_json",
  "sha2",
@@ -4258,6 +4257,7 @@ dependencies = [
  "uqa-analysis",
  "uqa-core",
  "uqa-graph",
+ "uqa-rusqlite",
  "uqa-scoring",
  "uqa-storage",
  "windows-sys 0.61.2",
