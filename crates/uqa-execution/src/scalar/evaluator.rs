@@ -55,7 +55,7 @@ pub(super) fn eval_scalar_inner(
         ScalarExpr::QualifiedStar(qualifier) => {
             ordinary_output(evaluate_qualified_whole_row(qualifier, context), control)
         }
-        ScalarExpr::Column(name) => column(name, context, control),
+        ScalarExpr::Column(name) => column(expression, name, context, control),
         ScalarExpr::Position(position) => context
             .row_lookup()
             .and_then(|row| row.positional_column(*position))
@@ -74,9 +74,9 @@ pub(super) fn eval_scalar_inner(
                 ))
             })
             .and_then(|value| control.copy_value(value).map_err(Into::into)),
-        ScalarExpr::QualifiedColumn { qualifier, column } => context
-            .sql_context()
-            .qualified_column_value_with_control(qualifier, column, control),
+        ScalarExpr::QualifiedColumn { qualifier, column } => {
+            qualified_column(expression, qualifier, column, context, control)
+        }
         ScalarExpr::TypedLiteral { value, ty, .. } => {
             uqa_sql::expr::composites::literal::evaluate_with_control(
                 value,
@@ -537,7 +537,10 @@ fn evaluate_items(
 
 mod function;
 mod variants;
-use variants::{array, binary, cast, column, exists, in_subquery, is_null, not, row, unary_minus};
+use variants::{
+    array, binary, cast, column, exists, in_subquery, is_null, not, qualified_column, row,
+    unary_minus,
+};
 
 #[cfg(test)]
 mod collation_tests;

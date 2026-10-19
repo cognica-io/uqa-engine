@@ -127,6 +127,23 @@ impl RowLookup for ProjectedRow<'_, '_> {
         Self::positional_column(self, index)
     }
 
+    fn resolution_schema(&self) -> Option<&RowSchema> {
+        Some(self.schema)
+    }
+
+    fn column_key(&self, name: &str) -> Option<usize> {
+        self.schema.unqualified_position(name)
+    }
+
+    fn qualified_column_key(&self, qualifier: &str, column: &str) -> Option<usize> {
+        self.schema.qualified_position(qualifier, column)
+    }
+
+    #[inline]
+    fn keyed_value(&self, key: usize) -> Option<&Value> {
+        Self::positional_column(self, key)
+    }
+
     fn score_source(&self, qualifier: Option<&str>) -> Option<&Value> {
         let physical = self.schema.score_source_slot(qualifier)?;
         let logical = (0..self.schema.len())

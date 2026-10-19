@@ -320,6 +320,26 @@ pub trait RowLookup {
         None
     }
 
+    /// The schema whose name resolution `column` and `qualified_column` apply. A lookup returning it resolves names to keys with `column_key` and `qualified_column_key` and reads them with `keyed_value`, so `column(name)` equals `column_key(name).and_then(|key| keyed_value(key))`; the default disables key retention.
+    fn resolution_schema(&self) -> Option<&crate::RowSchema> {
+        None
+    }
+
+    /// The key `column` reads `name` through under `resolution_schema`; `None` is a name the row does not carry.
+    fn column_key(&self, _name: &str) -> Option<usize> {
+        None
+    }
+
+    /// The key `qualified_column` reads `qualifier.column` through under `resolution_schema`.
+    fn qualified_column_key(&self, _qualifier: &str, _column: &str) -> Option<usize> {
+        None
+    }
+
+    /// The value at a key `column_key` or `qualified_column_key` produced; `None` for an absent or NULL value.
+    fn keyed_value(&self, _key: usize) -> Option<&Value> {
+        None
+    }
+
     /// Resolve an executor-only relation attribute. Materialized SQL rows do
     /// not expose these structural slots.
     fn internal_column(&self, _column: InternalColumnRef) -> Option<&Value> {

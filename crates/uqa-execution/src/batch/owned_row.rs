@@ -86,6 +86,22 @@ impl RowLookup for OwnedPhysicalRow {
             .and_then(|slot| self.row.value(slot))
     }
 
+    fn resolution_schema(&self) -> Option<&RowSchema> {
+        Some(&self.schema)
+    }
+
+    fn column_key(&self, name: &str) -> Option<usize> {
+        self.schema.column_slot(name)
+    }
+
+    fn qualified_column_key(&self, qualifier: &str, column: &str) -> Option<usize> {
+        self.schema.qualified_slot(qualifier, column)
+    }
+
+    fn keyed_value(&self, key: usize) -> Option<&Value> {
+        self.row.value(key)
+    }
+
     fn internal_column(&self, column: uqa_sql::ast::InternalColumnRef) -> Option<&Value> {
         self.schema
             .internal_slot(column)

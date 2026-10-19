@@ -197,6 +197,12 @@ impl RowSchema {
         &self.index.slots
     }
 
+    /// Whether `other` is a clone of this schema, sharing the index that defines its names and layout.
+    #[must_use]
+    pub fn shares_index(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.index, &other.index)
+    }
+
     #[doc(hidden)]
     pub fn is_identity_layout(&self) -> bool {
         self.index.cold.identity_layout

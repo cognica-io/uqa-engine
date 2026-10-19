@@ -49,4 +49,4 @@ pub const DEFAULT_BATCH_SIZE: usize = 1024;
 const NULL_SLOT: usize = usize::MAX;
 /// Keep the optional row-lock lineage pointer inside the pre-lineage 64-bit row footprint while retaining seven allocation-free join/projection fragments.
 const INLINE_ROW_FRAGMENTS: usize = 7;
-static NULL_VALUE: Value = Value::Null;
+pub(crate) static NULL_VALUE: Value = Value::Null;

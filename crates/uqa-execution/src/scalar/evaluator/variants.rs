@@ -11,9 +11,11 @@ use super::{
     ordinary_output, plain, real_type_name, scalar_source_type, Produced, ProductionControl,
     ProductionVec, SQLError, ScalarEvalContext, ScalarExpr, Value,
 };
-use crate::scalar::state::ConstantCast;
+use crate::scalar::state::{ColumnSlot, ConstantCast, ContextSchema};
+use std::sync::OnceLock;
 use uqa_core::ArrayValue;
 use uqa_sql::ast::BinaryOp;
+use uqa_sql::expr::RowLookup;
 use uqa_sql::expr::{
     cast_value_with_type_resolution_with_control, eval_binary_values_with_engine,
     negate_value_with_control, truthy,
@@ -292,21 +294,99 @@ fn immutable_constant_cast(operand: &ScalarExpr, source: Option<&str>, target: &
 }
 
 pub(super) fn column(
+    expression: &ScalarExpr,
     name: &str,
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    let retained = context.column_slot(expression);
+    if let Some(value) = retained.and_then(|slot| retained_value(slot, context)) {
+        return control.copy_value(value).map_err(Into::into);
+    }
+    #[cfg(test)]
+    crate::scalar::state::COLUMN_NAME_LOOKUPS.with(|count| count.set(count.get() + 1));
     if context.row_schema().is_some_and(|schema| {
         !schema.has_unqualified_column(name)
             && !schema.column_is_ambiguous(name)
             && schema.has_qualifier(name)
     }) {
-        ordinary_output(evaluate_qualified_whole_row(name, context), control)
-    } else {
-        context
-            .sql_context()
-            .column_value_with_control(name, control)
+        return ordinary_output(evaluate_qualified_whole_row(name, context), control);
     }
+    let value = context
+        .sql_context()
+        .column_value_with_control(name, control)?;
+    let context_schema = context
+        .row_schema()
+        .map_or(ContextSchema::Absent, |schema| {
+            ContextSchema::Shared(schema.clone())
+        });
+    retain_key(retained, context, context_schema, |row| {
+        row.column_key(name)
+    });
+    Ok(value)
+}
+
+pub(super) fn qualified_column(
+    expression: &ScalarExpr,
+    qualifier: &str,
+    column: &str,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let retained = context.column_slot(expression);
+    if let Some(value) = retained.and_then(|slot| retained_value(slot, context)) {
+        return control.copy_value(value).map_err(Into::into);
+    }
+    #[cfg(test)]
+    crate::scalar::state::COLUMN_NAME_LOOKUPS.with(|count| count.set(count.get() + 1));
+    let value = context
+        .sql_context()
+        .qualified_column_value_with_control(qualifier, column, control)?;
+    retain_key(retained, context, ContextSchema::Unused, |row| {
+        row.qualified_column_key(qualifier, column)
+    });
+    Ok(value)
+}
+
+/// Retain the key the rows' schema resolves a reference to. The reference named one unambiguous column of these rows, so later rows whose schema shares the index read the key without resolving the name again.
+fn retain_key(
+    slot: Option<&OnceLock<ColumnSlot>>,
+    context: &ScalarEvalContext<'_>,
+    context_schema: ContextSchema,
+    key: impl FnOnce(&dyn RowLookup) -> Option<usize>,
+) {
+    if let (Some(slot), Some(row)) = (slot, context.row_lookup()) {
+        if let Some(schema) = row.resolution_schema() {
+            let _ = slot.set(ColumnSlot {
+                context_schema,
+                row_schema: schema.clone(),
+                key: key(row),
+            });
+        }
+    }
+}
+
+/// The value of a reference whose key was retained for rows of the schema the row now reads, under the schema the context now carries.
+fn retained_value<'a>(
+    slot: &OnceLock<ColumnSlot>,
+    context: &ScalarEvalContext<'a>,
+) -> Option<&'a Value> {
+    let resolved = slot.get()?;
+    let row = context.row_lookup()?;
+    if !row.resolution_schema()?.shares_index(&resolved.row_schema) {
+        return None;
+    }
+    match (&resolved.context_schema, context.row_schema()) {
+        (ContextSchema::Unused, _) | (ContextSchema::Absent, None) => {}
+        (ContextSchema::Shared(retained), Some(current)) if current.shares_index(retained) => {}
+        _ => return None,
+    }
+    Some(
+        resolved
+            .key
+            .and_then(|key| row.keyed_value(key))
+            .unwrap_or(&crate::batch::NULL_VALUE),
+    )
 }
 
 pub(super) fn exists(

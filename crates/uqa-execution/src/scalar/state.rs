@@ -8,6 +8,8 @@
 
 use std::sync::OnceLock;
 
+use crate::RowSchema;
+
 use uqa_core::Value;
 use uqa_sql::{
     ast::{BinaryOp, FunctionBinding, FunctionDispatch},
@@ -19,6 +21,7 @@ use uqa_sql::{
 thread_local! {
     static COMPARISON_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(super) static CONSTANT_CAST_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(super) static COLUMN_NAME_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The first conversion of a cast whose operand is a literal.
@@ -30,12 +33,34 @@ pub(crate) enum ConstantCast {
     PerEvaluation,
 }
 
+/// The context schema the resolution of a column reference depended on.
+#[derive(Debug)]
+pub(crate) enum ContextSchema {
+    /// A qualified reference never consults the context schema.
+    Unused,
+    /// The context carried no schema.
+    Absent,
+    /// The context carried this schema, which decided between a column and a whole-row reference.
+    Shared(RowSchema),
+}
+
+/// The key a column reference reads once the schema of its rows is known.
+#[derive(Debug)]
+pub(crate) struct ColumnSlot {
+    pub(crate) context_schema: ContextSchema,
+    /// The schema the rows resolved the reference through. Retaining it keeps the index alive, so a later schema can never reuse its address.
+    pub(crate) row_schema: RowSchema,
+    /// The row lookup's key for the reference, or `None` for a name the rows do not carry.
+    pub(crate) key: Option<usize>,
+}
+
 /// Read-only lookup into the function state owned by a prepared expression set.
-/// The state has one fixed-size entry per logical ordering comparison or literal cast, never per input row.
+/// The state has one fixed-size entry per logical ordering comparison, literal cast or unqualified column reference, never per input row.
 #[derive(Debug, Default)]
 pub struct FunctionCallStates {
     enums: Vec<((usize, u8), EnumComparisonState)>,
     constant_casts: Vec<(usize, OnceLock<ConstantCast>)>,
+    columns: Vec<(usize, OnceLock<ColumnSlot>)>,
 }
 
 impl FunctionCallStates {
@@ -58,12 +83,25 @@ impl FunctionCallStates {
                 self.constant_casts
                     .push((std::ptr::from_ref(expr.as_ref()) as usize, OnceLock::new()));
             }
+            ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => {
+                self.columns
+                    .push((std::ptr::from_ref(expression) as usize, OnceLock::new()));
+            }
             _ => {},
         });
     }
 
     fn is_empty(&self) -> bool {
-        self.enums.is_empty() && self.constant_casts.is_empty()
+        self.enums.is_empty() && self.constant_casts.is_empty() && self.columns.is_empty()
+    }
+
+    /// The retained key of the column reference `expression`.
+    pub(crate) fn column_slot(&self, expression: &ScalarExpr) -> Option<&OnceLock<ColumnSlot>> {
+        let address = std::ptr::from_ref(expression) as usize;
+        self.columns
+            .binary_search_by_key(&address, |(key, _)| *key)
+            .ok()
+            .map(|index| &self.columns[index].1)
     }
 
     /// The retained first conversion of the cast whose literal operand is `operand`.
@@ -153,6 +191,7 @@ struct PreparedCallStates<T> {
 static EMPTY_CALL_STATES: FunctionCallStates = FunctionCallStates {
     enums: Vec::new(),
     constant_casts: Vec::new(),
+    columns: Vec::new(),
 };
 
 impl<T> PreparedExpressions<T> {
@@ -165,6 +204,8 @@ impl<T> PreparedExpressions<T> {
             .constant_casts
             .sort_unstable_by_key(|(address, _)| *address);
         calls.constant_casts.dedup_by_key(|(address, _)| *address);
+        calls.columns.sort_unstable_by_key(|(address, _)| *address);
+        calls.columns.dedup_by_key(|(address, _)| *address);
         Self {
             expressions,
             calls: (!calls.is_empty()).then(|| Box::new(PreparedCallStates { calls, visit_roots })),

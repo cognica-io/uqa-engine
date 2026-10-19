@@ -96,6 +96,14 @@ impl<'a> ScalarEvalContext<'a> {
             .and_then(|states| states.constant_cast(operand))
     }
 
+    pub(super) fn column_slot(
+        &self,
+        expression: &super::ScalarExpr,
+    ) -> Option<&std::sync::OnceLock<super::state::ColumnSlot>> {
+        self.function_states
+            .and_then(|states| states.column_slot(expression))
+    }
+
     pub(crate) fn with_retrieval_predicate(
         mut self,
         predicate: &'a RetrievalPredicate<'a>,
