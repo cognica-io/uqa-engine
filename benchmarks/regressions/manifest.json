@@ -327,13 +327,14 @@
       "package": "uqa-engine",
       "kind": "test",
       "test": "native_session_groups_preserve_metadata_under_concurrent_load",
-      "cases": 1,
+      "cases": 2,
       "source": "crates/uqa-engine/tests/sessions/ivf_publication.rs",
       "capability": "Concurrent native session metadata correctness",
-      "workload": "Two fixed rounds run the original 69 native session tests in serial and with sixteen threads in separate simultaneous processes, including all four SQLite file modes.",
+      "workload": "Two required round cases each run the original 69 native session tests in serial and with sixteen threads in separate simultaneous processes, including all four SQLite file modes; CI serializes the round cases and retains child progress.",
       "invariant": "Every original fixture passes in every round and schedule; no retry, skipped fixture or isolated-test scheduling can hide the within-process metadata inconsistency.",
       "case_names": [
-        ""
+        "case_1_first",
+        "case_2_second"
       ]
     },
     {
