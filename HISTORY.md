@@ -12,7 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Keep mutating COPY output and sink flush inside the statement transaction, rolling back failed or cancelled exports instead of committing their changes before delivery.
+- Deliver COPY SELECT rows through the bounded query spool and keep sink output and flush inside the statement transaction, preserving the selected rows and rolling back failed or cancelled mutating exports.
 
 - Reuse resolved builtin numeric row casts within their prepared expression and input schema, preserving current callbacks, cancellation, memory admission, rounding and overflow diagnostics.
 

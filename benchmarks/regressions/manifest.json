@@ -14863,7 +14863,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -15890,6 +15890,48 @@
       "capability": "COPY transaction publication",
       "workload": "INSERT, UPDATE, DELETE RETURNING and modifying CTEs fail at first write, partial output, flush or cancellation across memory, native SQLite, SQLite K/V and redb.",
       "invariant": "Every failed COPY restores the prior rows, durable reopen preserves rollback, and successful flushed COPY commits once.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "copy_spill_delivery_does_not_rematerialize_the_complete_result",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/copy/tests.rs",
+      "capability": "Bounded COPY query delivery",
+      "workload": "A 32MiB text result in a 64KiB query spool delivered to a hashing sink.",
+      "invariant": "Exact SHA-256 and byte/row counts; less than 512KiB peak output allocation; one flush and no retained scratch or temporary files.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "copy_spill_failure_and_cancellation_release_the_spool",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/copy/tests.rs",
+      "capability": "Bounded COPY query delivery",
+      "workload": "A spilled query fails after one output row or observes cancellation before its first row.",
+      "invariant": "The first I/O/cancellation error propagates without flushing, and spool files and scratch are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_spooled_query_preserves_values_and_statement_snapshot",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "COPY statement snapshot",
+      "workload": "A 2048-row query under 1KiB work memory across all four providers; the three persistent providers update the source through another session during output.",
+      "invariant": "Exact original values, order and duplicate labels remain in the spool; the independent update is visible afterward; empty and cached set-query output retains its metadata.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite",

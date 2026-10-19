@@ -164,6 +164,77 @@ fn copy_output_failure_rolls_back_the_implicit_mutation(#[case] provider: usize)
     }
 }
 
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn copy_spooled_query_preserves_values_and_statement_snapshot(#[case] provider: usize) {
+    struct UpdatingSink<'a> {
+        writer: Option<&'a Engine>,
+        bytes: Vec<u8>,
+        updated: bool,
+        flushes: usize,
+    }
+    impl std::io::Write for UpdatingSink<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if !self.updated {
+                if let Some(writer) = self.writer {
+                    exec(writer, "UPDATE copy_snapshot SET value = 'after'");
+                }
+                self.updated = true;
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let engine = copy_engine(provider, &directory.path().join("copy-snapshot.db"));
+    exec(
+        &engine,
+        "CREATE TABLE copy_snapshot (id INTEGER PRIMARY KEY, value TEXT)",
+    );
+    exec(&engine, "INSERT INTO copy_snapshot VALUES (1, 'before')");
+    engine.set_query_memory_limit(Some(1024));
+    let writer = (provider != 0).then(|| engine.new_session().unwrap());
+    let mut sink = UpdatingSink {
+        writer: writer.as_ref(),
+        bytes: Vec::new(),
+        updated: false,
+        flushes: 0,
+    };
+    assert_eq!(engine.copy_to("COPY (SELECT value, n, n + 1 AS n FROM copy_snapshot CROSS JOIN generate_series(1, 2048) AS series(n) ORDER BY 2) TO STDOUT WITH (FORMAT csv, HEADER)", &mut sink).unwrap(), 2048);
+    let mut expected = String::from("value,n,n\n");
+    for n in 1..=2048 {
+        use std::fmt::Write;
+        writeln!(expected, "before,{n},{}", n + 1).unwrap();
+    }
+    assert_eq!(sink.bytes, expected.as_bytes());
+    assert_eq!(sink.flushes, 1);
+    assert_eq!(
+        engine
+            .sql("SELECT value FROM copy_snapshot", &[])
+            .unwrap()
+            .rows[0]["value"],
+        Value::Str(if provider == 0 { "before" } else { "after" }.into())
+    );
+    // Reuse cached plans and retain output metadata even when the spool has no rows.
+    for _ in 0..2 {
+        assert_eq!(copy_to_string(&engine, "COPY (SELECT id, value FROM copy_snapshot WHERE id < 0) TO STDOUT WITH (FORMAT csv, HEADER)"), "id,value\n");
+        assert_eq!(
+            copy_to_string(
+                &engine,
+                "COPY (SELECT 1 AS x UNION ALL SELECT 2 ORDER BY x DESC) TO STDOUT"
+            ),
+            "2\n1\n"
+        );
+    }
+}
+
 #[test]
 fn copy_output_preserves_session_style_duplicate_labels_and_mutation_returning() {
     let engine = Engine::new();

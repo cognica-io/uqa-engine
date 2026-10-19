@@ -7,7 +7,7 @@
 //! SQL batch scheduling over live cache, transaction and statement inputs.
 
 use super::{
-    plan_executor::UnifiedPlanExecutor,
+    plan_executor::{StatementOutput, UnifiedPlanExecutor},
     transactions::{
         abort_explicit_statement_error, rollback_after_statement_error, rollback_implicit_statement,
     },
@@ -48,7 +48,7 @@ pub fn execute_nested<S: Clone + Send + Sync + 'static>(
 
 enum ResultConsumer<'a> {
     Completed(&'a mut dyn FnMut(&SQLResult) -> Result<(), SQLError>),
-    WithinStatement(&'a mut dyn FnMut(&SQLResult) -> Result<(), SQLError>),
+    WithinStatement(&'a mut dyn FnMut(StatementOutput) -> Result<(), SQLError>),
 }
 
 /// Consume results before the implicit statement or batch commits. Consumer errors
@@ -57,7 +57,7 @@ pub fn execute_with_output<S: Clone + Send + Sync + 'static>(
     context: &BatchExecutionContext<'_, S>,
     sql: &str,
     params: &[SQLParam],
-    consume: &mut dyn FnMut(&SQLResult) -> Result<(), SQLError>,
+    consume: &mut dyn FnMut(StatementOutput) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
     execute_with_context(
         context,
@@ -74,11 +74,13 @@ fn execute_plan<S: Clone + Send + Sync + 'static>(
     plan: &UnifiedPlan,
     consumer: &mut Option<ResultConsumer<'_>>,
 ) -> Result<SQLResult, SQLError> {
-    let result = executor.execute(plan)?;
     if let Some(ResultConsumer::WithinStatement(consume)) = consumer {
-        consume(&result)?;
+        consume(executor.execute_for_output(plan)?)?;
+        // This entry point hands off the result and returns no public row vector.
+        Ok(SQLResult::empty())
+    } else {
+        executor.execute(plan)
     }
-    Ok(result)
 }
 
 enum StatementInput<'sql> {
