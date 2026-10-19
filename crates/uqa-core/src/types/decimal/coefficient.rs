@@ -18,6 +18,22 @@ mod workspace;
 
 type Result<T> = std::result::Result<T, ValueRetentionError>;
 
+/// Align a coefficient that fits a machine word to `target_scale` in 128-bit arithmetic. `None` leaves the value to the arbitrary-precision kernels.
+pub(super) fn aligned_word(value: &BigInt, source_scale: u32, target_scale: u32) -> Option<i128> {
+    let value = i128::from(i64::try_from(value).ok()?);
+    value.checked_mul(10_i128.checked_pow(target_scale.checked_sub(source_scale)?)?)
+}
+
+/// Retain a coefficient computed in 128-bit arithmetic with exactly the bytes its normalized representation keeps, as the kernels' admitted workspace does after `run`.
+pub(super) fn from_word_result(
+    value: i128,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<BigInt>> {
+    let value = BigInt::from(value);
+    let words = retained_words(&value).map_err(ValueRetentionError::from)?;
+    run(control, move || Ok(words), move || value)
+}
+
 pub(super) fn add(
     left: &BigInt,
     right: &BigInt,

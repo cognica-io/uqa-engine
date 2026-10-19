@@ -223,3 +223,103 @@ fn the_integer_digit_limit_holds_without_counting_every_coefficient() {
         assert!(!integer_digits_may_exceed_limit(&below, 0));
     }
 }
+
+fn finite_parts(value: &DecimalValue) -> (BigInt, u32) {
+    match value.repr() {
+        DecimalRepr::Finite { coefficient, scale } => (coefficient.clone(), *scale),
+        other => panic!("finite numeric expected, got {other:?}"),
+    }
+}
+
+#[test]
+fn machine_word_paths_match_arbitrary_precision_results_and_release_allowance() {
+    let budget = MemoryBudget::new(16 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let coefficients = [
+        BigInt::zero(),
+        BigInt::from(1),
+        BigInt::from(-1),
+        BigInt::from(7),
+        BigInt::from(-12_345),
+        BigInt::from(1_000_000_000_000_000_000_i64),
+        BigInt::from(i64::MAX),
+        BigInt::from(i64::MIN),
+        BigInt::from(i128::from(i64::MAX) + 1),
+        BigInt::from(i128::from(i64::MIN) - 1),
+    ];
+    let scales = [0, 2, 6, 18, 38, 40];
+    let values: Vec<DecimalValue> = coefficients
+        .iter()
+        .flat_map(|coefficient| {
+            scales
+                .iter()
+                .map(|scale| DecimalValue::finite(coefficient.clone(), *scale).unwrap())
+        })
+        .collect();
+    for left in &values {
+        for right in &values {
+            let (left_coefficient, left_scale) = finite_parts(left);
+            let (right_coefficient, right_scale) = finite_parts(right);
+            let scale = left_scale.max(right_scale);
+            let left_aligned =
+                super::super::align_coefficient(&left_coefficient, left_scale, scale);
+            let right_aligned =
+                super::super::align_coefficient(&right_coefficient, right_scale, scale);
+
+            assert_eq!(
+                left.cmp(right),
+                left_aligned.cmp(&right_aligned),
+                "{left:?} cmp {right:?}"
+            );
+            assert_eq!(
+                left.cmp_with_control(right, &control).unwrap(),
+                left_aligned.cmp(&right_aligned),
+                "{left:?} controlled cmp {right:?}"
+            );
+
+            let sum = left
+                .checked_add_with_control(right, &control)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                finite_parts(&sum),
+                (&left_aligned + &right_aligned, scale),
+                "{left:?} + {right:?}"
+            );
+            let difference = left
+                .checked_sub_with_control(right, &control)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                finite_parts(&difference),
+                (&left_aligned - &right_aligned, scale),
+                "{left:?} - {right:?}"
+            );
+            let product = left
+                .checked_mul_with_control(right, &control)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                finite_parts(&product),
+                (
+                    &left_coefficient * &right_coefficient,
+                    left_scale + right_scale
+                ),
+                "{left:?} * {right:?}"
+            );
+            assert_eq!(
+                sum.reserved_bytes(),
+                sum.retained_bytes(),
+                "{left:?} + {right:?} charge"
+            );
+            assert_eq!(
+                product.reserved_bytes(),
+                product.retained_bytes(),
+                "{left:?} * {right:?} charge"
+            );
+        }
+    }
+    assert_eq!(budget.used(), 0);
+}

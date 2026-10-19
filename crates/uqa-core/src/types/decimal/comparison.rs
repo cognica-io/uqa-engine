@@ -10,11 +10,25 @@ use std::cmp::Ordering;
 
 use num_bigint::BigInt;
 
-use super::{align_coefficient, DecimalRepr, DecimalValue};
+use super::{align_coefficient, coefficient::aligned_word, DecimalRepr, DecimalValue};
 
 fn compare_finite(left: &BigInt, left_scale: u32, right: &BigInt, right_scale: u32) -> Ordering {
+    if let Some(ordering) = compare_words(left, left_scale, right, right_scale) {
+        return ordering;
+    }
     let scale = left_scale.max(right_scale);
     align_coefficient(left, left_scale, scale).cmp(&align_coefficient(right, right_scale, scale))
+}
+
+/// Exact comparison of coefficients that fit machine words once aligned in 128-bit arithmetic.
+fn compare_words(
+    left: &BigInt,
+    left_scale: u32,
+    right: &BigInt,
+    right_scale: u32,
+) -> Option<Ordering> {
+    let scale = left_scale.max(right_scale);
+    Some(aligned_word(left, left_scale, scale)?.cmp(&aligned_word(right, right_scale, scale)?))
 }
 
 impl PartialEq for DecimalValue {
@@ -80,6 +94,9 @@ impl DecimalValue {
         };
         if left_scale == right_scale {
             return Ok(left.cmp(right));
+        }
+        if let Some(ordering) = compare_words(left, *left_scale, right, *right_scale) {
+            return Ok(ordering);
         }
         let signs = self.sign().cmp(&other.sign());
         if signs != Ordering::Equal || self.sign() == 0 {
