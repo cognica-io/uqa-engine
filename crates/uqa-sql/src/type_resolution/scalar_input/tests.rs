@@ -9,6 +9,75 @@ use crate::RowSchema;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn selected_type_observation_keeps_regtype_without_rebinding_catalog_inputs() {
+    use crate::ast::{
+        FunctionBinding, FunctionDispatch, FunctionOrderSyntax, FunctionResolutionError,
+    };
+
+    for ty in ["enum#20001", "app.bounded_array", "composite#20003"] {
+        let binding = FunctionBinding::dispatched(FunctionDispatch::TypeOf { type_oid: 20_001 });
+        let mut expression = ScalarExpr::Func {
+            name: binding.name.clone(),
+            binding: Some(binding),
+            args: vec![ScalarExpr::Cast {
+                implicit: false,
+                expr: Box::new(ScalarExpr::Literal(Value::Null)),
+                ty: ty.into(),
+            }],
+            distinct: false,
+            order_syntax: FunctionOrderSyntax::Ordinary,
+            order_by: Vec::new(),
+            filter: None,
+        };
+        let schema = RowSchema::default();
+        assert_eq!(
+            crate::scalar_type(&expression, &schema, &[]).unwrap(),
+            Some(ColumnType::Regtype)
+        );
+        for cancel in [None, Some(false), Some(true)] {
+            let budget = MemoryBudget::new(1024);
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            let control = ProductionControl::new(&budget, &original, &invoking);
+            if let Some(owner) = cancel {
+                if owner {
+                    original.cancel();
+                } else {
+                    invoking.cancel();
+                }
+            }
+            let result =
+                scalar_cast_source_type_name_with_control(&expression, &schema, &[], &control);
+            if cancel.is_some() {
+                assert_eq!(result.unwrap_err().sqlstate(), Some("57014"));
+            } else {
+                assert_eq!(
+                    &*result.unwrap().unwrap(),
+                    &ColumnType::Regtype.catalog_name()
+                );
+            }
+            assert_eq!(budget.used(), 0);
+        }
+        let ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } = &mut expression
+        else {
+            unreachable!()
+        };
+        binding.resolution_error = Some(Box::new(FunctionResolutionError::UndefinedFunction {
+            signature: "missing(integer)".into(),
+        }));
+        assert_eq!(
+            crate::scalar_type(&expression, &schema, &[])
+                .unwrap_err()
+                .sqlstate(),
+            Some("42883")
+        );
+    }
+}
+
+#[test]
 fn row_field_collations_use_analyzed_inputs_and_observe_cancellation() {
     let schema = RowSchema::with_types(
         vec!["selected".into(), "indeterminate".into()],

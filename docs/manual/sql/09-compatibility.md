@@ -25,7 +25,7 @@ The [official regression inventory](../internals/09-verification.md#compatibilit
 
 <!-- pg18-milestone-snapshot:start -->
 
-Manifest inventory: 151 evidence items — 93 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
+Manifest inventory: 152 evidence items — 94 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
 
 Current milestone snapshot: complete — `M2` (Protocol 3.2); in progress — `M0` (PG18 baseline), `M1` (Discovered semantic fixes), `M3` (PG18 DDL and types), `M4` (Core regression parity), `M5` (Client parity); not started — `M6` (Complete compatibility). Each milestone status is derived from its owned evidence items and remains bounded by its exit gate.
 

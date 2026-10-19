@@ -2,6 +2,10 @@
 
 This page describes UQA Engine 0.6.0 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.0/docs/manual/reference/10-upgrading.md) when installing the 0.6.0 packages.
 
+## Unreleased
+
+Current main retains the analyzed argument type of `pg_typeof` as a structural function binding while preserving normal argument evaluation. Newly stored definitions can contain that binding; use compatible binaries for all owners before creating or replacing them, because 0.6.0 cannot deserialize the new dispatch identity. Existing calls without this metadata bind their original arguments through the normal execution path.
+
 ## 0.6.0
 
 Version 0.6.0 adds PostgreSQL regular expressions and input collations, set-returning routine planning, BIT/VARBIT values and the expanded standalone usql shell. Update Rust, Python and JavaScript packages together.

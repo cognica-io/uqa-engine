@@ -396,8 +396,9 @@ pub(super) fn bind_call(
         return name;
     }
     coerce_arguments(args, &overload.argument_types, schema, params, resolver);
-    if let Some(dispatch @ FunctionDispatch::CollationFor { .. }) =
-        binding.as_ref().and_then(|binding| binding.dispatch)
+    if let Some(
+        dispatch @ (FunctionDispatch::CollationFor { .. } | FunctionDispatch::TypeOf { .. }),
+    ) = binding.as_ref().and_then(|binding| binding.dispatch)
     {
         selected.binding.dispatch = Some(dispatch);
     }
@@ -461,7 +462,7 @@ pub fn selected_builtin_dispatch(binding: &FunctionBinding) -> Option<FunctionDi
 pub(crate) fn runtime_dispatch(binding: &FunctionBinding) -> Option<FunctionDispatch> {
     if matches!(
         binding.dispatch,
-        Some(FunctionDispatch::CollationFor { .. })
+        Some(FunctionDispatch::CollationFor { .. } | FunctionDispatch::TypeOf { .. })
     ) {
         return binding.dispatch;
     }

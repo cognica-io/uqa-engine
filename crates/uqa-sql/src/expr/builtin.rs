@@ -270,6 +270,7 @@ pub fn bound_scalar_function_strictness(
             | FunctionDispatch::ArraySlices
             | FunctionDispatch::ArraySlicesWithBounds(_)
             | FunctionDispatch::CollationFor { .. }
+            | FunctionDispatch::TypeOf { .. }
             | FunctionDispatch::ArrayConcat
             | FunctionDispatch::ArrayAppend
             | FunctionDispatch::ArrayPrepend
@@ -417,6 +418,9 @@ pub(super) fn eval_dispatched_builtin_with_control(
             context.engine,
             control,
         ),
+        FunctionDispatch::TypeOf { type_oid } => {
+            Ok(control.finish(Value::Int(i64::from(type_oid)), control.empty_reservation())?)
+        }
         FunctionDispatch::NumericOperator(operator) => {
             super::numeric_operator::eval_bound_operator_with_control(
                 operator, binding, evaluated, control,

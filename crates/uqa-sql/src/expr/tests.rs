@@ -10,6 +10,7 @@ use super::*;
 use crate::ast::Expr;
 
 mod collations;
+mod type_observation;
 
 /// The ordinary scalar kernels, with collation-dependent functions under the database default collation.
 fn eval_scalar_function(name: &str, args: &[Value]) -> crate::error::Result<Value> {
