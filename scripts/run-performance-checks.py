@@ -75,11 +75,15 @@ def selector(check: dict) -> str:
     )
 
 
-def build_arguments(checks: list[dict]) -> list[str]:
+def package_arguments(checks: list[dict]) -> list[str]:
     packages = sorted({check["package"] for check in checks})
-    return ["--locked", "--lib", "--tests"] + [
+    return [
         argument for package in packages for argument in ("-p", package)
     ]
+
+
+def build_arguments(checks: list[dict]) -> list[str]:
+    return ["--locked", "--lib", "--tests", *package_arguments(checks)]
 
 
 def selection_config(checks: list[dict]) -> str:
@@ -250,6 +254,7 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="validate inventory without building or running")
     mode.add_argument("--build-archive", type=pathlib.Path, help="compile the inventory's test targets without executing them")
+    mode.add_argument("--build-claim-fixture", action="store_true", help="compile the claim example with the archive's package features and test profile")
     mode.add_argument("--archive-file", type=pathlib.Path, help="verify and run an already compiled nextest archive")
     args = parser.parse_args()
     checks = inventory()
@@ -260,6 +265,13 @@ def main() -> int:
         subprocess.run([
             "cargo", "nextest", "archive", "--profile", "ci", *build_arguments(checks),
             "--archive-file", str(args.build_archive),
+        ], cwd=ROOT, check=True)
+        return 0
+    if args.build_claim_fixture:
+        # Keep feature unification and dependency profile overrides identical to the archive.
+        subprocess.run([
+            "cargo", "build", "--locked", "--profile", "test",
+            "--example", "row_claim_contention", *package_arguments(checks),
         ], cwd=ROOT, check=True)
         return 0
     result = {

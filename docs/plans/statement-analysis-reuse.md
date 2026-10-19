@@ -55,3 +55,7 @@ The fixture constructs the same 24-level logical plan directly because compiling
 | #1108 | PR #1137 retains numeric descriptors with 10,000-row work evidence and current-source Linux qualification. Nonnumeric/operator/routine reuse and controlled historical comparison remain. |
 | #1117 | Statement-result reuse is merged; executable source reuse and borrowed privilege lineage are delivered by this PR. Further block/outer-schema reuse, nested privilege coverage and controlled acceptance remain. |
 | #653 | Main run 39317722346 independently passes all twenty controlled comparisons and stops EC2 afterward. The historical instruction-throughput variation remains unexplained. |
+
+## Regression archive build reuse
+
+The macOS job for source `e3619d6ff` finished its test archive but exceeded the existing 60-minute deadline while compiling the independent-process claim fixture with a different Cargo feature graph and development profile. The fixture now selects the same inventory packages and test profile as the archive, preserving its dependency overrides and reusing their libraries. A separate small Cargo workspace reproduces the previous feature/profile mismatch and verifies that the corrected command reuses every dependency artifact. Test assertions, execution limits and process-history verification are unchanged; no workflow is manually rerun or cancelled.
