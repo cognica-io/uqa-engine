@@ -11,6 +11,7 @@ on:
       - 'benchmarks/analytical/**'
       - 'benchmarks/regressions/claim-timing.json'
       - 'scripts/*performance*.py'
+      - '!scripts/performance_change_scope.py'
       - 'scripts/controlled_runner_host.py'
       - 'scripts/benchmark_features.py'
       - 'scripts/check-analytical-benchmark.py'
