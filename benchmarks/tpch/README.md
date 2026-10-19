@@ -37,40 +37,86 @@ target/release/examples/tpch_runner --iterations 201 --query 9 \
   | jq '.queries[0].elapsed_ms | sort | {median: .[100], p90: .[180]}'
 ```
 
-## Local PostgreSQL 17 comparison (2026-08-09)
+## Released package comparison with PostgreSQL 18 (2026-10-19)
 
-The following historical snapshot was measured on an Apple M1 Ultra host. UQA used the package-scoped release runner built by Rust 1.90.0 and reports the median of 201 iterations. PostgreSQL 17.10 ran in a dedicated arm64 container and reports the median of five executions captured by the runner now named `run-tpch-pg18.py`. Both sides validated the same ordered results first.
+This comparison measures the published `uqa` 0.6.0 package, the build that `pip install -U uqa` installs, instead of a source build. It ran on a temporary on-demand EC2 `c7g.4xlarge` host in `ap-northeast-2` with 16 Graviton3 (Neoverse-V1) cores without SMT, 32 GiB of memory, Ubuntu 24.04 and Linux 7.0. UQA was the `uqa-0.6.0-cp38-abi3-manylinux_2_28_aarch64.whl` wheel (SHA-256 `840cd511ac3ae5f4df08a3694cdbaa6f6f4d132aadabbaab27ca5313c8fadac8`), executed by its `usql` command against an in-memory database. PostgreSQL 18.6 came from the PGDG packages with the default configuration and a libc `en_US.UTF-8` database, was loaded with `COPY`, maintained with `VACUUM (ANALYZE)` and queried through `psql` over the local socket. Neither host control nor an independent noise bound was established, so the values are a dated comparison, not a regression gate.
 
-These runs were on the same developer host but were not interleaved, so the ratios are directional local evidence rather than a regression gate. Values are milliseconds; a ratio below `1.00x` favors UQA.
+`usql` reports `\timing` around `Engine::sql`, which covers parsing, analysis, planning, execution and result materialization in the embedded engine but not rendering; the release runner above measures the same boundary. The PostgreSQL `psql` column adds the protocol round trip and result transfer to the server's parsing, planning and execution. The PostgreSQL execution column is the `Execution Time` of `EXPLAIN (ANALYZE, TIMING false, SUMMARY true)`, the executor-only boundary of the earlier snapshot; it excludes planning, whose per-query medians were 0.033-0.421 ms.
 
-| Query | UQA | PostgreSQL 17 | UQA / PostgreSQL |
+[`scripts/run-tpch-release-comparison.py`](../../scripts/run-tpch-release-comparison.py) loaded UQA with the Rust fixture loader's 128-row INSERT batches and checked PostgreSQL and every UQA process against `expected/pg18.json` before timing; UQA output also stayed identical across executions. Six rounds alternated the engine order, and each round executed every query once untimed and then 34 times per engine, so each median covers 204 executions. PostgreSQL's per-round medians varied by at most 8%; the first UQA round was up to 1.37 times slower than the later rounds, and no per-round ratio fell on the other side of `1.00x` from the pooled ratio. A separate UQA run after `ANALYZE` changed no median by more than 4.2%.
+
+Values are milliseconds; a ratio below `1.00x` favors UQA.
+
+| Query | UQA 0.6.0 usql | PostgreSQL psql | PostgreSQL execution | UQA / psql | UQA / execution |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Q01 | 60.962 | 4.847 | 4.812 | 12.58x | 12.67x |
+| Q02 | 6.822 | 0.384 | 0.067 | 17.76x | 101.81x |
+| Q03 | 7.501 | 0.945 | 0.897 | 7.94x | 8.37x |
+| Q04 | 5.951 | 0.891 | 0.884 | 6.68x | 6.73x |
+| Q05 | 7.504 | 1.051 | 0.728 | 7.14x | 10.31x |
+| Q06 | 4.658 | 0.669 | 0.588 | 6.96x | 7.92x |
+| Q07 | 7.360 | 0.402 | 0.044 | 18.33x | 167.26x |
+| Q08 | 14.526 | 1.083 | 0.772 | 13.41x | 18.82x |
+| Q09 | 12.534 | 1.954 | 1.684 | 6.41x | 7.44x |
+| Q10 | 8.893 | 1.217 | 1.024 | 7.31x | 8.68x |
+| Q11 | 7.660 | 0.220 | 0.042 | 34.82x | 182.39x |
+| Q12 | 21.479 | 1.338 | 1.226 | 16.05x | 17.52x |
+| Q13 | 4.241 | 0.874 | 0.801 | 4.85x | 5.29x |
+| Q14 | 18.738 | 0.696 | 0.572 | 26.92x | 32.76x |
+| Q15 | 7.691 | 0.729 | 0.584 | 10.55x | 13.17x |
+| Q16 | 4.196 | 0.496 | 0.324 | 8.46x | 12.95x |
+| Q17 | 2.827 | 0.152 | 0.039 | 18.60x | 72.49x |
+| Q18 | 14.715 | 1.882 | 1.783 | 7.82x | 8.25x |
+| Q19 | 85.695 | 1.187 | 0.944 | 72.19x | 90.83x |
+| Q20 | 37.653 | 682.649 | 690.289 | 0.06x | 0.05x |
+| Q21 | 6.045 | 0.519 | 0.050 | 11.65x | 120.90x |
+| Q22 | 6.399 | 0.422 | 0.258 | 15.16x | 24.80x |
+
+UQA was at or below PostgreSQL on 1 of 22 queries under either PostgreSQL boundary: Q20, whose PostgreSQL plan is pathological at this scale. Excluding Q20, the sum of medians was 316.397 ms for UQA, 21.959 ms for PostgreSQL round trips and 18.122 ms for PostgreSQL execution. Summing medians is only a compact snapshot; it is not a throughput or audited TPC-H metric.
+
+### Change since the 2026-08-09 snapshot
+
+The previous snapshot, measured with the release runner on an Apple M1 Ultra, had UQA below the PostgreSQL 17 execution median on 14 of 22 queries; its full table is preserved in the [v0.6.0 README](https://github.com/cognica-io/uqa-engine/blob/v0.6.0/benchmarks/tpch/README.md#local-postgresql-17-comparison-2026-08-09). The current engine is slower on every query, which [#1108](https://github.com/cognica-io/uqa-engine/issues/1108) tracks. On the same host class, the release runners of the snapshot commit `613251702` and of `v0.6.0` ran in four interleaved ABBA pairs of 51 timed iterations and returned identical results. The rerun snapshot summed to 14.776 ms excluding Q20, within 4.2% of its published 14.184 ms, against 184.655 ms for `v0.6.0`. The host was not idle, so the values show the size of the change rather than acceptance evidence.
+
+| Query | 613251702 | v0.6.0 | Factor |
 | --- | ---: | ---: | ---: |
-| Q01 | 2.544 | 3.530 | 0.72x |
-| Q02 | 0.163 | 0.133 | 1.22x |
-| Q03 | 0.527 | 0.814 | 0.65x |
-| Q04 | 0.919 | 1.131 | 0.81x |
-| Q05 | 0.118 | 0.760 | 0.16x |
-| Q06 | 0.331 | 0.601 | 0.55x |
-| Q07 | 0.227 | 0.105 | 2.16x |
-| Q08 | 0.687 | 0.807 | 0.85x |
-| Q09 | 1.774 | 1.432 | 1.24x |
-| Q10 | 0.780 | 1.001 | 0.78x |
-| Q11 | 0.068 | 0.141 | 0.48x |
-| Q12 | 0.705 | 1.126 | 0.63x |
-| Q13 | 0.830 | 0.654 | 1.27x |
-| Q14 | 0.389 | 0.609 | 0.64x |
-| Q15 | 0.596 | 0.645 | 0.92x |
-| Q16 | 0.421 | 0.355 | 1.19x |
-| Q17 | 0.062 | 0.102 | 0.60x |
-| Q18 | 1.227 | 1.340 | 0.92x |
-| Q19 | 1.007 | 0.872 | 1.15x |
-| Q20 | 0.058 | 396.945 | 0.00x |
-| Q21 | 0.295 | 0.176 | 1.68x |
-| Q22 | 0.516 | 0.292 | 1.77x |
+| Q01 | 2.655 | 35.432 | 13.3x |
+| Q02 | 0.174 | 4.147 | 23.8x |
+| Q03 | 0.525 | 4.350 | 8.3x |
+| Q04 | 0.947 | 3.009 | 3.2x |
+| Q05 | 0.123 | 4.658 | 37.8x |
+| Q06 | 0.342 | 2.603 | 7.6x |
+| Q07 | 0.235 | 4.412 | 18.7x |
+| Q08 | 0.666 | 8.705 | 13.1x |
+| Q09 | 1.891 | 7.261 | 3.8x |
+| Q10 | 0.804 | 5.164 | 6.4x |
+| Q11 | 0.067 | 4.734 | 70.5x |
+| Q12 | 0.734 | 11.599 | 15.8x |
+| Q13 | 0.882 | 2.328 | 2.6x |
+| Q14 | 0.408 | 12.381 | 30.4x |
+| Q15 | 0.619 | 4.383 | 7.1x |
+| Q16 | 0.437 | 2.271 | 5.2x |
+| Q17 | 0.066 | 1.487 | 22.5x |
+| Q18 | 1.287 | 8.252 | 6.4x |
+| Q19 | 1.065 | 50.567 | 47.5x |
+| Q20 | 0.062 | 21.514 | 348.4x |
+| Q21 | 0.305 | 3.465 | 11.3x |
+| Q22 | 0.542 | 3.446 | 6.4x |
 
-UQA was faster on 14 of 22 per-query medians. Excluding Q20, whose PostgreSQL plan is pathological at this tiny scale, the sum of medians was 14.184 ms for UQA and 16.626 ms for PostgreSQL. A separate 501-iteration Q09 run measured a 1.759 ms median and 1.880 ms p90. Summing medians is only a compact snapshot; it is not a throughput or audited TPC-H metric.
+Sampled `v0.6.0` stacks attribute most of the added time to type resolution through textual type names: operator type selection repeated in every execution's analysis takes 47% of Q11 samples, and casts that resolve type names during per-row scalar evaluation take 29% of Q01 samples, while decimal arithmetic takes 18% of Q01. Measured through the published wheels on the same host, the Q20-excluded sum of medians was 53.3 ms in 0.1.6, peaked at 462.7 ms in 0.4.0 and was 182.4 ms in 0.6.0.
 
-The remaining local gaps are Q02, Q07, Q09, Q13, Q16, Q19, Q21, and Q22. This list is deliberately retained so optimization work does not hide behind the aggregate result.
+### Reproducing the release comparison
+
+Install the package to measure, create a dedicated PostgreSQL 18 database owned by the invoking role, and run the script from the repository root:
+
+```sh
+python3 -m venv target/tpch-release-venv
+target/tpch-release-venv/bin/pip install -U uqa
+createdb --locale=en_US.UTF-8 --template=template0 uqa_tpch
+python3 scripts/run-tpch-release-comparison.py --usql target/tpch-release-venv/bin/usql
+```
+
+The script recreates the `public` schema of `--database` (default `uqa_tpch`) through `psql` with the default connection settings. It writes per-round scripts, logs and `report.json`, which holds every sample with the host, package and server metadata, to `target/benchmark-runs/tpch-release-comparison`. `--rounds` and `--iterations` select the session shape, `--psql` selects the PostgreSQL client, and `--uqa-analyze` adds `ANALYZE` after the UQA load.
 
 ## Live PostgreSQL differential run
 

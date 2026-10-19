@@ -257,6 +257,7 @@ cargo bench -p uqa-engine --bench text_top_k --locked -- --warm-up-time 2 --meas
 bash scripts/run-vector-search-benchmark.sh
 bash scripts/run-beir-benchmark.sh
 python3 scripts/run-analytical-regression.py <base-commit>
+python3 scripts/run-tpch-release-comparison.py --usql <installed-usql>
 ```
 
 Benchmark results are same-machine regression evidence unless independently reproduced. Cross-engine ratios are advisory and require matching semantics and measured boundaries. See the [performance design](../../design/performance.md).
