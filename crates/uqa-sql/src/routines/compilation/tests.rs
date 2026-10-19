@@ -7,6 +7,43 @@
 use super::*;
 
 #[test]
+fn sql_standard_utilities_use_postgresql_command_diagnostics() {
+    let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/sql_standard_utilities_oracle.expected.json"
+    )))
+    .unwrap();
+    let mut checked = 0;
+    for case in reference["cases"].as_array().unwrap() {
+        if !case["id"].as_str().unwrap().starts_with("function_")
+            || case["error"]["sqlstate"] != "0A000"
+        {
+            continue;
+        }
+        let Statement::CreateFunction(definition) = crate::compile(case["sql"].as_str().unwrap())
+            .unwrap()
+            .remove(0)
+        else {
+            panic!("expected routine definition");
+        };
+        let FunctionBody::Statements(statements) = definition.body else {
+            panic!("expected SQL-standard body");
+        };
+        let error = validate_sql_standard_statement(&statements[0]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("0A000"));
+        assert_eq!(
+            error.to_string(),
+            case["error"]["message"].as_str().unwrap()
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 20,
+        "the independent reference includes utility families"
+    );
+}
+
+#[test]
 fn sql_standard_foreign_table_utilities_fail_before_dependency_binding() {
     for clause in ["", "IF NOT EXISTS "] {
         let Statement::CreateFunction(definition) = crate::compile(&format!(
