@@ -49,7 +49,7 @@ rusqlite = { workspace = true }
 workspace = true
 
 [target.'cfg(target_os = "emscripten")'.dependencies]
-rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache"] }
+rusqlite = { package = "uqa-rusqlite", version = "=0.39.1", default-features = false, features = ["bundled", "blob", "cache"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Threading"] }

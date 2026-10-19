@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Remove the bundled SQLite process-wide page-cache memory-management mutex through the maintained rusqlite packages, preserving SQLCipher, connection-local cache release and database formats; direct Rust driver dependencies must use the maintained package identity.
+
 - Reuse the result schema produced by ordered statement input analysis, avoiding a second complete binding pass while preserving output types, collations, anonymous-record fields and procedural dependency scopes.
 
 - Preserve every comma-separated input of UPDATE FROM and DELETE USING so empty or missing later sources cannot cause unintended row changes. Retain source order, aliases and LATERAL dependencies through the shared SQL source-list compiler.
