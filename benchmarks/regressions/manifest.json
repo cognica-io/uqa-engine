@@ -16045,6 +16045,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "impossible_admission_preserves_idle_patterns_under_shared_and_parent_pressure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Regex retention admission",
+      "workload": "Completed-state admission under pressure from an independent retained owner, with shared or separate compilation budgets and a limiting parent allowance.",
+      "invariant": "Impossible key/state requests preserve idle compiled patterns and existing hits do not recompile; all reservations release."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admission_reclaims_only_useful_idle_entries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Regex retention admission",
+      "workload": "Two retained patterns and an exhausted allowance admit a small completed state by evicting the older pattern.",
+      "invariant": "Admission succeeds, the newer pattern remains a cache hit, only the removed pattern recompiles, and all memory releases."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "bundled_page_cache_uses_connection_local_memory_management",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/connection/tests.rs",
+      "capability": "SQLite connection-local page cache",
+      "workload": "A managed connection checks the compiled memory-management option, releases its own cache and reads its unchanged row.",
+      "invariant": "The bundled global memory-management option is disabled while ordinary values and connection-local cache reclamation remain available."
     }
   ]
 }
