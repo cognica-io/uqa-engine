@@ -9,6 +9,34 @@ use std::collections::BTreeMap;
 use uqa_core::{ArrayValue, EnumLabelKey, EnumValue};
 
 #[test]
+fn deferred_not_null_checks_preserve_relation_order_and_nested_scope_ownership() {
+    let state = RewriteDeferral::default();
+    assert!(!state.retain_not_null_check("outside", "a"));
+    let outer = state.defer_not_null();
+    assert!(!state.is_deferred(), "index construction must still run");
+    for (table, column) in [("z", "b"), ("a", "x"), ("z", "a"), ("z", "b")] {
+        assert!(state.retain_not_null_check(table, column));
+    }
+    {
+        let _inner = state.defer_not_null();
+        assert!(state.retain_not_null_check("discarded", "x"));
+        let _rewrite = state.defer();
+        assert!(state.is_deferred());
+    }
+    assert!(!state.is_deferred());
+    assert_eq!(
+        outer.take_checks(),
+        vec![
+            ("z".into(), ["a".into(), "b".into()].into()),
+            ("a".into(), ["x".into()].into()),
+        ]
+    );
+    assert!(outer.take_checks().is_empty());
+    drop(outer);
+    assert!(!state.retain_not_null_check("outside", "a"));
+}
+
+#[test]
 fn original_and_rewritten_rows_share_one_allowance_and_keep_typed_values() {
     for limit in [0, 128, 1 << 16] {
         let memory = MemoryBudget::new(limit);

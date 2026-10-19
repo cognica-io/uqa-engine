@@ -20,6 +20,7 @@ pub mod entry;
 pub mod identity;
 mod locking;
 mod preparation;
+mod primary_keys;
 mod recursion;
 mod type_changes;
 pub use context::*;
@@ -112,14 +113,16 @@ pub fn run_alter_table<S: Clone + 'static>(
         mut actions,
     } = stmt;
     context.constraints.access.ensure_table_owner(&table)?;
-    let prepared_types = preparation::prepare(context, &table, &qualifier, &mut actions)?;
+    let prepared = preparation::prepare(context, &table, &qualifier, &mut actions, recurse, mode)?;
+    let not_null_checks = (!prepared.primary_keys.is_empty())
+        .then(|| context.constraints.deferred_rows.defer_not_null());
     let mut rewrites = type_changes::TypeRewrites::capture(
         context,
         &table,
         recurse,
         mode,
         &actions,
-        prepared_types,
+        prepared.types,
     )?;
     let _deferred = rewrites.as_ref().map(|_| {
         (
@@ -146,46 +149,56 @@ pub fn run_alter_table<S: Clone + 'static>(
             continue;
         }
         let column_checks = prepare_alter_action(context, &table, recurse, &mut action, mode)?;
-        run_recursive_alter_action(
-            context,
-            AlterTableStmt {
-                table: table.clone(),
-                qualifier: qualifier.clone(),
-                if_exists,
-                recurse,
-                actions: Vec::new(),
-            },
-            action,
-        )?;
-        for mut action in column_checks {
-            if matches!(action, AlterTableAction::AddForeignKeyConstraint { .. }) {
-                locking::prepare_table_alter_action(
-                    &context.binding,
-                    context,
-                    &table,
-                    recurse,
-                    &mut action,
-                    mode,
-                )?;
-            }
-            materialize_recursive_action_names(context, &table, recurse, &mut action)?;
-            run_recursive_alter_action(
-                context,
-                AlterTableStmt {
-                    table: table.clone(),
-                    qualifier: qualifier.clone(),
-                    if_exists,
-                    recurse,
-                    actions: Vec::new(),
-                },
-                action,
+        if let (AlterTableAction::AddKeyConstraint { constraint }, Some(required)) =
+            (&action, prepared.primary_keys.get(&position))
+        {
+            primary_keys::add_requirements(
+                context, &table, &qualifier, constraint, required, mode,
             )?;
         }
+        let target = AlterTableStmt {
+            table: table.clone(),
+            qualifier: qualifier.clone(),
+            if_exists,
+            recurse,
+            actions: Vec::new(),
+        };
+        run_recursive_alter_action(context, target.clone(), action)?;
+        run_column_constraints(context, &target, column_checks, mode)?;
     }
+    let mut checks = not_null_checks.as_ref().map_or_else(
+        Vec::new,
+        super::columns::rows::NotNullDeferralGuard::take_checks,
+    );
     if let Some(rewrites) = rewrites {
+        checks.retain(|(table, _)| !rewrites.validates_relation(table));
         rewrites.finish(context)?;
     }
+    primary_keys::validate_rows(context, checks)?;
     Ok(SQLResult::empty())
+}
+
+fn run_column_constraints<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
+    target: &AlterTableStmt,
+    constraints: Vec<AlterTableAction>,
+    mode: crate::row_locks::RelationLockMode,
+) -> Result<(), SQLError> {
+    for mut action in constraints {
+        if matches!(action, AlterTableAction::AddForeignKeyConstraint { .. }) {
+            locking::prepare_table_alter_action(
+                &context.binding,
+                context,
+                &target.table,
+                target.recurse,
+                &mut action,
+                mode,
+            )?;
+        }
+        materialize_recursive_action_names(context, &target.table, target.recurse, &mut action)?;
+        run_recursive_alter_action(context, target.clone(), action)?;
+    }
+    Ok(())
 }
 
 /// Create the sequence of an added `SERIAL` or identity column once, before the column reaches a child table: a partition draws from its parent's identity sequence and an inheritance child from its parent's `SERIAL` default. Identity is not inherited, so `PostgreSQL` rejects an identity column for a table with inheritance children before it creates anything.

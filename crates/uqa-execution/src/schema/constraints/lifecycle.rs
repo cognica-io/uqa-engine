@@ -413,7 +413,9 @@ pub fn validate_not_null_rows(
     table: &str,
     column: &str,
 ) -> Result<(), SQLError> {
-    if context.deferred_rows.is_deferred() {
+    if context.deferred_rows.retain_not_null_check(table, column)
+        || context.deferred_rows.is_deferred()
+    {
         return Ok(());
     }
     crate::schema::validation::validate_not_null_rows(context.rows.reads, table, column)
@@ -567,7 +569,6 @@ pub fn add_key_constraint(
             crate::schema::publication::keys::append_key_constraint(publication, table, &constraint)
         }))
         .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-    let mut built = Vec::new();
     for state in &partitions {
         let index = uqa_sql::schema::keys::definition::define_partition_key(
             &uqa_sql::schema::keys::definition::KeyPartition {
@@ -595,17 +596,7 @@ pub fn add_key_constraint(
             if !context.deferred_rows.is_deferred() {
                 crate::schema::keys::validate_key_index_rows(&validation, &state.table, &copy)?;
             }
-            built.push((state.table.as_str(), copy));
         }
-    }
-    if !context.deferred_rows.is_deferred() && partition.is_none() {
-        crate::schema::keys::validate_primary_key_rows(&validation, table, &constraint)?;
-    }
-    for (leaf, copy) in built
-        .iter()
-        .filter(|_| !context.deferred_rows.is_deferred())
-    {
-        crate::schema::keys::validate_primary_key_rows(&validation, leaf, copy)?;
     }
     Ok(())
 }

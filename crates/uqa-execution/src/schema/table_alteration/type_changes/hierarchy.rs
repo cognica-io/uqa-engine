@@ -38,16 +38,7 @@ pub(super) fn lock_relations<S: Clone + 'static>(
     let mut position = 0;
     while position < relations.len() {
         // Read children after acquiring their parent's lock and refreshing its catalog.
-        let mut children = catalog
-            .direct_hierarchy_children(&relations[position])?
-            .into_iter()
-            .map(|name| {
-                let oid = context.binding.catalog.relation_catalog_oid(&name)?;
-                Ok((oid, name))
-            })
-            .collect::<Result<Vec<_>, SQLError>>()?;
-        children.sort();
-        for (_, name) in children {
+        for name in super::super::locking::direct_children(context, &relations[position])? {
             let Some(id) = context.binding.catalog.relation_object_id(&name)? else {
                 continue;
             };

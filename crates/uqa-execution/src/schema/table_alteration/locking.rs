@@ -116,11 +116,7 @@ fn bind_secondary_relations<S: Clone + 'static>(
                 true,
             )?;
             lock_alter_children(binding, primary, RelationLockMode::AccessShare, |parent| {
-                tables
-                    .hierarchy
-                    .partitions
-                    .catalog
-                    .direct_hierarchy_children(parent)
+                direct_children(tables, parent)
             })?;
         }
         AlterTableAction::DropInheritance { parent } => {
@@ -130,12 +126,7 @@ fn bind_secondary_relations<S: Clone + 'static>(
             *partition =
                 bind_secondary_table(binding, partition, RelationLockMode::AccessExclusive, true)?;
             lock_partition_subtree(binding, tables, partition)?;
-            for child in tables
-                .hierarchy
-                .partitions
-                .catalog
-                .direct_hierarchy_children(primary)?
-            {
+            for child in direct_children(tables, primary)? {
                 let hierarchy = tables
                     .hierarchy
                     .partitions
@@ -264,11 +255,7 @@ fn lock_enforceability_reference<S: Clone + 'static>(
         .is_some();
     if partitioned {
         lock_alter_children(binding, &referenced, mode, |parent| {
-            tables
-                .hierarchy
-                .partitions
-                .catalog
-                .direct_hierarchy_children(parent)
+            direct_children(tables, parent)
         })?;
     }
     Ok(())
@@ -339,13 +326,7 @@ fn lock_partition_subtree<S: Clone + 'static>(
         context,
         &current,
         RelationLockMode::AccessExclusive,
-        |parent| {
-            tables
-                .hierarchy
-                .partitions
-                .catalog
-                .direct_hierarchy_children(parent)
-        },
+        |parent| direct_children(tables, parent),
     )
 }
 
@@ -363,11 +344,7 @@ fn lock_inherited_action<S: Clone + 'static>(
     }
     lock_alter_children(context, root, mode, |parent| {
         if all_descendants {
-            tables
-                .hierarchy
-                .partitions
-                .catalog
-                .direct_hierarchy_children(parent)
+            direct_children(tables, parent)
         } else if matches!(
             action,
             AlterTableAction::AddColumn { .. } | AlterTableAction::SetNotNull { .. }
@@ -379,15 +356,55 @@ fn lock_inherited_action<S: Clone + 'static>(
     })
 }
 
+pub(super) fn lock_direct_children<S: Clone + 'static>(
+    tables: &TableAlterContext<'_, S>,
+    parent: &str,
+    mode: RelationLockMode,
+) -> Result<Vec<String>, SQLError> {
+    let binding = &tables.binding;
+    let mut retained = Vec::new();
+    for name in direct_children(tables, parent)? {
+        let Some(identity) = binding.catalog.relation_object_id(&name)? else {
+            continue;
+        };
+        if let Some(current) =
+            lock_relation_identity(binding.catalog, binding.locks, name, identity, mode, false)?
+        {
+            retained.push(current);
+        }
+    }
+    Ok(retained)
+}
+
+/// Enumerate the current children by their durable catalog OIDs, including after a lock wait.
+pub(super) fn direct_children<S: Clone + 'static>(
+    tables: &TableAlterContext<'_, S>,
+    parent: &str,
+) -> Result<Vec<String>, SQLError> {
+    let mut children = tables
+        .hierarchy
+        .partitions
+        .catalog
+        .direct_hierarchy_children(parent)?
+        .into_iter()
+        .map(|name| {
+            let oid = tables.binding.catalog.relation_catalog_oid(&name)?;
+            Ok((oid, name))
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    children.sort();
+    Ok(children.into_iter().map(|(_, name)| name).collect())
+}
+
 fn lock_alter_children(
     context: &TableAlterBindingContext<'_>,
     root: &str,
     mode: RelationLockMode,
     mut children: impl FnMut(&str) -> Result<Vec<String>, SQLError>,
 ) -> Result<(), SQLError> {
-    let mut pending = vec![root.to_string()];
+    let mut pending = std::collections::VecDeque::from([root.to_string()]);
     let mut retained = BTreeSet::new();
-    while let Some(parent) = pending.pop() {
+    while let Some(parent) = pending.pop_front() {
         // Enumerate below each locked parent after refreshing: a wait may have admitted a new child before this lock was acquired.
         let targets = children(&parent)?
             .into_iter()
@@ -405,7 +422,7 @@ fn lock_alter_children(
             if let Some(current) =
                 lock_relation_identity(context.catalog, context.locks, name, identity, mode, false)?
             {
-                pending.push(current);
+                pending.push_back(current);
             }
         }
     }
@@ -418,10 +435,12 @@ fn locks_all_descendants<S: Clone + 'static>(
     recurse: bool,
     action: &AlterTableAction,
 ) -> Result<bool, SQLError> {
+    if recurse && matches!(action, AlterTableAction::AddKeyConstraint { .. }) {
+        return Ok(true);
+    }
     if matches!(
         action,
-        AlterTableAction::AddKeyConstraint { .. }
-            | AlterTableAction::DropConstraint { .. }
+        AlterTableAction::DropConstraint { .. }
             | AlterTableAction::RenameColumn { .. }
             | AlterTableAction::DropColumn { .. }
     ) && context

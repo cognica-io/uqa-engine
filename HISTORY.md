@@ -24,6 +24,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reject primary keys over existing NO INHERIT or unvalidated NOT NULL constraints with PostgreSQL diagnostics, preserving original column metadata and written-order ALTER COLUMN TYPE analysis.
 
+- Propagate primary-key NOT NULL requirements through ordinary inheritance, preserve existing child constraint identities, and match PostgreSQL ONLY checks, descendant locks, validation order and rollback.
+
 ## [0.6.0] - 2026-10-18
 
 ### Added

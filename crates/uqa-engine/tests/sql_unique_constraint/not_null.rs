@@ -31,17 +31,68 @@ fn open(provider: usize, path: &Path) -> Engine {
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn primary_key_not_null_requirements_match_postgresql_after_reopen(#[case] provider: usize) {
+    verify_after_reopen(
+        provider,
+        include_str!("../../../../tests/parity/pg18/primary_key_not_null_oracle.expected.json"),
+        "alter_plain_savepoint",
+        "not_null_primary_probe",
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn inherited_primary_key_not_null_matches_postgresql_after_reopen(#[case] provider: usize) {
+    verify_after_reopen(
+        provider,
+        include_str!(
+            "../../../../tests/parity/pg18/inherited_primary_key_not_null_oracle.expected.json"
+        ),
+        "persistent_catalog",
+        "inherited_pk_probe",
+    );
+}
+
+#[rstest::rstest]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn inherited_primary_key_locks_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("primary-key-locks.db"));
+    let peer = engine.new_session().unwrap();
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/parity/pg18/inherited_primary_key_locks_oracle.expected.json"
+    ))
+    .unwrap();
+    for step in reference["cases"].as_array().unwrap() {
+        let session = if step["session"] == "A" {
+            &engine
+        } else {
+            &peer
+        };
+        crate::pg18_oracle::verify(
+            session,
+            &serde_json::json!({
+                "postgresql_version": reference["postgresql_version"],
+                "cases": [step],
+            })
+            .to_string(),
+        );
+    }
+}
+
+fn verify_after_reopen(provider: usize, expected: &str, split_id: &str, schema: &str) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("primary-key-not-null.db");
     let engine = open(provider, &path);
-    let mut reference: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../tests/parity/pg18/primary_key_not_null_oracle.expected.json"
-    ))
-    .unwrap();
+    let mut reference: serde_json::Value = serde_json::from_str(expected).unwrap();
     let cases = reference["cases"].take().as_array().unwrap().clone();
     let split = cases
         .iter()
-        .position(|case| case["id"] == "alter_plain_savepoint")
+        .position(|case| case["id"] == split_id)
         .unwrap();
     reference["cases"] = serde_json::Value::from(cases[..split].to_vec());
     crate::pg18_oracle::verify(&engine, &reference.to_string());
@@ -54,7 +105,7 @@ fn primary_key_not_null_requirements_match_postgresql_after_reopen(#[case] provi
     };
     engine
         .sql(
-            "BEGIN; SET LOCAL search_path=not_null_primary_probe,pg_catalog",
+            &format!("BEGIN; SET LOCAL search_path={schema},pg_catalog"),
             &[],
         )
         .unwrap();

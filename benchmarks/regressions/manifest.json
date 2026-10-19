@@ -8285,6 +8285,63 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "inherited_primary_key_requirements_match_postgresql_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/keys/tests.rs",
+      "capability": "Inherited primary-key NOT NULL requirements",
+      "workload": "ONLY child requirements and recursive additions encounter missing, NO INHERIT and unvalidated child constraints.",
+      "invariant": "SQL preserves PostgreSQL SQLSTATE, message, DETAIL and HINT and keeps SET NOT NULL distinct from constraint addition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_not_null_checks_preserve_relation_order_and_nested_scope_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/columns/rows/tests.rs",
+      "capability": "Inherited primary-key NOT NULL requirements",
+      "workload": "Repeated column demands, multiple relations, nested scopes and physical rewrite deferral share the statement-local check owner.",
+      "invariant": "Requirements remain grouped per relation in encounter order; nested rollback restores the outer scope without suppressing index construction or leaking checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "inherited_primary_key_not_null_matches_postgresql_after_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_unique_constraint/not_null.rs",
+      "capability": "Inherited primary-key NOT NULL requirements",
+      "workload": "Replay 356 PostgreSQL 18.6 observations over memory, native SQLite, SQLite K/V and redb, with persistent reopen before final constraint and NULL enforcement checks.",
+      "invariant": "Ordinary inheritance, ONLY, diamonds, original constraint identities, OID-ordered diagnostics, type rewrites and failed statements retain PostgreSQL catalog and row behavior.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "inherited_primary_key_locks_match_postgresql",
+      "cases": 3,
+      "source": "crates/uqa-engine/tests/sql_unique_constraint/not_null.rs",
+      "capability": "Inherited primary-key NOT NULL requirements",
+      "workload": "Replay 72 PostgreSQL 18.6 two-session observations over native SQLite, SQLite K/V and redb, including NOWAIT child probes, savepoint rollback, ONLY partitions and original-action lock/error order.",
+      "invariant": "Generated requirements retain descendant locks; compatible existing ONLY requirements avoid child locks; rollback releases locks and later column errors do not bypass earlier lock acquisition.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "constraint_alteration_reports_postgresql_tuple_replacements",
       "source": "crates/uqa-sql/src/schema/constraint_changes/tests.rs",
       "cases": 1,

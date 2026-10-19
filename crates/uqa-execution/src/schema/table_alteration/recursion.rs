@@ -172,11 +172,7 @@ pub(super) fn recursive_alter_children<S: Clone + 'static>(
         return Ok(Vec::new());
     }
     if recurse {
-        return context
-            .hierarchy
-            .partitions
-            .catalog
-            .direct_hierarchy_children(table);
+        return super::locking::direct_children(context, table);
     }
     let requires_children = partition_column
         || matches!(
@@ -185,14 +181,7 @@ pub(super) fn recursive_alter_children<S: Clone + 'static>(
                 | AlterTableAction::AddCheckConstraint { .. }
                 | AlterTableAction::AddNotNullConstraint { .. }
         );
-    if requires_children
-        && !context
-            .hierarchy
-            .partitions
-            .catalog
-            .direct_hierarchy_children(table)?
-            .is_empty()
-    {
+    if requires_children && !super::locking::direct_children(context, table)?.is_empty() {
         let object = if matches!(action, AlterTableAction::AddColumn { .. }) {
             "column"
         } else {
@@ -212,14 +201,7 @@ pub(super) fn materialize_recursive_action_names<S: Clone + 'static>(
     recurse: bool,
     action: &mut AlterTableAction,
 ) -> Result<(), SQLError> {
-    if !recurse
-        || context
-            .hierarchy
-            .partitions
-            .catalog
-            .direct_hierarchy_children(table)?
-            .is_empty()
-    {
+    if !recurse || super::locking::direct_children(context, table)?.is_empty() {
         return Ok(());
     }
     let mut columns = context
@@ -324,14 +306,11 @@ pub(super) fn merge_existing_recursive_action<S: Clone + 'static>(
                 constraint.clone(),
             )
         }
-        AlterTableAction::AddNotNullConstraint { column, .. }
-        | AlterTableAction::SetNotNull { name: column } => {
-            let sqlstate = if matches!(action, AlterTableAction::SetNotNull { .. }) {
-                "0A000"
-            } else {
-                "55000"
-            };
-            merge_existing_not_null(context, table, column, sqlstate)
+        AlterTableAction::AddNotNullConstraint {
+            column, validated, ..
+        } => merge_existing_not_null(context, table, column, Some(*validated)),
+        AlterTableAction::SetNotNull { name: column } => {
+            merge_existing_not_null(context, table, column, None)
         }
         _ => Ok(false),
     }
@@ -341,7 +320,7 @@ fn merge_existing_not_null<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     table: &str,
     column: &str,
-    sqlstate: &str,
+    added_validated: Option<bool>,
 ) -> Result<bool, SQLError> {
     let definition = context
         .hierarchy
@@ -356,7 +335,19 @@ fn merge_existing_not_null<S: Clone + 'static>(
     let Some(definition) = definition.filter(|definition| definition.not_null) else {
         return Ok(false);
     };
-    uqa_sql::schema::constraint_changes::ensure_not_null_inheritable(table, &definition, sqlstate)?;
+    if let Some(validated) = added_validated {
+        uqa_sql::schema::constraint_changes::validate_inherited_not_null_addition(
+            table,
+            &definition,
+            validated,
+        )?;
+    } else {
+        uqa_sql::schema::constraint_changes::ensure_not_null_inheritable(
+            table,
+            &definition,
+            "0A000",
+        )?;
+    }
     // An inherited merge preserves the existing child's validation state but changes its parent count.
     crate::schema::publication::queue_constraint_publication(&context.hierarchy.publication, table)
         .map_err(|error| ddl_storage_error("publish inherited constraint count", error))?;
