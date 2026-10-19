@@ -33,7 +33,12 @@ pub trait CopyStatements {
         statement: Statement,
         params: &[SQLParam],
     ) -> Result<SQLResult, SQLError>;
-    fn execute_text(&self, text: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError>;
+    fn execute_text_with_output(
+        &self,
+        text: &str,
+        params: &[SQLParam],
+        consume: &mut dyn FnMut(&SQLResult) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError>;
 }
 pub struct CopyExecutionContext<'a> {
     pub catalog: &'a dyn CopyCatalog,
@@ -174,20 +179,25 @@ pub fn copy_to(
         }
         CopyTarget::Query(query) => query.clone(),
     };
-    let result = context.statements.execute_text(&query, &[])?;
-    let row_count = u64::try_from(result.rows.len()).map_err(|_| SQLError::Routine {
-        sqlstate: "54000".into(),
-        message: "COPY output row count exceeds u64".into(),
-    })?;
-    let memory = MemoryBudget::new(context.memory.work_mem_bytes()?);
-    let control = ProductionControl::new(&memory, context.cancellation, context.cancellation);
-    write_copy_result(
-        &result,
-        &copy.options,
-        output,
-        Some(context.output),
-        &control,
-    )?;
+    let mut row_count = 0;
+    context
+        .statements
+        .execute_text_with_output(&query, &[], &mut |result| {
+            let memory = MemoryBudget::new(context.memory.work_mem_bytes()?);
+            let control =
+                ProductionControl::new(&memory, context.cancellation, context.cancellation);
+            row_count = u64::try_from(result.rows.len()).map_err(|_| SQLError::Routine {
+                sqlstate: "54000".into(),
+                message: "COPY output row count exceeds u64".into(),
+            })?;
+            write_copy_result(
+                result,
+                &copy.options,
+                output,
+                Some(context.output),
+                &control,
+            )
+        })?;
     Ok(row_count)
 }
 

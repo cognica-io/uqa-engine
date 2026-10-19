@@ -14863,7 +14863,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -15867,6 +15867,35 @@
       "capability": "Shared ordered statement analysis",
       "workload": "A procedural query occurrence with a numeric modifier under one retained binding scope.",
       "invariant": "One block analysis preserves the result modifier and releases the original catalog scope."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "output_completion_observes_flush_failure_cancellation_and_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "COPY output completion",
+      "workload": "Empty output over failed, cancelled, interrupted and successful flush sinks under a zero-byte scratch allowance.",
+      "invariant": "Flush errors and current cancellation propagate; interruption retries and no scratch remains.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_output_failure_rolls_back_the_implicit_mutation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "COPY transaction publication",
+      "workload": "INSERT, UPDATE, DELETE RETURNING and modifying CTEs fail at first write, partial output, flush or cancellation across memory, native SQLite, SQLite K/V and redb.",
+      "invariant": "Every failed COPY restores the prior rows, durable reopen preserves rollback, and successful flushed COPY commits once.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

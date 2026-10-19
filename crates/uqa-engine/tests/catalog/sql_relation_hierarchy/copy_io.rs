@@ -14,6 +14,156 @@ fn copy_to_string(engine: &Engine, statement: &str) -> String {
     String::from_utf8(output).unwrap()
 }
 
+fn copy_engine(provider: usize, path: &std::path::Path) -> Engine {
+    match provider {
+        0 => Engine::new(),
+        1 => Engine::open(path).unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn copy_output_failure_rolls_back_the_implicit_mutation(#[case] provider: usize) {
+    struct Sink {
+        mode: &'static str,
+        token: uqa_core::CancellationToken,
+        writes: usize,
+        flushes: usize,
+        bytes: Vec<u8>,
+    }
+    impl std::io::Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.writes += 1;
+            if self.mode == "write" || (self.mode == "partial" && self.writes > 1) {
+                return Err(std::io::Error::other("closed COPY sink"));
+            }
+            let count = if self.mode == "partial" {
+                1
+            } else {
+                bytes.len()
+            };
+            self.bytes.extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            match self.mode {
+                "flush" => Err(std::io::Error::other("failed COPY flush")),
+                "cancel" => {
+                    self.token.cancel();
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("copy-output-failure.db");
+    let engine = copy_engine(provider, &path);
+    exec(
+        &engine,
+        "CREATE TABLE copy_atomic (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(&engine, "INSERT INTO copy_atomic VALUES (1, 10)");
+    let original = engine
+        .sql("SELECT * FROM copy_atomic ORDER BY id", &[])
+        .unwrap()
+        .rows;
+    for statement in [
+        "INSERT INTO copy_atomic VALUES (2, 20) RETURNING id, value",
+        "UPDATE copy_atomic SET value = 99 RETURNING id, value",
+        "DELETE FROM copy_atomic RETURNING id, value",
+        "WITH changed AS (INSERT INTO copy_atomic VALUES (2, 20) RETURNING id, value) SELECT * FROM changed",
+    ] {
+        for mode in ["write", "partial", "flush", "cancel"] {
+            let mut sink = Sink {
+                mode,
+                token: engine.cancellation_token(),
+                writes: 0,
+                flushes: 0,
+                bytes: Vec::new(),
+            };
+            let error = engine.copy_to(&format!("COPY ({statement}) TO STDOUT"), &mut sink).unwrap_err();
+            assert_eq!(error.sqlstate(), Some(if mode == "cancel" { "57014" } else { "58030" }));
+            assert_eq!(sink.flushes, usize::from(matches!(mode, "flush" | "cancel")));
+            if mode == "partial" {
+                assert_eq!(sink.bytes.len(), 1);
+            }
+            engine.reset_cancellation();
+            assert_eq!(engine.sql("SELECT * FROM copy_atomic ORDER BY id", &[]).unwrap().rows, original, "{mode}: {statement}");
+        }
+    }
+    drop(engine);
+    let engine = if provider == 0 {
+        let engine = copy_engine(provider, &path);
+        exec(
+            &engine,
+            "CREATE TABLE copy_atomic (id INTEGER PRIMARY KEY, value INTEGER)",
+        );
+        exec(&engine, "INSERT INTO copy_atomic VALUES (1, 10)");
+        engine
+    } else {
+        let engine = copy_engine(provider, &path);
+        assert_eq!(
+            engine
+                .sql("SELECT * FROM copy_atomic ORDER BY id", &[])
+                .unwrap()
+                .rows,
+            original
+        );
+        engine
+    };
+    let mut sink = Sink {
+        mode: "success",
+        token: engine.cancellation_token(),
+        writes: 0,
+        flushes: 0,
+        bytes: Vec::new(),
+    };
+    assert_eq!(
+        engine
+            .copy_to(
+                "COPY (INSERT INTO copy_atomic VALUES (2, 20) RETURNING id, value) TO STDOUT",
+                &mut sink
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(sink.bytes, b"2\t20\n");
+    assert_eq!(sink.flushes, 1);
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM copy_atomic", &[])
+            .unwrap()
+            .rows
+            .len(),
+        2
+    );
+    drop(engine);
+    if provider != 0 {
+        assert_eq!(
+            copy_engine(provider, &path)
+                .sql("SELECT * FROM copy_atomic", &[])
+                .unwrap()
+                .rows
+                .len(),
+            2
+        );
+    }
+}
+
 #[test]
 fn copy_output_preserves_session_style_duplicate_labels_and_mutation_returning() {
     let engine = Engine::new();
