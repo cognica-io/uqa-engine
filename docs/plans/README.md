@@ -1,5 +1,7 @@
 # Implementation plans
 
+Managed SQLite driver publication and local file compatibility are complete in [PR #1144](https://github.com/cognica-io/uqa-engine/pull/1144). The [six-issue performance ledger](open-performance-corrections.md) records completed local/current-source Linux checks, remaining macOS/timing gates and the next COPY RETURNING/CTE producer correction.
+
 The [controlled build-source correction](../../benchmarks/regressions/controlled-runner.md) prevents Cargo output from another checkout being mislabeled as the requested benchmark revision. PR #1136 merged as `d1dbb3418`. All 104 local controller, provenance, qualification and selection tests and nine actual EC2 build-source regressions pass; reviewed deployment is complete with matching installed digests. Automatic main assessment 39312252456 is running. Historical performance variation in #653 remains unresolved.
 
 [Open performance corrections](open-performance-corrections.md) tracks all six performance issues open on 2026-10-20, their remaining root corrections and source-scoped verification. Regex retention #1063 is the first bounded delivery; the other issues remain explicit pending obligations.
