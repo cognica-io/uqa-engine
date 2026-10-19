@@ -50,6 +50,8 @@ pub(crate) struct ColumnSlot {
     pub(crate) context_schema: ContextSchema,
     /// The schema the rows resolved the reference through. Retaining it keeps the index alive, so a later schema can never reuse its address.
     pub(crate) row_schema: RowSchema,
+    /// The space of `key`: rows of the same schema read through a lookup of another space resolve the name again.
+    pub(crate) key_space: uqa_sql::expr::RowKeySpace,
     /// The row lookup's key for the reference, or `None` for a name the rows do not carry.
     pub(crate) key: Option<usize>,
 }

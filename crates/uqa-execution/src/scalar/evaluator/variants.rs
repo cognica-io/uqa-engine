@@ -360,6 +360,7 @@ fn retain_key(
             let _ = slot.set(ColumnSlot {
                 context_schema,
                 row_schema: schema.clone(),
+                key_space: row.key_space(),
                 key: key(row),
             });
         }
@@ -373,7 +374,9 @@ fn retained_value<'a>(
 ) -> Option<&'a Value> {
     let resolved = slot.get()?;
     let row = context.row_lookup()?;
-    if !row.resolution_schema()?.shares_index(&resolved.row_schema) {
+    if row.key_space() != resolved.key_space
+        || !row.resolution_schema()?.shares_index(&resolved.row_schema)
+    {
         return None;
     }
     match (&resolved.context_schema, context.row_schema()) {

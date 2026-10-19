@@ -446,6 +446,15 @@ fn projected_rows_and_qualified_references_retain_their_keys() {
         );
     }
     assert_eq!(COLUMN_NAME_LOOKUPS.with(std::cell::Cell::get), 2);
+    // Physical rows of the same schema address values by slot, not by the projected row's logical position, so they resolve the names again instead of reading the retained keys.
+    let physical = crate::OwnedPhysicalRow::new(
+        schema.clone(),
+        crate::PhysicalRow::from_values(vec![Value::Int(40), Value::Int(2)]),
+    );
+    let context =
+        ScalarEvalContext::from_row_lookup(&physical, &[]).with_function_states(prepared.calls());
+    assert_eq!(eval_scalar(&prepared, &context).unwrap(), Value::Int(42));
+    assert_eq!(COLUMN_NAME_LOOKUPS.with(std::cell::Cell::get), 4);
 }
 
 #[test]

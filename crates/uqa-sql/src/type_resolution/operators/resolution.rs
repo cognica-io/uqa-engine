@@ -19,7 +19,7 @@ use crate::{
 };
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
-/// An operand type of a builtin scalar operator selection. The hash covers only the variant, which equal types always share; equality compares the complete type.
+/// An operand type of a builtin scalar operator selection, without type modifiers as selection reads it. Builtin scalar types without modifiers carry no payload that distinguishes two values of one variant, so the hash of the variant is consistent with the derived equality.
 #[derive(Clone, PartialEq, Eq)]
 struct OperandType(Option<ColumnType>);
 
@@ -31,9 +31,12 @@ impl Hash for OperandType {
 
 type SelectionKey = (Box<str>, OperandType, OperandType);
 
-/// Operator selection is a function of the operator name and its operand types. Selections whose operands are builtin scalars or unknown, a bounded set, are made once per process; other operands are selected at every request.
+/// Operator selection is a function of the operator name and its operand types without modifiers. Selections whose operands are builtin scalars or unknown, a bounded set, are made once per process; other operands are selected at every request.
 static BUILTIN_SELECTIONS: LazyLock<RwLock<HashMap<SelectionKey, [ColumnType; 3]>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// The catalog's operator names and the builtin scalar types bound the retained selections far below this; reaching it discards the retained selections instead of growing.
+const RETAINED_SELECTIONS: usize = 1 << 14;
 
 /// Remaining allowance that every builtin scalar selection stays below. With at least this much available, a fresh selection cannot exhaust the allowance, so a retained selection reports the same outcome; a smaller allowance selects afresh and keeps its quota errors independent of earlier selections.
 const RETAINED_SELECTION_ALLOWANCE: usize = 1 << 20;
@@ -43,11 +46,12 @@ fn selection_key(
     left: Option<&ColumnType>,
     right: Option<&ColumnType>,
 ) -> Option<SelectionKey> {
+    // Selection normalizes its operands to base types without modifiers, so the key does the same and modifier variants share one selection.
     let operand = |ty: Option<&ColumnType>| match ty {
         None => Some(OperandType(None)),
         Some(ty) => builtin_canonical_type_name(ty)
             .is_some()
-            .then(|| OperandType(Some(ty.clone()))),
+            .then(|| OperandType(Some(base_type(ty).without_type_modifiers()))),
     };
     Some((name.into(), operand(left)?, operand(right)?))
 }
@@ -115,11 +119,19 @@ pub(crate) fn named_binary_operator_types_with_control(
     }
     let selected = select_binary_operator_types(name, left, right, control)?;
     if let Some(key) = key {
-        if let Ok(mut selections) = BUILTIN_SELECTIONS.write() {
-            selections.entry(key).or_insert_with(|| (*selected).clone());
-        }
+        retain_selection(key, &selected);
     }
     Ok(selected)
+}
+
+/// Retain one selection, discarding every retained selection first when the bound is reached.
+fn retain_selection(key: SelectionKey, selected: &[ColumnType; 3]) {
+    if let Ok(mut selections) = BUILTIN_SELECTIONS.write() {
+        if selections.len() >= RETAINED_SELECTIONS {
+            selections.clear();
+        }
+        selections.entry(key).or_insert_with(|| selected.clone());
+    }
 }
 
 fn select_binary_operator_types(
