@@ -15993,6 +15993,74 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_rule_images_spill_and_share_original_contexts_without_complete_output",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/returning/tests.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "48MiB of action OLD/NEW/current images with duplicate labels, 64KiB work memory and one shared 2.1MiB source context.",
+      "invariant": "Combined action production and captured image peak allocation stays below 2MiB; exact image order/content/count, shared original scope and complete source release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_rule_images_keep_positional_assignment_nulls_and_original_source_indices",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/returning/tests.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "Two action rows with numeric typmods, NULL images and reversed source indices under one-byte work memory.",
+      "invariant": "Positional assignment values and exact original source mapping remain unchanged across spill.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_rule_images_reject_invalid_source_indices_and_observe_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/returning/tests.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "Negative, absent, mistyped and out-of-range source indices; cancellation before reading a spilled action result.",
+      "invariant": "Invalid internal indices fail before projection and cancellation remains 57014; every source owner is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bounded_rule_output_keeps_owner_plan_identity_and_error_before_execution",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/statement/compiled/tests.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "A nested stored rule query rejected by its analyzer with an explicit owner and parameter.",
+      "invariant": "Stored relation identities and statement cancellation precede planning; rejected analysis never captures execution state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_rule_returning_keeps_source_context_and_rolls_back_failed_delivery",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "Rewrite-rule UPDATE FROM/COPY with duplicate labels, OLD/NEW and source columns under 1KiB work memory across four providers; failed sink flush and persistent reopening.",
+      "invariant": "Independent PostgreSQL 18.4 result namespaces are preserved; failed delivery rolls back rule actions and successful output survives reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

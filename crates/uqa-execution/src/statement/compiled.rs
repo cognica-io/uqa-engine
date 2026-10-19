@@ -80,12 +80,35 @@ pub fn execute_with_privilege_subject<S: Clone + Send + Sync + 'static>(
 ) -> Result<SQLResult, SQLError> {
     let _statement_thread =
         super::context::statement_thread_scope(context.statements, context.cancellation);
-    let mut plan = UnifiedPlan::lower_with(statement, context.aggregates);
-    mark_catalog_statement_relations_bound(&mut plan)?;
-    let plan = context.planning.plan_for_execution(plan, params)?;
+    let plan = stored_plan(context, statement, params)?;
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
         .with_privilege_subject(privilege_subject)
         .execute(&plan)
+}
+
+/// Finish a stored rule action under its owner, keeping query and mutation output in bounded physical storage.
+pub fn execute_output_with_privilege_subject<S: Clone + Send + Sync + 'static>(
+    context: &CompiledStatementContext<'_, S>,
+    statement: Statement,
+    params: &[SQLParam],
+    privilege_subject: &RoleReference,
+) -> Result<super::plan_executor::StatementOutput, SQLError> {
+    let _statement_thread =
+        super::context::statement_thread_scope(context.statements, context.cancellation);
+    let plan = stored_plan(context, statement, params)?;
+    UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
+        .with_privilege_subject(privilege_subject)
+        .execute_for_output(&plan)
+}
+
+fn stored_plan<S: Clone + 'static>(
+    context: &CompiledStatementContext<'_, S>,
+    statement: Statement,
+    params: &[SQLParam],
+) -> Result<UnifiedPlan, SQLError> {
+    let mut plan = UnifiedPlan::lower_with(statement, context.aggregates);
+    mark_catalog_statement_relations_bound(&mut plan)?;
+    context.planning.plan_for_execution(plan, params)
 }
 
 pub fn execute_optimized_command<S: Clone + Send + Sync + 'static>(

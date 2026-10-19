@@ -9,12 +9,12 @@ use crate::Engine;
 use uqa_core::Value;
 use uqa_execution::{
     mutation::rules::{RuleContext, RuleExpressions, RuleSecurity, RuleStatements},
+    statement::plan_executor::StatementOutput,
     PhysicalRow, RowSchema,
 };
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
-    ast::Statement, plan::ExpressionPlan, semantics::rules::analysis::RuleAnalysisContext,
-    SQLError, SQLResult,
+    ast::Statement, plan::ExpressionPlan, semantics::rules::analysis::RuleAnalysisContext, SQLError,
 };
 impl Engine {
     pub(crate) fn rule_analysis_context(&self) -> RuleAnalysisContext<'_> {
@@ -25,7 +25,10 @@ impl Engine {
         }
     }
     pub(crate) fn rule_execution_context(&self) -> RuleContext<'_> {
+        let runtime = self.query_runtime_view();
         RuleContext {
+            memory: runtime.settings,
+            cancellation: runtime.cancellation,
             analysis: self.rule_analysis_context(),
             binding: self.catalog_routine_analysis_context(),
             security: self,
@@ -46,8 +49,8 @@ impl RuleStatements for Engine {
         &self,
         statement: Statement,
         privilege_subject: &RoleReference,
-    ) -> Result<SQLResult, SQLError> {
-        uqa_execution::statement::compiled::execute_with_privilege_subject(
+    ) -> Result<StatementOutput, SQLError> {
+        uqa_execution::statement::compiled::execute_output_with_privilege_subject(
             &self.compiled_statement_context(),
             statement,
             &[],

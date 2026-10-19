@@ -77,7 +77,7 @@ fn statement(sql: &str) -> Statement {
     statements.remove(0)
 }
 
-fn assert_planning_error(result: Result<SQLResult, SQLError>) {
+fn assert_planning_error<T>(result: Result<T, SQLError>) {
     assert!(
         matches!(result, Err(SQLError::TypeMismatch(message)) if message == "planning rejected the input")
     );
@@ -104,6 +104,23 @@ fn registered_aggregate_lowering_and_parameters_precede_execution_capture() {
 fn catalog_relation_identity_is_retained_before_planning_nested_queries() {
     let inputs = Inputs::default();
     assert_planning_error(execute_with_privilege_subject(
+        &inputs.context(),
+        statement("WITH source AS (SELECT $1 AS id FROM public.items) SELECT id FROM source"),
+        &[SQLParam::scalar(Value::Int(7))],
+        &"rule_owner".into(),
+    ));
+    let plans = inputs.planned.borrow();
+    let [UnifiedPlan::Query(query)] = &plans[..] else {
+        panic!("expected the bound catalog query")
+    };
+    assert!(query.relations_bound);
+    assert!(matches!(&query.ctes[0].body, CtePlanBody::Query(source) if source.relations_bound));
+}
+
+#[test]
+fn bounded_rule_output_keeps_owner_plan_identity_and_error_before_execution() {
+    let inputs = Inputs::default();
+    assert_planning_error(execute_output_with_privilege_subject(
         &inputs.context(),
         statement("WITH source AS (SELECT $1 AS id FROM public.items) SELECT id FROM source"),
         &[SQLParam::scalar(Value::Int(7))],
