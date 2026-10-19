@@ -12,9 +12,9 @@ use super::{
 
 pub fn required(
     block: &QueryBlockPlan,
-    scope: &CteScope<'_>,
+    scope: &CteScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, SQLError> {
-    let mut scope = scope.clone();
+    let mut scope = scope.reborrow();
     scope.include_authorization_only_columns = false;
     let mut universe = SourceLineage::default();
     let mut required = BTreeSet::new();
@@ -44,9 +44,9 @@ fn by_relation(required: BTreeSet<super::BaseColumn>) -> BTreeMap<String, BTreeS
 pub fn for_source_expressions(
     source: &crate::plan::SourcePlan,
     expressions: &[&crate::ScalarExpr],
-    scope: &CteScope<'_>,
+    scope: &CteScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, SQLError> {
-    let mut scope = scope.clone();
+    let mut scope = scope.reborrow();
     scope.include_authorization_only_columns = false;
     let (_, required) = super::source_expression_dependencies(source, expressions, &scope)?;
     Ok(by_relation(required))
@@ -57,15 +57,15 @@ pub fn for_target_expressions(
     table: &str,
     qualifiers: &BTreeSet<String>,
     expressions: &[&crate::ScalarExpr],
-    scope: &CteScope<'_>,
+    scope: &CteScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, SQLError> {
-    let mut scope = scope.clone();
+    let mut scope = scope.reborrow();
     scope.include_authorization_only_columns = false;
     let (_, required) = super::table_expression_dependencies(
         table,
         qualifiers,
         expressions,
-        &scope.scalar_subqueries,
+        scope.scalar_subqueries,
         &[],
         &scope,
     )?;

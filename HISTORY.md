@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Borrow immutable scalar-query and CTE plans during nested privilege analysis instead of copying complete plan payloads, preserving lexical visibility, authorization subjects and error order.
+
 - Reuse the types selected during GROUP BY, GROUPING SETS, DISTINCT ON and ORDER BY validation when checking comparison support, preserving expression-error precedence without resolving the same clause twice.
 
 - Reuse selected builtin numeric operators within an immutable expression and input schema, preserving per-row conversions, result widths, invoking privileges, cancellation and memory ownership.

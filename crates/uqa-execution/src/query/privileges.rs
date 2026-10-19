@@ -35,14 +35,14 @@ impl<S: Clone> PrivilegeCteCatalog for CteScope<S> {
 }
 pub(crate) fn with_scope<S: Clone, T>(
     ctes: &CteScope<S>,
-    apply: impl FnOnce(&PrivilegeScope<'_>) -> Result<T, SQLError>,
+    apply: impl FnOnce(&PrivilegeScope<'_, &[QueryPlan]>) -> Result<T, SQLError>,
 ) -> Result<T, SQLError> {
     let catalog = ctes.catalog_read_view()?;
-    let scope = PrivilegeScope::new(
+    let scope = PrivilegeScope::borrowed(
         &catalog,
         ctes.relation_name_resolution()?,
         ctes,
-        ctes.scalar_subqueries.clone(),
+        &ctes.scalar_subqueries,
     );
     apply(&scope)
 }

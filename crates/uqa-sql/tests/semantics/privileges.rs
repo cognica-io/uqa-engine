@@ -151,3 +151,73 @@ fn borrowed_privilege_scopes_preserve_correlated_and_join_requirements() {
         ]
     );
 }
+
+#[test]
+fn nested_privilege_analysis_does_not_copy_inherited_subquery_plans() {
+    let catalog = Catalog::new(3);
+    let mut scope = scope(&catalog);
+    let large = plan(&format!("SELECT '{}'", "x".repeat(32 * 1024)));
+    scope.scalar_subqueries = vec![large; 32];
+    let query = plan("SELECT (SELECT (SELECT parent.c0)) FROM root AS parent");
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        unreachable!()
+    };
+    let allocation = allocation_counter::measure(|| {
+        ensure_select_privileges_for_query_block(block, block.from.as_ref().unwrap(), &scope)
+            .unwrap();
+    });
+    assert_eq!(
+        *catalog.checked.borrow(),
+        vec![("root".into(), Some("c0".into()))]
+    );
+    assert!(allocation.bytes_total < 256 * 1024, "{allocation:?}");
+}
+
+#[test]
+fn nested_privilege_analysis_does_not_copy_local_cte_plans() {
+    let catalog = Catalog::new(3);
+    let query = plan(&format!(
+        "SELECT (WITH held AS (SELECT '{}') SELECT (SELECT parent.c0)) FROM root AS parent",
+        "x".repeat(1024 * 1024),
+    ));
+    let allocation = allocation_counter::measure(|| authorize(&query, &catalog).unwrap());
+    assert_eq!(
+        *catalog.checked.borrow(),
+        vec![("root".into(), Some("c0".into()))]
+    );
+    assert!(allocation.bytes_total < 256 * 1024, "{allocation:?}");
+}
+
+#[test]
+fn borrowed_privilege_query_arena_preserves_denials_and_check_order() {
+    let query = plan("SELECT (SELECT child.c2 FROM leaf AS child WHERE child.c0 = parent.c0) FROM root AS parent");
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        unreachable!()
+    };
+    let catalog = Catalog::new(3);
+    let owned = scope(&catalog);
+    let borrowed = context::PrivilegeScope::borrowed(
+        owned.catalog,
+        owned.resolution.clone(),
+        owned.inherited,
+        &block.subqueries,
+    );
+    assert!(std::ptr::eq(
+        borrowed.scalar_subqueries,
+        block.subqueries.as_slice()
+    ));
+    let error = uqa_sql::semantics::privileges::ensure_select_privileges_for_source_expressions(
+        block.from.as_ref().unwrap(),
+        &[&block.projections[0].expr],
+        &borrowed,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    assert_eq!(
+        *catalog.checked.borrow(),
+        vec![
+            ("leaf".into(), Some("c0".into())),
+            ("leaf".into(), Some("c2".into()))
+        ]
+    );
+}

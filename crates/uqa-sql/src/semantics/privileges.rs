@@ -152,7 +152,7 @@ fn table_lineage(
     qualifier: &str,
     alias: Option<&str>,
     column_aliases: &[String],
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
 ) -> Result<SourceLineage, SQLError> {
     if ctes.is_visible_cte(name) {
         let columns = ctes
@@ -346,7 +346,7 @@ fn collect_expression_and_subqueries(
     scopes: &[&SourceLineage],
     direct_star: bool,
     subqueries: &[QueryPlan],
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     universe: &mut SourceLineage,
     required: &mut BTreeSet<BaseColumn>,
 ) -> Result<(), SQLError> {
@@ -402,7 +402,7 @@ fn analyze_join_source_lineage(
     source: &SourcePlan,
     outer_scopes: &[&SourceLineage],
     subqueries: &[QueryPlan],
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     universe: &mut SourceLineage,
     required: &mut BTreeSet<BaseColumn>,
 ) -> Result<SourceLineage, SQLError> {
@@ -466,7 +466,7 @@ fn analyze_function_group_lineage(
     source: &SourcePlan,
     outer_scopes: &[&SourceLineage],
     subqueries: &[QueryPlan],
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     universe: &mut SourceLineage,
     required: &mut BTreeSet<BaseColumn>,
 ) -> Result<SourceLineage, SQLError> {
@@ -511,7 +511,7 @@ fn analyze_source_lineage(
     source: &SourcePlan,
     outer_scopes: &[&SourceLineage],
     subqueries: &[QueryPlan],
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     universe: &mut SourceLineage,
     required: &mut BTreeSet<BaseColumn>,
 ) -> Result<SourceLineage, SQLError> {
@@ -598,7 +598,7 @@ fn analyze_source_lineage(
 fn analyze_query_block(
     block: &QueryBlockPlan,
     source: Option<&SourcePlan>,
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     outer_scopes: &[&SourceLineage],
     universe: &mut SourceLineage,
     required: &mut BTreeSet<BaseColumn>,
@@ -667,30 +667,30 @@ fn analyze_query_block(
 
 fn analyze_query_plan(
     plan: &QueryPlan,
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     outer_scopes: &[&SourceLineage],
     universe: &mut SourceLineage,
     required: &mut BTreeSet<BaseColumn>,
 ) -> Result<(), SQLError> {
     let reachable = crate::semantics::reachable_plan_cte_names(plan);
-    let mut preceding_ctes = ctes.clone();
+    let mut preceding_ctes = ctes.reborrow();
     for cte in &plan.ctes {
         if reachable.contains(&cte.name) {
-            let mut definition_ctes = preceding_ctes.clone();
+            let mut definition_ctes = preceding_ctes.reborrow();
             if cte.recursive {
                 for local in &plan.ctes {
-                    definition_ctes.insert_deferred(local.clone());
+                    definition_ctes.insert_deferred_ref(local);
                 }
             }
             if let Some(query) = cte.body.query() {
                 analyze_query_plan(query, &definition_ctes, outer_scopes, universe, required)?;
             }
         }
-        preceding_ctes.insert_deferred(cte.clone());
+        preceding_ctes.insert_deferred_ref(cte);
     }
-    let mut root_ctes = ctes.clone();
+    let mut root_ctes = ctes.reborrow();
     for cte in &plan.ctes {
-        root_ctes.insert_deferred(cte.clone());
+        root_ctes.insert_deferred_ref(cte);
     }
     match &plan.root {
         RelationalPlan::QueryBlock(block) => analyze_query_block(
@@ -750,7 +750,7 @@ fn analyze_query_plan(
 pub fn ensure_select_privileges_for_query_block(
     statement: &QueryBlockPlan,
     source: &SourcePlan,
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
 ) -> Result<(), SQLError> {
     let mut universe = SourceLineage::default();
     let mut required = BTreeSet::new();
@@ -768,7 +768,7 @@ pub fn ensure_select_privileges_for_query_block(
 pub fn ensure_select_privileges_for_source_expressions(
     source: &SourcePlan,
     expressions: &[&ScalarExpr],
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
 ) -> Result<(), SQLError> {
     let (universe, required) = source_expression_dependencies(source, expressions, ctes)?;
     ensure_required_select(&universe, &required, ctes)
@@ -777,14 +777,14 @@ pub fn ensure_select_privileges_for_source_expressions(
 fn source_expression_dependencies(
     source: &SourcePlan,
     expressions: &[&ScalarExpr],
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
 ) -> Result<(SourceLineage, BTreeSet<BaseColumn>), SQLError> {
     let mut universe = SourceLineage::default();
     let mut required = BTreeSet::new();
     let lineage = analyze_source_lineage(
         source,
         &[],
-        &ctes.scalar_subqueries,
+        ctes.scalar_subqueries.as_ref(),
         ctes,
         &mut universe,
         &mut required,
@@ -796,7 +796,7 @@ fn source_expression_dependencies(
             expression,
             &scopes,
             matches!(expression, ScalarExpr::QualifiedStar(_)),
-            &ctes.scalar_subqueries,
+            ctes.scalar_subqueries.as_ref(),
             ctes,
             &mut universe,
             &mut required,
@@ -811,7 +811,7 @@ pub fn ensure_select_privileges_for_table_expressions(
     expressions: &[&ScalarExpr],
     subqueries: &[QueryPlan],
     required_columns: &[String],
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
 ) -> Result<(), SQLError> {
     let (universe, required) = table_expression_dependencies(
         table,
@@ -830,7 +830,7 @@ fn table_expression_dependencies(
     expressions: &[&ScalarExpr],
     subqueries: &[QueryPlan],
     required_columns: &[String],
-    ctes: &CteScope<'_>,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
 ) -> Result<(SourceLineage, BTreeSet<BaseColumn>), SQLError> {
     let catalog = ctes.catalog;
     let mut resolution = ctes.resolution.clone();
