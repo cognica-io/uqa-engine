@@ -723,16 +723,20 @@ function formatHTTPDate(days) {
   requireSafeHTTPInteger(days);
   if (days === -2_147_483_648) return "-infinity";
   if (days === 2_147_483_647) return "infinity";
-  const date = new Date(days * 86_400_000);
-  if (Number.isNaN(date.valueOf())) {
-    return String(days);
-  }
-  const year = date.getUTCFullYear();
-  if (year < -262_143 || year > 262_142) {
-    return String(days);
-  }
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
+  // Match Core's physical Julian calendar, including unsigned wrapping for retained day words; host Date has a narrower range.
+  let julian = (days + 2_440_588) >>> 0;
+  julian = (julian + 32_044) >>> 0;
+  const centuries = Math.floor(julian / 146_097);
+  const remainder = (julian % 146_097) * 4 + 3;
+  julian = (julian + 60 + centuries * 3 + Math.floor(remainder / 146_097)) >>> 0;
+  const fourYears = Math.floor(julian / 1461);
+  const dayInCycle = julian % 1461;
+  const yearInCycle = Math.floor(dayInCycle * 4 / 1461);
+  const monthDay = (yearInCycle === 0 ? (dayInCycle + 306) % 366 : (dayInCycle + 305) % 365) + 123;
+  const monthIndex = Math.floor(monthDay * 2141 / 65_536);
+  const year = yearInCycle + fourYears * 4 - 4800;
+  const month = String((monthIndex + 10) % 12 + 1).padStart(2, "0");
+  const day = String(monthDay - Math.floor(7834 * monthIndex / 256)).padStart(2, "0");
   return `${formatHTTPYear(year)}-${month}-${day}${year <= 0 ? " BC" : ""}`;
 }
 
@@ -766,24 +770,12 @@ function formatHTTPOffset(source) {
 
 function formatHTTPTimestamp(source, utc) {
   const micros = requireSafeHTTPInteger(source);
-  const date = new Date(Math.floor(micros / 1000));
-  if (Number.isNaN(date.valueOf())) {
-    return String(micros);
-  }
-  const year = date.getUTCFullYear();
-  if (year < -262_143 || year > 262_142) {
-    return String(micros);
-  }
-  const datePart = `${formatHTTPYear(year)}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
-  const timePart = [date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds()]
-    .map((value) => String(value).padStart(2, "0"))
-    .join(":");
-  let output = `${datePart} ${timePart}`;
-  const fraction = ((micros % 1_000_000) + 1_000_000) % 1_000_000;
-  if (fraction !== 0) {
-    output += `.${String(fraction).padStart(6, "0").replace(/0+$/, "")}`;
-  }
-  return output + (utc ? "+00" : "") + (year <= 0 ? " BC" : "");
+  const day = 86_400_000_000;
+  const remainder = ((micros % day) + day) % day;
+  const date = formatHTTPDate(Math.floor(micros / day));
+  const era = date.endsWith(" BC") ? " BC" : "";
+  const calendar = era ? date.slice(0, -3) : date;
+  return calendar + " " + formatHTTPTime(remainder) + (utc ? "+00" : "") + era;
 }
 
 function formatHTTPInterval(monthsSource, daysSource, microsSource) {

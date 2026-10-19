@@ -4,7 +4,8 @@
     "timezone": "UTC",
     "datestyle": "ISO, YMD",
     "intervalstyle": "postgres",
-    "source": "Independent psql capture; carrier units are Unix days/microseconds and TemporalInfinity endpoints."
+    "source": "Independent psql capture; carrier units are Unix days/microseconds and TemporalInfinity endpoints.",
+    "wide_calendar_source": "PostgreSQL 18.4 SQL text plus timestamp_send/timestamptz_send network-order integers, translated exactly from the PostgreSQL epoch to Unix microseconds; DATE uses integer day subtraction. No floating-point epoch extraction."
   },
   "cases": [
     {
@@ -245,6 +246,90 @@
       "sql": "SELECT '-1 year -1 mon 2 days 9223372036854775807 microseconds'::interval",
       "wire": "{\"$uqa_type\":\"interval\",\"months\":-13,\"days\":2,\"micros\":9223372036854775807}",
       "expected": "-1 years -1 mons +2 days 2562047788:00:54.775807",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT date '4713-01-01 BC'",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":-2440550}",
+      "expected": "4713-01-01 BC",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT date '10000-02-29'",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":2932956}",
+      "expected": "10000-02-29",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT date '262142-12-31'",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":95026236}",
+      "expected": "262142-12-31",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT date '262143-01-01'",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":95026237}",
+      "expected": "262143-01-01",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT date '275760-09-14'",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":100000001}",
+      "expected": "275760-09-14",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT date '294000-01-01'",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":106661767}",
+      "expected": "294000-01-01",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT date '400000-02-29'",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":145377531}",
+      "expected": "400000-02-29",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT date '5874897-12-31'",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":2145042905}",
+      "expected": "5874897-12-31",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT timestamp '262143-01-01 00:00:00.000001'",
+      "wire": "{\"$uqa_type\":\"timestamp\",\"micros\":8210266876800000001}",
+      "expected": "262143-01-01 00:00:00.000001",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamp '294000-02-28 23:59:59.999999'",
+      "wire": "{\"$uqa_type\":\"timestamp\",\"micros\":9215581766399999999}",
+      "expected": "294000-02-28 23:59:59.999999",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamp '294247-01-10 04:00:54.775807'",
+      "wire": "{\"$uqa_type\":\"timestamp\",\"micros\":9223372036854775807}",
+      "expected": "294247-01-10 04:00:54.775807",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamptz '262143-01-01 00:00:00.000001'",
+      "wire": "{\"$uqa_type\":\"timestamp_tz\",\"micros\":8210266876800000001}",
+      "expected": "262143-01-01 00:00:00.000001+00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamptz '294000-02-28 23:59:59.999999'",
+      "wire": "{\"$uqa_type\":\"timestamp_tz\",\"micros\":9215581766399999999}",
+      "expected": "294000-02-28 23:59:59.999999+00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamptz '294247-01-10 04:00:54.775807'",
+      "wire": "{\"$uqa_type\":\"timestamp_tz\",\"micros\":9223372036854775807}",
+      "expected": "294247-01-10 04:00:54.775807+00",
       "browser_safe": false
     }
   ]

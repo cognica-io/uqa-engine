@@ -109,6 +109,8 @@ for await (const frame of stream) {
 
 Node.js preserves signed 64-bit integers through `BigInt` when they exceed the safe `number` range and returns byte values as `Buffer`. Parameter validation, atomic batch submission, response-size bounds, request identities, and terminal stream validation follow the native HTTP contract. Breaking out of a stream's asynchronous iterator closes its response. HTTP requests do not follow redirects or use process-configured HTTP proxies.
 
+Typed DATE and timestamp HTTP values use the same canonical SQL text as native bindings, including wide calendar years, BC era markers and exact microseconds. Integer calendar conversion preserves the date range independently of JavaScript's `Date` object. Node.js retains full signed 64-bit timestamp precision; browser output still rejects unsafe integers before conversion.
+
 The browser package exports a fetch-based `HttpEngine` beside the embedded WASM `Engine`:
 
 ```javascript
