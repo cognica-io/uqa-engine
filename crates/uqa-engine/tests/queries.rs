@@ -108,6 +108,8 @@ mod sql_routine_lookup;
 mod sql_row_locks;
 #[path = "queries/sql_row_locks_recheck.rs"]
 mod sql_row_locks_recheck;
+#[path = "queries/sql_set_ordering.rs"]
+mod sql_set_ordering;
 #[path = "queries/sql_simple_query.rs"]
 mod sql_simple_query;
 #[path = "sql_subqueries.rs"]

@@ -27,7 +27,7 @@ pub fn query_output_position(position: i64, width: usize, clause: &str) -> Resul
 pub fn output_position_error(clause: &str, position: i64) -> SQLError {
     SQLError::Routine {
         sqlstate: "42P10".into(),
-        message: format!("{clause} position {position} is not in the select list"),
+        message: format!("{clause} position {position} is not in select list"),
     }
 }
 

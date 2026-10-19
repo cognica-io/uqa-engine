@@ -14408,6 +14408,74 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_ordering_accepts_output_names_positions_and_outer_expressions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/set_ordering.rs",
+      "capability": "Set-operation ordering",
+      "workload": "All six set-operation forms use names, parenthesized names and output ordinals; branch-local and outer expression ordering remain valid.",
+      "invariant": "Analysis agrees with independent PostgreSQL acceptance and diagnostics before any operand is executed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_ordering_rejects_computed_targets_after_complete_clause_analysis",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/set_ordering.rs",
+      "capability": "Set-operation ordering",
+      "workload": "Computed targets and typed parameters are rejected after complete ORDER BY name/type analysis, before LIMIT and execution.",
+      "invariant": "Analysis agrees with independent PostgreSQL acceptance and diagnostics before any operand is executed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_ordering_preserves_literal_and_duplicate_output_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/set_ordering.rs",
+      "capability": "Set-operation ordering",
+      "workload": "Noninteger constants, int4 parser-token boundaries, invalid ordinals and duplicate output names retain exact PostgreSQL diagnostics.",
+      "invariant": "Analysis agrees with independent PostgreSQL acceptance and diagnostics before any operand is executed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_ordering_retains_leaf_names_without_exposing_nested_query_outputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/set_ordering.rs",
+      "capability": "Set-operation ordering",
+      "workload": "Flattened and separately ordered set operands retain hidden source names for SQLSTATE/DETAIL/HINT without exposing inaccessible outputs.",
+      "invariant": "Analysis agrees with independent PostgreSQL acceptance and diagnostics before any operand is executed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "set_operation_ordering_matches_postgresql_after_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/sql_set_ordering.rs",
+      "capability": "Set-operation ordering",
+      "workload": "Replay 93 PostgreSQL 18.4 result/error observations on memory, native SQLite, SQLite K/V and redb; reopen stored view definitions before prepared-query controls.",
+      "invariant": "Values, command tags, SQLSTATE, primary messages, DETAIL, HINT and unreachable sequence effects match the independent reference.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }
