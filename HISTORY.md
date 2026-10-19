@@ -8,11 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reject utility commands in SQL-standard function and procedure definitions with PostgreSQL diagnostics, preserving nested query and CALL analysis, statement error order, quoted bodies and transactional catalog state.
+
+- Bind column dependencies inside SQL-standard `VALUES` bodies so unrelated view deletion and column changes retain their PostgreSQL behavior, including after reopening persistent stores.
+
 - Keep persistent IVF and HNSW writers bound to their completed index definitions when another session commits during index creation, preventing canonical vectors from being written without the corresponding index metadata.
 
 - Preserve explicitly requested schemaless document fields in streaming derived tables and CTEs instead of returning NULL after source projection.
-
-- Bind column dependencies inside SQL-standard `VALUES` bodies so unrelated view deletion and column changes retain their PostgreSQL behavior, including after reopening persistent stores.
 
 ## [0.6.0] - 2026-10-18
 

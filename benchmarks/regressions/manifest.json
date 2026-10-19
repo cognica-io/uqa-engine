@@ -377,7 +377,9 @@
       "capability": "Named document field demands",
       "workload": "Combine a named field with a wildcard, a volatile expression or a scalar subquery predicate.",
       "invariant": "Conservative projection retains the named fields without pretending it can prune the complete declared source row.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-planner",
@@ -388,7 +390,9 @@
       "capability": "Mixed document and SQL source binding",
       "workload": "Join a declared SQL relation and an open document source with both statically bound and runtime field references.",
       "invariant": "A bound SQL input remains owned by its declared relation, while unresolved document field demands remain available.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",
@@ -399,7 +403,9 @@
       "capability": "Bounded document field projection",
       "workload": "Read a present and an absent field from a document with an unrelated 2 MiB payload using the real local row source.",
       "invariant": "The result preserves the value and missing-field NULL within a 64 KiB allocation bound, without copying the unrequested payload.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-engine",
@@ -3778,6 +3784,35 @@
       "capability": "Trigger record descriptor persistence",
       "workload": "Eleven independent PostgreSQL observations cover OLD/NEW, whole-record copies, NULLs, repeated invocations and persistent reopening on four providers.",
       "invariant": "Declared field types and collations survive invocation, copying, field lookup and reopen without changing tuple values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_values_bind_parameters_and_preserve_column_identity_across_rename",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_columns/tests.rs",
+      "capability": "Stored VALUES column identity",
+      "workload": "Bare and ordered VALUES with a scalar subquery, positional source aliases and an unresolved routine parameter.",
+      "invariant": "Dependency collection and serialized column renames preserve relation identity and unresolved parameters.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "stored_values_dependencies_match_postgresql_after_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/stored_values.rs",
+      "capability": "Stored VALUES lifecycle",
+      "workload": "48 PostgreSQL reference messages for accepted SQL-standard statement kinds, VALUES routines and catalog changes across memory, SQLite, SQLite K/V and redb, with committed definitions reopened before use.",
+      "invariant": "Results and diagnostics match PostgreSQL; unrelated view and column changes succeed while used columns remain protected.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     },
     {
       "package": "uqa-sql",
@@ -14266,12 +14301,12 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
-      "test": "stored_values_bind_parameters_and_preserve_column_identity_across_rename",
+      "test": "sql_standard_utilities_use_postgresql_command_diagnostics",
       "cases": 1,
-      "source": "crates/uqa-sql/src/binding/stored_columns/tests.rs",
-      "capability": "Stored VALUES column identity",
-      "workload": "Bare and ordered VALUES with a scalar subquery, positional source aliases and an unresolved routine parameter.",
-      "invariant": "Dependency collection and serialized column renames preserve relation identity and unresolved parameters.",
+      "source": "crates/uqa-sql/src/routines/compilation/tests.rs",
+      "capability": "SQL-standard routine utility diagnostics",
+      "workload": "261 independent PostgreSQL 18.4 command/result/error observations, covering utility families, nested query analysis, CALL, preceding errors, quoted bodies and transaction rollback.",
+      "invariant": "Definition analysis follows statement order, reports the PostgreSQL diagnostic and preserves catalog and row state without executing body commands.",
       "case_names": [
         ""
       ]
@@ -14279,17 +14314,31 @@
     {
       "package": "uqa-engine",
       "kind": "test",
-      "test": "stored_values_dependencies_match_postgresql_after_reopen",
+      "test": "sql_standard_utility_bodies_match_postgresql",
       "cases": 4,
-      "source": "crates/uqa-engine/tests/sql_routine_identity/stored_values.rs",
-      "capability": "Stored VALUES lifecycle",
-      "workload": "48 PostgreSQL reference messages for accepted SQL-standard statement kinds, VALUES routines and catalog changes across memory, SQLite, SQLite K/V and redb, with committed definitions reopened before use.",
-      "invariant": "Results and diagnostics match PostgreSQL; unrelated view and column changes succeed while used columns remain protected.",
+      "source": "crates/uqa-engine/tests/sql_routine_identity/utility_bodies.rs",
+      "capability": "SQL-standard routine utility diagnostics",
+      "workload": "261 independent PostgreSQL 18.4 command/result/error observations, covering utility families, nested query analysis, CALL, preceding errors, quoted bodies and transaction rollback.",
+      "invariant": "Definition analysis follows statement order, reports the PostgreSQL diagnostic and preserves catalog and row state without executing body commands.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite",
         "case_3_sqlite_key_value",
         "case_4_redb"
+      ],
+      "target": "integration"
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "prepared_input_constants_keep_their_original_stored_syntax_sites",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_routines/analysis/tests.rs",
+      "capability": "Stored routine input identity",
+      "workload": "Bind converted and unchanged literal inputs, serialize their original SQL syntax and rebind the restored statement.",
+      "invariant": "Input conversion retains original syntax correspondence and subsequent binding is idempotent.",
+      "case_names": [
+        ""
       ]
     }
   ]
