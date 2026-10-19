@@ -11,6 +11,7 @@ use super::{
     ordinary_output, plain, real_type_name, scalar_source_type, Produced, ProductionControl,
     ProductionVec, SQLError, ScalarEvalContext, ScalarExpr, Value,
 };
+use crate::scalar::state::ConstantCast;
 use uqa_core::ArrayValue;
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::{
@@ -214,6 +215,37 @@ pub(super) fn cast(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    let Some(constant) = context.constant_cast(expr) else {
+        return convert(expr, ty, context, control).map(|(_, converted)| converted);
+    };
+    match constant.get() {
+        Some(ConstantCast::Retained(value)) => control.copy_value(value).map_err(Into::into),
+        Some(ConstantCast::PerEvaluation) => {
+            convert(expr, ty, context, control).map(|(_, converted)| converted)
+        }
+        None => {
+            let (source, converted) = convert(expr, ty, context, control)?;
+            // A concurrent first evaluation sets the same conversion of the same literal.
+            let _ = constant.set(
+                if immutable_constant_cast(expr, source.as_deref().map(String::as_str), ty) {
+                    ConstantCast::Retained((*converted).clone())
+                } else {
+                    ConstantCast::PerEvaluation
+                },
+            );
+            Ok(converted)
+        }
+    }
+}
+
+fn convert(
+    expr: &ScalarExpr,
+    ty: &str,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(Option<Produced<String>>, Produced<Value>), SQLError> {
+    #[cfg(test)]
+    crate::scalar::state::CONSTANT_CAST_CONVERSIONS.with(|count| count.set(count.get() + 1));
     let source_ty = context.with_type_schema(|schema| {
         uqa_sql::type_resolution::scalar_cast_source_type_name_with_control(
             expr,
@@ -223,13 +255,40 @@ pub(super) fn cast(
         )
     })?;
     let value = eval_scalar_inner(expr, context, control)?;
-    cast_value_with_type_resolution_with_control(
+    let converted = cast_value_with_type_resolution_with_control(
         &value,
         source_ty.as_deref().map(String::as_str),
         ty,
         context.function_hook(),
         control,
-    )
+    )?;
+    Ok((source_ty, converted))
+}
+
+/// A literal's conversion can be retained for the rest of the execution only when no evaluation could convert it differently: the target is spelled in `pg_catalog`, which `search_path` cannot redirect, both types are builtin scalars, and the cast reads neither a catalog descriptor nor a session setting.
+fn immutable_constant_cast(operand: &ScalarExpr, source: Option<&str>, target: &str) -> bool {
+    let (ScalarExpr::Literal(operand) | ScalarExpr::TypedLiteral { value: operand, .. }) = operand
+    else {
+        return false;
+    };
+    if uqa_sql::expr::composites::literal::contains_records(operand)
+        || uqa_sql::expr::datums::contains_datum(operand)
+    {
+        return false;
+    }
+    let Some(target) = uqa_sql::type_resolution::pg_catalog_builtin_type(target) else {
+        return false;
+    };
+    if !uqa_sql::type_resolution::immutable_cast_type(&target) {
+        return false;
+    }
+    source.is_none_or(|source| {
+        uqa_sql::ColumnType::from_sql_name(source).is_ok_and(|source| {
+            uqa_sql::type_resolution::immutable_cast_type(&source)
+                && uqa_sql::type_resolution::cast_volatility(&source, &target)
+                    == uqa_sql::ast::FunctionVolatility::Immutable
+        })
+    })
 }
 
 pub(super) fn column(

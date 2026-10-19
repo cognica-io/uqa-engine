@@ -140,7 +140,7 @@ fn removable(expression: &ScalarExpr, aggregates: &dyn AggregateClassifier) -> b
         }
         ScalarExpr::Cast { ty, .. }
             if !uqa_sql::ColumnType::from_sql_name(ty)
-                .is_ok_and(|ty| super::scalar::constants::immutable_cast_type(&ty)) =>
+                .is_ok_and(|ty| uqa_sql::type_resolution::immutable_cast_type(&ty)) =>
         {
             removable = false;
         }

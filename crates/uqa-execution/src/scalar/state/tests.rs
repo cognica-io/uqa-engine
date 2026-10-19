@@ -300,3 +300,91 @@ fn between_bounds_retain_separate_enum_state_after_primitive_rows() {
         Value::Bool(false)
     );
 }
+
+fn literal_cast(literal: Value, ty: &str) -> ScalarExpr {
+    ScalarExpr::Cast {
+        implicit: true,
+        expr: Box::new(ScalarExpr::Literal(literal)),
+        ty: ty.into(),
+    }
+}
+
+fn evaluate_rows(
+    prepared: &PreparedExpressions<ScalarExpr>,
+    rows: i64,
+) -> Vec<Result<Value, SQLError>> {
+    (0..rows)
+        .map(|quantity| {
+            let row = ResultRow::from([("quantity".into(), Value::Int(quantity))]);
+            let context =
+                ScalarEvalContext::new(Some(&row), &[]).with_function_states(prepared.calls());
+            eval_scalar(prepared, &context)
+        })
+        .collect()
+}
+
+#[test]
+fn immutable_literal_casts_convert_once_per_prepared_execution() {
+    let prepared = PreparedExpressions::scalar(ScalarExpr::Binary {
+        op: uqa_sql::ast::BinaryOp::GreaterEqual,
+        lhs: Box::new(ScalarExpr::Column("quantity".into())),
+        rhs: Box::new(literal_cast(Value::Int(10), "pg_catalog.\"numeric\"")),
+    });
+    assert_eq!(prepared.calls().constant_casts.len(), 1);
+    CONSTANT_CAST_CONVERSIONS.with(|count| count.set(0));
+    let results = evaluate_rows(&prepared, 1_000);
+    for (quantity, result) in results.into_iter().enumerate() {
+        assert_eq!(
+            result.unwrap(),
+            Value::Bool(quantity >= 10),
+            "row {quantity}"
+        );
+    }
+    assert_eq!(CONSTANT_CAST_CONVERSIONS.with(std::cell::Cell::get), 1);
+
+    // A clone prepares independent state, which converts its literal again once.
+    let cloned = prepared.clone();
+    CONSTANT_CAST_CONVERSIONS.with(|count| count.set(0));
+    assert!(evaluate_rows(&cloned, 100)
+        .into_iter()
+        .all(|result| result.is_ok()));
+    assert_eq!(CONSTANT_CAST_CONVERSIONS.with(std::cell::Cell::get), 1);
+}
+
+#[test]
+fn search_path_or_failing_literal_casts_convert_at_every_evaluation() {
+    // The grammar spells keyword types such as NUMERIC in pg_catalog, while an identifier such as int8 can select another type through search_path.
+    for (target, conversions) in [("numeric", 1), ("int8", 50)] {
+        let prepared = PreparedExpressions::scalar(ScalarExpr::Binary {
+            op: uqa_sql::ast::BinaryOp::GreaterEqual,
+            lhs: Box::new(ScalarExpr::Column("quantity".into())),
+            rhs: Box::new(literal_cast(Value::Int(10), target)),
+        });
+        CONSTANT_CAST_CONVERSIONS.with(|count| count.set(0));
+        let results = evaluate_rows(&prepared, 50);
+        for (quantity, result) in results.into_iter().enumerate() {
+            assert_eq!(
+                result.unwrap(),
+                Value::Bool(quantity >= 10),
+                "{target} row {quantity}"
+            );
+        }
+        assert_eq!(
+            CONSTANT_CAST_CONVERSIONS.with(std::cell::Cell::get),
+            conversions,
+            "{target}"
+        );
+    }
+
+    // A failed conversion is reported by every evaluation instead of being retained.
+    let failing = PreparedExpressions::scalar(literal_cast(
+        Value::Str("not a number".into()),
+        "pg_catalog.\"numeric\"",
+    ));
+    CONSTANT_CAST_CONVERSIONS.with(|count| count.set(0));
+    let results = evaluate_rows(&failing, 3);
+    assert!(results.iter().all(|result| result
+        .as_ref()
+        .is_err_and(|error| error.sqlstate() == Some("22P02"))));
+    assert_eq!(CONSTANT_CAST_CONVERSIONS.with(std::cell::Cell::get), 3);
+}

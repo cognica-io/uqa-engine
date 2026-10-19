@@ -8,7 +8,7 @@
 
 mod catalog;
 mod volatility;
-pub use volatility::cast_volatility;
+pub use volatility::{cast_volatility, immutable_cast_type, pg_catalog_builtin_type};
 
 use crate::ast::ColumnType;
 use crate::SQLError;

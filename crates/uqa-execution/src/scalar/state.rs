@@ -6,6 +6,9 @@
 
 //! Function state belongs to immutable expressions prepared for one execution.
 
+use std::sync::OnceLock;
+
+use uqa_core::Value;
 use uqa_sql::{
     ast::{BinaryOp, FunctionBinding, FunctionDispatch},
     expr::enums::EnumComparisonState,
@@ -15,13 +18,24 @@ use uqa_sql::{
 #[cfg(test)]
 thread_local! {
     static COMPARISON_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(super) static CONSTANT_CAST_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The first conversion of a cast whose operand is a literal.
+#[derive(Debug)]
+pub(crate) enum ConstantCast {
+    /// An immutable conversion, which every later evaluation copies.
+    Retained(Value),
+    /// The conversion reads a catalog descriptor, a session setting or a type outside the builtin scalars, so every evaluation converts again.
+    PerEvaluation,
 }
 
 /// Read-only lookup into the function state owned by a prepared expression set.
-/// The state has one fixed-size entry per logical ordering comparison, never per input row.
+/// The state has one fixed-size entry per logical ordering comparison or literal cast, never per input row.
 #[derive(Debug, Default)]
 pub struct FunctionCallStates {
     enums: Vec<((usize, u8), EnumComparisonState)>,
+    constant_casts: Vec<(usize, OnceLock<ConstantCast>)>,
 }
 
 impl FunctionCallStates {
@@ -38,8 +52,27 @@ impl FunctionCallStates {
                 self.add(std::ptr::from_ref(low.as_ref()) as usize, 1);
                 self.add(std::ptr::from_ref(high.as_ref()) as usize, 1);
             }
+            ScalarExpr::Cast { expr, .. }
+                if matches!(expr.as_ref(), ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. }) =>
+            {
+                self.constant_casts
+                    .push((std::ptr::from_ref(expr.as_ref()) as usize, OnceLock::new()));
+            }
             _ => {},
         });
+    }
+
+    fn is_empty(&self) -> bool {
+        self.enums.is_empty() && self.constant_casts.is_empty()
+    }
+
+    /// The retained first conversion of the cast whose literal operand is `operand`.
+    pub(crate) fn constant_cast(&self, operand: &ScalarExpr) -> Option<&OnceLock<ConstantCast>> {
+        let address = std::ptr::from_ref(operand) as usize;
+        self.constant_casts
+            .binary_search_by_key(&address, |(key, _)| *key)
+            .ok()
+            .map(|index| &self.constant_casts[index].1)
     }
 
     fn add(&mut self, address: usize, slots: u8) {
@@ -117,7 +150,10 @@ struct PreparedCallStates<T> {
     visit_roots: VisitRoots<T>,
 }
 
-static EMPTY_CALL_STATES: FunctionCallStates = FunctionCallStates { enums: Vec::new() };
+static EMPTY_CALL_STATES: FunctionCallStates = FunctionCallStates {
+    enums: Vec::new(),
+    constant_casts: Vec::new(),
+};
 
 impl<T> PreparedExpressions<T> {
     pub(crate) fn new(expressions: T, visit_roots: VisitRoots<T>) -> Self {
@@ -125,10 +161,13 @@ impl<T> PreparedExpressions<T> {
         visit_roots(&expressions, &mut |expression| calls.register(expression));
         calls.enums.sort_unstable_by_key(|(address, _)| *address);
         calls.enums.dedup_by_key(|(address, _)| *address);
+        calls
+            .constant_casts
+            .sort_unstable_by_key(|(address, _)| *address);
+        calls.constant_casts.dedup_by_key(|(address, _)| *address);
         Self {
             expressions,
-            calls: (!calls.enums.is_empty())
-                .then(|| Box::new(PreparedCallStates { calls, visit_roots })),
+            calls: (!calls.is_empty()).then(|| Box::new(PreparedCallStates { calls, visit_roots })),
         }
     }
 
