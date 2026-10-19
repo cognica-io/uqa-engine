@@ -14863,7 +14863,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -15490,6 +15490,19 @@
       "capability": "Session regular-expression ownership",
       "workload": "Repeated SQL predicates through transaction commit/rollback, independent SQLite sessions and portal workers, then session destruction.",
       "invariant": "Results and NULLs remain exact; the session reuses one retained allocation across statements, peers own independent caches, portal workers share the invoking owner and session destruction returns every retained byte."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_compilation_does_not_evict_a_full_cache_without_memory_pressure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded retained regular expressions",
+      "workload": "Fill all 32 cache slots, compile an invalid pattern, then visit every retained pattern again.",
+      "invariant": "The invalid pattern returns 2201B without evicting a valid pattern, changing retained bytes or recompiling any cached pattern."
     }
   ]
 }

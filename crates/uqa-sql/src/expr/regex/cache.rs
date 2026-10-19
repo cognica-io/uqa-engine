@@ -115,9 +115,6 @@ impl RegexCache {
                 generation: entries.generation,
             };
         }
-        if entries.values.len() == CAPACITY {
-            entries.values.remove(0);
-        }
         Ok(entries.generation)
     }
 

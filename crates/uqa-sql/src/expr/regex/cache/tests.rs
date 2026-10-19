@@ -105,6 +105,29 @@ fn the_thirty_two_entry_limit_evicts_the_least_recently_used_pattern() {
 }
 
 #[test]
+fn failed_compilation_does_not_evict_a_full_cache_without_memory_pressure() {
+    let budget = MemoryBudget::new(4 << 20);
+    let cache = Arc::new(RegexCache::new(budget.clone()));
+    let _scope = RegexCacheScope::enter(Some(cache.clone()));
+    let control = ProductionControl::uncontrolled();
+    for index in 0..32 {
+        predicate(&format!("p{index}"), REG_ADVANCED, 950, "", &control).unwrap();
+    }
+    let retained = budget.used();
+    let error = predicate("(", REG_ADVANCED, 950, "", &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("2201B"));
+    assert_eq!(budget.used(), retained);
+    assert_eq!(cache.entries.lock().unwrap().values.len(), 32);
+    let before = COMPILES.get();
+    for index in 0..32 {
+        predicate(&format!("p{index}"), REG_ADVANCED, 950, "", &control).unwrap();
+    }
+    assert_eq!(COMPILES.get(), before);
+    cache.clear();
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn hits_observe_each_current_cancellation_and_scratch_allowance() {
     let retained = MemoryBudget::new(1 << 20);
     let cache = Arc::new(RegexCache::new(retained.clone()));
