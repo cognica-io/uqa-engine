@@ -14841,6 +14841,19 @@
       "capability": "SQL scalar binding stack",
       "workload": "Thirty-two nested retained concatenation calls through ordinary executable type/coercion binding on a 2 MiB stack.",
       "invariant": "Calls and retained metadata bind without a native stack overflow and preserve the declared text result."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "nested_collated_calls_fold_on_an_ordinary_thread_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/collations.rs",
+      "capability": "Scalar optimizer stack and retained metadata",
+      "workload": "Thirty-two chr/concatenation calls under lower and explicit C collation, analyzed, optimized and observed on a 2 MiB stack.",
+      "invariant": "Call simplification returns the exact lowercase value and retains its original result schema and collation without enlarging the stack."
     }
   ]
 }
