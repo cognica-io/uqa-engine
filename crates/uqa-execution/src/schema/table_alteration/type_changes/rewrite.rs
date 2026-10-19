@@ -46,6 +46,12 @@ pub(in crate::schema::table_alteration) struct TypeRewrites {
 }
 
 impl TypeRewrites {
+    pub(in crate::schema::table_alteration) fn validates_relation(&self, table: &str) -> bool {
+        self.relations
+            .iter()
+            .any(|relation| relation.table == table)
+    }
+
     pub(in crate::schema::table_alteration) fn capture<S: Clone + 'static>(
         context: &TableAlterContext<'_, S>,
         table: &str,

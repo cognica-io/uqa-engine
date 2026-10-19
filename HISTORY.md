@@ -12,6 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Restrict combined set-operation ORDER BY to output names and positions, preserving PostgreSQL clause-analysis order, literal and ordinal diagnostics, hidden operand names, prepared values and stored views.
 - Remove per-row and per-candidate type resolution from TPC-H-derived queries: builtin overload matching compares fixed type spellings, immutable literal casts convert once per execution, word-sized numeric arithmetic and comparison avoid arbitrary-precision temporaries, literal `ANY` and `ALL` membership uses the compiled predicate path, correlated subquery filters reach their scans with the outer row bound, builtin operator selections and parsed type-name spellings are retained, a statement whose date, time, timestamp or interval literals read the same under every DateStyle, IntervalStyle and transaction clock reuses its optimized plan across messages, row schema lookup maps hash with `ahash`, and column references keep the row slot they resolve to for rows of the same schema (#1108).
 - Keep word-sized numeric coefficients without a heap allocation: a finite numeric that fits a machine word retains only its boxed representation, so sums, products, copies and parsed literals no longer allocate and free an arbitrary-precision limb vector for every value (#1118).
 
@@ -26,6 +27,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Preserve explicitly requested schemaless document fields in streaming derived tables and CTEs instead of returning NULL after source projection.
 
 - Reject primary keys over existing NO INHERIT or unvalidated NOT NULL constraints with PostgreSQL diagnostics, preserving original column metadata and written-order ALTER COLUMN TYPE analysis.
+
+- Propagate primary-key NOT NULL requirements through ordinary inheritance, preserve existing child constraint identities, and match PostgreSQL ONLY checks, descendant locks, validation order and rollback.
 
 ## [0.6.0] - 2026-10-18
 
