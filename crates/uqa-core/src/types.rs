@@ -10,6 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
+#[cfg(test)]
 use chrono::{DateTime, NaiveDate};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 

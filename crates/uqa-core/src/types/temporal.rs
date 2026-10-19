@@ -6,7 +6,9 @@
 
 //! SQL temporal values, parsing, formatting, and total ordering.
 
-use super::{DateTime, NaiveDate, Ordering};
+use super::Ordering;
+#[cfg(test)]
+use super::{DateTime, NaiveDate};
 use crate::{
     memory::{ProductionControl, ProductionString},
     ValueRetentionError,
@@ -170,6 +172,7 @@ impl Ord for TemporalValue {
     }
 }
 
+#[cfg(test)]
 fn epoch_date() -> NaiveDate {
     DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive()
 }

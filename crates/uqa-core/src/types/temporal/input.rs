@@ -6,8 +6,7 @@
 
 //! Date and time input as `PostgreSQL`'s input functions read it: ISO 8601 dates, times and timestamps with a UTC offset and an `AD` or `BC` era, the special values `now`, `today`, `tomorrow`, `yesterday`, `epoch` and `allballs`, and the diagnostics `DecodeDateTime`, `DecodeTimeOnly`, `DecodeTimezone` and `ValidateDate` report, each kept apart so the SQL layer names the type and the text.
 
-use super::{epoch_date, TemporalInfinity, TemporalValue, MICROS_PER_DAY, MICROS_PER_SECOND};
-use chrono::NaiveDate;
+use super::{TemporalInfinity, TemporalValue, MICROS_PER_DAY, MICROS_PER_SECOND};
 
 /// Field order for ambiguous numeric calendar dates. ISO and compact dates retain year-first interpretation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -282,11 +281,8 @@ fn special_days(special: Special, now_micros: i64) -> Input<i32> {
 
 /// Days since 1970-01-01 of a validated calendar date; a year the day carrier cannot hold is out of range.
 fn calendar_days(calendar: Calendar) -> Input<i32> {
-    let year = i32::try_from(calendar.year).map_err(|_| TemporalInputError::OutOfRange)?;
-    let date = NaiveDate::from_ymd_opt(year, calendar.month, calendar.day)
-        .ok_or(TemporalInputError::OutOfRange)?;
-    i32::try_from(date.signed_duration_since(epoch_date()).num_days())
-        .map_err(|_| TemporalInputError::OutOfRange)
+    super::calendar::from_calendar(calendar.year, calendar.month, calendar.day)
+        .ok_or(TemporalInputError::OutOfRange)
 }
 
 /// Split the text into its fields as `ParseDateTime` and `DecodeDateTime` do for the ISO forms: a date, a time of day with an optional glued offset, a separate offset or zone name, a meridian, or one special word.

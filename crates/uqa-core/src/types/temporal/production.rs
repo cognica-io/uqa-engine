@@ -7,11 +7,11 @@
 //! Temporal producers use admitted text and borrowed parser tokens.
 
 use super::{
-    wall_clock_micros, DateTime, ProductionControl, ProductionString, TemporalDateOrder,
-    TemporalInputError, TemporalValue, ValueRetentionError, MICROS_PER_DAY, MICROS_PER_SECOND,
+    wall_clock_micros, ProductionControl, ProductionString, TemporalDateOrder, TemporalInputError,
+    TemporalValue, ValueRetentionError, MICROS_PER_DAY, MICROS_PER_SECOND,
 };
 use crate::memory::Produced;
-use chrono::{Datelike, NaiveDate, NaiveTime};
+use chrono::NaiveTime;
 
 impl TemporalValue {
     pub fn parse_same_kind_with_control(
@@ -375,14 +375,19 @@ fn format_timestamp(
     utc: bool,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
-    let Some(dt) = DateTime::from_timestamp_micros(micros) else {
-        return control.format(format_args!("{micros}"));
-    };
+    // Every day in the signed microsecond carrier fits in the integer day carrier.
+    let days = (micros.div_euclid(MICROS_PER_DAY)) as i32;
+    let (year, month, day) = super::calendar::to_output_calendar(days);
+    let seconds = micros.rem_euclid(MICROS_PER_DAY) / MICROS_PER_SECOND;
     let mut out = ProductionString::new(*control);
-    let local = dt.naive_utc();
-    push_date(&mut out, local.date(), control)?;
+    push_date(&mut out, year, month, day, control)?;
     out.push(' ')?;
-    out.push_str(&control.format(format_args!("{}", local.format("%H:%M:%S")))?)?;
+    out.push_str(&control.format(format_args!(
+        "{:02}:{:02}:{:02}",
+        seconds / 3600,
+        seconds / 60 % 60,
+        seconds % 60
+    ))?)?;
     append_fraction(
         &mut out,
         micros.rem_euclid(MICROS_PER_SECOND) as u64,
@@ -391,28 +396,25 @@ fn format_timestamp(
     if utc {
         out.push_str("+00")?;
     }
-    push_era(&mut out, local.date())?;
+    push_era(&mut out, year)?;
     out.finish()
 }
 
 /// `EncodeDateOnly`'s calendar fields: a year of at least four digits without a sign, counting years before the common era from 1 BC as `-(year - 1)` does, followed by the month and day.
 fn push_date(
     out: &mut ProductionString<'_>,
-    date: NaiveDate,
+    year: i64,
+    month: i64,
+    day: i64,
     control: &ProductionControl<'_>,
 ) -> Result<(), ValueRetentionError> {
-    let year = i64::from(date.year());
     let displayed = if year > 0 { year } else { 1 - year };
-    out.push_str(&control.format(format_args!(
-        "{displayed:04}-{:02}-{:02}",
-        date.month(),
-        date.day()
-    ))?)
+    out.push_str(&control.format(format_args!("{displayed:04}-{month:02}-{day:02}"))?)
 }
 
 /// The ` BC` suffix `EncodeDateOnly` and `EncodeDateTime` append to a year at or before zero.
-fn push_era(out: &mut ProductionString<'_>, date: NaiveDate) -> Result<(), ValueRetentionError> {
-    if date.year() <= 0 {
+fn push_era(out: &mut ProductionString<'_>, year: i64) -> Result<(), ValueRetentionError> {
+    if year <= 0 {
         out.push_str(" BC")?;
     }
     Ok(())
