@@ -3,6 +3,9 @@ name: Dependency checks
 on:
   pull_request:
     paths:
+      - ".github/actions/select-validation-inputs/**"
+      - "scripts/performance_change_scope.py"
+      - "scripts/tests/test_performance_change_scope.py"
       - Cargo.toml
       - Cargo.lock
       - "crates/**/Cargo.toml"
@@ -12,14 +15,28 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
+  scope:
+    name: Select dependencies inputs
+    runs-on: ubuntu-24.04
+    outputs:
+      required: ${{ steps.select.outputs.required }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: select
+        uses: ./.github/actions/select-validation-inputs
+        with:
+          kind: dependencies
+          base: ${{ github.event.pull_request.base.sha || github.event.before }}
+          before: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
   deny:
+    needs: scope
+    if: needs.scope.outputs.required == 'true'
     name: Verify dependency policy
     runs-on: ubuntu-24.04
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

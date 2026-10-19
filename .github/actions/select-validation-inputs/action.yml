@@ -1,0 +1,44 @@
+name: Select changed validation inputs
+description: Preserve prior validation when a PR update changes no relevant inputs.
+inputs:
+  kind:
+    description: Validation input set (regression, regex or dependencies).
+    required: true
+  base:
+    description: Current pull-request base or preceding main revision.
+    required: true
+  before:
+    description: Previous head for a pull-request synchronize event.
+    required: false
+    default: ""
+outputs:
+  required:
+    description: Whether relevant inputs require a new validation run.
+    value: ${{ steps.select.outputs.required }}
+runs:
+  using: composite
+  steps:
+    - name: Verify input selection
+      shell: bash
+      run: python3 -m unittest discover -s scripts/tests -p test_performance_change_scope.py
+    - name: Select changed inputs
+      id: select
+      shell: bash
+      env:
+        VALIDATION_KIND: ${{ inputs.kind }}
+        VALIDATION_BASE: ${{ inputs.base }}
+        VALIDATION_PREVIOUS_HEAD: ${{ inputs.before }}
+      run: |
+        if [[ -z "$VALIDATION_BASE" || "$VALIDATION_BASE" =~ ^0+$ ]]; then
+          echo "required=true" >> "$GITHUB_OUTPUT"
+        elif ! git fetch --no-tags --depth=200 origin "$VALIDATION_BASE"; then
+          echo "required=true" >> "$GITHUB_OUTPUT"
+        elif [[ -n "$VALIDATION_PREVIOUS_HEAD" ]]; then
+          if git fetch --no-tags --depth=200 origin "$VALIDATION_PREVIOUS_HEAD"; then
+            python3 scripts/performance_change_scope.py --kind "$VALIDATION_KIND" --base "$VALIDATION_BASE" --before "$VALIDATION_PREVIOUS_HEAD" >> "$GITHUB_OUTPUT"
+          else
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          python3 scripts/performance_change_scope.py --kind "$VALIDATION_KIND" --base "$VALIDATION_BASE" >> "$GITHUB_OUTPUT"
+        fi
