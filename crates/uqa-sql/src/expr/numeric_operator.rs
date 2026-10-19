@@ -44,6 +44,20 @@ pub fn eval_numeric_operator_with_control(
     types: &[Option<ColumnType>],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    eval_numeric_operator_with_resolution(operator, arguments, types, control)
+        .map(|(value, _)| value)
+}
+
+mod resolved;
+pub use resolved::ResolvedNumericOperator;
+
+/// Evaluate before retaining an immutable builtin numeric selection. Unknown, domain and other catalog-defined operands preserve their original conversion path.
+pub fn eval_numeric_operator_with_resolution(
+    operator: NumericOperator,
+    arguments: &[Value],
+    types: &[Option<ColumnType>],
+    control: &ProductionControl<'_>,
+) -> Result<(Produced<Value>, Option<ResolvedNumericOperator>)> {
     control.check()?;
     if arguments.len() != types.len() {
         return Err(SQLError::Internal(
@@ -51,6 +65,11 @@ pub fn eval_numeric_operator_with_control(
         ));
     }
     let selected = numeric_operator_types_with_control(operator, types, control)?;
+    if let Some(resolved) = ResolvedNumericOperator::from_selection(operator, types, &selected) {
+        return resolved
+            .evaluate(arguments, control)
+            .map(|value| (value, Some(resolved)));
+    }
     let mut converted = ProductionVec::new(*control);
     converted.reserve(arguments.len())?;
     for ((value, source), target) in arguments.iter().zip(types).zip(&selected.arguments) {
@@ -68,28 +87,38 @@ pub fn eval_numeric_operator_with_control(
     }
     let arguments = converted.finish()?;
     if arguments.iter().any(|value| matches!(value, Value::Null)) {
+        return Ok((
+            control.finish(Value::Null, control.empty_reservation())?,
+            None,
+        ));
+    }
+    let value = evaluate_converted(operator, &arguments, control)?;
+    let target = selected.result.sql_name_with_control(control)?;
+    super::cast_value_from_with_control(&value, &target, None, control).map(|value| (value, None))
+}
+
+fn evaluate_converted(
+    operator: NumericOperator,
+    arguments: &[Value],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    if arguments.iter().any(|value| matches!(value, Value::Null)) {
         return Ok(control.finish(Value::Null, control.empty_reservation())?);
     }
-    let value = if operator == NumericOperator::Plus {
-        control.copy_value(&arguments[0])?
-    } else {
-        let name = match operator {
-            NumericOperator::Modulo => "mod",
-            NumericOperator::Power => "power",
-            NumericOperator::SquareRoot => "sqrt",
-            NumericOperator::CubeRoot => "cbrt",
-            NumericOperator::Absolute => "abs",
-            NumericOperator::Plus => unreachable!("unary plus copied its selected operand"),
-        };
-        super::scalar_core::eval_core_functions_with_control(name, &arguments, control)
-            .or_else(|| {
-                super::scalar_math::eval_math_functions_with_control(name, &arguments, control)
-            })
-            .expect("numeric syntax selects an existing numeric function")?
+    if operator == NumericOperator::Plus {
+        return Ok(control.copy_value(&arguments[0])?);
+    }
+    let name = match operator {
+        NumericOperator::Modulo => "mod",
+        NumericOperator::Power => "power",
+        NumericOperator::SquareRoot => "sqrt",
+        NumericOperator::CubeRoot => "cbrt",
+        NumericOperator::Absolute => "abs",
+        NumericOperator::Plus => unreachable!("unary plus copied its selected operand"),
     };
-    // The shared carrier does not retain int2/int4 width; the selected result cast enforces absolute-value overflow and real width.
-    let target = selected.result.sql_name_with_control(control)?;
-    super::cast_value_from_with_control(&value, &target, None, control)
+    super::scalar_core::eval_core_functions_with_control(name, arguments, control)
+        .or_else(|| super::scalar_math::eval_math_functions_with_control(name, arguments, control))
+        .expect("numeric syntax selects an existing numeric function")
 }
 
 pub(super) fn eval_ast_operator(

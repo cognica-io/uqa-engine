@@ -188,7 +188,10 @@ pub(crate) use context::{
 pub use diagnostics::{unknown_function_error, value_type_name};
 pub use evaluator::eval;
 mod numeric_operator;
-pub use numeric_operator::{eval_numeric_operator, eval_numeric_operator_with_control};
+pub use numeric_operator::{
+    eval_numeric_operator, eval_numeric_operator_with_control,
+    eval_numeric_operator_with_resolution, ResolvedNumericOperator,
+};
 
 #[cfg(test)]
 mod tests;

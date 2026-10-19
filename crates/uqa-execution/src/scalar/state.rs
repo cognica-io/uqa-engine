@@ -44,6 +44,16 @@ pub(crate) enum RowCast {
     PerEvaluation,
 }
 
+/// A fixed numeric overload tied to the immutable schema that selected it.
+#[derive(Debug)]
+pub(crate) enum NumericCall {
+    Resolved {
+        operation: uqa_sql::expr::ResolvedNumericOperator,
+        schema: Option<RowSchema>,
+    },
+    PerEvaluation,
+}
+
 /// The context schema the resolution of a column reference depended on.
 #[derive(Debug)]
 pub(crate) enum ContextSchema {
@@ -68,22 +78,28 @@ pub(crate) struct ColumnSlot {
 }
 
 /// Read-only lookup into the function state owned by a prepared expression set.
-/// The state has one fixed-size entry per logical ordering comparison, literal/row cast or column reference, never per input row.
+/// The state has one fixed-size entry per logical ordering comparison, numeric operator, literal/row cast or column reference, never per input row.
 #[derive(Debug, Default)]
 pub struct FunctionCallStates {
     enums: Vec<((usize, u8), EnumComparisonState)>,
     constant_casts: Vec<(usize, OnceLock<ConstantCast>)>,
     columns: Vec<(usize, OnceLock<ColumnSlot>)>,
     row_casts: Vec<(usize, OnceLock<RowCast>)>,
+    numeric_operators: Vec<(usize, OnceLock<NumericCall>)>,
 }
 
 impl FunctionCallStates {
     fn register(&mut self, expression: &ScalarExpr) {
         let first_row_cast = self.row_casts.len();
+        let first_numeric = self.numeric_operators.len();
         let mut parameter_dependent = false;
         expression.visit(&mut |expression| match expression {
             ScalarExpr::Func { name, binding, args, .. } => {
                 self.add(args.as_ptr() as usize, function_slots(name, binding.as_ref(), args));
+                if binding.as_ref().is_some_and(|binding| binding.builtin
+                    && matches!(binding.dispatch, Some(FunctionDispatch::NumericOperator(operator)) if args.len() == operator.arity())) {
+                    self.numeric_operators.push((args.as_ptr() as usize, OnceLock::new()));
+                }
             }
             ScalarExpr::Binary {
                 op: BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual,
@@ -112,6 +128,7 @@ impl FunctionCallStates {
         // One traversal per root avoids rescanning every nested cast's subtree. Parameter-dependent roots keep live inference without disabling independent roots.
         if parameter_dependent {
             self.row_casts.truncate(first_row_cast);
+            self.numeric_operators.truncate(first_numeric);
         }
     }
 
@@ -120,6 +137,7 @@ impl FunctionCallStates {
             && self.constant_casts.is_empty()
             && self.columns.is_empty()
             && self.row_casts.is_empty()
+            && self.numeric_operators.is_empty()
     }
 
     /// The retained key of the column reference `expression`.
@@ -146,6 +164,17 @@ impl FunctionCallStates {
             .binary_search_by_key(&address, |(key, _)| *key)
             .ok()
             .map(|index| &self.row_casts[index].1)
+    }
+
+    pub(crate) fn numeric_operator(
+        &self,
+        arguments: &[ScalarExpr],
+    ) -> Option<&OnceLock<NumericCall>> {
+        let address = arguments.as_ptr() as usize;
+        self.numeric_operators
+            .binary_search_by_key(&address, |(key, _)| *key)
+            .ok()
+            .map(|index| &self.numeric_operators[index].1)
     }
 
     fn add(&mut self, address: usize, slots: u8) {
@@ -228,6 +257,7 @@ static EMPTY_CALL_STATES: FunctionCallStates = FunctionCallStates {
     constant_casts: Vec::new(),
     columns: Vec::new(),
     row_casts: Vec::new(),
+    numeric_operators: Vec::new(),
 };
 
 impl<T> PreparedExpressions<T> {
@@ -246,6 +276,12 @@ impl<T> PreparedExpressions<T> {
             .row_casts
             .sort_unstable_by_key(|(address, _)| *address);
         calls.row_casts.dedup_by_key(|(address, _)| *address);
+        calls
+            .numeric_operators
+            .sort_unstable_by_key(|(address, _)| *address);
+        calls
+            .numeric_operators
+            .dedup_by_key(|(address, _)| *address);
         Self {
             expressions,
             calls: (!calls.is_empty()).then(|| Box::new(PreparedCallStates { calls, visit_roots })),
