@@ -1,0 +1,16 @@
+{
+  "postgresql": "18.4",
+  "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+  "cases": [
+    {
+      "format": "text",
+      "sql": "COPY (SELECT NULL::text AS n, ''::text AS empty, E'é,\\t\"\\\\\\n' AS special, '\\x00ff'::bytea AS bytes, true AS flag, 'x  '::char(3) AS padded, '1 2'::int2vector AS ids) TO STDOUT WITH (FORMAT text, HEADER true);",
+      "expected": "n\tempty\tspecial\tbytes\tflag\tpadded\tids\n\\N\t\té,\\t\"\\\\\\n\t\\\\x00ff\tt\tx  \t1 2\n"
+    },
+    {
+      "format": "csv",
+      "sql": "COPY (SELECT NULL::text AS n, ''::text AS empty, E'é,\\t\"\\\\\\n' AS special, '\\x00ff'::bytea AS bytes, true AS flag, 'x  '::char(3) AS padded, '1 2'::int2vector AS ids) TO STDOUT WITH (FORMAT csv, HEADER true);",
+      "expected": "n,empty,special,bytes,flag,padded,ids\n,\"\",\"é,\t\"\"\\\n\",\\x00ff,t,x  ,1 2\n"
+    }
+  ]
+}

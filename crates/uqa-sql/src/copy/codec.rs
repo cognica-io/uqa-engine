@@ -6,10 +6,8 @@
 
 //! `PostgreSQL` COPY text and CSV stream codecs.
 
-use uqa_core::Value;
-
 use super::{CopyFormat, CopyHeader, CopyInputField, CopyOptions};
-use crate::{ColumnType, SQLError, SQLResult};
+use crate::{SQLError, SQLResult};
 
 /// Decode a complete text or CSV COPY stream into rows.
 pub fn decode_copy_input(
@@ -381,7 +379,15 @@ fn copy_encoding_error(line: Option<usize>) -> SQLError {
 
 /// Encode one SQL result using `PostgreSQL` COPY text or CSV representation.
 pub fn encode_copy_result(result: &SQLResult, options: &CopyOptions) -> Result<Vec<u8>, SQLError> {
-    encode_copy_result_impl(result, options, None)
+    let mut output = Vec::new();
+    super::output::write_copy_result(
+        result,
+        options,
+        &mut output,
+        None,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?;
+    Ok(output)
 }
 
 /// Encode one SQL result while resolving catalog-backed `reg*` text output through the engine hook.
@@ -390,171 +396,13 @@ pub fn encode_copy_result_with_engine(
     options: &CopyOptions,
     engine: &dyn crate::expr::EngineHook,
 ) -> Result<Vec<u8>, SQLError> {
-    encode_copy_result_impl(result, options, Some(engine))
-}
-
-fn encode_copy_result_impl(
-    result: &SQLResult,
-    options: &CopyOptions,
-    engine: Option<&dyn crate::expr::EngineHook>,
-) -> Result<Vec<u8>, SQLError> {
-    if options.format == CopyFormat::Binary {
-        return Err(SQLError::Unsupported(
-            "binary COPY format is not implemented".into(),
-        ));
-    }
     let mut output = Vec::new();
-    if options.header != CopyHeader::False {
-        encode_copy_row(
-            result.columns.iter().map(|name| Some(name.as_str())),
-            options,
-            &mut output,
-        );
-    }
-    for row_index in 0..result.rows.len() {
-        let values = result
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(column, _)| {
-                result
-                    .value_at(row_index, column)
-                    .map_or(Ok(None), |value| {
-                        copy_value_text(
-                            value,
-                            result.column_types.get(column).and_then(Option::as_ref),
-                            engine,
-                        )
-                    })
-            })
-            .collect::<Result<Vec<_>, SQLError>>()?;
-        match options.format {
-            CopyFormat::Text => encode_text_value_row(values, options, &mut output),
-            CopyFormat::Csv => encode_csv_value_row(values, options, &mut output),
-            CopyFormat::Binary => unreachable!(),
-        }
-    }
+    super::output::write_copy_result(
+        result,
+        options,
+        &mut output,
+        Some(engine),
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?;
     Ok(output)
-}
-
-fn copy_value_text(
-    value: &Value,
-    ty: Option<&ColumnType>,
-    engine: Option<&dyn crate::expr::EngineHook>,
-) -> Result<Option<String>, SQLError> {
-    if matches!(value, Value::Null) {
-        return Ok(None);
-    }
-    if let Some(text) = ty
-        .map(|ty| crate::expr::format_regtype_value(value, ty, engine))
-        .transpose()?
-        .flatten()
-    {
-        return Ok(Some(text));
-    }
-    if matches!(ty, Some(ColumnType::Int2Vector | ColumnType::OidVector)) {
-        return crate::expr::vector_value_to_string(value);
-    }
-    Ok(Some(match value {
-        Value::Bool(true) => "t".into(),
-        Value::Bool(false) => "f".into(),
-        Value::Float(value) if value.is_nan() => "NaN".into(),
-        Value::Float(value) if *value == f64::INFINITY => "Infinity".into(),
-        Value::Float(value) if *value == f64::NEG_INFINITY => "-Infinity".into(),
-        Value::FixedChar(value) => value.clone(),
-        other => crate::expr::value_to_string(other)?,
-    }))
-}
-
-fn encode_text_value_row(
-    fields: impl IntoIterator<Item = Option<String>>,
-    options: &CopyOptions,
-    output: &mut Vec<u8>,
-) {
-    for (index, field) in fields.into_iter().enumerate() {
-        if index != 0 {
-            output.push(options.delimiter);
-        }
-        match field {
-            None => output.extend_from_slice(options.null.as_bytes()),
-            Some(field) => encode_text_field(&field, options.delimiter, output),
-        }
-    }
-    output.push(b'\n');
-}
-
-fn encode_text_field(field: &str, delimiter: u8, output: &mut Vec<u8>) {
-    for byte in field.bytes() {
-        match byte {
-            0x08 => output.extend_from_slice(b"\\b"),
-            0x0c => output.extend_from_slice(b"\\f"),
-            b'\n' => output.extend_from_slice(b"\\n"),
-            b'\r' => output.extend_from_slice(b"\\r"),
-            b'\t' => output.extend_from_slice(b"\\t"),
-            0x0b => output.extend_from_slice(b"\\v"),
-            b'\\' => output.extend_from_slice(b"\\\\"),
-            escaped if escaped == delimiter => {
-                output.push(b'\\');
-                output.push(escaped);
-            }
-            other => output.push(other),
-        }
-    }
-}
-
-fn encode_csv_value_row(
-    fields: impl IntoIterator<Item = Option<String>>,
-    options: &CopyOptions,
-    output: &mut Vec<u8>,
-) {
-    for (index, field) in fields.into_iter().enumerate() {
-        if index != 0 {
-            output.push(options.delimiter);
-        }
-        match field {
-            None => output.extend_from_slice(options.null.as_bytes()),
-            Some(field) => encode_csv_field(&field, options, output),
-        }
-    }
-    output.push(b'\n');
-}
-
-fn encode_copy_row<'a>(
-    fields: impl IntoIterator<Item = Option<&'a str>>,
-    options: &CopyOptions,
-    output: &mut Vec<u8>,
-) {
-    match options.format {
-        CopyFormat::Text => encode_text_value_row(
-            fields.into_iter().map(|field| field.map(str::to_string)),
-            options,
-            output,
-        ),
-        CopyFormat::Csv => encode_csv_value_row(
-            fields.into_iter().map(|field| field.map(str::to_string)),
-            options,
-            output,
-        ),
-        CopyFormat::Binary => {}
-    }
-}
-
-fn encode_csv_field(field: &str, options: &CopyOptions, output: &mut Vec<u8>) {
-    let needs_quotes = field.is_empty() && options.null.is_empty()
-        || field == options.null
-        || field.bytes().any(|byte| {
-            matches!(byte, b'\n' | b'\r') || byte == options.delimiter || byte == options.quote
-        });
-    if !needs_quotes {
-        output.extend_from_slice(field.as_bytes());
-        return;
-    }
-    output.push(options.quote);
-    for byte in field.bytes() {
-        if byte == options.quote || byte == options.escape {
-            output.push(options.escape);
-        }
-        output.push(byte);
-    }
-    output.push(options.quote);
 }
