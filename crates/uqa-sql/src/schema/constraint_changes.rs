@@ -132,18 +132,58 @@ pub fn ensure_not_null_inheritable(
     sqlstate: &str,
 ) -> Result<(), SQLError> {
     if column.not_null_no_inherit {
-        let relation = uqa_core::RelationIdentity::from_legacy_name(table)
-            .map_err(|error| SQLError::Internal(format!("resolve NOT NULL relation: {error}")))?;
-        let name = column.not_null_name.as_deref().unwrap_or("<unnamed>");
         return Err(constraint_error(
             sqlstate,
-            format!(
-            "cannot change NO INHERIT status of NOT NULL constraint \"{name}\" on relation \"{}\"",
-            relation.name,
-        ),
+            not_null_inheritance_message(table, column)?,
         ));
     }
     Ok(())
+}
+
+/// An inherited ADD CONSTRAINT cannot silently change a child's inheritance or validation requirement.
+pub fn validate_inherited_not_null_addition(
+    table: &str,
+    column: &crate::ast::ColumnDef,
+    validated: bool,
+) -> Result<(), SQLError> {
+    let (message, hint) = if column.not_null_no_inherit {
+        (
+            not_null_inheritance_message(table, column)?,
+            "You might need to make the existing constraint inheritable using ALTER TABLE ... ALTER CONSTRAINT ... INHERIT.",
+        )
+    } else if validated && !column.not_null_validated {
+        let relation =
+            uqa_core::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+        let name = column.not_null_name.as_deref().unwrap_or("<unnamed>");
+        (
+            format!(
+                "incompatible NOT VALID constraint \"{name}\" on relation \"{}\"",
+                relation.name
+            ),
+            "You might need to validate it using ALTER TABLE ... VALIDATE CONSTRAINT.",
+        )
+    } else {
+        return Ok(());
+    };
+    Err(SQLError::Diagnostic {
+        sqlstate: "55000".into(),
+        message,
+        detail: None,
+        hint: Some(hint.into()),
+    })
+}
+
+fn not_null_inheritance_message(
+    table: &str,
+    column: &crate::ast::ColumnDef,
+) -> Result<String, SQLError> {
+    let relation = uqa_core::RelationIdentity::from_legacy_name(table)
+        .map_err(|error| SQLError::Internal(format!("resolve NOT NULL relation: {error}")))?;
+    let name = column.not_null_name.as_deref().unwrap_or("<unnamed>");
+    Ok(format!(
+        "cannot change NO INHERIT status of NOT NULL constraint \"{name}\" on relation \"{}\"",
+        relation.name
+    ))
 }
 
 pub fn take_column_check(column: &mut crate::ast::ColumnDef) -> Option<TableCheck> {

@@ -167,6 +167,22 @@ pub fn validate_key_definition(
     relation: &KeyRelation<'_>,
     key: &TableKeyConstraint,
 ) -> Result<(), SQLError> {
+    validate_definition(relation, key, false)
+}
+
+/// An ALTER primary key requires the generated or original NOT NULL constraints to still exist when its index is defined.
+pub fn validate_added_key_definition(
+    relation: &KeyRelation<'_>,
+    key: &TableKeyConstraint,
+) -> Result<(), SQLError> {
+    validate_definition(relation, key, true)
+}
+
+fn validate_definition(
+    relation: &KeyRelation<'_>,
+    key: &TableKeyConstraint,
+    require_not_null: bool,
+) -> Result<(), SQLError> {
     let declared = |name: &str| relation.columns.iter().any(|column| column.name == name);
     let access_method = if key.without_overlaps {
         "gist"
@@ -196,6 +212,20 @@ pub fn validate_key_definition(
         let local = uqa_core::RelationIdentity::from_legacy_name(relation.table)
             .map_err(SQLError::Internal)?;
         return Err(multiple_primary_keys(&local.name));
+    }
+    if require_not_null && key.kind == TableKeyConstraintKind::PrimaryKey {
+        for name in &key.columns {
+            if relation
+                .columns
+                .iter()
+                .any(|column| column.name == *name && !column.not_null)
+            {
+                return Err(SQLError::Routine {
+                    sqlstate: "42P16".into(),
+                    message: format!("primary key column \"{name}\" is not marked NOT NULL"),
+                });
+            }
+        }
     }
     if let Some(partition) = relation.partition {
         crate::schema::indexes::unique::validate_partitioned_key_constraint(

@@ -18,6 +18,13 @@ pub struct RewriteDeferral {
     active: std::cell::Cell<bool>,
     physical:
         std::cell::RefCell<std::collections::BTreeMap<String, std::collections::BTreeSet<String>>>,
+    not_null: std::cell::RefCell<Option<NotNullChecks>>,
+}
+
+#[derive(Default)]
+struct NotNullChecks {
+    relations: Vec<(String, std::collections::BTreeSet<String>)>,
+    positions: std::collections::BTreeMap<String, usize>,
 }
 
 impl RewriteDeferral {
@@ -31,6 +38,32 @@ impl RewriteDeferral {
             previous: self.active.replace(true),
             physical: self.physical.take(),
         }
+    }
+
+    pub(in crate::schema) fn defer_not_null(&self) -> NotNullDeferralGuard<'_> {
+        NotNullDeferralGuard {
+            state: self,
+            previous: self.not_null.replace(Some(NotNullChecks::default())),
+        }
+    }
+
+    pub(in crate::schema) fn retain_not_null_check(&self, table: &str, column: &str) -> bool {
+        let mut retained = self.not_null.borrow_mut();
+        let Some(checks) = retained.as_mut() else {
+            return false;
+        };
+        let position = *checks
+            .positions
+            .entry(table.to_string())
+            .or_insert_with(|| {
+                let position = checks.relations.len();
+                checks
+                    .relations
+                    .push((table.to_string(), std::collections::BTreeSet::new()));
+                position
+            });
+        checks.relations[position].1.insert(column.to_string());
+        true
     }
 
     pub(in crate::schema) fn require_physical_rewrite(&self, table: &str, column: &str) {
@@ -53,6 +86,28 @@ impl RewriteDeferral {
             .flatten()
             .cloned()
             .collect()
+    }
+}
+
+pub(in crate::schema) struct NotNullDeferralGuard<'a> {
+    state: &'a RewriteDeferral,
+    previous: Option<NotNullChecks>,
+}
+
+impl NotNullDeferralGuard<'_> {
+    pub(in crate::schema) fn take_checks(
+        &self,
+    ) -> Vec<(String, std::collections::BTreeSet<String>)> {
+        self.state
+            .not_null
+            .take()
+            .map_or_else(Vec::new, |checks| checks.relations)
+    }
+}
+
+impl Drop for NotNullDeferralGuard<'_> {
+    fn drop(&mut self) {
+        self.state.not_null.replace(self.previous.take());
     }
 }
 

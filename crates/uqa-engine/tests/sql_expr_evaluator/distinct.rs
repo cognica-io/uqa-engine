@@ -173,7 +173,7 @@ fn distinct_ordering_validation_matches_postgresql() {
     assert_eq!(out_of_range.sqlstate(), Some("42P10"));
     assert!(out_of_range
         .to_string()
-        .contains("DISTINCT ON position 3 is not in the select list"));
+        .contains("DISTINCT ON position 3 is not in select list"));
 
     let reordered = eng
         .sql(
