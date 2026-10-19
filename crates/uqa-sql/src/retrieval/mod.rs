@@ -155,8 +155,8 @@ pub fn lower_where(expr: &ScalarExpr, constants: &RetrievalConstants<'_>) -> Opt
         }
         ScalarExpr::Between { expr, low, high } => {
             let field = predicates::filter_field(expr, constants)?;
-            let lo = const_value(low, constants)?;
-            let hi = const_value(high, constants)?;
+            let lo = predicates::filter_constant(low, constants)?;
+            let hi = predicates::filter_constant(high, constants)?;
             Some(RetrievalExpr::Filter {
                 field,
                 predicate: Predicate::Between { low: lo, high: hi },
@@ -183,7 +183,8 @@ fn lower_membership(
             }
             crate::semantics::MembershipItem::Constant(value) => value.clone(),
         };
-        if matches!(value, Value::Array(_)) {
+        // The untyped posting set has no selected element operator or session timezone. Keep these operands in the SQL evaluator; physical carrier identity is not their SQL equality.
+        if matches!(value, Value::Array(_) | Value::Temporal(_)) {
             return None;
         }
         if matches!(value, Value::Null) {

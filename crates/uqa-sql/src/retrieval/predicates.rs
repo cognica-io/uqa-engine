@@ -12,7 +12,7 @@ use super::{
     lower_multi_field_match, lower_operator_arg, lower_positive_evidence_pool,
     lower_staged_retrieval, try_lower_attention_fusion, try_lower_fts_match, try_lower_knn_match,
     try_lower_text_match, BinaryOp, Predicate, RetrievalConstants, RetrievalExpr, ScalarExpr,
-    TextScoringMode,
+    TextScoringMode, Value,
 };
 
 /// Build document-level SQL Boolean algebra without weakening the carrier
@@ -126,7 +126,7 @@ pub(super) fn lower_comparison(
         _ => return None,
     };
     let field = filter_field(col_expr, constants)?;
-    let value = const_value(val_expr, constants)?;
+    let value = filter_constant(val_expr, constants)?;
     let predicate = match (op, swap) {
         (BinaryOp::Equal, _) => Predicate::Equals(value),
         (BinaryOp::NotEqual, _) => Predicate::NotEquals(value),
@@ -168,13 +168,22 @@ pub(super) fn lower_range(
         return None;
     }
     let field = filter_field(lower_column, constants)?;
-    let low = const_value(low, constants)?;
-    let high = const_value(high, constants)?;
+    let low = filter_constant(low, constants)?;
+    let high = filter_constant(high, constants)?;
     Some(RetrievalExpr::Filter {
         field,
         predicate: Predicate::Between { low, high },
         source: None,
     })
+}
+
+/// A storage predicate has no declared operand type or invoking session, so it cannot replace a selected temporal SQL operator.
+pub(super) fn filter_constant(
+    expression: &ScalarExpr,
+    constants: &RetrievalConstants<'_>,
+) -> Option<Value> {
+    let value = const_value(expression, constants)?;
+    (!matches!(value, Value::Temporal(_))).then_some(value)
 }
 
 /// The stored field a predicate on `expr` filters. An engine pseudo column is one only where the relation declares a column of that name, and the `_meta` namespace never is: a predicate on either stays relational, where the column carries the row's value.

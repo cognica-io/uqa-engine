@@ -8,21 +8,12 @@
 
 use super::{definition::ParameterDefinition, identifier_list::split_identifier_list};
 use crate::SQLError;
-use uqa_core::TemporalDateOrder;
+use uqa_core::{TemporalDateOrder, TemporalDateStyle as Style};
 
 #[derive(Clone, Copy, Default)]
 struct DateStyle {
     style: Style,
     order: TemporalDateOrder,
-}
-
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-enum Style {
-    #[default]
-    Iso,
-    Sql,
-    Postgres,
-    German,
 }
 
 impl DateStyle {
@@ -63,6 +54,12 @@ impl DateStyle {
 #[must_use]
 pub fn date_order(setting: &str) -> TemporalDateOrder {
     DateStyle::canonical(setting).order
+}
+
+/// The output style in a validated, canonical session setting.
+#[must_use]
+pub fn date_style(setting: &str) -> Style {
+    DateStyle::canonical(setting).style
 }
 
 pub(super) fn parse_setting(

@@ -7,8 +7,90 @@
 use super::*;
 use crate::types::temporal::epoch_date;
 use crate::{memory::MemoryBudget, CancellationToken};
+use chrono::NaiveDate;
 
 mod interval_limits;
+
+#[test]
+fn integer_calendar_timestamp_input_and_output_match_postgresql() {
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("tests/timestamps.json")).unwrap();
+    let budget = MemoryBudget::new(1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for case in reference["cases"].as_array().unwrap() {
+        let text = case["input"].as_str().unwrap();
+        let micros = case["unix_micros"]
+            .as_str()
+            .unwrap()
+            .parse::<i64>()
+            .unwrap();
+        let expected = match case["type"].as_str().unwrap() {
+            "timestamp" => TemporalValue::Timestamp { micros },
+            "timestamptz" => TemporalValue::TimestampTz { micros },
+            other => panic!("unexpected PostgreSQL type {other}"),
+        };
+        for input in [
+            expected.parse_same_kind(text),
+            expected
+                .parse_same_kind_with_control(text, &control)
+                .unwrap(),
+        ] {
+            assert_eq!(input.as_ref(), Some(&expected), "{text}");
+            assert_eq!(budget.used(), 0);
+        }
+        let output = expected.to_sql_string_with_control(&control).unwrap();
+        assert_eq!(output.as_str(), case["output"].as_str().unwrap(), "{text}");
+        assert_eq!(budget.used(), output.reserved_bytes());
+        drop(output);
+        assert_eq!(budget.used(), 0);
+    }
+    for text in ["400000-01-01", "294000-02-30"] {
+        assert!(TemporalValue::parse_timestamp(text).is_none());
+        assert!(TemporalValue::parse_timestamp_tz(text).is_none());
+    }
+}
+
+#[test]
+fn wide_timestamp_production_preserves_quotas_and_both_cancellation_scopes() {
+    let value = TemporalValue::Timestamp {
+        // PostgreSQL 18.4 timestamp_send('294000-01-01') plus the Unix epoch delta.
+        micros: 9_215_576_668_800_000_000,
+    };
+    let budget = MemoryBudget::new(0);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    assert_eq!(
+        value
+            .parse_same_kind_with_control("294000-01-01", &control)
+            .unwrap(),
+        Some(value.clone())
+    );
+    assert!(matches!(
+        value.to_sql_string_with_control(&control),
+        Err(ValueRetentionError::Memory(_))
+    ));
+    assert_eq!(budget.used(), 0);
+    for cancel_original in [true, false] {
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        assert!(matches!(
+            value.parse_same_kind_with_control("294000-01-01", &control),
+            Err(ValueRetentionError::Cancelled(_))
+        ));
+        assert!(matches!(
+            value.to_sql_string_with_control(&control),
+            Err(ValueRetentionError::Cancelled(_))
+        ));
+        assert_eq!(budget.used(), 0);
+    }
+}
 
 #[test]
 fn controlled_temporal_production_preserves_fractional_and_interval_spelling() {

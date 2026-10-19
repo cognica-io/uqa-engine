@@ -14,6 +14,8 @@ use super::{ProjectedExpr, ProjectedIntPredicate};
 use crate::scalar::scalar_integer_binary_width;
 use crate::{RowSchema, ScalarExpr};
 
+mod session;
+
 #[expect(
     clippy::too_many_lines,
     reason = "predicate compiler exhaustively accepts or rejects each IR shape"
@@ -23,6 +25,9 @@ pub(super) fn compile(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Option<ProjectedExpr>, SQLError> {
+    if session::required(expression, schema, params)? {
+        return Ok(None);
+    }
     // This evaluator has no value catalog. Preserve such operands for the canonical evaluator instead of losing record/enum identity during predicate pushdown.
     if matches!(
         expression,
@@ -150,9 +155,7 @@ pub(super) fn compile(
             }
             let expression = require(expr, schema, params)?;
             match expression {
-                // A typed SQL literal is represented as CAST(literal AS type).
-                // Evaluate it once while preparing the predicate instead of
-                // reparsing (notably DATE/TIMESTAMP text) for every input row.
+                // Session-independent noninteger literal casts can be evaluated once; integer casts retain row-evaluation error timing.
                 ProjectedExpr::Literal(value) if is_integer_type(ty) => ProjectedExpr::Cast {
                     expression: Box::new(ProjectedExpr::Literal(value)),
                     ty: ty.clone(),

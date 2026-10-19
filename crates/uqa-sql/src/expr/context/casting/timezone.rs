@@ -4,13 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Typed local timestamps use the invoking session's zone before the ordinary cast applies its type modifier.
+//! Typed timestamp casts use the invoking session's zone before applying the target type modifier.
 
 use uqa_core::{memory::ProductionControl, TemporalTimeZone, TemporalValue, Value};
 
 use super::{ColumnType, EngineHook, Result, SQLError};
 
-pub(super) fn cast_local_timestamp(
+pub(super) fn cast_timestamp(
     value: &Value,
     target: Option<&ColumnType>,
     engine: Option<&dyn EngineHook>,
@@ -25,6 +25,38 @@ pub(super) fn cast_local_timestamp(
     } = base
     {
         base = underlying;
+    }
+    if let Value::Temporal(value @ TemporalValue::TimestampTz { micros }) = value {
+        if matches!(
+            base,
+            ColumnType::Date | ColumnType::Timestamp | ColumnType::TimestampPrecision(_)
+        ) {
+            if let Some(infinity) = value.infinity() {
+                control.check()?;
+                return Ok(Some(Value::Temporal(if matches!(base, ColumnType::Date) {
+                    infinity.date()
+                } else {
+                    infinity.timestamp()
+                })));
+            }
+            let zone = session_zone(engine, control)?;
+            let offset = zone
+                .offset_at_micros(*micros)
+                .ok_or_else(|| crate::expr::datetime_out_of_range("timestamp"))?;
+            let local = i128::from(*micros) + i128::from(offset) * 1_000_000;
+            let value = if matches!(base, ColumnType::Date) {
+                let days = i32::try_from(local.div_euclid(86_400_000_000))
+                    .map_err(|_| crate::expr::datetime_out_of_range("date"))?;
+                TemporalValue::Date { days }
+            } else {
+                let micros = i64::try_from(local)
+                    .ok()
+                    .filter(|micros| TemporalValue::timestamp_micros_in_range(*micros))
+                    .ok_or_else(|| crate::expr::datetime_out_of_range("timestamp"))?;
+                TemporalValue::Timestamp { micros }
+            };
+            return Ok(Some(Value::Temporal(value)));
+        }
     }
     if !matches!(
         base,
@@ -48,6 +80,21 @@ pub(super) fn cast_local_timestamp(
             .ok_or_else(out_of_range)?,
         _ => return Ok(None),
     };
+    let zone = session_zone(engine, control)?;
+    let offset = zone
+        .offset_for_local(local.div_euclid(1_000_000))
+        .ok_or_else(out_of_range)?;
+    let micros = local
+        .checked_sub(i64::from(offset) * 1_000_000)
+        .filter(|micros| TemporalValue::timestamp_micros_in_range(*micros))
+        .ok_or_else(out_of_range)?;
+    Ok(Some(Value::Temporal(TemporalValue::TimestampTz { micros })))
+}
+
+fn session_zone(
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<TemporalTimeZone> {
     control.check()?;
     let name = engine
         .map(|engine| engine.runtime_parameter("TimeZone"))
@@ -60,16 +107,8 @@ pub(super) fn cast_local_timestamp(
         .transpose()?;
     control.check()?;
     let name = name.as_ref().map_or("UTC", |name| name.as_str());
-    let zone = TemporalTimeZone::named(name).ok_or_else(|| SQLError::Routine {
+    TemporalTimeZone::named(name).ok_or_else(|| SQLError::Routine {
         sqlstate: "22023".into(),
         message: format!("time zone \"{name}\" not recognized"),
-    })?;
-    let offset = zone
-        .offset_for_local(local.div_euclid(1_000_000))
-        .ok_or_else(out_of_range)?;
-    let micros = local
-        .checked_sub(i64::from(offset) * 1_000_000)
-        .filter(|micros| TemporalValue::timestamp_micros_in_range(*micros))
-        .ok_or_else(out_of_range)?;
-    Ok(Some(Value::Temporal(TemporalValue::TimestampTz { micros })))
+    })
 }

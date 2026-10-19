@@ -33,10 +33,9 @@ pub fn scalar_record_field_type_with_control(
             type_modifier: -1,
         }));
     }
-    let Some(name) = operand_type_name(expression, schema, params, engine, control, true)? else {
-        return Ok(None);
-    };
-    let Some(ty) = resolve_operand_type(&name, engine, control)? else {
+    let Some(ty) =
+        scalar_operand_type_with_engine_and_control(expression, schema, params, engine, control)?
+    else {
         return Ok(None);
     };
     let collation_oid = if let Some(oid) = schema.input_collation(expression) {
@@ -60,6 +59,20 @@ pub fn scalar_record_field_type_with_control(
         oid: crate::catalog::type_metadata::pg_type_oid(&ty) as u32,
         type_modifier: crate::catalog::type_metadata::pg_type_modifier(&ty) as i32,
     }))
+}
+
+/// Resolve an evaluated operand's declared type from its retained binding and catalog without evaluating it or repeating type input. Unknown operands remain absent; resource failures retain the caller's allowance and cancellation scopes.
+pub fn scalar_operand_type_with_engine_and_control(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    engine: Option<&dyn crate::expr::EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    let Some(name) = operand_type_name(expression, schema, params, engine, control, true)? else {
+        return Ok(None);
+    };
+    resolve_operand_type(&name, engine, control)
 }
 
 /// Retain an ARRAY constructor's analyzed scalar element identity without evaluating its items or repeating any input or domain checks. Bound item signatures take precedence over erased value carriers, including typed NULL and explicit record coercions.

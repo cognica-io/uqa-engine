@@ -462,17 +462,26 @@ fn execute_exists_subquery(
 
 fn execute_in_subquery(
     subquery: SubqueryId,
-    needle: &Value,
+    needle: crate::scalar::SubqueryNeedle<'_>,
     context: &ScalarEvalContext<'_>,
 ) -> Result<Option<bool>, SQLError> {
     let runner = context
         .subquery_runner()
         .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
     match context.physical_outer_row() {
-        Some((schema, row)) => {
-            runner.subquery_contains_physical(subquery, needle, schema, row, context.params())
-        }
-        None => runner.subquery_contains(subquery, needle, context.outer_row(), context.params()),
+        Some((schema, row)) => runner.subquery_contains_selected_physical(
+            subquery,
+            needle,
+            schema,
+            row,
+            context.params(),
+        ),
+        None => runner.subquery_contains_selected(
+            subquery,
+            needle,
+            context.outer_row(),
+            context.params(),
+        ),
     }
 }
 

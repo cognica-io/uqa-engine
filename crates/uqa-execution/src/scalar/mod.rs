@@ -28,7 +28,7 @@ pub use evaluator::{eval_generated_scalar_with_control, eval_scalar};
 pub use state::FunctionCallStates;
 pub(crate) use state::PreparedExpressions;
 pub(crate) use subquery::single_row_cardinality_error;
-pub use subquery::{ScalarSubqueryRunner, SubqueryResult};
+pub use subquery::{ScalarSubqueryRunner, SubqueryNeedle, SubqueryResult};
 
 #[cfg(test)]
 mod tests;

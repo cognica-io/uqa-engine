@@ -120,6 +120,102 @@ fn zoned(micros: i64) -> Value {
 }
 
 #[test]
+fn zoned_casts_to_civil_values_match_postgresql_at_transitions_and_extrema() {
+    let reference: serde_json::Value = serde_json::from_str(include_str!("timezone.json")).unwrap();
+    let cases = reference["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 99);
+    for case in cases {
+        let zone = match case["zone"].as_str().unwrap() {
+            "UTC" => "UTC",
+            "Asia/Seoul" => "Asia/Seoul",
+            "America/New_York" => "America/New_York",
+            _ => unreachable!(),
+        };
+        let session = Session::new(zone);
+        let input = Value::Temporal(
+            TemporalValue::parse_timestamp_tz(case["input"].as_str().unwrap()).unwrap(),
+        );
+        let target = case["target"].as_str().unwrap();
+        let actual =
+            cast_value_with_type_resolution(&input, Some("timestamptz"), target, Some(&session));
+        if let Some(expected) = case["expected"].as_str() {
+            let Value::Temporal(value) = actual.unwrap() else {
+                panic!("temporal cast: {case}");
+            };
+            // A cast can retain the day before the date input boundary; output observes that physical day without reparsing it.
+            assert_eq!(value.to_sql_string(), expected, "{case}");
+        } else {
+            let error = actual.unwrap_err();
+            assert_eq!(
+                error.sqlstate(),
+                case["error"]["sqlstate"].as_str(),
+                "{case}"
+            );
+            assert_eq!(
+                error.to_string(),
+                case["error"]["message"].as_str().unwrap(),
+                "{case}"
+            );
+        }
+        let finite = !matches!(&input, Value::Temporal(value) if value.infinity().is_some());
+        assert_eq!(session.calls.get(), usize::from(finite), "{case}");
+    }
+}
+
+#[test]
+fn reverse_zone_casts_keep_array_shape_precision_and_cancellation() {
+    let session = Session::new("Asia/Seoul");
+    let input = zoned(1_704_164_645_123_600);
+    let array = Value::Array(
+        ArrayValue::with_lower_bounds(vec![input.clone(), Value::Null], vec![-2]).unwrap(),
+    );
+    let output = cast_value_with_type_resolution(
+        &array,
+        Some("timestamptz[]"),
+        "timestamp(3)[]",
+        Some(&session),
+    )
+    .unwrap();
+    assert_eq!(
+        output,
+        Value::Array(
+            ArrayValue::with_lower_bounds(
+                vec![timestamp("2024-01-02 12:04:05.124"), Value::Null],
+                vec![-2]
+            )
+            .unwrap()
+        )
+    );
+    assert_eq!(session.calls.get(), 1);
+    for target in ["timestamp", "date"] {
+        for cancel_original in [true, false] {
+            let budget = MemoryBudget::new(4096);
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            let session = Session {
+                cancel: Some(if cancel_original {
+                    &original
+                } else {
+                    &invoking
+                }),
+                ..Session::new("Asia/Seoul")
+            };
+            let error = cast_value_with_type_resolution_with_control(
+                &input,
+                Some("timestamptz"),
+                target,
+                Some(&session),
+                &ProductionControl::new(&budget, &original, &invoking),
+            )
+            .unwrap_err();
+            assert_eq!(error.sqlstate(), Some("57014"));
+            assert_eq!(session.calls.get(), 1);
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}
+
+#[test]
 fn typed_local_casts_obey_the_invoking_session_and_postgresql_gap_fold_rules() {
     for (zone, input, expected) in [
         (

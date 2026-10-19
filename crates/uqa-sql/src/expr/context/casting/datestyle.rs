@@ -7,7 +7,44 @@
 //! Read the live session date order for casts, including `set_config` earlier in the same row.
 
 use super::{ColumnType, EngineHook, Result};
-use uqa_core::{memory::ProductionControl, Value};
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    TemporalValue, Value,
+};
+
+/// DATE-to-string casts call `date_out` with the live style before the destination applies its length or padding.
+pub(super) fn date_output(
+    value: &Value,
+    target_name: &str,
+    target: Option<&ColumnType>,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>> {
+    let (Value::Temporal(date @ TemporalValue::Date { .. }), Some(engine)) = (value, engine) else {
+        return Ok(None);
+    };
+    if !target.is_some_and(super::is_string_type) {
+        return Ok(None);
+    }
+    control.check()?;
+    let Some(setting) = engine.runtime_parameter("DateStyle")? else {
+        return Ok(None);
+    };
+    let memory = control.reserve(setting.capacity())?;
+    let setting = control.finish(setting, memory)?;
+    control.check()?;
+    let output = date.to_sql_string_in_date_style_with_control(
+        crate::semantics::parameters::datestyle::date_style(&setting),
+        crate::semantics::parameters::datestyle::date_order(&setting),
+        control,
+    )?;
+    let (text, memory) = output.into_parts();
+    if matches!(target, Some(ColumnType::Text)) {
+        return Ok(Some(control.finish(Value::Str(text), memory)?));
+    }
+    super::cast_value_from_with_control(&Value::Str(text), target_name, Some("text"), control)
+        .map(Some)
+}
 
 pub(super) fn input_scope(
     value: &Value,

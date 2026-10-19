@@ -230,16 +230,20 @@ function formatHTTPDate(days) {
   requireSafeHTTPInteger(days);
   if (days === -2_147_483_648) return "-infinity";
   if (days === 2_147_483_647) return "infinity";
-  const date = new Date(days * 86_400_000);
-  if (Number.isNaN(date.valueOf())) {
-    return String(days);
-  }
-  const year = date.getUTCFullYear();
-  if (year < -262_143 || year > 262_142) {
-    return String(days);
-  }
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
+  // Match Core's physical Julian calendar, including unsigned wrapping for retained day words; host Date has a narrower range.
+  let julian = (days + 2_440_588) >>> 0;
+  julian = (julian + 32_044) >>> 0;
+  const centuries = Math.floor(julian / 146_097);
+  const remainder = (julian % 146_097) * 4 + 3;
+  julian = (julian + 60 + centuries * 3 + Math.floor(remainder / 146_097)) >>> 0;
+  const fourYears = Math.floor(julian / 1461);
+  const dayInCycle = julian % 1461;
+  const yearInCycle = Math.floor(dayInCycle * 4 / 1461);
+  const monthDay = (yearInCycle === 0 ? (dayInCycle + 306) % 366 : (dayInCycle + 305) % 365) + 123;
+  const monthIndex = Math.floor(monthDay * 2141 / 65_536);
+  const year = yearInCycle + fourYears * 4 - 4800;
+  const month = String((monthIndex + 10) % 12 + 1).padStart(2, "0");
+  const day = String(monthDay - Math.floor(7834 * monthIndex / 256)).padStart(2, "0");
   return `${formatHTTPYear(year)}-${month}-${day}${year <= 0 ? " BC" : ""}`;
 }
 
@@ -283,7 +287,6 @@ function formatHTTPTimestamp(source, utc) {
   const date = formatHTTPDate(days);
   const era = date.endsWith(" BC") ? " BC" : "";
   const calendar = era ? date.slice(0, -3) : date;
-  if (!/^\d{4,}-\d{2}-\d{2}$/.test(calendar)) return String(micros);
   return calendar + " " + formatClock(remainder) + (utc ? "+00" : "") + era;
 }
 

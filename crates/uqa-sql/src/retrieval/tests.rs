@@ -87,6 +87,118 @@ fn analyzed_membership_keeps_set_filter_and_null_rejection() {
 }
 
 #[test]
+fn temporal_membership_retains_sql_operators_instead_of_physical_set_keys() {
+    for value in [
+        uqa_core::TemporalValue::Date { days: 18_262 },
+        uqa_core::TemporalValue::Timestamp {
+            micros: 1_577_836_800_000_000,
+        },
+        uqa_core::TemporalValue::TimestampTz {
+            micros: 1_577_836_800_000_000,
+        },
+    ] {
+        for negated in [false, true] {
+            let scalar = ScalarExpr::InList {
+                expr: Box::new(ScalarExpr::Column("d".into())),
+                list: vec![ScalarExpr::Literal(Value::Temporal(value.clone()))],
+                negated,
+            };
+            let constants = RetrievalConstants {
+                params: &[],
+                evaluate: &|expression, _| constant(expression),
+                stores: &|_| true,
+            };
+            assert!(lower_where(&scalar, &constants).is_none());
+            let mut folded = bound(if negated {
+                "c NOT IN (1, 2)"
+            } else {
+                "c IN (1, 2)"
+            });
+            let ScalarExpr::Func { args, .. } = &mut folded else {
+                panic!("analyzed scalar-array comparison");
+            };
+            args[1] = ScalarExpr::Literal(Value::Array(
+                uqa_core::ArrayValue::try_new(vec![Value::Temporal(value.clone())]).unwrap(),
+            ));
+            assert!(lower_where(&folded, &constants).is_none());
+        }
+    }
+}
+
+#[test]
+fn temporal_filters_retain_sql_comparison_instead_of_carrier_order() {
+    let constants = RetrievalConstants {
+        params: &[],
+        evaluate: &|expression, _| constant(expression),
+        stores: &|_| true,
+    };
+    let column = ScalarExpr::Column("d".into());
+    for value in [
+        uqa_core::TemporalValue::Date { days: 18_262 },
+        uqa_core::TemporalValue::Timestamp {
+            micros: 1_577_836_800_000_000,
+        },
+        uqa_core::TemporalValue::TimestampTz {
+            micros: 1_577_836_800_000_000,
+        },
+    ] {
+        let literal = ScalarExpr::Literal(Value::Temporal(value));
+        for op in [
+            BinaryOp::Equal,
+            BinaryOp::NotEqual,
+            BinaryOp::Less,
+            BinaryOp::LessEqual,
+            BinaryOp::Greater,
+            BinaryOp::GreaterEqual,
+        ] {
+            for (lhs, rhs) in [(&column, &literal), (&literal, &column)] {
+                assert!(lower_where(
+                    &ScalarExpr::Binary {
+                        op,
+                        lhs: Box::new(lhs.clone()),
+                        rhs: Box::new(rhs.clone())
+                    },
+                    &constants
+                )
+                .is_none());
+            }
+        }
+        for (low, high) in [
+            (&literal, &literal),
+            (&literal, &ScalarExpr::Literal(Value::Int(0))),
+            (&ScalarExpr::Literal(Value::Int(0)), &literal),
+        ] {
+            let bounds = [
+                ScalarExpr::Binary {
+                    op: BinaryOp::GreaterEqual,
+                    lhs: Box::new(column.clone()),
+                    rhs: Box::new(low.clone()),
+                },
+                ScalarExpr::Binary {
+                    op: BinaryOp::LessEqual,
+                    lhs: Box::new(column.clone()),
+                    rhs: Box::new(high.clone()),
+                },
+            ];
+            assert!(predicates::lower_range(&bounds, &constants).is_none());
+            assert!(lower_where(&ScalarExpr::And(bounds.to_vec()), &constants).is_none());
+            assert!(lower_where(
+                &ScalarExpr::Between {
+                    expr: Box::new(column.clone()),
+                    low: Box::new(low.clone()),
+                    high: Box::new(high.clone())
+                },
+                &constants
+            )
+            .is_none());
+        }
+    }
+    assert!(lower("c = 1").is_some());
+    assert!(lower("c BETWEEN 1 AND 3").is_some());
+    assert!(lower("c >= 1 AND c <= 3").is_some());
+}
+
+#[test]
 fn set_recognition_retains_conversions_and_quantified_operator_identity() {
     for sql in [
         "c < ANY(ARRAY[1, 2])",

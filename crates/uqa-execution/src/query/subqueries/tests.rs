@@ -453,3 +453,156 @@ fn range_membership_preserves_selected_equality_in_cached_and_streamed_rows() {
         assert_eq!(*services.events.lock(), ["memory"]);
     }
 }
+
+#[test]
+fn selected_datetime_membership_keeps_one_representation_and_resolves_types_once() {
+    use crate::query::scope::subqueries::CachedScalarSubquery;
+    use crate::scalar::SubqueryNeedle;
+    use std::cell::Cell;
+    use uqa_core::TemporalValue;
+    use uqa_sql::ColumnType;
+
+    for budget in [1, 64 * 1024] {
+        for (output_type, stored, hashable) in [
+            (
+                Some(ColumnType::Date),
+                TemporalValue::Date { days: 0 },
+                true,
+            ),
+            (
+                Some(ColumnType::Timestamp),
+                TemporalValue::Timestamp { micros: 0 },
+                false,
+            ),
+            (
+                Some(ColumnType::TimestampTz),
+                TemporalValue::TimestampTz { micros: 0 },
+                false,
+            ),
+            (None, TemporalValue::Timestamp { micros: 0 }, false),
+        ] {
+            let services = Services::default();
+            let scope = CteScope::new();
+            let schema = RowSchema::with_types(vec!["v".into()], vec![output_type]);
+            let mut spill = crate::SpillBuffer::new(budget);
+            spill
+                .push(crate::Batch::from_physical_rows(
+                    schema.clone(),
+                    vec![
+                        PhysicalRow::from_values(vec![Value::Temporal(stored)]),
+                        PhysicalRow::from_values(vec![Value::Null]),
+                    ],
+                ))
+                .unwrap();
+            scope.cache_subquery(
+                0,
+                ScalarSubqueryCacheEntry::Materialized(CachedScalarSubquery {
+                    columns: vec!["v".into()],
+                    rows: spill.into_shared(schema).unwrap(),
+                }),
+            );
+            let calls = Cell::new(0);
+            let mut can_hash = |output: Option<&ColumnType>| {
+                calls.set(calls.get() + 1);
+                Ok(output.is_some_and(|output| {
+                    uqa_sql::type_resolution::equality_types_share_hash_key(
+                        &ColumnType::Date,
+                        output,
+                    )
+                }))
+            };
+            let context = services.context(&scope);
+            for (value, expected) in [
+                (Value::Temporal(TemporalValue::Date { days: 0 }), Some(true)),
+                (Value::Temporal(TemporalValue::Date { days: 1 }), None),
+                (Value::Null, None),
+            ] {
+                assert_eq!(
+                    context
+                        .subquery_contains_selected(
+                            0,
+                            &plan("SELECT 1"),
+                            SubqueryNeedle {
+                                value: &value,
+                                engine: Some(&services),
+                                control: uqa_core::memory::ProductionControl::uncontrolled(),
+                                can_hash: &mut can_hash,
+                            },
+                            PhysicalOuterRow::Absent,
+                            &[]
+                        )
+                        .unwrap(),
+                    expected
+                );
+            }
+            assert_eq!(calls.get(), 1);
+            assert_eq!(
+                matches!(
+                    scope.cached_subquery(0),
+                    Some(ScalarSubqueryCacheEntry::Membership(_))
+                ),
+                hashable
+            );
+            assert_eq!(
+                matches!(
+                    scope.cached_subquery(0),
+                    Some(ScalarSubqueryCacheEntry::ComparedMembership(_))
+                ),
+                !hashable
+            );
+            assert_eq!(
+                services.events.lock().as_slice(),
+                if hashable { &["memory"][..] } else { &[] }
+            );
+        }
+    }
+}
+
+#[test]
+fn selected_membership_cancellation_precedes_cache_selection_and_row_reads() {
+    use crate::scalar::SubqueryNeedle;
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    for cancel_original in [true, false] {
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        let budget = MemoryBudget::new(0);
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let services = Services::default();
+        let scope = CteScope::new();
+        scope.cache_subquery(
+            0,
+            ScalarSubqueryCacheEntry::Materialized(materialized(vec![Value::Null], 1)),
+        );
+        let needle = Value::Null;
+        let error = services
+            .context(&scope)
+            .subquery_contains_selected(
+                0,
+                &plan("SELECT 1"),
+                SubqueryNeedle {
+                    value: &needle,
+                    engine: Some(&services),
+                    control,
+                    can_hash: &mut |_| panic!("cancelled membership must not select its cache"),
+                },
+                PhysicalOuterRow::Absent,
+                &[],
+            )
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("57014"));
+        assert!(matches!(
+            scope.cached_subquery(0),
+            Some(ScalarSubqueryCacheEntry::Materialized(_))
+        ));
+        assert!(services.events.lock().is_empty());
+        assert_eq!(budget.used(), 0);
+    }
+}

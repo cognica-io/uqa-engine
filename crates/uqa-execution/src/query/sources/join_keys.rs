@@ -82,14 +82,17 @@ pub(super) fn join_keys(
                     continue;
                 };
                 let mut support = ComparisonKeySupport::default();
-                for (key, input) in [(left_key.as_ref(), left), (right_key.as_ref(), right)] {
-                    match crate::scalar_type_with_resolver(key, input, params, types)? {
-                        Some(ty) => support.include(&ty, types)?,
-                        None => {
-                            // Schemaless UQA inputs require runtime comparison; absent type metadata is not a declared lack of operators.
-                            support.hashing = false;
-                        }
+                let left_type = crate::scalar_type_with_resolver(&left_key, left, params, types)?;
+                let right_type =
+                    crate::scalar_type_with_resolver(&right_key, right, params, types)?;
+                if let (Some(left), Some(right)) = (&left_type, &right_type) {
+                    support.include_equality_operands(left, right, types)?;
+                } else {
+                    // Schemaless UQA inputs require runtime comparison; absent type metadata is not a declared lack of operators.
+                    for ty in [&left_type, &right_type].into_iter().flatten() {
+                        support.include(ty, types)?;
                     }
+                    support.hashing = false;
                 }
                 merge_supported &= support.ordering;
                 all_hashed &= support.hashing;
@@ -203,6 +206,74 @@ mod tests {
             .unwrap();
             assert_eq!(selected.is_some(), hashing);
         }
+    }
+
+    #[test]
+    fn cross_datetime_joins_preserve_comparison_predicates_and_full_join_admission() {
+        for (left_type, right_type) in [
+            (ColumnType::Date, ColumnType::Timestamp),
+            (ColumnType::Timestamp, ColumnType::Date),
+            (ColumnType::Date, ColumnType::TimestampTzPrecision(6)),
+            (ColumnType::TimestampTzPrecision(6), ColumnType::Date),
+        ] {
+            let left = schema("l", Some(left_type));
+            let right = schema("r", Some(right_type));
+            for row in [false, true] {
+                for kind in [
+                    JoinKind::Inner,
+                    JoinKind::Left,
+                    JoinKind::Right,
+                    JoinKind::Full,
+                ] {
+                    assert!(join_keys(
+                        kind,
+                        Some(&equality(row)),
+                        &left,
+                        &right,
+                        &[],
+                        &Types,
+                        &Types
+                    )
+                    .unwrap()
+                    .is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_datetime_join_keeps_an_independent_hash_key_and_temporal_residual() {
+        let schema = |qualifier, ty| {
+            RowSchema::with_qualified_types(
+                qualifier,
+                vec!["v".into(), "id".into()],
+                vec![Some(ty), Some(ColumnType::Integer)],
+            )
+        };
+        let left = schema("l", ColumnType::Date);
+        let right = schema("r", ColumnType::TimestampTz);
+        let predicate = ScalarExpr::And(vec![
+            equality(false),
+            ScalarExpr::Binary {
+                op: BinaryOp::Equal,
+                lhs: Box::new(ScalarExpr::qualified_column("l", "id")),
+                rhs: Box::new(ScalarExpr::qualified_column("r", "id")),
+            },
+        ]);
+        let keys = join_keys(
+            JoinKind::Full,
+            Some(&predicate),
+            &left,
+            &right,
+            &[],
+            &Types,
+            &Types,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(keys.left, vec![ScalarExpr::qualified_column("l", "id")]);
+        assert_eq!(keys.right, vec![ScalarExpr::qualified_column("r", "id")]);
+        assert_eq!(keys.residual, Some(equality(false)));
     }
 
     #[test]
