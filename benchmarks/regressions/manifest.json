@@ -15893,6 +15893,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "correlated_scope_builds_lookup_maps_once_with_or_without_virtual_columns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/outer_scope/tests.rs",
+      "capability": "Single construction of correlated lookup maps",
+      "workload": "Overlay 1-, 64- and 1024-column scopes with and without a hidden virtual column and distinct inner/outer collations.",
+      "invariant": "Construct the composite lookup index once, preserving local shadowing, shifted outer slots, hidden-column typing and collations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unchanged_virtual_bindings_share_indexes_and_new_bindings_preserve_the_source",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/outer_scope/tests.rs",
+      "capability": "Immutable virtual-column metadata updates",
+      "workload": "Add empty, already visible and genuinely new virtual bindings to a collated row schema.",
+      "invariant": "No-op additions share the original index; real additions preserve source immutability, physical layout and existing collation without rebuilding lookup maps.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

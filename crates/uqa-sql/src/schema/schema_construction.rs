@@ -13,6 +13,18 @@ use super::{
 use crate::ast::InternalRelationId;
 use crate::schema::{SchemaMap, SchemaSet};
 
+#[cfg(test)]
+thread_local! {
+    static SCHEMA_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(super) fn count_builds<T>(build: impl FnOnce() -> T) -> (T, usize) {
+    let before = SCHEMA_BUILDS.get();
+    let result = build();
+    (result, SCHEMA_BUILDS.get() - before)
+}
+
 impl Default for RowSchema {
     fn default() -> Self {
         Self::new(Vec::new())
@@ -271,6 +283,8 @@ impl RowSchema {
         physical_width: usize,
         metadata: SchemaBuildMetadata,
     ) -> Self {
+        #[cfg(test)]
+        SCHEMA_BUILDS.set(SCHEMA_BUILDS.get() + 1);
         let SchemaBuildMetadata {
             mut collations,
             row_types,

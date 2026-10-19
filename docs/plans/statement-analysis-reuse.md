@@ -45,6 +45,14 @@ The allocation regression retains a 1024-column outer relation and 24 nested sca
 
 The fixture constructs the same 24-level logical plan directly because compiling its SQL spelling independently exposed the protobuf recursion defect [#1146](https://github.com/cognica-io/uqa-engine/issues/1146). PostgreSQL accepts that spelling. The parser defect remains separate; no fixture-depth reduction or larger process stack is used to satisfy the lineage allocation check.
 
+## Correlated schema construction
+
+Outer-scope composition constructed its final lookup maps, then rebuilt the complete schema to attach binding-only virtual columns, including when there were no such columns. The virtual-column update now accepts the freshly owned schema and changes only its hidden binding metadata. Empty or already visible additions share the existing immutable index. Adding new identities to a shared schema first takes an owned copy; existing callers retain their original names, slots, types and collations.
+
+A hidden binding adds no physical slot, public column, wildcard position or ordinary lookup-map entry. Preserving those indexes and changing only the binding-only metadata is therefore equivalent to their former reconstruction. Existing identities retain precedence and declared types; correlated composition still shifts outer physical slots and applies the original qualifier masking and collation inheritance.
+
+The owner regressions fail before the correction: outer composition constructs two complete indexes, and a no-op virtual update fails to share the input. The same tests require one construction for 1-, 64- and 1024-column outer scopes with and without virtual metadata, while checking local/outer lookup, shadowing, row width and C/POSIX collations. PostgreSQL 18.4 independently confirms the correlated values and collation identities. All 2,220 combined local SQL library/integration cases pass. Strict SQL library/test Clippy and formatting also pass. Affected Engine consumer checks remain pending; no timing acceptance is claimed.
+
 ## Original performance task records
 
 | Issue | Preserved work |
@@ -53,7 +61,7 @@ The fixture constructs the same 24-level logical plan directly because compiling
 | #348 | Managed driver publication is complete. PR #1144 passes 63 local cases and twelve legacy lifecycle scenarios; current-source Linux qualification passes and macOS remains pending. |
 | #714 | PR #1134 incremental encoding, #1142 bounded SELECT/output rollback and #1145 ordinary RETURNING/CTE delivery are locally verified. Rewrite-rule action/capture ownership and final platform/public-path acceptance remain. |
 | #1108 | PR #1137 retains numeric descriptors with 10,000-row work evidence and current-source Linux qualification. Nonnumeric/operator/routine reuse and controlled historical comparison remain. |
-| #1117 | Statement-result reuse is merged; executable source reuse and borrowed privilege lineage are delivered by this PR. Further block/outer-schema reuse, nested privilege coverage and controlled acceptance remain. |
+| #1117 | Statement-result reuse is merged; executable source reuse, borrowed privilege lineage and single-construction correlated schemas are implemented by this PR. Further block/outer-schema reuse, nested privilege coverage and controlled acceptance remain. |
 | #653 | Main run 39317722346 independently passes all twenty controlled comparisons and stops EC2 afterward. The historical instruction-throughput variation remains unexplained. |
 
 ## Regression archive build reuse
