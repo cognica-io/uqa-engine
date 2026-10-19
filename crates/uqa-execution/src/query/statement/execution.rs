@@ -54,6 +54,9 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
         .diagnostics
         .bind_current()
         .map_err(|error| crate::storage_errors::storage_error("bind query diagnostics", &error))?;
+    let prepared =
+        crate::query::sources::prepared_queries::prepare(&context.source, plan, params, ctes)?;
+    let plan = prepared.as_ref();
     crate::query::privileges::routine_calls::query(&context.source, plan, params, ctes)?;
     let mut running_statement = None;
     if plan.ctes.iter().any(|cte| cte.body.modifies_data()) {

@@ -408,6 +408,15 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         resolver.is_none() || control.budget().is_none(),
         "catalog callbacks are resolved outside retained generated inference"
     );
+    if let Some(binding) =
+        binding.filter(|binding| matches!(binding.dispatch, Some(FunctionDispatch::TypeOf { .. })))
+    {
+        if let Some(error) = &binding.resolution_error {
+            return Err(error.sql_error());
+        }
+        // Analysis fixed this result type; runtime callers need no catalog to re-infer its retained operand.
+        return inline(ColumnType::Regtype, control);
+    }
     if let Some((binding, FunctionDispatch::NumericOperator(operator))) =
         binding.and_then(|binding| binding.dispatch.map(|dispatch| (binding, dispatch)))
     {
@@ -517,6 +526,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                     .map(Some);
             }
             FunctionDispatch::CollationFor { .. } => return inline(ColumnType::Text, control),
+            FunctionDispatch::TypeOf { .. } => unreachable!("type observer handled above"),
             FunctionDispatch::Collate { oid } => {
                 let [_, ScalarExpr::Literal(Value::Str(name))] = args else {
                     return Err(SQLError::Internal("invalid COLLATE expression".into()));

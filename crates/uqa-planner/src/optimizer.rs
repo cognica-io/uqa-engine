@@ -25,6 +25,7 @@ use crate::{
 mod access_path;
 mod api;
 mod command;
+mod cte_projection;
 mod derived_projection;
 mod function_source;
 mod implicit_fusion;
@@ -40,6 +41,7 @@ pub use api::{
     optimize_with_aggregates_and_statistics, optimize_with_statistics, ConstantEvaluator,
     OptimizerConfig, OptimizerError, OptimizerResult, SourceStatistics,
 };
+pub use derived_projection::prune_outputs as prune_query_outputs;
 pub use implicit_fusion::query_contains_implicit_hybrid_fusion;
 
 use access_path::{choose_access_path, prioritize_access_predicates};

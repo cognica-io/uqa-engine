@@ -581,20 +581,38 @@ impl Binder<'_, '_> {
         self.coerce_concat_call(&mut call)?;
         self.bind_optional_calls(&mut call, &mut infer)?;
         self.bind_enum_call(&mut call)?;
-        if helpers::is_pg_typeof(&call.name) && call.arguments.len() == 1 {
+        self.bind_type_observation(&mut call)?;
+        Ok(call.into_expression())
+    }
+
+    fn bind_type_observation(&mut self, call: &mut BindingCall) -> Result<(), SQLError> {
+        if call.arguments.len() == 1
+            && call.binding.as_ref().is_some_and(|binding| {
+                binding.builtin
+                    && binding.name == "pg_catalog.pg_typeof"
+                    && !matches!(
+                        binding.dispatch,
+                        Some(crate::ast::FunctionDispatch::TypeOf { .. })
+                    )
+            })
+        {
             let ty = if super::is_unknown_literal(&call.arguments[0]) {
                 None
             } else {
                 self.semantic(self.infer(&call.arguments[0]))?.flatten()
             };
-            let cast = ColumnType::Regtype.catalog_name_with_control(&control)?;
-            // The selected type is an OID value; resolving its output name again could select a shadowing type.
+            // Retain the type identity without discarding argument effects or resolving its name again.
             let oid = ty
                 .as_deref()
                 .map_or(705, crate::catalog::type_metadata::pg_type_oid);
-            return self.cast(ScalarExpr::Literal(Value::Int(oid)), cast);
+            call.binding
+                .as_mut()
+                .expect("selected type observer")
+                .dispatch = Some(crate::ast::FunctionDispatch::TypeOf {
+                type_oid: u32::try_from(oid).expect("catalog type identity"),
+            });
         }
-        Ok(call.into_expression())
+        Ok(())
     }
 }
 

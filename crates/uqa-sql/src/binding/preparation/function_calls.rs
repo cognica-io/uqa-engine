@@ -24,13 +24,25 @@ pub(super) struct ObservedFunctionModifiers {
 }
 
 impl ObservedFunctionArguments {
-    pub(super) fn retain_collation_observer(&self, binding: &mut FunctionBinding) {
-        if !binding.builtin || binding.name != "pg_catalog.pg_collation_for" {
+    pub(super) fn retain_argument_observer(&self, binding: &mut FunctionBinding) {
+        if !binding.builtin {
             return;
         }
         let [argument] = self.values.as_slice() else {
             return;
         };
+        if binding.name == "pg_catalog.pg_typeof" {
+            binding.dispatch = Some(crate::ast::FunctionDispatch::TypeOf {
+                type_oid: argument.ty.as_ref().map_or(705, |ty| {
+                    u32::try_from(crate::catalog::type_metadata::pg_type_oid(ty))
+                        .expect("catalog type identity")
+                }),
+            });
+            return;
+        }
+        if binding.name != "pg_catalog.pg_collation_for" {
+            return;
+        }
         let noncollatable_type_oid = argument.ty.as_ref().and_then(|ty| {
             (crate::catalog::type_metadata::pg_type_collation_oid(ty) == 0).then(|| {
                 u32::try_from(crate::catalog::type_metadata::pg_type_oid(ty))
@@ -468,7 +480,7 @@ impl Preparation<'_> {
         Ok(FunctionResult::Unselected)
     }
 
-    /// Record `PostgreSQL`'s `inputcollid` on the binding the call keeps: its selected overload, its existing binding, or, for a regular-expression function without a registered signature, a built-in selected by name. A selected `pg_collation_for` also keeps the collation it observes.
+    /// Record `PostgreSQL`'s `inputcollid` on the binding the call keeps: its selected overload, its existing binding, or, for a regular-expression function without a registered signature, a built-in selected by name. Type and collation observers also keep the argument metadata they observe.
     pub(super) fn keep_call_selection(
         &mut self,
         expression: &ScalarExpr,
@@ -481,7 +493,7 @@ impl Preparation<'_> {
         };
         if let Some(selected) = selected {
             selected.binding.input_collation = input_collation;
-            arguments.retain_collation_observer(&mut selected.binding);
+            arguments.retain_argument_observer(&mut selected.binding);
         } else if binding.is_none()
             && crate::expr::binds_input_collation_by_name(name)
             && !self.routines.has_untyped_function(name)

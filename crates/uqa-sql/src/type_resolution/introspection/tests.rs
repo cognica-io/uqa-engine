@@ -89,12 +89,27 @@ fn typeof_distinguishes_unknown_literals_from_resolved_text_inputs() {
             25,
         ),
     ] {
+        let original = ExpressionPlan::lower(argument.clone()).scalar;
         let expression = ExpressionPlan::lower(call("pg_typeof", vec![argument])).scalar;
         let bound = bind_type_introspection(expression, &schema, &[]);
-        assert!(matches!(
-            bound, ScalarExpr::Cast {ty, expr, ..}
-                if ty == "pg_catalog.\"regtype\"" && matches!(*expr, ScalarExpr::Literal(Value::Int(oid)) if oid == expected)
-        ));
+        let ScalarExpr::Func {
+            binding: Some(binding),
+            args,
+            ..
+        } = &bound
+        else {
+            panic!("type observation must retain its call and operand")
+        };
+        assert_eq!(args, &[original]);
+        assert_eq!(
+            binding.dispatch,
+            Some(crate::ast::FunctionDispatch::TypeOf { type_oid: expected })
+        );
+        assert_eq!(binding.name, "pg_catalog.pg_typeof");
+        assert_eq!(binding.argument_types, ["any"]);
+        let restored: ScalarExpr =
+            serde_json::from_str(&serde_json::to_string(&bound).unwrap()).unwrap();
+        assert_eq!(restored, bound);
     }
 }
 
@@ -173,7 +188,7 @@ fn controlled_binding_admits_new_ir_before_mutating_the_owned_root() {
         call("pg_typeof", vec![Expr::Column("small".into())]),
         Expr::Literal(Value::Str("sibling".repeat(100))),
     ]);
-    for remaining in [0, 8, 64, 256, 1024] {
+    for remaining in [0, 8, 64, 256, 1024, 4096] {
         let budget = MemoryBudget::new(1 << 20);
         let token = CancellationToken::new();
         let control = ProductionControl::new(&budget, &token, &token);
@@ -187,7 +202,9 @@ fn controlled_binding_admits_new_ir_before_mutating_the_owned_root() {
                     panic!("row remains a row")
                 };
                 assert!(
-                    matches!(&items[0], ScalarExpr::Cast {ty, expr, .. } if ty == "pg_catalog.\"regtype\"" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Int(21))))
+                    matches!(&items[0], ScalarExpr::Func {binding: Some(binding), args, .. }
+                        if binding.dispatch == Some(crate::ast::FunctionDispatch::TypeOf {type_oid: 21})
+                            && matches!(args.as_slice(), [ScalarExpr::Column(name)] if name == "small"))
                 );
                 assert_eq!(
                     items[1],

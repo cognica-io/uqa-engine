@@ -54,7 +54,23 @@ fn execute_lateral_subquery_output_inner<S: Clone + Send + Sync + 'static>(
 ) -> Result<QueryOutput, SQLError> {
     let mut scoped_ctes = ctes.clone();
     scoped_ctes.set_row_lock_outer_row(outer_row.clone());
-    crate::query::cte::materialize_plan_ctes(context.ctes, &plan.ctes, params, &mut scoped_ctes)?;
+    let mut lookup = scoped_ctes.enter_relation_lookup_mode(plan.relations_bound)?;
+    let mut scoped_ctes = lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
+    // Keep folded occurrences selected during initialization instead of materializing their original, unpruned definitions for each outer row.
+    let scheduled = crate::query::cte::strategy::schedule_plan_ctes(context.volatility, plan)?;
+    for cte in scheduled.iter().filter(|cte| cte.deferred) {
+        scoped_ctes.insert_deferred(cte.plan.clone());
+    }
+    crate::query::cte::materialize_plan_ctes_with_filters(
+        context.ctes,
+        scheduled
+            .into_iter()
+            .filter(|cte| !cte.deferred)
+            .map(|cte| cte.plan),
+        params,
+        &mut scoped_ctes,
+        &std::collections::BTreeMap::new(),
+    )?;
     execute_lateral_relational_root_output(
         context,
         plan,

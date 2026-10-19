@@ -3883,6 +3883,61 @@
       "invariant": "ON CONFLICT selects the same unique arbiter and produces the same rows, completions and rejection diagnostics before and after reopening."
     },
     {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "named_output_pruning_preserves_bound_types_aliases_and_column_authority",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection.rs",
+      "capability": "Named query output projection",
+      "workload": "Two bound output columns with distinct types and range aliases; only the first is consumed.",
+      "invariant": "The discarded expression preserves its type, output position and column authority without reading its value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_demand_precedes_constant_evaluation_and_preserves_materialization",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/cte_projection.rs",
+      "capability": "Folded CTE expression liveness",
+      "workload": "Seven folded, materialized, repeated, aliased, predicate-dependent and volatile CTE shapes.",
+      "invariant": "Only unused scalar outputs of folded CTEs disappear before constant evaluation; materialization and volatile work are retained.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_recursive_ctes_keep_the_complete_query_descriptor",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests.rs",
+      "capability": "Deferred recursive source descriptors",
+      "workload": "Read recursive source types through full WITH plans and deferred scopes, including sibling inputs, positional aliases and SEARCH/CYCLE columns.",
+      "invariant": "Repeated deferred binding preserves the complete row descriptor and resolves recursive self references through their seed schema.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "view_routine_initialization_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
+      "capability": "Named query routine initialization",
+      "workload": "194 independent PostgreSQL 18.4 messages covering views, folded, materialized and recursive CTEs, lateral and scalar correlation, aliases, LIMIT 0, EXPLAIN, set calls and sequence-observed planning/execution on memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Selected expressions preserve exact rows and privilege errors, constant preparation runs once per occurrence, and denied routines prevent preceding row-production effects.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "stored_view_coercions_preserve_prepared_result_collations",
@@ -5457,6 +5512,22 @@
       "capability": "Unconstrained routine arguments",
       "workload": "Sixteen independent PostgreSQL catalog, scalar, NULL, array, named-row, alias, join, grouping, derived-row and empty-relation observations on all four providers.",
       "invariant": "All recorded values, type identities, command tags and diagnostics match the independent PostgreSQL reference.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "type_observation_arguments_match_postgresql_after_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/sql_type_introspection.rs",
+      "capability": "Declared type observation",
+      "workload": "141 independent PostgreSQL observations cover reached/unreached volatile arguments, per-row and aggregate calls, scalar/set subqueries, NULL/domain/record identity, prepared inputs, overloads, stored views, RETURNING and privileges on four providers after persistent reopening.",
+      "invariant": "Every reached argument retains its effects and errors exactly once, unreachable calls remain unexecuted, and values, type identities, diagnostics and transaction effects match PostgreSQL.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite",
@@ -14462,6 +14533,32 @@
       "capability": "Stored routine input identity",
       "workload": "Bind converted and unchanged literal inputs, serialize their original SQL syntax and rebind the restored statement.",
       "invariant": "Input conversion retains original syntax correspondence and subsequent binding is idempotent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_observation_retains_declared_identity_and_releases_consumed_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/tests/type_observation.rs",
+      "capability": "Declared type observation",
+      "workload": "Observe typed NULL, smallint integer carriers and a 32 KiB text operand under a shared allowance, then cancel a retained input.",
+      "invariant": "The result uses the analyzed type identity, typed NULL remains observable, and consumed or cancelled inputs release all their reservations while earlier output remains charged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_type_observation_keeps_regtype_without_rebinding_catalog_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/scalar_input/tests.rs",
+      "capability": "Type observation",
+      "workload": "Read a bound pg_typeof result with enum, domain and composite operands after catalog-free runtime inference; exercise both cancellation owners and retained resolution errors.",
+      "invariant": "The source remains regtype for catalog-aware output, inference does not revisit the analyzed operand, and all temporary reservations are released.",
       "case_names": [
         ""
       ]

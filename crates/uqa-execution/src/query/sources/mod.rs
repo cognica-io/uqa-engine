@@ -46,6 +46,7 @@ mod join_source;
 mod join_validation;
 mod lateral_source;
 mod output_descriptor;
+pub(crate) mod prepared_queries;
 mod source_operator;
 mod source_qualification;
 mod streaming_subquery;

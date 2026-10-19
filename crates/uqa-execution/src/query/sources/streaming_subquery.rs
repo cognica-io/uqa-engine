@@ -51,6 +51,8 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
             body,
         )?;
 
+    crate::query::privileges::routine_calls::query(context, body, params, ctes)?;
+
     // The block's scalar subqueries live in their own arena for the whole pull pipeline: the evaluators built below snapshot this scope, so a derived table with subqueries still streams and an outer LIMIT keeps its inner locking demand-driven.
     let mut ctes = ctes.enter_scalar_subqueries(&block.subqueries);
     let ctes: &mut CteScope<S> = &mut ctes;

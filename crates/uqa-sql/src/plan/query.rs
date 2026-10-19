@@ -458,6 +458,7 @@ impl SourcePlan {
                 bound_columns,
                 include_descendants,
             } => Self::Table {
+                executable_query: None,
                 name,
                 qualifier,
                 alias,

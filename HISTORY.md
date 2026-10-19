@@ -12,6 +12,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve normal argument evaluation in `pg_typeof`, including volatile effects, errors, privileges, NULL and declared type identities through stored views and provider reopening.
+
+- Check view and folded CTE routine privileges against the selected executable expressions before row production, including lateral and scalar correlation, `LIMIT 0`, `EXPLAIN`, and preceding sequence effects; retain materialized CTE and set-returning function requirements.
+
 - Restrict combined set-operation ORDER BY to output names and positions, preserving PostgreSQL clause-analysis order, literal and ordinal diagnostics, hidden operand names, prepared values and stored views.
 
 - Remove per-row and per-candidate type resolution from TPC-H-derived queries: builtin overload matching compares fixed type spellings, immutable literal casts convert once per execution, word-sized numeric arithmetic and comparison avoid arbitrary-precision temporaries, literal `ANY` and `ALL` membership uses the compiled predicate path, correlated subquery filters reach their scans with the outer row bound, builtin operator selections and parsed type-name spellings are retained, a statement whose date, time, timestamp or interval literals read the same under every DateStyle, IntervalStyle and transaction clock reuses its optimized plan across messages, row schema lookup maps hash with `ahash`, and column references keep the row slot they resolve to for rows of the same schema (#1108).
