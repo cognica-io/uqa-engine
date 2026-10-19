@@ -15,6 +15,90 @@ fn copy_to_string(engine: &Engine, statement: &str) -> String {
 }
 
 #[test]
+fn copy_output_preserves_session_style_duplicate_labels_and_mutation_returning() {
+    let engine = Engine::new();
+    exec(&engine, "SET intervalstyle = 'iso_8601'");
+    assert_eq!(
+        copy_to_string(
+            &engine,
+            "COPY (SELECT INTERVAL '1 day 2 hours', 1 AS x, 2 AS x) TO STDOUT"
+        ),
+        "P1DT2H\t1\t2\n"
+    );
+    exec(
+        &engine,
+        "CREATE TABLE copy_returning (id INTEGER PRIMARY KEY, value TEXT)",
+    );
+    assert_eq!(copy_to_string(&engine, "COPY (INSERT INTO copy_returning VALUES (1, 'before') RETURNING id, value) TO STDOUT WITH (FORMAT csv)"), "1,before\n");
+    assert_eq!(
+        copy_to_string(
+            &engine,
+            "COPY (UPDATE copy_returning SET value = 'after' RETURNING id, value) TO STDOUT"
+        ),
+        "1\tafter\n"
+    );
+    assert_eq!(copy_to_string(&engine, "COPY (WITH removed AS (DELETE FROM copy_returning RETURNING id, value) SELECT * FROM removed) TO STDOUT"), "1\tafter\n");
+    assert!(engine
+        .sql("SELECT * FROM copy_returning", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+}
+
+#[test]
+fn copy_output_sink_cancellation_and_io_error_abort_explicit_transaction() {
+    struct Sink {
+        token: uqa_core::CancellationToken,
+        cancel: bool,
+        calls: usize,
+    }
+    impl std::io::Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.calls += 1;
+            if self.cancel {
+                self.token.cancel();
+                Ok(bytes.len())
+            } else {
+                Err(std::io::Error::other("closed export sink"))
+            }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE copy_failure (id INTEGER)");
+    for cancel in [false, true] {
+        exec(&engine, "BEGIN");
+        exec(&engine, "INSERT INTO copy_failure VALUES (1)");
+        let mut sink = Sink {
+            token: engine.cancellation_token(),
+            cancel,
+            calls: 0,
+        };
+        let error = engine
+            .copy_to("COPY (SELECT repeat('x', 20000)) TO STDOUT", &mut sink)
+            .unwrap_err();
+        assert_eq!(
+            error.sqlstate(),
+            Some(if cancel { "57014" } else { "58030" })
+        );
+        assert_eq!(sink.calls, 1);
+        engine.reset_cancellation();
+        assert_eq!(
+            engine.sql("SELECT 1", &[]).unwrap_err().sqlstate(),
+            Some("25P02")
+        );
+        exec(&engine, "ROLLBACK");
+        assert!(engine
+            .sql("SELECT * FROM copy_failure", &[])
+            .unwrap()
+            .rows
+            .is_empty());
+    }
+}
+
+#[test]
 fn ordinary_inheritance_copy_uses_named_storage_and_query_scan_semantics() {
     let engine = Engine::new();
     exec(

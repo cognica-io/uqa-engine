@@ -22,6 +22,8 @@ impl Engine {
             privileges: self,
             statements: self,
             output: self,
+            memory: self.session.as_ref(),
+            cancellation: &self.runtime.cancellation,
         }
     }
 }

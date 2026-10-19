@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reuse compiled regular expressions by pattern, flags and collation in a bounded session cache. Charge retained state to its owning allowance, preserve invocation cancellation and scratch limits, and release memory on eviction and session destruction.
 
+- Encode COPY TO text/CSV incrementally with admitted per-field scratch and bounded cancellation checks, preserving PostgreSQL bytes, duplicate output columns and partial-write failures without allocating a second complete output buffer.
+
 - Preserve every comma-separated input of UPDATE FROM and DELETE USING so empty or missing later sources cannot cause unintended row changes. Retain source order, aliases and LATERAL dependencies through the shared SQL source-list compiler.
 
 - Implement PostgreSQL’s binary `^@` text-prefix operator with native operator resolution, strict NULL and collation diagnostics, and retained CHECK/index/view identities. The shared `starts_with` kernel borrows text inputs and observes cancellation between bounded comparison chunks.

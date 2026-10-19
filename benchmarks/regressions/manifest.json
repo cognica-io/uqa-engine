@@ -15633,6 +15633,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_output_preserves_session_style_duplicate_labels_and_mutation_returning",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "Public COPY output lifetime",
+      "workload": "Public COPY calls with session output styles, DML RETURNING, modifying CTEs and failing or cancelling sinks.",
+      "invariant": "Session semantics and original output/error behavior survive incremental encoding; failures abort the active explicit transaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_output_sink_cancellation_and_io_error_abort_explicit_transaction",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "Public COPY output lifetime",
+      "workload": "Public COPY calls with session output styles, DML RETURNING, modifying CTEs and failing or cancelling sinks.",
+      "invariant": "Session semantics and original output/error behavior survive incremental encoding; failures abort the active explicit transaction.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
