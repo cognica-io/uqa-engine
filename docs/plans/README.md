@@ -1,6 +1,8 @@
 # Implementation plans
 
-The [controlled build-source correction](../../benchmarks/regressions/controlled-runner.md) prevents Cargo output from another checkout being mislabeled as the requested benchmark revision. Local controller, provenance and qualification tests pass; operator installation and automatic verification remain pending. Historical performance variation in #653 remains unresolved.
+The [controlled build-source correction](../../benchmarks/regressions/controlled-runner.md) prevents Cargo output from another checkout being mislabeled as the requested benchmark revision. PR #1136 merged as `d1dbb3418`. All 104 local controller, provenance, qualification and selection tests and nine actual EC2 build-source regressions pass; reviewed deployment is complete with matching installed digests. The ordinary automatic assessment remains pending. Historical performance variation in #653 remains unresolved.
+
+The [numeric cast execution correction](../design/resolved-numeric-casts.md) addresses repeated per-row resolution in #1108. The SQL-owned numeric descriptor and Execution-owned expression/schema lifetime have local work, memory and PostgreSQL result coverage. Automatic platform qualification remains pending; general operator/routine reuse, remaining #1117 analysis and the original controlled historical comparison remain open.
 
 The [mutation source-list correction](0003-postgresql-18-compatibility.md#mutation-source-lists) addresses [#1130](https://github.com/cognica-io/uqa-engine/issues/1130), the reproduced UPDATE/DELETE input-loss defect. SQL owner tests and the 162-observation PostgreSQL fixture pass memory and all three durable providers, including reopened target outcomes. Delivery remains separate from the preceding datetime and prefix units; its PR records final automatic qualification. The compatibility summary also removes two obsolete assignment gaps already fixed in 0.6.0.
 

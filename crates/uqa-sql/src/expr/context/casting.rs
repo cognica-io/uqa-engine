@@ -302,6 +302,31 @@ pub fn cast_value_with_type_resolution_with_control(
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    cast_with_numeric_resolution(value, source_ty, target_ty, engine, control, &mut None)
+}
+
+/// Return an immutable numeric conversion when the ordinary catalog-aware cast selected one. Callers may retain it only within the same prepared expression and type-schema scope; the first evaluation keeps the original resolution, callback and failure order.
+pub fn cast_value_with_numeric_resolution_with_control(
+    value: &Value,
+    source_ty: Option<&str>,
+    target_ty: &str,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<(Produced<Value>, Option<super::super::NumericCast>)> {
+    let mut numeric = None;
+    let output =
+        cast_with_numeric_resolution(value, source_ty, target_ty, engine, control, &mut numeric)?;
+    Ok((output, numeric))
+}
+
+fn cast_with_numeric_resolution(
+    value: &Value,
+    source_ty: Option<&str>,
+    target_ty: &str,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+    numeric: &mut Option<super::super::NumericCast>,
+) -> Result<Produced<Value>> {
     control.check()?;
     let resolved_target = resolve_catalog_type_with_control(target_ty, engine, control)?;
     control.check()?;
@@ -375,6 +400,13 @@ pub fn cast_value_with_type_resolution_with_control(
                     .is_some_and(super::super::enums::is_enum_bearing))
         {
             return cast_catalog_array(value, source_ty, target, engine, control);
+        }
+    }
+    if let (Some(source), Some(target)) = (resolved_source_type.as_deref(), target_column_type) {
+        if let Some(cast) = super::super::casting::numeric::NumericCast::select(source, target) {
+            let output = cast.evaluate(value, control)?;
+            *numeric = Some(cast);
+            return Ok(output);
         }
     }
     let resolved_source = resolved_source_type

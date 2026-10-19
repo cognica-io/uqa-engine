@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 
 use crate::RowSchema;
 
-use uqa_core::Value;
+use uqa_core::{memory::Produced, Value};
 use uqa_sql::{
     ast::{BinaryOp, FunctionBinding, FunctionDispatch},
     expr::enums::EnumComparisonState,
@@ -20,7 +20,7 @@ use uqa_sql::{
 #[cfg(test)]
 thread_local! {
     static COMPARISON_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    pub(super) static CONSTANT_CAST_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(super) static CAST_TYPE_RESOLUTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(super) static COLUMN_NAME_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
@@ -30,6 +30,17 @@ pub(crate) enum ConstantCast {
     /// An immutable conversion, which every later evaluation copies.
     Retained(Value),
     /// The conversion reads a catalog descriptor, a session setting or a type outside the builtin scalars, so every evaluation converts again.
+    PerEvaluation,
+}
+
+/// Numeric conversions are retained for the same immutable execution schema; all other casts keep their live catalog path.
+#[derive(Debug)]
+pub(crate) enum RowCast {
+    Numeric {
+        conversion: uqa_sql::expr::NumericCast,
+        source: Produced<String>,
+        schema: Option<RowSchema>,
+    },
     PerEvaluation,
 }
 
@@ -57,16 +68,19 @@ pub(crate) struct ColumnSlot {
 }
 
 /// Read-only lookup into the function state owned by a prepared expression set.
-/// The state has one fixed-size entry per logical ordering comparison, literal cast or unqualified column reference, never per input row.
+/// The state has one fixed-size entry per logical ordering comparison, literal/row cast or column reference, never per input row.
 #[derive(Debug, Default)]
 pub struct FunctionCallStates {
     enums: Vec<((usize, u8), EnumComparisonState)>,
     constant_casts: Vec<(usize, OnceLock<ConstantCast>)>,
     columns: Vec<(usize, OnceLock<ColumnSlot>)>,
+    row_casts: Vec<(usize, OnceLock<RowCast>)>,
 }
 
 impl FunctionCallStates {
     fn register(&mut self, expression: &ScalarExpr) {
+        let first_row_cast = self.row_casts.len();
+        let mut parameter_dependent = false;
         expression.visit(&mut |expression| match expression {
             ScalarExpr::Func { name, binding, args, .. } => {
                 self.add(args.as_ptr() as usize, function_slots(name, binding.as_ref(), args));
@@ -85,16 +99,27 @@ impl FunctionCallStates {
                 self.constant_casts
                     .push((std::ptr::from_ref(expr.as_ref()) as usize, OnceLock::new()));
             }
+            ScalarExpr::Cast { expr, .. } => {
+                self.row_casts.push((std::ptr::from_ref(expr.as_ref()) as usize, OnceLock::new()));
+            }
+            ScalarExpr::Param(_) => parameter_dependent = true,
             ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => {
                 self.columns
                     .push((std::ptr::from_ref(expression) as usize, OnceLock::new()));
             }
             _ => {},
         });
+        // One traversal per root avoids rescanning every nested cast's subtree. Parameter-dependent roots keep live inference without disabling independent roots.
+        if parameter_dependent {
+            self.row_casts.truncate(first_row_cast);
+        }
     }
 
     fn is_empty(&self) -> bool {
-        self.enums.is_empty() && self.constant_casts.is_empty() && self.columns.is_empty()
+        self.enums.is_empty()
+            && self.constant_casts.is_empty()
+            && self.columns.is_empty()
+            && self.row_casts.is_empty()
     }
 
     /// The retained key of the column reference `expression`.
@@ -113,6 +138,14 @@ impl FunctionCallStates {
             .binary_search_by_key(&address, |(key, _)| *key)
             .ok()
             .map(|index| &self.constant_casts[index].1)
+    }
+
+    pub(crate) fn row_cast(&self, operand: &ScalarExpr) -> Option<&OnceLock<RowCast>> {
+        let address = std::ptr::from_ref(operand) as usize;
+        self.row_casts
+            .binary_search_by_key(&address, |(key, _)| *key)
+            .ok()
+            .map(|index| &self.row_casts[index].1)
     }
 
     fn add(&mut self, address: usize, slots: u8) {
@@ -194,6 +227,7 @@ static EMPTY_CALL_STATES: FunctionCallStates = FunctionCallStates {
     enums: Vec::new(),
     constant_casts: Vec::new(),
     columns: Vec::new(),
+    row_casts: Vec::new(),
 };
 
 impl<T> PreparedExpressions<T> {
@@ -208,6 +242,10 @@ impl<T> PreparedExpressions<T> {
         calls.constant_casts.dedup_by_key(|(address, _)| *address);
         calls.columns.sort_unstable_by_key(|(address, _)| *address);
         calls.columns.dedup_by_key(|(address, _)| *address);
+        calls
+            .row_casts
+            .sort_unstable_by_key(|(address, _)| *address);
+        calls.row_casts.dedup_by_key(|(address, _)| *address);
         Self {
             expressions,
             calls: (!calls.is_empty()).then(|| Box::new(PreparedCallStates { calls, visit_roots })),
