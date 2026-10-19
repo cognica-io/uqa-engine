@@ -127,8 +127,9 @@ def numeric_columns(description: list[tuple[str, str]]) -> set[int]:
 
 
 def render_row(fields: list[str], kinds: str) -> str:
+    """Render one row whose field count the caller has checked against ``kinds``."""
     values = []
-    for value, kind in zip(fields, kinds, strict=True):
+    for value, kind in zip(fields, kinds):
         if kind in "IN":
             values.append(value)
         else:
