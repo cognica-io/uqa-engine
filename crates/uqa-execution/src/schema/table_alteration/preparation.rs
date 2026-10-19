@@ -33,13 +33,44 @@ pub(super) struct PreparedTypeChange {
     pub collation_oid: u32,
 }
 
+pub(super) struct PreparedAlter {
+    pub types: BTreeMap<usize, PreparedTypeChange>,
+    pub primary_keys: BTreeMap<usize, Vec<String>>,
+}
+
 pub(super) fn prepare<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     table: &str,
     qualifier: &str,
     actions: &mut [AlterTableAction],
-) -> Result<BTreeMap<usize, PreparedTypeChange>, SQLError> {
-    prepare_relation(context, table, qualifier, actions, false)
+    recurse: bool,
+    mode: crate::row_locks::RelationLockMode,
+) -> Result<PreparedAlter, SQLError> {
+    let mut primary_keys = BTreeMap::new();
+    let types = prepare_actions(
+        context,
+        table,
+        qualifier,
+        actions,
+        false,
+        |columns, position, action| {
+            if let AlterTableAction::AddKeyConstraint { constraint } = action {
+                if constraint.kind == TableKeyConstraintKind::PrimaryKey {
+                    primary_keys.insert(
+                        position,
+                        super::primary_keys::prepare(
+                            context, table, columns, constraint, recurse, mode,
+                        )?,
+                    );
+                }
+            }
+            Ok(())
+        },
+    )?;
+    Ok(PreparedAlter {
+        types,
+        primary_keys,
+    })
 }
 
 pub(super) fn prepare_relation<S: Clone + 'static>(
@@ -48,6 +79,19 @@ pub(super) fn prepare_relation<S: Clone + 'static>(
     qualifier: &str,
     actions: &mut [AlterTableAction],
     recursing: bool,
+) -> Result<BTreeMap<usize, PreparedTypeChange>, SQLError> {
+    prepare_actions(context, table, qualifier, actions, recursing, |_, _, _| {
+        Ok(())
+    })
+}
+
+fn prepare_actions<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
+    table: &str,
+    qualifier: &str,
+    actions: &mut [AlterTableAction],
+    recursing: bool,
+    mut prepare_key: impl FnMut(&[ColumnDef], usize, &AlterTableAction) -> Result<(), SQLError>,
 ) -> Result<BTreeMap<usize, PreparedTypeChange>, SQLError> {
     let mut prepared = BTreeMap::new();
     if !actions.iter().any(|action| {
@@ -68,8 +112,8 @@ pub(super) fn prepare_relation<S: Clone + 'static>(
         .unwrap_or(actions.len());
     let (preceding, remaining) = actions.split_at_mut(first_type);
     if !recursing {
-        for action in preceding {
-            prepare_existing_key(table, &columns, action)?;
+        for (position, action) in preceding.iter().enumerate() {
+            prepare_key(&columns, position, action)?;
         }
     }
     if remaining.is_empty() {
@@ -95,7 +139,7 @@ pub(super) fn prepare_relation<S: Clone + 'static>(
     };
     for (offset, action) in remaining.iter_mut().enumerate() {
         if !recursing {
-            prepare_existing_key(table, &columns, action)?;
+            prepare_key(&columns, first_type + offset, action)?;
         }
         if let Some(change) = prepare_type_change(context, relation, &binding, action)? {
             prepared.insert(first_type + offset, change);
@@ -206,17 +250,4 @@ fn inherited_column<S: Clone + 'static>(
         }
     }
     Ok(false)
-}
-
-fn prepare_existing_key(
-    table: &str,
-    columns: &[ColumnDef],
-    action: &AlterTableAction,
-) -> Result<(), SQLError> {
-    if let AlterTableAction::AddKeyConstraint { constraint } = action {
-        uqa_sql::schema::keys::validate_primary_key_not_null_constraints(
-            table, columns, constraint,
-        )?;
-    }
-    Ok(())
 }

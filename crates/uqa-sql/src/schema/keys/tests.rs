@@ -151,3 +151,66 @@ fn primary_key_not_null_preparation_matches_postgresql() {
         validate_primary_key_not_null_constraints(relation, &table.columns, &constraint).unwrap();
     }
 }
+
+#[test]
+fn inherited_primary_key_requirements_match_postgresql_diagnostics() {
+    let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/inherited_primary_key_not_null_oracle.expected.json"
+    )))
+    .unwrap();
+    let Statement::CreateTable(mut table) = compile("CREATE TABLE c(a int)").unwrap().remove(0)
+    else {
+        panic!("expected table");
+    };
+    for (case, not_null, no_inherit, validated, inherited) in [
+        ("only_nullable", false, false, true, false),
+        ("only_noinherit", true, true, true, false),
+        ("not_valid_true", true, false, false, false),
+        ("recursive_noinherit", true, true, true, true),
+        ("not_valid_false", true, false, false, true),
+    ] {
+        let column = &mut table.columns[0];
+        column.not_null = not_null;
+        column.not_null_no_inherit = no_inherit;
+        column.not_null_validated = validated;
+        column.not_null_name = Some(if validated { "local_nn" } else { "pending_nn" }.into());
+        let result = if inherited {
+            crate::schema::constraint_changes::validate_inherited_not_null_addition(
+                "inherited_pk_probe.c",
+                column,
+                true,
+            )
+        } else {
+            validate_primary_key_not_null_child("inherited_pk_probe.c", &table.columns, "a")
+        };
+        let error = result.unwrap_err();
+        let expected = reference["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|record| record["id"] == case)
+            .unwrap();
+        assert_eq!(
+            error.sqlstate(),
+            expected["error"]["sqlstate"].as_str(),
+            "{case}"
+        );
+        assert_eq!(error.to_string(), expected["error"]["message"], "{case}");
+        assert_eq!(
+            error.detail(),
+            expected["error"]["detail"].as_str(),
+            "{case}"
+        );
+        assert_eq!(error.hint(), expected["error"]["hint"].as_str(), "{case}");
+    }
+    table.columns[0].not_null_no_inherit = false;
+    table.columns[0].not_null_validated = true;
+    validate_primary_key_not_null_child("inherited_pk_probe.c", &table.columns, "a").unwrap();
+    crate::schema::constraint_changes::validate_inherited_not_null_addition(
+        "inherited_pk_probe.c",
+        &table.columns[0],
+        true,
+    )
+    .unwrap();
+}

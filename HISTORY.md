@@ -13,6 +13,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Preserve normal argument evaluation in `pg_typeof`, including volatile effects, errors, privileges, NULL and declared type identities through stored views and provider reopening.
+
+- Check view and folded CTE routine privileges against the selected executable expressions before row production, including lateral and scalar correlation, `LIMIT 0`, `EXPLAIN`, and preceding sequence effects; retain materialized CTE and set-returning function requirements.
+
+- Restrict combined set-operation ORDER BY to output names and positions, preserving PostgreSQL clause-analysis order, literal and ordinal diagnostics, hidden operand names, prepared values and stored views.
+
 - Reject utility commands in SQL-standard function and procedure definitions with PostgreSQL diagnostics, preserving nested query and CALL analysis, statement error order, quoted bodies and transactional catalog state.
 
 - Bind column dependencies inside SQL-standard `VALUES` bodies so unrelated view deletion and column changes retain their PostgreSQL behavior, including after reopening persistent stores.
@@ -24,6 +29,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Preserve explicitly requested schemaless document fields in streaming derived tables and CTEs instead of returning NULL after source projection.
 
 - Reject primary keys over existing NO INHERIT or unvalidated NOT NULL constraints with PostgreSQL diagnostics, preserving original column metadata and written-order ALTER COLUMN TYPE analysis.
+
+- Propagate primary-key NOT NULL requirements through ordinary inheritance, preserve existing child constraint identities, and match PostgreSQL ONLY checks, descendant locks, validation order and rollback.
 
 ## [0.6.0] - 2026-10-18
 

@@ -282,6 +282,7 @@ fn command_statement_routine_inputs(
 
 fn merge_statement_routine_inputs(plan: &MergePlan) -> CommandRoutineInputs {
     let target = SourcePlan::Table {
+        executable_query: None,
         bound_columns: None,
         name: plan.target.clone(),
         qualifier: plan.target_qualifier.clone(),
@@ -497,6 +498,7 @@ fn statement_target_schema(
     let target = crate::binding::analyze_source_plan_schema(
         context.routines,
         &SourcePlan::Table {
+            executable_query: None,
             bound_columns: None,
             name: table.to_string(),
             qualifier: target_qualifier.to_string(),

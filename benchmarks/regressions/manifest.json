@@ -3883,6 +3883,61 @@
       "invariant": "ON CONFLICT selects the same unique arbiter and produces the same rows, completions and rejection diagnostics before and after reopening."
     },
     {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "named_output_pruning_preserves_bound_types_aliases_and_column_authority",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection.rs",
+      "capability": "Named query output projection",
+      "workload": "Two bound output columns with distinct types and range aliases; only the first is consumed.",
+      "invariant": "The discarded expression preserves its type, output position and column authority without reading its value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_demand_precedes_constant_evaluation_and_preserves_materialization",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/cte_projection.rs",
+      "capability": "Folded CTE expression liveness",
+      "workload": "Seven folded, materialized, repeated, aliased, predicate-dependent and volatile CTE shapes.",
+      "invariant": "Only unused scalar outputs of folded CTEs disappear before constant evaluation; materialization and volatile work are retained.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_recursive_ctes_keep_the_complete_query_descriptor",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests.rs",
+      "capability": "Deferred recursive source descriptors",
+      "workload": "Read recursive source types through full WITH plans and deferred scopes, including sibling inputs, positional aliases and SEARCH/CYCLE columns.",
+      "invariant": "Repeated deferred binding preserves the complete row descriptor and resolves recursive self references through their seed schema.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "view_routine_initialization_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
+      "capability": "Named query routine initialization",
+      "workload": "194 independent PostgreSQL 18.4 messages covering views, folded, materialized and recursive CTEs, lateral and scalar correlation, aliases, LIMIT 0, EXPLAIN, set calls and sequence-observed planning/execution on memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Selected expressions preserve exact rows and privilege errors, constant preparation runs once per occurrence, and denied routines prevent preceding row-production effects.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "stored_view_coercions_preserve_prepared_result_collations",
@@ -8296,6 +8351,63 @@
         "case_2_sqlite",
         "case_3_sqlite_key_value",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "inherited_primary_key_requirements_match_postgresql_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/keys/tests.rs",
+      "capability": "Inherited primary-key NOT NULL requirements",
+      "workload": "ONLY child requirements and recursive additions encounter missing, NO INHERIT and unvalidated child constraints.",
+      "invariant": "SQL preserves PostgreSQL SQLSTATE, message, DETAIL and HINT and keeps SET NOT NULL distinct from constraint addition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_not_null_checks_preserve_relation_order_and_nested_scope_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/columns/rows/tests.rs",
+      "capability": "Inherited primary-key NOT NULL requirements",
+      "workload": "Repeated column demands, multiple relations, nested scopes and physical rewrite deferral share the statement-local check owner.",
+      "invariant": "Requirements remain grouped per relation in encounter order; nested rollback restores the outer scope without suppressing index construction or leaking checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "inherited_primary_key_not_null_matches_postgresql_after_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_unique_constraint/not_null.rs",
+      "capability": "Inherited primary-key NOT NULL requirements",
+      "workload": "Replay 356 PostgreSQL 18.6 observations over memory, native SQLite, SQLite K/V and redb, with persistent reopen before final constraint and NULL enforcement checks.",
+      "invariant": "Ordinary inheritance, ONLY, diamonds, original constraint identities, OID-ordered diagnostics, type rewrites and failed statements retain PostgreSQL catalog and row behavior.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "inherited_primary_key_locks_match_postgresql",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/primary_keys.rs",
+      "capability": "Inherited primary-key NOT NULL requirements",
+      "workload": "Replay 72 PostgreSQL 18.6 observations with two controlled sessions over native SQLite, SQLite K/V and redb, including NOWAIT child probes, savepoint rollback, ONLY partitions and original-action lock/error order.",
+      "invariant": "Generated requirements retain descendant locks; compatible existing ONLY requirements avoid child locks; rollback releases locks and later column errors do not bypass earlier lock acquisition.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
       ]
     },
     {
@@ -14449,6 +14561,74 @@
       "invariant": "The source remains regtype for catalog-aware output, inference does not revisit the analyzed operand, and all temporary reservations are released.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_ordering_accepts_output_names_positions_and_outer_expressions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/set_ordering.rs",
+      "capability": "Set-operation ordering",
+      "workload": "All six set-operation forms use names, parenthesized names and output ordinals; branch-local and outer expression ordering remain valid.",
+      "invariant": "Analysis agrees with independent PostgreSQL acceptance and diagnostics before any operand is executed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_ordering_rejects_computed_targets_after_complete_clause_analysis",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/set_ordering.rs",
+      "capability": "Set-operation ordering",
+      "workload": "Computed targets and typed parameters are rejected after complete ORDER BY name/type analysis, before LIMIT and execution.",
+      "invariant": "Analysis agrees with independent PostgreSQL acceptance and diagnostics before any operand is executed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_ordering_preserves_literal_and_duplicate_output_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/set_ordering.rs",
+      "capability": "Set-operation ordering",
+      "workload": "Noninteger constants, int4 parser-token boundaries, invalid ordinals and duplicate output names retain exact PostgreSQL diagnostics.",
+      "invariant": "Analysis agrees with independent PostgreSQL acceptance and diagnostics before any operand is executed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_ordering_retains_leaf_names_without_exposing_nested_query_outputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/set_ordering.rs",
+      "capability": "Set-operation ordering",
+      "workload": "Flattened and separately ordered set operands retain hidden source names for SQLSTATE/DETAIL/HINT without exposing inaccessible outputs.",
+      "invariant": "Analysis agrees with independent PostgreSQL acceptance and diagnostics before any operand is executed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "set_operation_ordering_matches_postgresql_after_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/sql_set_ordering.rs",
+      "capability": "Set-operation ordering",
+      "workload": "Replay 93 PostgreSQL 18.4 result/error observations on memory, native SQLite, SQLite K/V and redb; reopen stored view definitions before prepared-query controls.",
+      "invariant": "Values, command tags, SQLSTATE, primary messages, DETAIL, HINT and unreachable sequence effects match the independent reference.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
       ]
     }
   ]

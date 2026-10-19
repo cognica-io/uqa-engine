@@ -82,6 +82,34 @@ fn retrieval_metadata_binding_agrees_with_analysis_without_running_a_query() {
 }
 
 #[test]
+fn deferred_recursive_ctes_keep_the_complete_query_descriptor() {
+    for sql in [
+        "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r WHERE n<3) SELECT n FROM r",
+        "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r WHERE n<3) SEARCH DEPTH FIRST BY n SET ordering SELECT n,ordering FROM r",
+        "WITH RECURSIVE seed(n) AS (SELECT 1), r(n) AS (SELECT n FROM seed UNION ALL SELECT n+1 FROM r WHERE n<3) CYCLE n SET cycled USING path SELECT n,cycled,path FROM r",
+    ] {
+        let crate::plan::UnifiedPlan::Query(mut query) =
+            crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("expected query plan");
+        };
+        let mut context = super::fixture::empty_binding_context();
+        let expected =
+            super::bind_query_plan_schema(&EmptyRoutineResolution, &query, &[], &context, None)
+                .unwrap();
+        for cte in std::mem::take(&mut query.ctes) {
+            context.deferred_ctes.insert(cte.name.clone(), cte);
+        }
+        for _ in 0..2 {
+            let actual =
+                super::bind_query_plan_schema(&EmptyRoutineResolution, &query, &[], &context, None)
+                    .unwrap();
+            assert_eq!(actual, expected, "{sql}");
+        }
+    }
+}
+
+#[test]
 fn routine_parameter_lookup_preserves_wildcard_syntax_sites() {
     let context = super::BindingContext {
         catalog: super::fixture::catalog(BTreeMap::new()),
@@ -259,6 +287,7 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
         crate::binding::fixture::resolution(vec!["app".into()], "pg_temp_fixture".into());
     let source = SourcePlan::Join {
         left: Box::new(SourcePlan::Table {
+            executable_query: None,
             bound_columns: None,
             name: "documents".into(),
             qualifier: "documents".into(),
@@ -267,6 +296,7 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
             include_descendants: true,
         }),
         right: Box::new(SourcePlan::Table {
+            executable_query: None,
             bound_columns: None,
             name: "rankings".into(),
             qualifier: "rankings".into(),

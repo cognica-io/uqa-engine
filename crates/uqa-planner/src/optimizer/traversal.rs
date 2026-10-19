@@ -45,6 +45,9 @@ pub(super) fn optimize_query(
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
     super::subqueries::prune_query(query);
+    if let Some(routines) = &config.routine_inlining {
+        super::cte_projection::prune(query, aggregates, routines.volatility)?;
+    }
     let reachable = uqa_sql::semantics::reachable_plan_cte_names(query);
     for cte in query
         .ctes

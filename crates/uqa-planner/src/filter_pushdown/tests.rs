@@ -28,6 +28,7 @@ fn qualified_literal_equality(qualifier: &str, column: &str, value: &str) -> Sca
 fn joined_source(kind: JoinKind, on: ScalarExpr) -> SourcePlan {
     SourcePlan::Join {
         left: Box::new(SourcePlan::Table {
+            executable_query: None,
             bound_columns: None,
             name: "left_table".into(),
             qualifier: "left_table".into(),
@@ -36,6 +37,7 @@ fn joined_source(kind: JoinKind, on: ScalarExpr) -> SourcePlan {
             include_descendants: true,
         }),
         right: Box::new(SourcePlan::Table {
+            executable_query: None,
             bound_columns: None,
             name: "right_table".into(),
             qualifier: "right_table".into(),
@@ -115,6 +117,7 @@ fn table_range_aliases_are_the_filter_ownership_names() {
     let fixture = Fixture::new();
     let scope = fixture.scope();
     let source = SourcePlan::Table {
+        executable_query: None,
         bound_columns: None,
         name: "filter_alias_source".into(),
         qualifier: "filter_alias_source".into(),
@@ -163,6 +166,7 @@ fn unaliased_relations_keep_their_columns_from_the_only_named_relation() {
     ] {
         let from = SourcePlan::Join {
             left: Box::new(SourcePlan::Table {
+                executable_query: None,
                 bound_columns: None,
                 name: "filter_alias_source".into(),
                 qualifier: "filter_alias_source".into(),
@@ -361,6 +365,7 @@ fn outer_join_marks_only_null_extended_qualifiers_as_unsafe_for_pushdown() {
     let nested_alias = SourcePlan::Join {
         left: Box::new(nested_outer),
         right: Box::new(SourcePlan::Table {
+            executable_query: None,
             bound_columns: None,
             name: "marker_table".into(),
             qualifier: "marker_table".into(),

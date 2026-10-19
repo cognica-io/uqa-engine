@@ -201,3 +201,17 @@ fn mutation_initialization_matches_postgresql(#[case] provider: usize) {
         ),
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn view_routine_initialization_matches_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("view-routine-plan.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../../tests/parity/pg18/view_routine_plan_oracle.expected.json"),
+    );
+}

@@ -17,6 +17,7 @@ mod constraint_names;
 mod constraint_rename;
 mod foreign_key_removal;
 mod foreign_key_rename;
+mod primary_keys;
 mod removal;
 mod validation;
 
