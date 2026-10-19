@@ -148,6 +148,15 @@ fn wide_expressions_and_independent_projections_remain_valid() {
 
 #[test]
 fn expression_depth_boundary_is_consistent() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(check_expression_depth_boundary)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn check_expression_depth_boundary() {
     for (prefix, suffix) in [("[", "]"), ("(", ")"), ("NOT ", "")] {
         let accepted = format!("RETURN {}0{}", prefix.repeat(63), suffix.repeat(63));
         assert!(parse_cypher(&accepted).is_ok());
@@ -162,4 +171,41 @@ fn expression_depth_boundary_is_consistent() {
         parse_cypher(&format!("RETURN 0{}", " + 0".repeat(64))),
         Err(uqa_graph::cypher::ParseError::ExpressionTooDeep { limit: 64, .. })
     ));
+}
+
+#[test]
+fn boolean_arithmetic_and_postfix_precedence_is_preserved() {
+    for (query, parenthesized) in [
+        (
+            "RETURN NOT 1 = 2 AND true OR false XOR true",
+            "RETURN ((NOT (1 = 2)) AND true) OR (false XOR true)",
+        ),
+        (
+            "RETURN -2 ^ 2 ^ 3 * 4 + 5",
+            "RETURN ((((-2) ^ 2) ^ 3) * 4) + 5",
+        ),
+        ("RETURN 1 < 2 < 3", "RETURN (1 < 2) < 3"),
+        (
+            "RETURN NOT 1 IN [1, 2] IS NULL",
+            "RETURN NOT ((1 IN [1, 2]) IS NULL)",
+        ),
+        (
+            "RETURN 'ab' STARTS WITH 'a' = true",
+            "RETURN ('ab' STARTS WITH 'a') = true",
+        ),
+        ("RETURN -[1, 2][0] ^ 2", "RETURN (-([1, 2][0])) ^ 2"),
+    ] {
+        assert_eq!(
+            parse_cypher(query).unwrap(),
+            parse_cypher(parenthesized).unwrap(),
+            "{query}"
+        );
+    }
+    for query in [
+        "RETURN 1 + NOT true",
+        "RETURN 1 = NOT true",
+        "RETURN -NOT true",
+    ] {
+        assert!(parse_cypher(query).is_err(), "{query}");
+    }
 }
