@@ -501,7 +501,7 @@ Duplicate projected labels remain separate slots through execution and the colum
 
 ## Pull execution and blocking operators
 
-Physical relational operators are pull-based and exchange batches of dynamic `Value` instances. Filters can compile projected predicates once and evaluate positions directly. Aggregates use streaming state and adaptive grouping where possible.
+Physical relational operators are pull-based and exchange batches of dynamic `Value` instances. Filters can compile projected predicates once and evaluate positions directly. Aggregates use streaming state and adaptive grouping where possible. Finalized expressions read their aggregate/group slots through a borrowed output lookup, including expressions simplified to constants before slot binding; an external group row is built only when the expression still needs one.
 
 Scalar highlighting borrows the current `QueryRuntimeView` after SQL argument validation and NULL short circuits. Execution forwards one `work_mem` allowance and cancellation callback through borrowed query candidate splitting and the analysis-owned matcher/renderer. Named resources retain their immutable revision during source/query analysis. Memory failures return `53200`; cancellation retains the typed `57014` error. The completed string transfers to the ordinary scalar result owner, and the highlighter does not spill.
 

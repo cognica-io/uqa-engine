@@ -14630,6 +14630,48 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "constant_group_outputs_read_finalized_slots_without_an_input_row",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/output/tests.rs",
+      "capability": "Grouped output evaluation",
+      "workload": "Constant and nested group outputs with zero or one aggregate finalizer, evaluated without an external input row.",
+      "invariant": "Rewritten internal group slots remain readable at their selected finalizer offset and unrelated constants retain their values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "grouped_expression_outputs_keep_the_finalized_null_value",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/output/tests.rs",
+      "capability": "Grouped output evaluation",
+      "workload": "Grouped constant, negation and NULL predicate consume the finalized absent-key value.",
+      "invariant": "Expressions consume the finalized group value, including NULL, instead of reevaluating the pre-group constant or reporting an unavailable slot.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "grouped_constant_outputs_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_aggregates/grouping.rs",
+      "capability": "Grouped output evaluation",
+      "workload": "34 independent PostgreSQL observations cover the original single-row regex/concat/function/predicate failures, typed and NULL constants, nested outputs, finalizer offsets, grouping sets, HAVING, hidden ordering and empty-input controls on four providers.",
+      "invariant": "SQL rows, declared types, labels, command tags and errors match PostgreSQL while constant-source propagation and empty-input group cardinality remain intact.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

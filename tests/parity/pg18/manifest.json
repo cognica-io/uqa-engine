@@ -163,7 +163,8 @@
       "functions.input-collation-case-mapping",
       "query.set-returning-contexts",
       "functions.type-observation-arguments",
-      "query.set-operation-ordering"
+      "query.set-operation-ordering",
+      "query.constant-group-output-slots"
     ],
     "M2": [
       "protocol.frontend-backend-3.2"
@@ -1482,6 +1483,14 @@
       "postgresql_reference": "93 independently captured PostgreSQL 18.4 observations in tests/parity/pg18/set_operation_ordering_oracle.expected.json; transformSetOperationStmt, transformSortClause and errorMissingColumn.",
       "uqa_test": "cargo test -p uqa-sql --lib binding::preparation::tests::set_ordering; cargo test -p uqa-engine --test integration set_operation_ordering_matches_postgresql_after_reopen",
       "supported_version": "UNION, INTERSECT and EXCEPT with distinct/ALL variants accept output names and positions, reject computed ordering after clause analysis, preserve literal/ordinal/ambiguous and inaccessible-column diagnostics, common-type error order, branch/outer sorting, prepared arguments and stored views across provider reopening.",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "query.constant-group-output-slots",
+      "postgresql_reference": "34 independently captured PostgreSQL 18.4 observations in aggregate_output_slots_oracle.expected.json, including the five original #1010 reproductions.",
+      "uqa_test": "cargo test -p uqa-execution --lib aggregation::output::tests; cargo test -p uqa-engine --test integration grouped_constant_outputs_match_postgresql",
+      "supported_version": "Unreleased: constant and nested finalized group outputs over one-row VALUES and source-free derived relations, typed and NULL constants, aggregate finalizer offsets, grouping sets, HAVING, hidden ORDER BY and empty-input cardinality. All 34 observations match memory, native SQLite, SQLite Key/Value and redb; two Execution owner tests preserve borrowed slot lookup without an input row.",
       "status": "verified",
       "open_issue": null
     }
