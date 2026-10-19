@@ -286,6 +286,8 @@ SELECT pg_get_functiondef('pg_catalog.bit_length(text)'::regprocedure) AS defini
 
 SQL functions can return scalar, `SETOF`, or `TABLE` results according to their declaration. SQL-standard `RETURN expression` and `BEGIN ATOMIC ... END` bodies are also implemented for supported statement shapes. `pg_get_function_sqlbody(oid)` returns the stored SQL-standard body as text for user routines and built-ins that have one. A `RETURN` expression prints on one line, and each `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`, or `WITH` statement of a `BEGIN ATOMIC` body uses PostgreSQL's layout, with column references qualified by their relation and parameters by name, qualified by the routine's name whenever the statement has a range table. Source-string and internal bodies, unknown OIDs and NULL input return NULL. Reconstruction is read-only and qualifies a selected routine whenever the invoking search path contains an earlier routine with the same name and argument types; a different overload does not hide it. Stored views, defaults and generated expressions use the same selected-identity rule.
 
+A SQL-standard body accepts analyzed queries and data-modifying statements. Utility commands report `0A000` with their PostgreSQL command name during definition, including when `check_function_bodies` is off. CTAS, materialized-view creation, `EXPLAIN`, cursor declarations and `CALL` analyze their inputs first, so an invalid contained query or unresolved procedure retains its earlier error. Statements are analyzed in source order without executing them. Quoted SQL bodies retain their separate creation-validation and execution-time behavior.
+
 ```sql execute
 SELECT pg_get_function_sqlbody('pg_catalog.bit_length(text)'::regprocedure) AS body;
 ```

@@ -52,7 +52,25 @@ pub fn bind_catalog_statement_routines(
     plan: &UnifiedPlan,
     params: &[crate::SQLParam],
 ) -> Result<BoundStatementRoutines, SQLError> {
-    bind_catalog_statement(context, plan, |query, outer| {
+    bind_catalog_statement(context, plan, None, |query, outer| {
+        crate::binding::bind_syntax_query_plan_routines(
+            context.routines,
+            query,
+            params,
+            context.binding,
+            outer,
+        )
+    })
+}
+
+/// Retain the original syntax correspondence after full statement input analysis has converted literals in a separate plan.
+pub(crate) fn bind_prepared_catalog_statement_routines(
+    context: &CatalogRoutineContext<'_, '_>,
+    syntax: &UnifiedPlan,
+    prepared: &UnifiedPlan,
+    params: &[crate::SQLParam],
+) -> Result<BoundStatementRoutines, SQLError> {
+    bind_catalog_statement(context, syntax, Some(prepared), |query, outer| {
         crate::binding::bind_syntax_query_plan_routines(
             context.routines,
             query,
@@ -69,7 +87,7 @@ pub(super) fn bind_catalog_statement_composite_inputs(
     params: &[crate::SQLParam],
     outer: Option<&RowSchema>,
 ) -> Result<BoundStatementRoutines, SQLError> {
-    bind_catalog_statement(context, plan, |query, command_outer| {
+    bind_catalog_statement(context, plan, None, |query, command_outer| {
         let mut scope = super::SchemaScope::for_analysis(context.binding)?;
         scope.scalar_binding = super::ScalarBindingMode::CompositeInputs;
         scope.preserve_syntax_shape = true;
@@ -86,16 +104,20 @@ pub(super) fn bind_catalog_statement_composite_inputs(
 fn bind_catalog_statement(
     context: &CatalogRoutineContext<'_, '_>,
     plan: &UnifiedPlan,
+    prepared: Option<&UnifiedPlan>,
     bind: impl FnOnce(&mut QueryPlan, Option<&RowSchema>) -> Result<RowSchema, SQLError>,
 ) -> Result<BoundStatementRoutines, SQLError> {
-    let lowered = match plan {
-        UnifiedPlan::Query(query) => {
-            let mut query = (**query).clone();
-            mark_query_relations_bound(&mut query);
-            Some((query, None))
+    let lower = |plan: &UnifiedPlan| -> Result<_, SQLError> {
+        match plan {
+            UnifiedPlan::Query(query) => {
+                let mut query = (**query).clone();
+                mark_query_relations_bound(&mut query);
+                Ok(Some((query, None)))
+            }
+            UnifiedPlan::Command(command) => command_statement_query(context, command),
         }
-        UnifiedPlan::Command(command) => command_statement_query(context, command)?,
     };
+    let lowered = lower(plan)?;
     let Some((lowered, outer)) = lowered else {
         return Ok(BoundStatementRoutines {
             query: None,
@@ -103,7 +125,18 @@ fn bind_catalog_statement(
             query_output: None,
         });
     };
-    let mut query = lowered.clone();
+    let mut query = match prepared {
+        Some(prepared) => {
+            lower(prepared)?
+                .ok_or_else(|| {
+                    SQLError::Internal(
+                        "prepared catalog statement lost its analyzed expressions".into(),
+                    )
+                })?
+                .0
+        }
+        None => lowered.clone(),
+    };
     let output = bind(&mut query, outer.as_ref())?;
     let sites = if matches!(plan, UnifiedPlan::Command(_)) {
         super::syntax_sites::command_query_syntax_sites(&lowered, &query)?

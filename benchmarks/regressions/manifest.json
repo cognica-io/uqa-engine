@@ -376,7 +376,9 @@
       "capability": "Named document field demands",
       "workload": "Combine a named field with a wildcard, a volatile expression or a scalar subquery predicate.",
       "invariant": "Conservative projection retains the named fields without pretending it can prune the complete declared source row.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-planner",
@@ -387,7 +389,9 @@
       "capability": "Mixed document and SQL source binding",
       "workload": "Join a declared SQL relation and an open document source with both statically bound and runtime field references.",
       "invariant": "A bound SQL input remains owned by its declared relation, while unresolved document field demands remain available.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",
@@ -398,7 +402,9 @@
       "capability": "Bounded document field projection",
       "workload": "Read a present and an absent field from a document with an unrelated 2 MiB payload using the real local row source.",
       "invariant": "The result preserves the value and missing-field NULL within a 64 KiB allocation bound, without copying the unrequested payload.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-engine",
@@ -3806,6 +3812,61 @@
       "capability": "Persistent expression-index conflict inference",
       "workload": "Eighteen independent PostgreSQL commands cover partial unique indexes, aliases, view rewrites, explicit C/POSIX clauses, rejected casts and persistent reopening across memory, native SQLite, SQLite Key/Value and redb.",
       "invariant": "ON CONFLICT selects the same unique arbiter and produces the same rows, completions and rejection diagnostics before and after reopening."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "named_output_pruning_preserves_bound_types_aliases_and_column_authority",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection.rs",
+      "capability": "Named query output projection",
+      "workload": "Two bound output columns with distinct types and range aliases; only the first is consumed.",
+      "invariant": "The discarded expression preserves its type, output position and column authority without reading its value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_demand_precedes_constant_evaluation_and_preserves_materialization",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/cte_projection.rs",
+      "capability": "Folded CTE expression liveness",
+      "workload": "Seven folded, materialized, repeated, aliased, predicate-dependent and volatile CTE shapes.",
+      "invariant": "Only unused scalar outputs of folded CTEs disappear before constant evaluation; materialization and volatile work are retained.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_recursive_ctes_keep_the_complete_query_descriptor",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests.rs",
+      "capability": "Deferred recursive source descriptors",
+      "workload": "Read recursive source types through full WITH plans and deferred scopes, including sibling inputs, positional aliases and SEARCH/CYCLE columns.",
+      "invariant": "Repeated deferred binding preserves the complete row descriptor and resolves recursive self references through their seed schema.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "view_routine_initialization_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
+      "capability": "Named query routine initialization",
+      "workload": "194 independent PostgreSQL 18.4 messages covering views, folded, materialized and recursive CTEs, lateral and scalar correlation, aliases, LIMIT 0, EXPLAIN, set calls and sequence-observed planning/execution on memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Selected expressions preserve exact rows and privilege errors, constant preparation runs once per occurrence, and denied routines prevent preceding row-production effects.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     },
     {
       "package": "uqa-sql",
@@ -14263,40 +14324,14 @@
       ]
     },
     {
-      "package": "uqa-planner",
-      "kind": "lib",
-      "test": "named_output_pruning_preserves_bound_types_aliases_and_column_authority",
-      "cases": 1,
-      "source": "crates/uqa-planner/src/optimizer/derived_projection.rs",
-      "capability": "Named query output projection",
-      "workload": "Two bound output columns with distinct types and range aliases; only the first is consumed.",
-      "invariant": "The discarded expression preserves its type, output position and column authority without reading its value.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-planner",
-      "kind": "lib",
-      "test": "folded_cte_demand_precedes_constant_evaluation_and_preserves_materialization",
-      "cases": 1,
-      "source": "crates/uqa-planner/src/optimizer/cte_projection.rs",
-      "capability": "Folded CTE expression liveness",
-      "workload": "Seven folded, materialized, repeated, aliased, predicate-dependent and volatile CTE shapes.",
-      "invariant": "Only unused scalar outputs of folded CTEs disappear before constant evaluation; materialization and volatile work are retained.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
       "package": "uqa-sql",
       "kind": "lib",
-      "test": "deferred_recursive_ctes_keep_the_complete_query_descriptor",
+      "test": "sql_standard_utilities_use_postgresql_command_diagnostics",
       "cases": 1,
-      "source": "crates/uqa-sql/src/binding/tests.rs",
-      "capability": "Deferred recursive source descriptors",
-      "workload": "Read recursive source types through full WITH plans and deferred scopes, including sibling inputs, positional aliases and SEARCH/CYCLE columns.",
-      "invariant": "Repeated deferred binding preserves the complete row descriptor and resolves recursive self references through their seed schema.",
+      "source": "crates/uqa-sql/src/routines/compilation/tests.rs",
+      "capability": "SQL-standard routine utility diagnostics",
+      "workload": "261 independent PostgreSQL 18.4 command/result/error observations, covering utility families, nested query analysis, CALL, preceding errors, quoted bodies and transaction rollback.",
+      "invariant": "Definition analysis follows statement order, reports the PostgreSQL diagnostic and preserves catalog and row state without executing body commands.",
       "case_names": [
         ""
       ]
@@ -14304,17 +14339,31 @@
     {
       "package": "uqa-engine",
       "kind": "test",
-      "test": "view_routine_initialization_matches_postgresql",
+      "test": "sql_standard_utility_bodies_match_postgresql",
       "cases": 4,
-      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
-      "capability": "Named query routine initialization",
-      "workload": "194 independent PostgreSQL 18.4 messages covering views, folded, materialized and recursive CTEs, lateral and scalar correlation, aliases, LIMIT 0, EXPLAIN, set calls and sequence-observed planning/execution on memory, SQLite, SQLite K/V and redb.",
-      "invariant": "Selected expressions preserve exact rows and privilege errors, constant preparation runs once per occurrence, and denied routines prevent preceding row-production effects.",
+      "source": "crates/uqa-engine/tests/sql_routine_identity/utility_bodies.rs",
+      "capability": "SQL-standard routine utility diagnostics",
+      "workload": "261 independent PostgreSQL 18.4 command/result/error observations, covering utility families, nested query analysis, CALL, preceding errors, quoted bodies and transaction rollback.",
+      "invariant": "Definition analysis follows statement order, reports the PostgreSQL diagnostic and preserves catalog and row state without executing body commands.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite",
         "case_3_sqlite_key_value",
         "case_4_redb"
+      ],
+      "target": "integration"
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "prepared_input_constants_keep_their_original_stored_syntax_sites",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_routines/analysis/tests.rs",
+      "capability": "Stored routine input identity",
+      "workload": "Bind converted and unchanged literal inputs, serialize their original SQL syntax and rebind the restored statement.",
+      "invariant": "Input conversion retains original syntax correspondence and subsequent binding is idempotent.",
+      "case_names": [
+        ""
       ]
     }
   ]

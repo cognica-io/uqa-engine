@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Check view and folded CTE routine privileges against the selected executable expressions before row production, including lateral and scalar correlation, `LIMIT 0`, `EXPLAIN`, and preceding sequence effects; retain materialized CTE and set-returning function requirements.
 
+- Reject utility commands in SQL-standard function and procedure definitions with PostgreSQL diagnostics, preserving nested query and CALL analysis, statement error order, quoted bodies and transactional catalog state.
+
 - Keep persistent IVF and HNSW writers bound to their completed index definitions when another session commits during index creation, preventing canonical vectors from being written without the corresponding index metadata.
 
 - Preserve explicitly requested schemaless document fields in streaming derived tables and CTEs instead of returning NULL after source projection.
