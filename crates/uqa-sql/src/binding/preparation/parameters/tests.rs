@@ -18,7 +18,7 @@ fn interval_input_applies_fields_before_parameter_type_modifiers_are_removed() {
     parameters.coerce_unknown(&mut inferred, &target).unwrap();
     assert_eq!(inferred.ty, Some(ColumnType::Interval));
     assert!(matches!(
-        parameters.take_literal(&expression).unwrap(),
+        parameters.take_literal(&expression).unwrap().expression,
         ScalarExpr::TypedLiteral {
             value: Value::Temporal(uqa_core::TemporalValue::Interval {
                 months: 12,
@@ -35,7 +35,14 @@ fn copied_membership_constants_keep_input_cache_volatility() {
     for (text, target, reusable) in [
         ("1", ColumnType::Integer, true),
         ("hello", ColumnType::Text, true),
-        ("2020-02-03", ColumnType::Date, false),
+        // An ISO date reads the same under every DateStyle; a two-digit leading field takes the order DateStyle selects, and the special values resolve against the transaction clock.
+        ("2020-02-03", ColumnType::Date, true),
+        ("02-03-2020", ColumnType::Date, false),
+        ("today", ColumnType::Date, false),
+        ("epoch", ColumnType::Timestamp, true),
+        ("now", ColumnType::Timestamp, false),
+        ("1 day", ColumnType::Interval, true),
+        ("-1 2:03:04", ColumnType::Interval, false),
     ] {
         for collated in [false, true] {
             let clause = if collated { " COLLATE \"C\"" } else { "" };

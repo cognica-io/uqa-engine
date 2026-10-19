@@ -73,6 +73,9 @@ impl DecimalValue {
                 },
             ) => {
                 let scale = (*left_scale).max(*right_scale);
+                if let Some(sum) = word_sum(left, *left_scale, right, *right_scale, scale, false) {
+                    return finite(coefficient::from_word_result(sum, control)?, scale, control);
+                }
                 let left_aligned = aligned(left, *left_scale, scale, control)?;
                 let right_aligned = aligned(right, *right_scale, scale, control)?;
                 finite(
@@ -93,6 +96,28 @@ impl DecimalValue {
         rhs: &Self,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Produced<Self>>, ValueRetentionError> {
+        if let (
+            DecimalRepr::Finite {
+                coefficient: left,
+                scale: left_scale,
+            },
+            DecimalRepr::Finite {
+                coefficient: right,
+                scale: right_scale,
+            },
+        ) = (self.repr(), rhs.repr())
+        {
+            let scale = (*left_scale).max(*right_scale);
+            if let Some(difference) = word_sum(left, *left_scale, right, *right_scale, scale, true)
+            {
+                control.check()?;
+                return checked(
+                    coefficient::from_word_result(difference, control)
+                        .map_err(Failure::from)
+                        .and_then(|coefficient| finite(coefficient, scale, control)),
+                );
+            }
+        }
         let rhs = rhs.negated_with_control(control)?;
         self.checked_add_with_control(&rhs, control)
     }
@@ -133,10 +158,21 @@ impl DecimalValue {
         else {
             unreachable!("special numeric handled above")
         };
-        let coefficient = coefficient::multiply(left, right, control)?;
         let scale = left_scale
             .checked_add(*right_scale)
             .ok_or(Failure::Invalid)?;
+        if scale <= MAX_FRACTIONAL_DIGITS {
+            if let (Ok(left), Ok(right)) = (i64::try_from(left), i64::try_from(right)) {
+                // Two machine words always multiply within 128 bits.
+                let product = i128::from(left) * i128::from(right);
+                return finite(
+                    coefficient::from_word_result(product, control)?,
+                    scale,
+                    control,
+                );
+            }
+        }
+        let coefficient = coefficient::multiply(left, right, control)?;
         if scale <= MAX_FRACTIONAL_DIGITS {
             return finite(coefficient, scale, control);
         }
@@ -331,6 +367,24 @@ fn integer_digits_may_exceed_limit(coefficient: &BigInt, scale: u32) -> bool {
 }
 
 /// The coefficient at `target_scale`, or `None` when the scale already matches and the coefficient can be used as it is. A power of ten that fits in a machine word multiplies the coefficient directly.
+/// The exact sum or difference of two machine-word coefficients aligned to `scale`, when it fits 128 bits.
+fn word_sum(
+    left: &BigInt,
+    left_scale: u32,
+    right: &BigInt,
+    right_scale: u32,
+    scale: u32,
+    subtract: bool,
+) -> Option<i128> {
+    let left = coefficient::aligned_word(left, left_scale, scale)?;
+    let right = coefficient::aligned_word(right, right_scale, scale)?;
+    if subtract {
+        left.checked_sub(right)
+    } else {
+        left.checked_add(right)
+    }
+}
+
 fn aligned(
     value: &BigInt,
     source_scale: u32,

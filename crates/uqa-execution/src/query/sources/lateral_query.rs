@@ -11,6 +11,7 @@ use super::{
     QueryOutput, QueryOutputMode, QueryPlan, RelationalPlan, SQLError, SQLParam, SourceContext,
 };
 use crate::query::projection::expand_from_star_columns;
+mod outer_constants;
 mod streaming_sets;
 use uqa_sql::{plan::QueryBlockPlan, semantics::projection_columns};
 
@@ -234,7 +235,14 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
             Some(&outer_row.schema),
         )?;
     }
-    let operator = build_lateral_query_source(context, stmt, outer_row, params, &mut scoped_ctes)?;
+    let (operator, residual) = build_lateral_query_source(
+        context,
+        stmt,
+        &own_schema,
+        outer_row,
+        params,
+        &mut scoped_ctes,
+    )?;
     let columns = expand_from_star_columns(
         projection_columns(&stmt.projections),
         &stmt.projections,
@@ -275,7 +283,7 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
     crate::query::relational::output::execute_query_block_operator_output(
         context.relational,
         operator,
-        stmt.r#where.clone(),
+        residual,
         stmt,
         stmt,
         params,
@@ -285,13 +293,23 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
     )
 }
 
+/// Build the block's sources with the conjuncts this invocation can place in them, and return the remaining filter over the overlaid rows.
 fn build_lateral_query_source<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
     stmt: &QueryBlockPlan,
+    own_schema: &crate::RowSchema,
     outer_row: &crate::OwnedPhysicalRow,
     params: &'a [SQLParam],
     scoped_ctes: &mut CteScope<S>,
-) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
+) -> Result<
+    (
+        Box<dyn crate::PhysicalOperator + 'a>,
+        Option<uqa_sql::ScalarExpr>,
+    ),
+    SQLError,
+> {
+    let placement = outer_constants::placement(context, stmt, own_schema, outer_row, scoped_ctes)?;
+    let filters = placement.filters.as_ref();
     let operator: Box<dyn crate::PhysicalOperator + 'a> = if let Some(from) = stmt.from.as_ref() {
         let source_row_locks = crate::query::locking::resolve_row_locks(
             context.locking,
@@ -303,7 +321,7 @@ fn build_lateral_query_source<'a, S: Clone + Send + Sync + 'static>(
         )?;
         let child = {
             let mut source_scope = scoped_ctes.enter_source_row_locks(source_row_locks);
-            build_join_operator_with_ctes(context, from, params, &mut source_scope, None, None)?
+            build_join_operator_with_ctes(context, from, params, &mut source_scope, None, filters)?
         };
         Box::new(crate::ScopeOverlay::new(child, outer_row.clone()))
     } else {
@@ -314,5 +332,5 @@ fn build_lateral_query_source<'a, S: Clone + Send + Sync + 'static>(
             ));
         Box::new(crate::ScopeOverlay::new(child, outer_row.clone()))
     };
-    Ok(operator)
+    Ok((operator, placement.residual))
 }

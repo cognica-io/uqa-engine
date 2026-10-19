@@ -7,9 +7,10 @@
 //! A borrowed expanded signature reuses ordinary overload scoring without copying declarations.
 
 use super::{
-    canonical_column_type_name_with_control, match_signature_with_control, BorrowedMatch,
-    BuiltinFunctionOverload, ColumnType, MatchedFunctionSignature, Produced, ProductionControl,
-    ProductionVec, RoutineCallDescriptor, SignatureParameters, ValueRetentionError,
+    builtin_canonical_type_name, canonical_column_type_name_with_control,
+    match_signature_with_control, BorrowedMatch, BuiltinFunctionOverload, ColumnType,
+    MatchedFunctionSignature, Produced, ProductionControl, ProductionVec, RoutineCallDescriptor,
+    SignatureParameters, ValueRetentionError,
 };
 use crate::ast::{RoutineInvocationBinding, RoutineVariadicMode};
 
@@ -45,6 +46,13 @@ impl SignatureParameters for Expanded<'_> {
             canonical_column_type_name_with_control(self.element, control)
         } else {
             self.builtin.canonical_type(index, control)
+        }
+    }
+    fn builtin_canonical_type(&self, index: usize) -> Option<&'static str> {
+        if index + 1 >= self.builtin.argument_types.len() {
+            builtin_canonical_type_name(self.element)
+        } else {
+            self.builtin.builtin_canonical_type(index)
         }
     }
 }

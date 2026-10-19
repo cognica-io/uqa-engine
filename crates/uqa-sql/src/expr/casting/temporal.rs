@@ -6,10 +6,17 @@
 
 //! Date, time, timestamp, and interval conversion: text is read by the type's input function against the statement's transaction clock, a temporal value of another kind converts as the catalog's casts convert it, and any other source has no cast.
 
-use uqa_core::{memory::ProductionControl, TemporalInputError, TemporalValue, Value};
+use uqa_core::{
+    memory::ProductionControl, TemporalDateOrder, TemporalInputError, TemporalIntervalStyle,
+    TemporalValue, Value,
+};
 
 use crate::ast::{ColumnType, IntervalFields};
 use crate::error::{Result, SQLError};
+use crate::expr::current_time::{transaction_timestamp_or_clock, TransactionClockScope};
+use crate::expr::temporal_input::{
+    temporal_date_order, temporal_interval_style, DateOrderScope, IntervalStyleScope,
+};
 
 use super::{canonical_cast_source_with_control, undefined_cast};
 
@@ -76,6 +83,55 @@ impl TemporalCastTarget {
             )?,
         })
     }
+}
+
+/// Whether reading `text` as `input_type` is a function of the text alone. `read` consults three settings of the executing thread: the date order, the interval style and the transaction clock the special values resolve against. Reading the text again under every other date order and interval style and under a clock on another day at another time of day must reproduce `value`; a different value, or an error under one of them, means the constant depends on the session and an ordinary message must read its text again.
+pub(crate) fn text_input_is_session_independent(
+    text: &str,
+    input_type: &ColumnType,
+    value: &Value,
+) -> bool {
+    let target = input_type.catalog_name();
+    let source = Value::Str(text.into());
+    let reproduces =
+        || super::cast_value_from(&source, &target, None).is_ok_and(|other| other == *value);
+    let current_order = temporal_date_order();
+    for order in [
+        TemporalDateOrder::MonthDayYear,
+        TemporalDateOrder::DayMonthYear,
+        TemporalDateOrder::YearMonthDay,
+    ] {
+        if order != current_order {
+            let _order = DateOrderScope::enter(order);
+            if !reproduces() {
+                return false;
+            }
+        }
+    }
+    let current_style = temporal_interval_style();
+    for style in [
+        TemporalIntervalStyle::Postgres,
+        TemporalIntervalStyle::PostgresVerbose,
+        TemporalIntervalStyle::SqlStandard,
+        TemporalIntervalStyle::Iso8601,
+    ] {
+        if style != current_style {
+            let _style = IntervalStyleScope::enter(style);
+            if !reproduces() {
+                return false;
+            }
+        }
+    }
+    let _clock = TransactionClockScope::enter(distant_clock(transaction_timestamp_or_clock()));
+    reproduces()
+}
+
+/// A transaction clock 10,000 days and one hour, one minute and one second away from `micros`, so `now`, `today`, `tomorrow` and `yesterday` resolve to other days and `now` to another time of day.
+fn distant_clock(micros: i64) -> i64 {
+    const SHIFT: i64 = 10_000 * 86_400_000_000 + 3_661_000_000;
+    micros
+        .checked_add(SHIFT)
+        .unwrap_or_else(|| micros.saturating_sub(SHIFT))
 }
 
 /// Cast `v` to the temporal type `target`, with `precision` the type modifier's fractional digits. Text reaches the type through its input function, as `coerce_type` and the I/O conversion casts read it, with the diagnostics of `DateTimeParseError`; a temporal value of another kind converts as the catalog's casts convert it; any other value has no cast to the type.

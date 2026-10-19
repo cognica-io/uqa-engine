@@ -4167,6 +4167,7 @@ dependencies = [
 name = "uqa-sql"
 version = "0.6.0"
 dependencies = [
+ "ahash",
  "chrono",
  "crc32fast",
  "errno",

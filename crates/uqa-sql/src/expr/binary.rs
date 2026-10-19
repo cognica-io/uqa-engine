@@ -557,17 +557,30 @@ fn decimal_arith(
     op: BinaryOp,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
-    let left = super::conversion::to_decimal_with_control(a, control)?;
-    let right = super::conversion::to_decimal_with_control(b, control)?;
+    // A numeric operand is borrowed; only other carriers are converted.
+    let converted_left;
+    let left = if let Value::Decimal(value) = a {
+        value
+    } else {
+        converted_left = super::conversion::to_decimal_with_control(a, control)?;
+        &*converted_left
+    };
+    let converted_right;
+    let right = if let Value::Decimal(value) = b {
+        value
+    } else {
+        converted_right = super::conversion::to_decimal_with_control(b, control)?;
+        &*converted_right
+    };
     let value = match op {
-        BinaryOp::Add => left.checked_add_with_control(&right, control)?,
-        BinaryOp::Subtract => left.checked_sub_with_control(&right, control)?,
-        BinaryOp::Multiply => left.checked_mul_with_control(&right, control)?,
+        BinaryOp::Add => left.checked_add_with_control(right, control)?,
+        BinaryOp::Subtract => left.checked_sub_with_control(right, control)?,
+        BinaryOp::Multiply => left.checked_mul_with_control(right, control)?,
         BinaryOp::Divide => {
             if right.is_zero() {
                 return Err(division_by_zero());
             }
-            left.checked_div_postgres_with_control(&right, control)?
+            left.checked_div_postgres_with_control(right, control)?
         }
         _ => {
             return Err(SQLError::Internal(format!(

@@ -7,10 +7,11 @@
 //! Construction and indexing of immutable row schemas.
 
 use super::{
-    Arc, ColumnIdentity, ColumnType, HashMap, HashSet, RowSchema, SchemaBuildMetadata,
-    SchemaColdMetadata, SchemaIndex, NULL_SLOT,
+    Arc, ColumnIdentity, ColumnType, RowSchema, SchemaBuildMetadata, SchemaColdMetadata,
+    SchemaIndex, NULL_SLOT,
 };
 use crate::ast::InternalRelationId;
+use crate::schema::{SchemaMap, SchemaSet};
 
 impl Default for RowSchema {
     fn default() -> Self {
@@ -216,7 +217,13 @@ impl RowSchema {
         slots: Vec<usize>,
         physical_width: usize,
     ) -> Self {
-        Self::from_parts_with_aliases(columns, identities, slots, physical_width, HashMap::new())
+        Self::from_parts_with_aliases(
+            columns,
+            identities,
+            slots,
+            physical_width,
+            SchemaMap::default(),
+        )
     }
 
     fn from_parts_with_aliases(
@@ -224,7 +231,7 @@ impl RowSchema {
         identities: Vec<ColumnIdentity>,
         slots: Vec<usize>,
         physical_width: usize,
-        aliases: HashMap<ColumnIdentity, usize>,
+        aliases: SchemaMap<ColumnIdentity, usize>,
     ) -> Self {
         Self::from_parts_with_aliases_and_exact_precedence(
             columns,
@@ -293,23 +300,26 @@ impl RowSchema {
                 .iter()
                 .enumerate()
                 .all(|(position, slot)| position == *slot);
-        let mut exact = HashMap::with_capacity(columns.len());
-        let mut unqualified = HashMap::with_capacity(columns.len());
-        let mut qualified = HashMap::with_capacity(columns.len());
-        let mut unqualified_counts: HashMap<Box<str>, usize> = HashMap::new();
-        let mut qualified_counts: HashMap<ColumnIdentity, usize> = HashMap::new();
-
+        let hasher = ahash::RandomState::default;
+        let mut exact = SchemaMap::with_capacity_and_hasher(columns.len(), hasher());
+        let mut unqualified = SchemaMap::with_capacity_and_hasher(columns.len(), hasher());
+        let mut qualified = SchemaMap::with_capacity_and_hasher(columns.len(), hasher());
+        // A name owned by more than one logical column is ambiguous; the replaced entry of each lookup map records the repetition without a second map per name.
+        let mut ambiguous_unqualified = SchemaSet::with_hasher(hasher());
+        let mut ambiguous_qualified = SchemaSet::with_hasher(hasher());
         for (logical, (name, identity)) in columns.iter().zip(&identities).enumerate() {
             // Later writes to the same named field replace the value in a
             // ResultRow. Schema transforms preserve that contract.
             exact.insert(Box::<str>::from(name.as_str()), logical);
-            *unqualified_counts
-                .entry(identity.column.clone())
-                .or_default() += 1;
-            unqualified.insert(identity.column.clone(), logical);
-            if identity.qualifier.is_some() {
-                *qualified_counts.entry(identity.clone()).or_default() += 1;
-                qualified.insert(identity.clone(), logical);
+            if unqualified
+                .insert(identity.column.clone(), logical)
+                .is_some()
+            {
+                ambiguous_unqualified.insert(identity.column.clone());
+            }
+            if identity.qualifier.is_some() && qualified.insert(identity.clone(), logical).is_some()
+            {
+                ambiguous_qualified.insert(identity.clone());
             }
         }
         for slot in aliases.values() {
@@ -318,22 +328,14 @@ impl RowSchema {
         for slot in internal.values() {
             debug_assert!(*slot == NULL_SLOT || *slot < physical_width);
         }
-        let mut ambiguous_unqualified: HashSet<Box<str>> = unqualified_counts
-            .into_iter()
-            .filter_map(|(column, count)| {
-                (count > 1
-                    && !(exact_unqualified_precedence
-                        && identities.iter().any(|identity| {
-                            identity.qualifier.is_none() && identity.column == column
-                        })))
-                .then_some(column)
-            })
-            .collect();
+        if exact_unqualified_precedence {
+            ambiguous_unqualified.retain(|column| {
+                !identities
+                    .iter()
+                    .any(|identity| identity.qualifier.is_none() && identity.column == *column)
+            });
+        }
         ambiguous_unqualified.extend(extra_ambiguous_unqualified);
-        let mut ambiguous_qualified = qualified_counts
-            .into_iter()
-            .filter_map(|(identity, count)| (count > 1).then_some(identity))
-            .collect::<HashSet<_>>();
         ambiguous_qualified.extend(extra_ambiguous_qualified);
         Self {
             index: Arc::new(SchemaIndex {

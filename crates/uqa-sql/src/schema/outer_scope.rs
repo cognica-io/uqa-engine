@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::ColumnType;
 
-use super::{ColumnIdentity, RowSchema, SchemaBuildMetadata, NULL_SLOT};
+use super::{ColumnIdentity, RowSchema, SchemaBuildMetadata, SchemaSet, NULL_SLOT};
 
 impl RowSchema {
     /// Overlay a statically typed correlated outer scope. The outer columns remain hidden from schema iteration and star expansion, but both qualified and unqualified lookup aliases retain their declared SQL types for expression binding.
@@ -86,7 +86,7 @@ impl RowSchema {
             }
         }
 
-        let mut outer_ambiguous = HashSet::new();
+        let mut outer_ambiguous = SchemaSet::default();
         for (column, positions) in outer_qualified {
             if current_unqualified.contains(column) || outer_exact.contains(column) {
                 continue;

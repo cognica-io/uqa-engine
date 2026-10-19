@@ -100,9 +100,13 @@ pub(super) fn compile(
             filter,
             ..
         } if !distinct && order_by.is_empty() && filter.is_none() => {
-            let Some(uqa_sql::ast::FunctionDispatch::Pattern { operator, .. }) = binding.dispatch
-            else {
-                return Ok(None);
+            let operator = match binding.dispatch {
+                Some(uqa_sql::ast::FunctionDispatch::Pattern { operator, .. }) => operator,
+                Some(
+                    dispatch @ (uqa_sql::ast::FunctionDispatch::AnyOperator
+                    | uqa_sql::ast::FunctionDispatch::AllOperator),
+                ) => return compiled_array_membership(dispatch, args, schema, params),
+                _ => return Ok(None),
             };
             if !operator.is_like() {
                 return Ok(None);
@@ -176,6 +180,55 @@ pub(super) fn compile(
         | ScalarExpr::InSubquery { .. } => return Ok(None),
     };
     Ok(Some(compiled))
+}
+
+/// `x = ANY (array)` and `x <> ALL (array)` over a literal array are `IN` and `NOT IN` over its elements: the same equality and the same NULL result when no element decides. Only non-empty one-dimensional arrays of builtin, catalog-independent elements are compiled; an empty array keeps the canonical evaluator, whose ANY is false even for a NULL operand.
+fn compiled_array_membership(
+    dispatch: uqa_sql::ast::FunctionDispatch,
+    args: &[ScalarExpr],
+    schema: &RowSchema,
+    params: &[SQLParam],
+) -> Result<Option<ProjectedExpr>, SQLError> {
+    let [expression, array, ScalarExpr::Literal(Value::Str(operator))] = args else {
+        return Ok(None);
+    };
+    let (ScalarExpr::Literal(Value::Array(array))
+    | ScalarExpr::TypedLiteral {
+        value: Value::Array(array),
+        ..
+    }) = array
+    else {
+        return Ok(None);
+    };
+    let negated = match (dispatch, operator.as_str()) {
+        (uqa_sql::ast::FunctionDispatch::AnyOperator, "=") => false,
+        (uqa_sql::ast::FunctionDispatch::AllOperator, "<>" | "!=") => true,
+        _ => return Ok(None),
+    };
+    let builtin_elements = array
+        .element_type_oid()
+        .is_some_and(|oid| oid < uqa_sql::catalog::oids::FIRST_NORMAL_OBJECT_ID);
+    if array.elements().is_empty()
+        || array.dimensions().len() != 1
+        || !builtin_elements
+        || array.elements().iter().any(|element| {
+            matches!(element, Value::Enum(_))
+                || uqa_sql::expr::composites::literal::contains_records(element)
+                || uqa_sql::expr::datums::contains_datum(element)
+        })
+    {
+        return Ok(None);
+    }
+    Ok(Some(ProjectedExpr::InList {
+        expression: Box::new(require(expression, schema, params)?),
+        list: array
+            .elements()
+            .iter()
+            .cloned()
+            .map(ProjectedExpr::Literal)
+            .collect(),
+        negated,
+    }))
 }
 
 fn compiled_and(items: Vec<ProjectedExpr>) -> ProjectedExpr {

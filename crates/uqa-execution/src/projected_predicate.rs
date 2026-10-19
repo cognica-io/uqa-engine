@@ -420,4 +420,122 @@ mod tests {
             (expected, actual) => panic!("projected result {actual:?} != canonical {expected:?}"),
         }
     }
+
+    fn membership(dispatch: &str, operator: &str, elements: Vec<Value>, oid: u32) -> ScalarExpr {
+        ScalarExpr::Func {
+            name: dispatch.into(),
+            binding: Some(uqa_sql::ast::FunctionBinding {
+                object_id: None,
+                name: if dispatch == "__any_op" {
+                    "ANY operator"
+                } else {
+                    "ALL operator"
+                }
+                .into(),
+                argument_types: Vec::new(),
+                builtin: true,
+                dispatch: Some(if dispatch == "__any_op" {
+                    uqa_sql::ast::FunctionDispatch::AnyOperator
+                } else {
+                    uqa_sql::ast::FunctionDispatch::AllOperator
+                }),
+                invocation: None,
+                composite_field: None,
+                resolution_error: None,
+                input_collation: None,
+            }),
+            args: vec![
+                ScalarExpr::Column("mode".into()),
+                ScalarExpr::Literal(Value::Array(
+                    uqa_core::ArrayValue::try_new(elements)
+                        .unwrap()
+                        .with_element_type_oid(Some(oid)),
+                )),
+                ScalarExpr::Literal(Value::Str(operator.into())),
+            ],
+            distinct: false,
+            order_by: Vec::new(),
+            order_syntax: uqa_sql::ast::FunctionOrderSyntax::Legacy,
+            filter: None,
+        }
+    }
+
+    #[test]
+    fn literal_array_membership_matches_canonical_any_and_all() {
+        let modes = || {
+            vec![
+                Value::FixedChar("AIR".into()),
+                Value::FixedChar("AIR REG".into()),
+            ]
+        };
+        let with_null = || vec![Value::Int(1), Value::Null];
+        let mut typed = membership("__any_op", "=", modes(), 1042);
+        if let ScalarExpr::Func { args, .. } = &mut typed {
+            let ScalarExpr::Literal(value) = args[1].clone() else {
+                unreachable!("literal array")
+            };
+            args[1] = ScalarExpr::TypedLiteral {
+                value,
+                ty: "pg_catalog.\"bpchar\"[]".into(),
+                collation_oid: None,
+                composite_source: None,
+                bound_type: Some(ColumnType::Array(Box::new(ColumnType::Bpchar))),
+                parameter_index: None,
+            };
+        }
+        let cases = [
+            typed,
+            membership("__any_op", "=", modes(), 1042),
+            membership("__all_op", "<>", modes(), 1042),
+            membership("__any_op", "=", with_null(), 23),
+            membership("__all_op", "<>", with_null(), 23),
+        ];
+        let rows = [
+            Value::FixedChar("AIR".into()),
+            Value::FixedChar("MAIL".into()),
+            Value::Int(1),
+            Value::Int(2),
+            Value::Null,
+        ];
+        for expression in &cases {
+            let predicate = ProjectedPredicate::compile(expression, &["mode".into()], &[])
+                .unwrap()
+                .unwrap_or_else(|| panic!("{expression:?} compiles"));
+            for value in &rows {
+                if matches!(
+                    (value, &expression),
+                    (Value::Int(_), ScalarExpr::Func { args, .. })
+                        if matches!(&args[1], ScalarExpr::Literal(Value::Array(array))
+                            if array.element_type_oid() == Some(1042))
+                ) {
+                    continue;
+                }
+                let row = uqa_sql::ResultRow::from([("mode".into(), value.clone())]);
+                let canonical =
+                    eval_scalar(expression, &ScalarEvalContext::new(Some(&row), &[])).unwrap();
+                assert_eq!(
+                    predicate.keep(&[value]).unwrap(),
+                    truthy(&canonical),
+                    "{expression:?} with {value:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_ordered_or_user_typed_membership_keeps_the_canonical_evaluator() {
+        for expression in [
+            membership("__any_op", "=", Vec::new(), 23),
+            membership("__any_op", "<", vec![Value::Int(1)], 23),
+            membership("__all_op", "=", vec![Value::Int(1)], 23),
+            membership("__any_op", "=", vec![Value::Int(1)], 16_384),
+        ] {
+            assert!(
+                ProjectedPredicate::compile(&expression, &["mode".into()], &[])
+                    .unwrap()
+                    .is_none(),
+                "{expression:?}"
+            );
+        }
+    }
 }

@@ -8,7 +8,7 @@
 
 use super::{
     ColumnIdentity, ColumnType, HashMap, PhysicalLayout, ProjectedSlot, RowSchema,
-    SchemaBuildMetadata, SchemaLayoutError, SchemaLayoutResult, ScoreSource, NULL_SLOT,
+    SchemaBuildMetadata, SchemaLayoutError, SchemaLayoutResult, SchemaMap, ScoreSource, NULL_SLOT,
 };
 
 impl RowSchema {
@@ -93,12 +93,12 @@ impl RowSchema {
             SchemaBuildMetadata {
                 collations,
                 record_fields: input.index.cold.record_fields.clone(),
-                aliases: HashMap::new(),
-                alias_types: HashMap::new(),
+                aliases: SchemaMap::default(),
+                alias_types: SchemaMap::default(),
                 internal: input.index.executor_attributes.clone(),
                 internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
-                binding_only: HashMap::new(),
+                binding_only: SchemaMap::default(),
                 ..SchemaBuildMetadata::default()
             },
         )
@@ -174,7 +174,7 @@ impl RowSchema {
                     internal,
                     internal_types,
                     score_sources: input.index.cold.score_sources.clone(),
-                    wildcard_hidden,
+                    wildcard_hidden: wildcard_hidden.into_iter().collect(),
                     binding_only: input.index.cold.binding_only.clone(),
                     row_types: input.index.cold.row_types.clone(),
                     open_qualifiers: input.index.cold.open_qualifiers.clone(),
@@ -204,12 +204,12 @@ impl RowSchema {
             SchemaBuildMetadata {
                 collations,
                 record_fields: input.index.cold.record_fields.clone(),
-                aliases: HashMap::new(),
-                alias_types: HashMap::new(),
+                aliases: SchemaMap::default(),
+                alias_types: SchemaMap::default(),
                 internal,
                 internal_types,
                 score_sources: input.index.cold.score_sources.clone(),
-                binding_only: HashMap::new(),
+                binding_only: SchemaMap::default(),
                 ..SchemaBuildMetadata::default()
             },
         )
@@ -361,8 +361,10 @@ impl RowSchema {
                 None => Ok(NULL_SLOT),
             })
             .collect::<SchemaLayoutResult<Vec<_>>>()?;
-        let mut lookup_aliases = HashMap::with_capacity(aliases.len());
-        let mut alias_types = HashMap::with_capacity(aliases.len());
+        let mut lookup_aliases =
+            SchemaMap::with_capacity_and_hasher(aliases.len(), ahash::RandomState::default());
+        let mut alias_types =
+            SchemaMap::with_capacity_and_hasher(aliases.len(), ahash::RandomState::default());
         for (identity, slot, ty) in aliases {
             let slot = match slot {
                 Some(slot) if slot < physical_width => slot,
@@ -380,8 +382,10 @@ impl RowSchema {
             }
             alias_types.insert(identity, ty);
         }
-        let mut internal_slots = HashMap::with_capacity(internal.len());
-        let mut internal_types = HashMap::with_capacity(internal.len());
+        let mut internal_slots =
+            SchemaMap::with_capacity_and_hasher(internal.len(), ahash::RandomState::default());
+        let mut internal_types =
+            SchemaMap::with_capacity_and_hasher(internal.len(), ahash::RandomState::default());
         for (column, slot, ty) in internal {
             let slot = match slot {
                 Some(slot) if slot < physical_width => slot,
@@ -425,8 +429,8 @@ impl RowSchema {
                 internal: internal_slots,
                 internal_types,
                 score_sources,
-                wildcard_hidden,
-                binding_only: HashMap::new(),
+                wildcard_hidden: wildcard_hidden.into_iter().collect(),
+                binding_only: SchemaMap::default(),
                 ..SchemaBuildMetadata::default()
             },
         ))

@@ -6,7 +6,7 @@
 
 //! Statically known anonymous-record descriptors follow their physical value slots through query analysis.
 
-use super::{Arc, ColumnType, HashMap, RowSchema};
+use super::{Arc, ColumnType, RowSchema, SchemaMap};
 
 /// A record's analyzed field types. Runtime values cannot distinguish SQL integer widths or a NULL field's declared type.
 pub type RecordFields = Arc<[Option<ColumnType>]>;
@@ -127,7 +127,7 @@ impl RowSchema {
         left: &Self,
         right: &Self,
         right_base: usize,
-    ) -> HashMap<usize, RecordMetadata> {
+    ) -> SchemaMap<usize, RecordMetadata> {
         let mut fields = left.index.cold.record_fields.clone();
         fields.extend(
             right
