@@ -124,21 +124,23 @@ impl RegexCache {
         if self.prepare().ok()? != generation {
             return None;
         }
+        let shared = original.is_some_and(|budget| self.budget.shares_allowance(budget));
+        let additional_state = if shared { 0 } else { bytes };
         let mut key = BudgetedString::new(&self.budget);
         loop {
             match key.push_str(pattern) {
                 Ok(()) => break,
-                Err(_) if self.evict() => {}
+                Err(ref error) if self.evict_for(error, additional_state) => {}
                 Err(_) => return None,
             }
         }
-        let memory = if original.is_some_and(|budget| self.budget.shares_allowance(budget)) {
+        let memory = if shared {
             None
         } else {
             loop {
                 match self.budget.reserve(bytes) {
                     Ok(memory) => break Some(memory),
-                    Err(_) if self.evict() => {}
+                    Err(ref error) if self.evict_for(error, 0) => {}
                     Err(_) => return None,
                 }
             }
@@ -168,12 +170,27 @@ impl RegexCache {
         Ok(entries.generation)
     }
 
-    pub(super) fn evict(&self) -> bool {
+    fn evict_for(&self, error: &MemoryError, pending_bytes: usize) -> bool {
+        let MemoryError::Limit { required, limit } = error else {
+            return false;
+        };
+        let Some(missing) = required
+            .checked_sub(*limit)
+            .and_then(|bytes| bytes.checked_add(pending_bytes))
+        else {
+            return false;
+        };
         let mut entries = self
             .entries
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        if entries.values.is_empty() {
+        // The refusal includes the actual key allocation and any limiting ancestor. Both the key and still-unadmitted compiled state must fit after reclaiming idle entries; active calls and unrelated retained owners cannot be evicted.
+        let reclaimable = entries.values.iter().try_fold(0usize, |bytes, entry| {
+            bytes
+                .checked_add(entry.pattern.capacity())?
+                .checked_add(entry.regex.reserved_bytes())
+        });
+        if entries.values.is_empty() || reclaimable.is_none_or(|bytes| bytes < missing) {
             return false;
         }
         entries.values.remove(0);

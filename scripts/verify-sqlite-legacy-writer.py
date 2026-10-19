@@ -152,7 +152,7 @@ fn main() {
 fn native(args: &[String]) {
     use new_storage::{mvcc::{PreparedRecordCommit, VersionedPersistence}, read_control::StorageReadControl};
     use new_provider::mvcc::native::{NativeRecord, NativeRecordFamily, NativeRecordOwner};
-    use rusqlite::types::ValueRef;
+    use new_provider::rusqlite::types::ValueRef;
     let connection = open(&args[1], std::path::Path::new(&args[3]));
     let control = StorageReadControl::with_limit(1 << 24);
     let store = new_provider::SQLiteRecordStore::for_native(&connection, &control).unwrap();
@@ -218,33 +218,40 @@ fn graph(args: &[String]) {
 '''
 
 
-def main() -> None:
-    target = ROOT / "target" / "sqlite-legacy-probe"
-    with tempfile.TemporaryDirectory(prefix="uqa-sqlite-legacy-") as temporary:
-        project = Path(temporary)
-        (project / "src" / "bin").mkdir(parents=True)
-        manifest = f'''[package]
-name = "uqa-sqlite-legacy-probe"
+def write_probe(project: Path, name: str, source: str) -> Path:
+    (project / "src").mkdir(parents=True)
+    manifest = f'''[package]
+name = "uqa-sqlite-{name}-probe"
 version = "0.0.0"
 edition = "2021"
 [workspace]
+[[bin]]
+name = "{name}"
+path = "src/main.rs"
 [dependencies]
-rusqlite = {{ version = "=0.39.0", default-features = false }}
-old_provider = {{ package = "uqa-storage-sqlite", version = "=0.3.6" }}
-old_storage = {{ package = "uqa-storage", version = "=0.3.6" }}
-old_core = {{ package = "uqa-core", version = "=0.3.6" }}
-new_provider = {{ package = "uqa-storage-sqlite", path = {json.dumps(str(ROOT / "crates/uqa-storage-sqlite"))} }}
-new_storage = {{ package = "uqa-storage", path = {json.dumps(str(ROOT / "crates/uqa-storage"))} }}
-new_core = {{ package = "uqa-core", path = {json.dumps(str(ROOT / "crates/uqa-core"))} }}
 '''
-        (project / "Cargo.toml").write_text(manifest)
-        (project / "src" / "bin" / "old.rs").write_text(OLD + OPEN)
-        (project / "src" / "bin" / "new.rs").write_text(NEW + OPEN)
-        subprocess.run(
-            ["cargo", "build", "--manifest-path", str(project / "Cargo.toml"), "--target-dir", str(target)],
-            check=True,
-        )
-        checksum = registry_package_checksum(project / "Cargo.toml", "uqa-storage-sqlite", "0.3.6")
+    for alias, package in (("provider", "uqa-storage-sqlite"), ("storage", "uqa-storage"), ("core", "uqa-core")):
+        location = 'version = "=0.3.6"' if name == "old" else f'path = {json.dumps(str(ROOT / "crates" / package))}'
+        manifest += f'{name}_{alias} = {{ package = "{package}", {location} }}\n'
+    manifest_path = project / "Cargo.toml"
+    manifest_path.write_text(manifest)
+    (project / "src" / "main.rs").write_text(source + OPEN)
+    return manifest_path
+
+
+def main() -> None:
+    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target" / "sqlite-legacy-probe"))
+    with tempfile.TemporaryDirectory(prefix="uqa-sqlite-legacy-") as temporary:
+        project = Path(temporary)
+        # Different SQLite package families cannot share one Cargo resolution graph.
+        old_manifest = write_probe(project / "old", "old", OLD)
+        new_manifest = write_probe(project / "new", "new", NEW)
+        for manifest in (old_manifest, new_manifest):
+            subprocess.run(
+                ["cargo", "build", "--manifest-path", str(manifest), "--target-dir", str(target)],
+                check=True,
+            )
+        checksum = registry_package_checksum(old_manifest, "uqa-storage-sqlite", "0.3.6")
         print(f"Released provider checksum: {checksum}", flush=True)
         extension = ".exe" if os.name == "nt" else ""
         old = str(target / "debug" / f"old{extension}")

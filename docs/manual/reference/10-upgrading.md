@@ -4,6 +4,14 @@ This page describes UQA Engine 0.6.0 and earlier releases. Use the [version-tagg
 
 ## Unreleased
 
+SQLite builds use the maintained `uqa-rusqlite` 0.39.1 and `uqa-libsqlite3-sys` 0.37.1 packages, preserving the upstream 0.39.0 API and SQLite/SQLCipher sources while removing the bundled global page-cache memory-management mutex. This changes the driver's Rust package identity, with maintainer approval; it does not change database formats or SQL behavior. Applications that name driver types can import `uqa_storage_sqlite::rusqlite` or alias the maintained package as shown below. Every native dependency must use the same package family: official and maintained sys crates both declare `links = "sqlite3"`, so a transitive dependency on official rusqlite must also be migrated. Cargo aliases preserve import spelling, not cross-package type identity.
+
+```toml
+rusqlite = { package = "uqa-rusqlite", version = "=0.39.1", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
+```
+
+Emscripten uses the same maintained packages with `bundled,blob,cache` instead of SQLCipher. Python, JavaScript, WASM and standalone CLI users do not manage these Rust dependencies directly. The provider re-export names the identical underlying driver module; it introduces no execution, conversion or storage operation. Connection-local memory reclamation and SQLCipher encryption remain active; the optional process-wide `sqlite3_release_memory` facility is no longer compiled in.
+
 Current main retains the analyzed argument type of `pg_typeof` as a structural function binding while preserving normal argument evaluation. Newly stored definitions can contain that binding; use compatible binaries for all owners before creating or replacing them, because 0.6.0 cannot deserialize the new dispatch identity. Existing calls without this metadata bind their original arguments through the normal execution path.
 
 ## 0.6.0
