@@ -1,5 +1,7 @@
 # Implementation plans
 
+The [open performance ledger](open-performance-corrections.md) now records the published managed SQLite driver (#1144), bounded RETURNING accumulation (#1145), qualified Linux results for #1134/#1137/#1139 and remaining macOS/controlled acceptance. PR #1133 also corrects reproduced impossible-admission cache eviction; earlier WASM evidence is explicitly scoped to its tested revision.
+
 [Open performance corrections](open-performance-corrections.md) tracks all six performance issues open on 2026-10-20, their remaining root corrections and source-scoped verification. Regex retention #1063 is the first bounded delivery; the other issues remain explicit pending obligations.
 
 The [statement-analysis reuse correction](statement-analysis-reuse.md) removes the duplicate result-analysis pass in #1117. Local tests reproduce two block analyses before the correction and one afterward; the complete local SQL suite, 1,469 selected Engine cases and actual Linux/macOS regression checks pass. Each platform verifies 1,143 checks / 1,643 cases and eight independent-process histories at source `4645582ad1eb5652df0274139c4dd389fad2e4cb`. The plan preserves all six original performance issues and the remaining execution, privilege, type-resolution and timing obligations.
