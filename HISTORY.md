@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Remove per-row and per-candidate type resolution from TPC-H-derived queries: builtin overload matching compares fixed type spellings, immutable literal casts convert once per execution, word-sized numeric arithmetic and comparison avoid arbitrary-precision temporaries, literal `ANY` and `ALL` membership uses the compiled predicate path, correlated subquery filters reach their scans with the outer row bound, and builtin operator selections are retained (#1108).
+
 - Reject utility commands in SQL-standard function and procedure definitions with PostgreSQL diagnostics, preserving nested query and CALL analysis, statement error order, quoted bodies and transactional catalog state.
 
 - Bind column dependencies inside SQL-standard `VALUES` bodies so unrelated view deletion and column changes retain their PostgreSQL behavior, including after reopening persistent stores.
