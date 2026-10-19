@@ -19,7 +19,7 @@ pub use btree::{
 mod selected;
 pub use selected::{
     compare_selected_grouping_values_with_catalog, compare_selected_values_with_catalog,
-    equal_selected_values_with_catalog,
+    equal_selected_values_with_catalog, equal_selected_values_with_engine,
 };
 #[cfg(test)]
 mod production_tests;

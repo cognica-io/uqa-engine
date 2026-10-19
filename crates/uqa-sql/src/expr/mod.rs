@@ -100,7 +100,7 @@ pub use binary::{
     compare_record_images_with_catalog, compare_selected_grouping_values_with_catalog,
     compare_selected_values_with_catalog, compare_typed_values_with_catalog_and_collation,
     compare_typed_values_with_control, compare_typed_values_with_enum_catalog,
-    compare_with_control, equal_selected_values_with_catalog,
+    compare_with_control, equal_selected_values_with_catalog, equal_selected_values_with_engine,
     equal_typed_values_with_catalog_and_collation, equal_typed_values_with_enum_catalog,
     eval_binary_values, eval_binary_values_with_control, eval_binary_values_with_engine,
     eval_binary_values_with_integer_width, eval_binary_values_with_integer_width_with_control,

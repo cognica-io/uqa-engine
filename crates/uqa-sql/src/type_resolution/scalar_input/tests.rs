@@ -9,6 +9,93 @@ use crate::RowSchema;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn selected_operand_types_retain_catalog_identity_and_resource_scope() {
+    struct Catalog<'a> {
+        ty: ColumnType,
+        cancel: Option<&'a CancellationToken>,
+    }
+    impl crate::expr::EngineHook for Catalog<'_> {
+        fn nextval(&self, _: &str) -> Result<i64, SQLError> {
+            panic!("type observation must not evaluate its operand")
+        }
+        fn currval(&self, _: &str) -> Result<i64, SQLError> {
+            unreachable!()
+        }
+        fn setval(&self, _: &str, _: i64, _: bool) -> Result<i64, SQLError> {
+            unreachable!()
+        }
+        fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, String> {
+            if let Some(cancel) = self.cancel {
+                cancel.cancel();
+            }
+            Ok(matches!(name, "domain#20001" | "app.event_date").then(|| self.ty.clone()))
+        }
+    }
+    let ty = ColumnType::Domain {
+        schema: "app".into(),
+        name: "event_date".into(),
+        oid: 20_001,
+        array_oid: Some(20_002),
+        collation_oid: None,
+        base: Box::new(ColumnType::Date),
+    };
+    let schema = RowSchema::with_types(vec!["d".into()], vec![Some(ty.clone())]);
+    for (limit, cancellation, state) in [
+        (8192, 0, None),
+        (0, 0, Some("53200")),
+        (8192, 1, Some("57014")),
+        (8192, 2, Some("57014")),
+        (8192, 3, Some("57014")),
+    ] {
+        let budget = MemoryBudget::new(limit);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        match cancellation {
+            1 => original.cancel(),
+            2 => invoking.cancel(),
+            _ => {}
+        }
+        let catalog = Catalog {
+            ty: ty.clone(),
+            cancel: (cancellation == 3).then_some(&invoking),
+        };
+        for expression in [
+            ScalarExpr::Column("d".into()),
+            ScalarExpr::Cast {
+                expr: Box::new(ScalarExpr::Literal(Value::Null)),
+                ty: "app.event_date".into(),
+                implicit: false,
+            },
+            ScalarExpr::TypedLiteral {
+                value: Value::Null,
+                ty: "domain#20001".into(),
+                bound_type: Some(ty.clone()),
+                collation_oid: None,
+                composite_source: None,
+                parameter_index: None,
+            },
+        ] {
+            let result = scalar_operand_type_with_engine_and_control(
+                &expression,
+                &schema,
+                &[],
+                Some(&catalog),
+                &control,
+            );
+            if let Some(state) = state {
+                assert_eq!(result.unwrap_err().sqlstate(), Some(state));
+            } else {
+                let result = result.unwrap().unwrap();
+                assert_eq!(*result, ty);
+                assert_eq!(budget.used(), result.reserved_bytes());
+            }
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}
+
+#[test]
 fn selected_type_observation_keeps_regtype_without_rebinding_catalog_inputs() {
     use crate::ast::{
         FunctionBinding, FunctionDispatch, FunctionOrderSyntax, FunctionResolutionError,

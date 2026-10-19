@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Compare dates with timestamps using PostgreSQL midnight, timezone and infinity semantics through joins, membership predicates and stored queries. Preserve finite dates beyond timestamp range and format timestamp years such as 294000 through the integer Gregorian calendar.
+
 - Keep nested scalar-call optimization within ordinary thread stacks while preserving conditional evaluation, inlining, result types and collation metadata.
 
 - Prevent native stack overflow while compiling, analyzing and binding ordinary nested SQL expressions; preserve operand order, selected types and collations.

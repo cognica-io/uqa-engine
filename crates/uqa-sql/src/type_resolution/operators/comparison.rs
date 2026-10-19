@@ -73,6 +73,19 @@ impl Default for ComparisonKeySupport {
 }
 
 impl ComparisonKeySupport {
+    /// Include both selected equality operands. `PostgreSQL`'s date, timestamp and timestamptz cross-type operators are merge-joinable but do not share a hash family; individual type support cannot establish pairwise hash compatibility.
+    pub fn include_equality_operands(
+        &mut self,
+        left: &ColumnType,
+        right: &ColumnType,
+        resolver: &dyn FunctionTypeResolver,
+    ) -> Result<(), SQLError> {
+        self.include(left, resolver)?;
+        self.include(right, resolver)?;
+        self.hashing &= equality_types_share_hash_key(left, right);
+        Ok(())
+    }
+
     pub fn include(
         &mut self,
         ty: &ColumnType,
@@ -97,6 +110,19 @@ impl ComparisonKeySupport {
             hint: None,
         })
     }
+}
+
+/// Whether two selected operands can use the same native equality-key encoding. Each type must separately support hashing; cross-type datetime operators instead evaluate their SQL comparison, even though each temporal type has its own hash family.
+pub fn equality_types_share_hash_key(left: &ColumnType, right: &ColumnType) -> bool {
+    let left = super::base_type(left);
+    let right = super::base_type(right);
+    let datetime = |ty: &ColumnType| {
+        matches!(
+            ty,
+            ColumnType::Date | ColumnType::Timestamp | ColumnType::TimestampTz
+        )
+    };
+    !(datetime(left) && datetime(right) && left != right)
 }
 
 impl ComparisonSupport {
@@ -196,5 +222,70 @@ impl ComparisonSupport {
                 },
                 error => error,
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Types;
+
+    impl FunctionTypeResolver for Types {
+        fn resolve_function_type(
+            &self,
+            _: &str,
+            _: Option<&crate::ast::FunctionBinding>,
+            _: &[Option<String>],
+            _: &[Option<ColumnType>],
+            _: bool,
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn datetime_equality_pair_support_matches_postgresql_operator_families() {
+        use ColumnType::{Date, Timestamp, TimestampTz};
+        // Independently read from PostgreSQL 18.4 pg_operator; all nine operators have oprcanmerge=true.
+        for (left, right, hashing) in [
+            (Date, Date, true),
+            (Date, Timestamp, false),
+            (Date, TimestampTz, false),
+            (Timestamp, Date, false),
+            (Timestamp, Timestamp, true),
+            (Timestamp, TimestampTz, false),
+            (TimestampTz, Date, false),
+            (TimestampTz, Timestamp, false),
+            (TimestampTz, TimestampTz, true),
+        ] {
+            let domain = |base: ColumnType| ColumnType::Domain {
+                schema: "public".into(),
+                name: "datetime_value".into(),
+                oid: 90_000,
+                array_oid: None,
+                collation_oid: None,
+                base: Box::new(base),
+            };
+            let precision = |ty: &ColumnType| match ty {
+                Timestamp => ColumnType::TimestampPrecision(6),
+                TimestampTz => ColumnType::TimestampTzPrecision(3),
+                other => other.clone(),
+            };
+            for (left, right) in [
+                (left.clone(), right.clone()),
+                (domain(precision(&left)), domain(precision(&right))),
+            ] {
+                let mut support = ComparisonKeySupport::default();
+                support
+                    .include_equality_operands(&left, &right, &Types)
+                    .unwrap();
+                assert_eq!(support.hashing, hashing, "{left:?} = {right:?}");
+                assert!(support.ordering);
+                // Each grouping key keeps its own declared comparison domain.
+                assert!(type_supports_hashing(&left, &Types).unwrap());
+                assert!(type_supports_hashing(&right, &Types).unwrap());
+            }
+        }
     }
 }

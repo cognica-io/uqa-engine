@@ -87,6 +87,45 @@ fn analyzed_membership_keeps_set_filter_and_null_rejection() {
 }
 
 #[test]
+fn temporal_membership_retains_sql_operators_instead_of_physical_set_keys() {
+    for value in [
+        uqa_core::TemporalValue::Date { days: 18_262 },
+        uqa_core::TemporalValue::Timestamp {
+            micros: 1_577_836_800_000_000,
+        },
+        uqa_core::TemporalValue::TimestampTz {
+            micros: 1_577_836_800_000_000,
+        },
+    ] {
+        for negated in [false, true] {
+            let scalar = ScalarExpr::InList {
+                expr: Box::new(ScalarExpr::Column("d".into())),
+                list: vec![ScalarExpr::Literal(Value::Temporal(value.clone()))],
+                negated,
+            };
+            let constants = RetrievalConstants {
+                params: &[],
+                evaluate: &|expression, _| constant(expression),
+                stores: &|_| true,
+            };
+            assert!(lower_where(&scalar, &constants).is_none());
+            let mut folded = bound(if negated {
+                "c NOT IN (1, 2)"
+            } else {
+                "c IN (1, 2)"
+            });
+            let ScalarExpr::Func { args, .. } = &mut folded else {
+                panic!("analyzed scalar-array comparison");
+            };
+            args[1] = ScalarExpr::Literal(Value::Array(
+                uqa_core::ArrayValue::try_new(vec![Value::Temporal(value.clone())]).unwrap(),
+            ));
+            assert!(lower_where(&folded, &constants).is_none());
+        }
+    }
+}
+
+#[test]
 fn set_recognition_retains_conversions_and_quantified_operator_identity() {
     for sql in [
         "c < ANY(ARRAY[1, 2])",

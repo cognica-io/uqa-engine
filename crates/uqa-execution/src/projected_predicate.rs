@@ -353,6 +353,34 @@ mod tests {
     }
 
     #[test]
+    fn session_dependent_datetime_predicates_keep_the_invoking_evaluator() {
+        let schema = RowSchema::with_types(vec!["d".into()], vec![Some(ColumnType::Date)]);
+        for sql in [
+            "d = TIMESTAMPTZ '2020-01-01+00'",
+            "TIMESTAMPTZ '2020-01-01+00' < d",
+            "d BETWEEN TIMESTAMPTZ '2020-01-01+00' AND TIMESTAMPTZ '2020-01-02+00'",
+            "d IN (TIMESTAMPTZ '2020-01-01+00')",
+            "d = ANY(ARRAY[TIMESTAMPTZ '2020-01-01+00'])",
+            "d <> ALL(ARRAY[TIMESTAMPTZ '2020-01-01+00'])",
+        ] {
+            assert!(
+                ProjectedPredicate::compile_with_schema(&parsed_expression(sql), &schema, &[])
+                    .unwrap()
+                    .is_none(),
+                "{sql}"
+            );
+        }
+        for sql in ["d = DATE '2020-01-01'", "d = TIMESTAMP '2020-01-01'"] {
+            assert!(
+                ProjectedPredicate::compile_with_schema(&parsed_expression(sql), &schema, &[])
+                    .unwrap()
+                    .is_some(),
+                "{sql}"
+            );
+        }
+    }
+
+    #[test]
     fn projected_predicate_folds_typed_literals_once() {
         let expression = ScalarExpr::Binary {
             op: BinaryOp::Less,

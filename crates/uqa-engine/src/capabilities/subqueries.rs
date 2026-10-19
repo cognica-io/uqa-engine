@@ -95,6 +95,18 @@ impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
         self.subquery_context()
             .subquery_exists(subquery, plan, outer_row, params)
     }
+    fn subquery_contains_selected(
+        &self,
+        subquery: usize,
+        plan: &QueryPlan,
+        needle: uqa_execution::scalar::SubqueryNeedle<'_>,
+        outer_row: PhysicalOuterRow<'_>,
+        params: &[SQLParam],
+    ) -> Result<Option<bool>, SQLError> {
+        self.subquery_context()
+            .subquery_contains_selected(subquery, plan, needle, outer_row, params)
+    }
+
     fn subquery_contains(
         &self,
         subquery: usize,

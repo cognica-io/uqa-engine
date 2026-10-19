@@ -55,7 +55,8 @@ pub use operator_errors::{
 mod operators;
 pub(crate) use operators::comparison::ComparisonSupport;
 pub use operators::comparison::{
-    comparison_key_is_constant, type_supports_hashing, type_supports_ordering, ComparisonKeySupport,
+    comparison_key_is_constant, equality_types_share_hash_key, type_supports_hashing,
+    type_supports_ordering, ComparisonKeySupport,
 };
 mod overload_resolution;
 pub(crate) use overload_resolution::resolve_local_builtin_call_with_control;
@@ -71,7 +72,7 @@ pub use scalar_input::{
     scalar_array_element_oid_with_control, scalar_cast_source_type_name_with_control,
     scalar_integer_operation_width, scalar_integer_operation_width_with_control,
     scalar_operand_type_name, scalar_operand_type_name_with_control,
-    scalar_record_field_type_with_control,
+    scalar_operand_type_with_engine_and_control, scalar_record_field_type_with_control,
 };
 pub(crate) use stored_constants::store_syntax_operand_coercions;
 pub use stored_constants::{

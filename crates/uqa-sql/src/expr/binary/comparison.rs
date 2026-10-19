@@ -18,6 +18,7 @@ pub use collations::{
 mod image;
 mod records;
 mod support;
+mod temporal;
 pub use image::{compare_record_images_with_catalog, visit_record_image_fields_with_catalog};
 pub(in crate::expr) use support::{require_array_element_support, ComparisonSupport};
 
@@ -152,11 +153,12 @@ pub fn eval_comparison_truth_with_deferred_state<'a>(
         };
     }
     let catalog = engine.map(crate::expr::value_catalog::EngineValueCatalog);
-    eval_comparison_truth_with_enum_catalog(
+    eval_comparison_truth_with_context(
         op,
         left,
         right,
         control,
+        engine,
         catalog
             .as_ref()
             .map(|catalog| catalog as &dyn crate::expr::SQLValueCatalog),
@@ -173,9 +175,21 @@ pub fn eval_comparison_truth_with_enum_catalog(
     enums: Option<&dyn super::super::enums::EnumLabelCatalog>,
     state: Option<&super::super::enums::EnumComparisonState>,
 ) -> Result<Option<bool>> {
+    eval_comparison_truth_with_context(op, left, right, control, None, enums, state)
+}
+
+fn eval_comparison_truth_with_context(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    engine: Option<&dyn crate::expr::EngineHook>,
+    enums: Option<&dyn EnumLabelCatalog>,
+    state: Option<&EnumComparisonState>,
+) -> Result<Option<bool>> {
     control.check()?;
     if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
-        return values_equal_nullable_with_catalog(left, right, control, enums)
+        return values_equal_nullable_with_catalog(left, right, control, enums, engine)
             .map(|equal| equal.map(|equal| if op == BinaryOp::Equal { equal } else { !equal }));
     }
     if !matches!(
@@ -186,7 +200,7 @@ pub fn eval_comparison_truth_with_enum_catalog(
             "non-comparison operator {op:?} reached comparison evaluation"
         )));
     }
-    let order = compare_nullable_with_catalog(left, right, control, enums, state)?;
+    let order = compare_nullable_with_catalog(left, right, control, enums, state, engine)?;
     Ok(order.map(|order| match op {
         BinaryOp::Less => order.is_lt(),
         BinaryOp::LessEqual => order.is_le(),
@@ -220,7 +234,7 @@ pub fn values_equal_nullable_with_control(
     b: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Option<bool>> {
-    values_equal_nullable_with_catalog(a, b, control, None)
+    values_equal_nullable_with_catalog(a, b, control, None, None)
 }
 
 fn values_equal_nullable_with_catalog(
@@ -228,6 +242,7 @@ fn values_equal_nullable_with_catalog(
     b: &Value,
     control: &ProductionControl<'_>,
     enums: Option<&dyn super::super::enums::EnumLabelCatalog>,
+    engine: Option<&dyn crate::expr::EngineHook>,
 ) -> Result<Option<bool>> {
     control.check()?;
     if let Some(value) = super::super::enums::eval_comparison(BinaryOp::Equal, a, b, enums, None)? {
@@ -251,6 +266,7 @@ fn values_equal_nullable_with_catalog(
                 b,
                 control,
                 enums,
+                engine,
             )
         }
         (_, Value::Datum(datum)) => {
@@ -259,6 +275,7 @@ fn values_equal_nullable_with_catalog(
                 &*super::super::datums::read_with_value_catalog_and_control(datum, enums, control)?,
                 control,
                 enums,
+                engine,
             )
         }
         (Value::Temporal(x), Value::Str(y)) | (Value::Str(y), Value::Temporal(x)) => Some(
@@ -269,6 +286,10 @@ fn values_equal_nullable_with_catalog(
                 control,
             )?
             .is_some_and(|parsed| x.cmp(&parsed).is_eq()),
+        ),
+        (Value::Temporal(left), Value::Temporal(right)) => Some(
+            temporal::compare(left, right, engine, control)?
+                .map_or_else(|| left == right, Ordering::is_eq),
         ),
         (Value::FixedChar(x), Value::Str(y)) | (Value::Str(y), Value::FixedChar(x)) => {
             Some(compare_fixed_text(x, y, control)?.is_eq())
@@ -294,7 +315,7 @@ fn values_equal_nullable_with_catalog(
                         collations::DEFAULT,
                     )?)
                 } else {
-                    values_equal_nullable_with_catalog(x, y, control, enums)?
+                    values_equal_nullable_with_catalog(x, y, control, enums, engine)?
                 };
                 match equal {
                     Some(false) => return Ok(Some(false)),
@@ -334,7 +355,7 @@ pub fn compare_nullable_with_control(
     b: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Ordering>> {
-    compare_nullable_with_catalog(a, b, control, None, None)
+    compare_nullable_with_catalog(a, b, control, None, None, None)
 }
 
 fn compare_nullable_with_catalog(
@@ -343,6 +364,7 @@ fn compare_nullable_with_catalog(
     control: &ProductionControl<'_>,
     enums: Option<&dyn EnumLabelCatalog>,
     state: Option<&EnumComparisonState>,
+    engine: Option<&dyn crate::expr::EngineHook>,
 ) -> Result<Option<Ordering>> {
     control.check()?;
     if matches!(a, Value::Null) || matches!(b, Value::Null) {
@@ -365,6 +387,7 @@ fn compare_nullable_with_catalog(
             control,
             enums,
             state,
+            engine,
         ),
         (_, Value::Datum(datum)) => compare_nullable_with_catalog(
             a,
@@ -372,6 +395,7 @@ fn compare_nullable_with_catalog(
             control,
             enums,
             state,
+            engine,
         ),
         (
             Value::Int(_) | Value::Float(_) | Value::Decimal(_),
@@ -383,7 +407,6 @@ fn compare_nullable_with_catalog(
         | (Value::FixedChar(_), Value::FixedChar(_))
         | (Value::BitString(_), Value::BitString(_))
         | (Value::JsonB(_), Value::JsonB(_))
-        | (Value::Temporal(_), Value::Temporal(_))
         | (Value::Bool(_), Value::Bool(_))
         | (Value::Array(_), Value::Array(_))
         | (Value::LegacyVector(_), Value::LegacyVector(_))
@@ -391,6 +414,9 @@ fn compare_nullable_with_catalog(
         | (Value::Record(_), Value::Record(_) | Value::Row(_))
         | (Value::Row(_), Value::Record(_))
         | (Value::Enum(_), Value::Enum(_)) => Ok(Some(compare_sql_values(a, b, control, enums)?)),
+        (Value::Temporal(left), Value::Temporal(right)) => Ok(Some(
+            temporal::compare(left, right, engine, control)?.unwrap_or_else(|| left.cmp(right)),
+        )),
         (Value::FixedChar(x), Value::Str(y)) | (Value::Str(x), Value::FixedChar(y)) => {
             Ok(Some(compare_fixed_text(x, y, control)?))
         }
@@ -413,7 +439,9 @@ fn compare_nullable_with_catalog(
             .map(|parsed| Some(parsed.cmp(y)))
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
         // Ordering is lexicographic; reaching NULL before a definite comparison leaves it unknown.
-        (Value::Row(xs), Value::Row(ys)) => compare_anonymous_row(xs, ys, control, enums, state),
+        (Value::Row(xs), Value::Row(ys)) => {
+            compare_anonymous_row(xs, ys, control, enums, state, engine)
+        }
         (lhs, rhs) => Err(SQLError::TypeMismatch(format!(
             "cannot compare {lhs:?} with {rhs:?}"
         ))),
@@ -426,6 +454,7 @@ fn compare_anonymous_row(
     control: &ProductionControl<'_>,
     enums: Option<&dyn EnumLabelCatalog>,
     state: Option<&EnumComparisonState>,
+    engine: Option<&dyn crate::expr::EngineHook>,
 ) -> Result<Option<Ordering>> {
     for (index, (left_value, right_value)) in left.iter().zip(right).enumerate() {
         let oid = row_field_oid(left, index).or_else(|| row_field_oid(right, index));
@@ -443,7 +472,7 @@ fn compare_anonymous_row(
                 left, right, control, enums,
             )?)
         } else {
-            compare_nullable_with_catalog(left, right, control, enums, field.as_deref())?
+            compare_nullable_with_catalog(left, right, control, enums, field.as_deref(), engine)?
         };
         match order {
             Some(Ordering::Equal) => {}

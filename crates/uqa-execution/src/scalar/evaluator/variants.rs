@@ -410,7 +410,33 @@ pub(super) fn in_subquery(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     let needle = eval_scalar_inner(expr, context, control)?;
-    let found = super::execute_in_subquery(subquery, &needle, context)?;
+    let mut can_hash = |output: Option<&uqa_sql::ColumnType>| {
+        let Some(output) = output else {
+            return Ok(false);
+        };
+        let input = context.with_type_schema(|schema| {
+            uqa_sql::type_resolution::scalar_operand_type_with_engine_and_control(
+                expr,
+                schema,
+                context.params(),
+                context.function_hook(),
+                control,
+            )
+        })?;
+        Ok(input.as_ref().is_some_and(|input| {
+            uqa_sql::type_resolution::equality_types_share_hash_key(input, output)
+        }))
+    };
+    let found = super::execute_in_subquery(
+        subquery,
+        crate::scalar::SubqueryNeedle {
+            value: &needle,
+            engine: context.function_hook(),
+            control: *control,
+            can_hash: &mut can_hash,
+        },
+        context,
+    )?;
     plain(
         found.map_or(Value::Null, |found| {
             Value::Bool(if negated { !found } else { found })

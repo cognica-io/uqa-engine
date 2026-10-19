@@ -15,8 +15,41 @@ use crate::batch::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 
 use super::SubqueryId;
 
+/// A SQL membership operand with lazy declared-type validation. The cache invokes `can_hash` once when selecting its representation, never once per probe or input row.
+pub struct SubqueryNeedle<'a> {
+    pub value: &'a Value,
+    pub engine: Option<&'a dyn uqa_sql::expr::EngineHook>,
+    pub control: uqa_core::memory::ProductionControl<'a>,
+    pub can_hash: &'a mut dyn FnMut(Option<&uqa_sql::ColumnType>) -> Result<bool, SQLError>,
+}
+
 /// Runtime callback for query children referenced by [`SubqueryId`]. The planner owns the actual query-plan arena; execution only needs this stable slot interface.
 pub trait ScalarSubqueryRunner {
+    fn subquery_contains_selected(
+        &self,
+        subquery: SubqueryId,
+        needle: SubqueryNeedle<'_>,
+        outer_row: Option<&dyn RowLookup>,
+        params: &[SQLParam],
+    ) -> Result<Option<bool>, SQLError> {
+        needle.control.check()?;
+        self.execute_subquery(subquery, outer_row, params)?
+            .contains_with_engine_and_control(needle.value, needle.engine, &needle.control)
+    }
+
+    fn subquery_contains_selected_physical(
+        &self,
+        subquery: SubqueryId,
+        needle: SubqueryNeedle<'_>,
+        outer_schema: &RowSchema,
+        outer_row: &PhysicalRow,
+        params: &[SQLParam],
+    ) -> Result<Option<bool>, SQLError> {
+        needle.control.check()?;
+        self.execute_subquery_physical(subquery, outer_schema, outer_row, params)?
+            .contains_with_engine_and_control(needle.value, needle.engine, &needle.control)
+    }
+
     fn execute_subquery(
         &self,
         subquery: SubqueryId,
@@ -157,7 +190,11 @@ impl SubqueryResult {
     }
 
     pub fn contains(self, needle: &Value) -> Result<Option<bool>, SQLError> {
-        self.contains_matching(needle, |value, _| Ok(value == needle))
+        self.contains_matching(
+            needle,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            |value, _| Ok(value == needle),
+        )
     }
 
     /// Test a streamed SQL subquery with the same selected field operators as its cached membership path.
@@ -166,28 +203,58 @@ impl SubqueryResult {
         needle: &Value,
         catalog: &dyn uqa_sql::expr::SQLValueCatalog,
     ) -> Result<Option<bool>, SQLError> {
-        self.contains_matching(needle, |value, ty| {
-            uqa_sql::expr::equal_selected_values_with_catalog(
-                value,
-                needle,
-                ty,
-                &uqa_core::memory::ProductionControl::uncontrolled(),
-                Some(catalog),
-            )
+        self.contains_matching(
+            needle,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            |value, ty| {
+                uqa_sql::expr::equal_selected_values_with_catalog(
+                    value,
+                    needle,
+                    ty,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                    Some(catalog),
+                )
+            },
+        )
+    }
+
+    pub fn contains_with_engine(
+        self,
+        needle: &Value,
+        engine: Option<&dyn uqa_sql::expr::EngineHook>,
+    ) -> Result<Option<bool>, SQLError> {
+        self.contains_with_engine_and_control(
+            needle,
+            engine,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+    }
+
+    pub fn contains_with_engine_and_control(
+        self,
+        needle: &Value,
+        engine: Option<&dyn uqa_sql::expr::EngineHook>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<bool>, SQLError> {
+        self.contains_matching(needle, control, |value, ty| {
+            uqa_sql::expr::equal_selected_values_with_engine(value, needle, ty, control, engine)
         })
     }
 
     fn contains_matching(
         self,
         needle: &Value,
+        control: &uqa_core::memory::ProductionControl<'_>,
         mut equal: impl FnMut(&Value, Option<&uqa_sql::ColumnType>) -> Result<bool, SQLError>,
     ) -> Result<Option<bool>, SQLError> {
+        control.check()?;
         if self.columns.is_empty() {
             return Ok(Some(false));
         }
         let mut saw_row = false;
         let mut saw_null = false;
         for row in self.rows {
+            control.check()?;
             let row = row?;
             saw_row = true;
             match row.positional_column(0) {

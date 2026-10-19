@@ -71,6 +71,19 @@ pub trait PhysicalSubqueryRunner {
             .into_exists()
     }
 
+    fn subquery_contains_selected(
+        &self,
+        subquery: SubqueryId,
+        plan: &QueryPlan,
+        needle: crate::scalar::SubqueryNeedle<'_>,
+        outer_row: PhysicalOuterRow<'_>,
+        params: &[SQLParam],
+    ) -> Result<Option<bool>, SQLError> {
+        needle.control.check()?;
+        self.execute_subquery(subquery, plan, outer_row, params)?
+            .contains_with_engine_and_control(needle.value, needle.engine, &needle.control)
+    }
+
     fn subquery_contains(
         &self,
         subquery: SubqueryId,
@@ -332,6 +345,44 @@ impl ScalarSubqueryRunner for PlanSubqueryArena<'_> {
         self.runner()?.subquery_exists(
             subquery,
             plan,
+            PhysicalOuterRow::Physical {
+                schema: outer_schema,
+                row: outer_row,
+            },
+            params,
+        )
+    }
+
+    fn subquery_contains_selected(
+        &self,
+        subquery: SubqueryId,
+        needle: crate::scalar::SubqueryNeedle<'_>,
+        _outer_row: Option<&dyn RowLookup>,
+        params: &[SQLParam],
+    ) -> Result<Option<bool>, SQLError> {
+        let plan = self.plan(subquery)?;
+        self.runner()?.subquery_contains_selected(
+            subquery,
+            plan,
+            needle,
+            PhysicalOuterRow::Absent,
+            params,
+        )
+    }
+
+    fn subquery_contains_selected_physical(
+        &self,
+        subquery: SubqueryId,
+        needle: crate::scalar::SubqueryNeedle<'_>,
+        outer_schema: &RowSchema,
+        outer_row: &PhysicalRow,
+        params: &[SQLParam],
+    ) -> Result<Option<bool>, SQLError> {
+        let plan = self.plan(subquery)?;
+        self.runner()?.subquery_contains_selected(
+            subquery,
+            plan,
+            needle,
             PhysicalOuterRow::Physical {
                 schema: outer_schema,
                 row: outer_row,

@@ -58,6 +58,36 @@ pub fn equal_selected_values_with_catalog(
     super::equal_typed_values_with_enum_catalog(left, right, control, catalog)
 }
 
+/// Evaluate a selected SQL equality predicate with its invoking session. Unlike grouping keys, cross-type datetime operands can require the session timezone.
+pub fn equal_selected_values_with_engine(
+    left: &Value,
+    right: &Value,
+    ty: Option<&ColumnType>,
+    control: &ProductionControl<'_>,
+    engine: Option<&dyn crate::expr::EngineHook>,
+) -> Result<bool> {
+    let catalog = engine.map(crate::expr::EngineValueCatalog);
+    if let Some(order) = selected_range_order(
+        left,
+        right,
+        ty,
+        control,
+        catalog
+            .as_ref()
+            .map(|catalog| catalog as &dyn SQLValueCatalog),
+    )? {
+        return Ok(order.is_eq());
+    }
+    Ok(super::eval_value_comparison_truth_with_engine(
+        crate::ast::BinaryOp::Equal,
+        left,
+        right,
+        control,
+        engine,
+        None,
+    )? == Some(true))
+}
+
 pub(super) fn selected_range_order(
     left: &Value,
     right: &Value,

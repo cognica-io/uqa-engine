@@ -18,6 +18,7 @@ pub enum ScalarSubqueryCacheEntry {
     CorrelatedExists(Arc<CachedCorrelatedExists>),
     Materialized(CachedScalarSubquery),
     Membership(Arc<CachedSubqueryMembership>),
+    ComparedMembership(CachedScalarSubquery),
     Scalar(Value),
     Row(Option<crate::OwnedPhysicalRow>),
     Exists(bool),

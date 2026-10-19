@@ -183,7 +183,8 @@ fn lower_membership(
             }
             crate::semantics::MembershipItem::Constant(value) => value.clone(),
         };
-        if matches!(value, Value::Array(_)) {
+        // The untyped posting set has no selected element operator or session timezone. Keep these operands in the SQL evaluator; physical carrier identity is not their SQL equality.
+        if matches!(value, Value::Array(_) | Value::Temporal(_)) {
             return None;
         }
         if matches!(value, Value::Null) {
