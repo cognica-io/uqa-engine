@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Check view and folded CTE routine privileges against the selected executable expressions before row production, including `LIMIT 0`, `EXPLAIN`, and preceding sequence effects; retain materialized CTE and set-returning function requirements.
+- Check view and folded CTE routine privileges against the selected executable expressions before row production, including lateral and scalar correlation, `LIMIT 0`, `EXPLAIN`, and preceding sequence effects; retain materialized CTE and set-returning function requirements.
 
 - Keep persistent IVF and HNSW writers bound to their completed index definitions when another session commits during index creation, preventing canonical vectors from being written without the corresponding index metadata.
 

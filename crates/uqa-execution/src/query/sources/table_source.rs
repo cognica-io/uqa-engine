@@ -42,13 +42,14 @@ pub(super) fn prune_query_outputs<S: Clone + Send + Sync + 'static>(
     projection: &uqa_sql::plan::source_projection::SourceProjection,
     params: &[SQLParam],
     scope: &CteScope<S>,
+    outer: Option<&crate::RowSchema>,
 ) -> Result<(), SQLError> {
     let schema = crate::query::binding::bind_query_plan_schema(
         context.ctes.routines,
         query,
         params,
         scope,
-        scope.row_lock_outer_row().map(|row| &row.schema),
+        outer,
     )?;
     context
         .ctes
@@ -129,7 +130,15 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     prune.and_then(|prune| prune.get(&qualifier)),
                 ) {
                     let aliases = output_aliases(&plan.columns, column_aliases);
-                    prune_query_outputs(context, query, &aliases, projection, params, ctes)?;
+                    prune_query_outputs(
+                        context,
+                        query,
+                        &aliases,
+                        projection,
+                        params,
+                        ctes,
+                        ctes.row_lock_outer_row().map(|row| &row.schema),
+                    )?;
                 }
                 let streamed = {
                     let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
@@ -332,6 +341,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         projection,
                         params,
                         ctes,
+                        ctes.row_lock_outer_row().map(|row| &row.schema),
                     )?;
                 }
                 let optimized = if executable_query.is_some() {

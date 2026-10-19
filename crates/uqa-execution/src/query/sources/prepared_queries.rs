@@ -6,7 +6,7 @@
 
 //! Prepare named relational inputs once, before any statement input produces rows.
 
-use super::{ColumnPrune, CteScope, SourceContext};
+use super::{ColumnPrune, CteScope, RowSchema, SourceContext};
 use std::{borrow::Cow, collections::BTreeSet};
 use uqa_sql::{
     plan::{QueryPlan, RelationalPlan, SourcePlan},
@@ -27,7 +27,14 @@ pub(crate) fn prepare<'a, S: Clone + Send + Sync + 'static>(
         return Ok(Cow::Borrowed(query));
     }
     let mut query = query.clone();
-    prepare_query(context, &mut query, params, &scope, &BTreeSet::new())?;
+    prepare_query(
+        context,
+        &mut query,
+        params,
+        &scope,
+        &BTreeSet::new(),
+        scope.row_lock_outer_row().map(|row| &row.schema),
+    )?;
     Ok(Cow::Owned(query))
 }
 
@@ -125,6 +132,7 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     parent: &CteScope<S>,
     parent_folded: &BTreeSet<String>,
+    outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     let mut scope = parent.clone();
     let mut folded = parent_folded.clone();
@@ -153,19 +161,20 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
             continue;
         }
         if let Some(body) = cte.body.query_mut() {
-            prepare_query(context, body, params, &scope, &folded)?;
+            prepare_query(context, body, params, &scope, &folded, outer)?;
         }
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
             scope.scalar_subqueries.clone_from(&block.subqueries);
+            let mut source_schema = RowSchema::default();
             if let Some(from) = &block.from {
-                let source_schema = crate::query::binding::bind_source_plan_schema(
+                source_schema = crate::query::binding::bind_source_plan_schema(
                     context.ctes.routines,
                     from,
                     params,
                     &scope,
-                    scope.row_lock_outer_row().map(|row| &row.schema),
+                    outer,
                 )?;
                 let prune =
                     context
@@ -178,10 +187,19 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
                     &scope,
                     &folded,
                     prune.as_ref(),
+                    outer,
                 )?;
             }
+            let expression_schema = uqa_sql::binding::overlay_outer_schema(&source_schema, outer);
             for query in &mut block.subqueries {
-                prepare_query(context, query, params, &scope, &folded)?;
+                prepare_query(
+                    context,
+                    query,
+                    params,
+                    &scope,
+                    &folded,
+                    Some(&expression_schema),
+                )?;
             }
         }
         RelationalPlan::SetOp {
@@ -190,15 +208,15 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
             subqueries,
             ..
         } => {
-            prepare_query(context, left, params, &scope, &folded)?;
-            prepare_query(context, right, params, &scope, &folded)?;
+            prepare_query(context, left, params, &scope, &folded, outer)?;
+            prepare_query(context, right, params, &scope, &folded, outer)?;
             for query in subqueries {
-                prepare_query(context, query, params, &scope, &folded)?;
+                prepare_query(context, query, params, &scope, &folded, outer)?;
             }
         }
         RelationalPlan::Values { subqueries, .. } => {
             for query in subqueries {
-                prepare_query(context, query, params, &scope, &folded)?;
+                prepare_query(context, query, params, &scope, &folded, outer)?;
             }
         }
     }
@@ -212,85 +230,133 @@ fn prepare_source<S: Clone + Send + Sync + 'static>(
     parent: &CteScope<S>,
     folded: &BTreeSet<String>,
     prune: Option<&ColumnPrune>,
+    outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     match source {
-        SourcePlan::Table {
-            name,
-            qualifier,
-            alias,
-            column_aliases,
-            executable_query,
+        SourcePlan::Table { .. } => {
+            prepare_named_source(context, source, params, parent, folded, prune, outer)?;
+        }
+        SourcePlan::Join {
+            left,
+            right,
+            lateral,
             ..
         } => {
-            if executable_query.is_some() {
-                return Ok(());
-            }
-            let qualifier = alias.as_deref().unwrap_or(qualifier);
-            let mut scope = parent.clone();
-            let (mut query, aliases, optimize) = if let Some(cte) = scope.deferred_reference(name) {
-                if !folded.contains(&cte.name) {
-                    return Ok(());
-                }
-                let Some(query) = cte.body.query() else {
-                    return Ok(());
-                };
-                (
-                    query.clone(),
-                    super::table_source::output_aliases(&cte.columns, column_aliases),
-                    false,
-                )
-            } else {
-                if scope.is_visible_cte(name) {
-                    return Ok(());
-                }
-                let catalog = scope.catalog_read_view()?;
-                let Some(view) = catalog
-                    .view_resolved(&scope.relation_name_resolution()?, name)?
-                    .cloned()
-                else {
-                    return Ok(());
-                };
-                if view.kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
-                    return Ok(());
-                }
-                let subject = if view.security_invoker() {
-                    scope.privilege_subject()?.clone()
-                } else {
-                    catalog.view_owner(&view)?
-                };
-                scope = {
-                    let scoped = scope.enter_privilege_subject(subject);
-                    (*scoped).clone()
-                };
-                (
-                    view.query.clone(),
-                    super::table_source::output_aliases(
-                        view.output_columns.as_deref().unwrap_or_default(),
-                        column_aliases,
-                    ),
-                    true,
-                )
-            };
-            let _stored = optimize.then(
-                uqa_sql::semantics::sets::placement_scope::SetPlacementScope::stored_definition,
+            prepare_source(context, left, params, parent, folded, prune, outer)?;
+            let implicit_lateral_function = matches!(
+                right.as_ref(),
+                SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
             );
-            if let Some(projection) = prune.and_then(|prune| prune.get(qualifier)) {
-                super::table_source::prune_query_outputs(
-                    context, &mut query, &aliases, projection, params, &scope,
+            let right_outer = if *lateral || implicit_lateral_function {
+                let left_schema = crate::query::binding::bind_source_plan_schema(
+                    context.ctes.routines,
+                    left,
+                    params,
+                    parent,
+                    outer,
                 )?;
-            }
-            if optimize {
-                query = context.ctes.rewrites.optimize_retained_query(&query)?;
-            }
-            prepare_query(context, &mut query, params, &scope, folded)?;
-            *executable_query = Some(Box::new(query));
+                Some(uqa_sql::binding::overlay_outer_schema(&left_schema, outer))
+            } else {
+                None
+            };
+            prepare_source(
+                context,
+                right,
+                params,
+                parent,
+                folded,
+                prune,
+                right_outer.as_ref().or(outer),
+            )?;
         }
-        SourcePlan::Join { left, right, .. } => {
-            prepare_source(context, left, params, parent, folded, prune)?;
-            prepare_source(context, right, params, parent, folded, prune)?;
+        SourcePlan::Subquery { body, .. } => {
+            prepare_query(context, body, params, parent, folded, outer)?;
         }
-        SourcePlan::Subquery { body, .. } => prepare_query(context, body, params, parent, folded)?,
         _ => {}
     }
+    Ok(())
+}
+
+fn prepare_named_source<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    source: &mut SourcePlan,
+    params: &[SQLParam],
+    parent: &CteScope<S>,
+    folded: &BTreeSet<String>,
+    prune: Option<&ColumnPrune>,
+    outer: Option<&RowSchema>,
+) -> Result<(), SQLError> {
+    let SourcePlan::Table {
+        name,
+        qualifier,
+        alias,
+        column_aliases,
+        executable_query,
+        ..
+    } = source
+    else {
+        unreachable!("named source checked by the traversal");
+    };
+    if executable_query.is_some() {
+        return Ok(());
+    }
+    let qualifier = alias.as_deref().unwrap_or(qualifier);
+    let mut scope = parent.clone();
+    let (mut query, aliases, optimize) = if let Some(cte) = scope.deferred_reference(name) {
+        if !folded.contains(&cte.name) {
+            return Ok(());
+        }
+        let Some(query) = cte.body.query() else {
+            return Ok(());
+        };
+        (
+            query.clone(),
+            super::table_source::output_aliases(&cte.columns, column_aliases),
+            false,
+        )
+    } else {
+        if scope.is_visible_cte(name) {
+            return Ok(());
+        }
+        let catalog = scope.catalog_read_view()?;
+        let Some(view) = catalog
+            .view_resolved(&scope.relation_name_resolution()?, name)?
+            .cloned()
+        else {
+            return Ok(());
+        };
+        if view.kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
+            return Ok(());
+        }
+        let subject = if view.security_invoker() {
+            scope.privilege_subject()?.clone()
+        } else {
+            catalog.view_owner(&view)?
+        };
+        scope = {
+            let scoped = scope.enter_privilege_subject(subject);
+            (*scoped).clone()
+        };
+        (
+            view.query.clone(),
+            super::table_source::output_aliases(
+                view.output_columns.as_deref().unwrap_or_default(),
+                column_aliases,
+            ),
+            true,
+        )
+    };
+    let _stored = optimize
+        .then(uqa_sql::semantics::sets::placement_scope::SetPlacementScope::stored_definition);
+    if let Some(projection) = prune.and_then(|prune| prune.get(qualifier)) {
+        super::table_source::prune_query_outputs(
+            context, &mut query, &aliases, projection, params, &scope, outer,
+        )?;
+    }
+    if optimize {
+        query = context.ctes.rewrites.optimize_retained_query(&query)?;
+    }
+    prepare_query(context, &mut query, params, &scope, folded, outer)?;
+    *executable_query = Some(Box::new(query));
     Ok(())
 }
