@@ -6,9 +6,7 @@
 
 //! Canonical decimal text retains a controlled radix-conversion workspace.
 
-use num_traits::{Signed, Zero};
-
-use super::{DecimalRepr, DecimalValue};
+use super::{coefficient::Coefficient, DecimalRepr, DecimalValue};
 use crate::{
     memory::{
         BudgetedString, MemoryBudget, MemoryError, Produced, ProductionControl, ProductionString,
@@ -127,7 +125,42 @@ fn push_digits(
     Ok(())
 }
 
+/// The decimal digits of the coefficient's magnitude, least significant first; zero has one digit.
 pub(super) fn coefficient_digits_with_control(
+    coefficient: &Coefficient,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>, ValueRetentionError> {
+    match coefficient {
+        Coefficient::Word(word) => word_digits_with_control(*word, control),
+        Coefficient::Big(value) => big_digits_with_control(value, control),
+    }
+}
+
+fn word_digits_with_control(
+    word: i128,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>, ValueRetentionError> {
+    control.check()?;
+    let mut magnitude = word.unsigned_abs();
+    let count = if magnitude == 0 {
+        1
+    } else {
+        magnitude.ilog10() as usize + 1
+    };
+    let mut digits = Vec::new();
+    digits.try_reserve_exact(count).map_err(MemoryError::from)?;
+    let memory = control.reserve(digits.capacity())?;
+    loop {
+        digits.push((magnitude % 10) as u8);
+        magnitude /= 10;
+        if magnitude == 0 {
+            break;
+        }
+    }
+    control.finish(digits, memory)
+}
+
+pub(super) fn big_digits_with_control(
     coefficient: &num_bigint::BigInt,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<u8>>, ValueRetentionError> {

@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::{memory::MemoryBudget, CancellationToken};
+use num_bigint::BigInt;
 
 #[test]
 fn admitted_quantization_preserves_midpoints_negative_scale_and_display_scale() {
@@ -207,8 +208,8 @@ fn directed_rounding_and_absolute_value_preserve_quota_and_both_cancellation_err
 
 #[test]
 fn normalized_coefficient_reservation_includes_integer_division_slack() {
-    // num-bigint's subtraction retains these 7/11/15-limb clones after cancellation down to 1/2/3 limbs: len == capacity / 4 does not trigger shrinking.
-    for result_limbs in [1_usize, 2, 3] {
+    // num-bigint's subtraction retains these 15/19-limb clones after cancellation down to 3/4 limbs: len == capacity / 4 does not trigger shrinking. Results of one or two limbs are words, which retain no limb allocation.
+    for result_limbs in [3_usize, 4] {
         let capacity = 4 * result_limbs + 3;
         let high = BigInt::from(1_u8) << ((capacity - 1) * usize::BITS as usize);
         let low = BigInt::from(1_u8) << ((result_limbs - 1) * usize::BITS as usize);
@@ -216,7 +217,7 @@ fn normalized_coefficient_reservation_includes_integer_division_slack() {
         let coefficient = source - high;
         assert_eq!(coefficient, low);
         let value = DecimalValue::with_repr(DecimalRepr::Finite {
-            coefficient,
+            coefficient: coefficient.into(),
             scale: 0,
         });
         let required = size_of::<DecimalRepr>() + capacity * size_of::<usize>();

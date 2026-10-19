@@ -6,7 +6,10 @@
 
 //! Exact binary-float values for internal total ordering and equality keys.
 
-use super::super::{coefficient, DecimalRepr, DecimalValue};
+use super::super::{
+    coefficient::{self, Coefficient},
+    DecimalRepr, DecimalValue,
+};
 use crate::{
     memory::{Produced, ProductionControl},
     ValueRetentionError,
@@ -72,7 +75,7 @@ impl DecimalValue {
             coefficient = coefficient::multiply(&coefficient, &factor, control)?;
         }
         let repr_memory = control.reserve(size_of::<DecimalRepr>())?;
-        let (coefficient, memory) = coefficient.into_parts();
+        let (coefficient, memory) = Coefficient::produced(coefficient, control)?.into_parts();
         control.finish(
             Self::with_repr(DecimalRepr::Finite { coefficient, scale }),
             control.combine(memory, repr_memory),

@@ -8,7 +8,7 @@
 
 use num_bigint::{BigInt, Sign};
 
-use super::{DecimalRepr, DecimalValue};
+use super::{coefficient::Coefficient, DecimalRepr, DecimalValue};
 use crate::{
     memory::{Budgeted, MemoryBudget, MemoryError, MemoryReservation, Produced, ProductionControl},
     CancellationToken, ValueRetentionError,
@@ -92,11 +92,24 @@ fn coefficient(
     plan: &FinitePlan<'_>,
     memory: &mut Option<MemoryReservation>,
     check: &mut impl FnMut() -> Result<(), ValueRetentionError>,
-) -> Result<BigInt, ValueRetentionError> {
+) -> Result<Coefficient, ValueRetentionError> {
     if plan.digit_count == 0 {
-        return Ok(BigInt::ZERO);
+        return Ok(Coefficient::ZERO);
     }
     check()?;
+    // Every text of at most 38 digits is a word, read without a digit buffer or an arbitrary-precision conversion.
+    if plan.digit_count <= 38 {
+        let mut word = 0_i128;
+        for byte in plan.significand.bytes() {
+            if byte != b'.' {
+                word = word * 10 + i128::from(byte - b'0');
+            }
+        }
+        for _ in 0..plan.trailing_zeros {
+            word *= 10;
+        }
+        return Ok(Coefficient::Word(if plan.negative { -word } else { word }));
+    }
     let mut digits = Vec::new();
     digits
         .try_reserve_exact(plan.digit_count)
@@ -127,13 +140,13 @@ fn coefficient(
     };
     let coefficient = BigInt::from_radix_be(sign, &digits, 10).expect("validated decimal digits");
     check()?;
-    Ok(coefficient)
+    Ok(Coefficient::from_big(coefficient))
 }
 
 fn conversion_bytes(digits: usize) -> Result<usize, MemoryError> {
-    if digits == 0 {
-        // BigInt::ZERO allocates nothing, but keep the same conservative retained representation charge as every other decimal owner.
-        return Ok(size_of::<DecimalRepr>() + 7 * size_of::<usize>());
+    if digits <= 38 {
+        // A text of at most 38 digits is read into a word coefficient, which retains only its boxed representation.
+        return Ok(size_of::<DecimalRepr>());
     }
     // num-bigint 0.4.6, biguint/convert.rs::from_radix_digits_be reserves ceil(log2(10) * digits / BigDigit::BITS) limbs, then updates that one Vec in place. A leading carry slot can grow it once; Vec's minimum non-byte growth is four elements. Reserve both old and replacement buffers, and at least the normalized four-times-limb plus three-limb slack charge. Four bits per decimal digit is an integer upper bound for both 32-bit and 64-bit BigDigit configurations (src/macros.rs). Normalization only truncates a possible leading zero; any shrink also fits the same overlap allowance. No power, coefficient clone, digit string, or formatting buffer is constructed by this path.
     // The growth rule is audited against Rust 1.90's min_non_zero_cap and grow_amortized: https://github.com/rust-lang/rust/blob/1.90.0/library/alloc/src/raw_vec/mod.rs.

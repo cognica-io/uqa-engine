@@ -7,15 +7,16 @@
 //! Decimal square root, logarithm, exponential, and power operations.
 
 use num_bigint::BigInt;
-use num_traits::{Signed, Zero};
+use num_traits::Signed;
 use std::cmp::Ordering;
 
 use super::arithmetic_control::{
-    checked, finite, numeric_group_head, special, Calculation, Failure,
+    checked, finite_big, numeric_group_head, special, Calculation, Failure,
 };
 use super::{
-    coefficient, format_budgeted::coefficient_digits_with_control, power, DecimalRepr,
-    DecimalValue, MAX_DISPLAY_SCALE, MAX_FRACTIONAL_DIGITS, MAX_RESULT_SCALE,
+    coefficient,
+    format_budgeted::{big_digits_with_control, coefficient_digits_with_control},
+    power, DecimalRepr, DecimalValue, MAX_DISPLAY_SCALE, MAX_FRACTIONAL_DIGITS, MAX_RESULT_SCALE,
 };
 use crate::{
     memory::{Produced, ProductionControl},
@@ -113,6 +114,7 @@ fn square_root(
     if value.is_negative() {
         return Err(Failure::Invalid);
     }
+    let value = value.big();
     let exponent = i64::from(result_scale)
         .checked_mul(2)
         .and_then(|value| value.checked_sub(i64::from(*scale)))
@@ -123,12 +125,12 @@ fn square_root(
             control,
         )?;
         (
-            coefficient::multiply(value, &power, control)?,
+            coefficient::multiply(&value, &power, control)?,
             coefficient::from_i64(1, control)?,
         )
     } else {
         (
-            coefficient::clone(value, control)?,
+            coefficient::clone(&value, control)?,
             coefficient::power_of_ten(
                 u32::try_from(exponent.checked_neg().ok_or(Failure::Invalid)?)
                     .map_err(|_| Failure::Invalid)?,
@@ -155,7 +157,7 @@ fn square_root(
     if *left >= *right {
         root = coefficient::add(&root, &one, control)?;
     }
-    finite(root, result_scale, control)
+    finite_big(root, result_scale, control)
 }
 
 fn integer_sqrt_floor(
@@ -167,7 +169,7 @@ fn integer_sqrt_floor(
     if value <= &*one {
         return Ok(coefficient::clone(value, control)?);
     }
-    let digits = coefficient_digits_with_control(value, control)?.len();
+    let digits = big_digits_with_control(value, control)?.len();
     let initial_power = u32::try_from(digits.div_ceil(2)).unwrap_or(u32::MAX);
     let mut estimate = coefficient::power_of_ten(initial_power, control)?;
     let two = coefficient::from_i64(2, control)?;
