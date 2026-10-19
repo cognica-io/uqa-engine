@@ -15698,6 +15698,58 @@
       "capability": "Bounded SQL regular-expression reuse",
       "workload": "Exhaust cache retention while executing valid, invalid and excessively complex patterns, refuse actual compilation scratch, and transfer completed state between shared or separate owners.",
       "invariant": "Retention capacity cannot alter compilation results or PostgreSQL diagnostics; transient compilation uses its original allowance, completed retained state remains charged, and every lease is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_analysis_derives_each_query_result_once",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "Shared ordered statement analysis",
+      "workload": "SELECT and five query-bearing command forms, including EXPLAIN.",
+      "invariant": "Each complete block result is analyzed once; later adapters reuse the selected schema."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_analysis_retains_postgresql_result_metadata",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "Shared ordered statement analysis",
+      "workload": "PostgreSQL output descriptions for typmods, unknown values, VALUES, modifying CTEs, RETURNING and duplicate column labels.",
+      "invariant": "Names, positional declared types and collations match the independent PostgreSQL reference."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_analysis_retains_parameter_identity_and_anonymous_record_fields",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "Shared ordered statement analysis",
+      "workload": "Declared parameter types and an anonymous ROW in one output schema.",
+      "invariant": "The original parameter identity and complete field types survive input normalization."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_analysis_keeps_its_first_query_schema_and_dependency_scope",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/procedural.rs",
+      "capability": "Shared ordered statement analysis",
+      "workload": "A procedural query occurrence with a numeric modifier under one retained binding scope.",
+      "invariant": "One block analysis preserves the result modifier and releases the original catalog scope."
     }
   ]
 }

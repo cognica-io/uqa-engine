@@ -30,7 +30,7 @@ ci = load("run-ec2-performance")
 
 
 class ControlledRunnerTest(unittest.TestCase):
-    def test_runtime_sources_remain_exact_when_claim_reference_build_reuses_candidate_checkout(self):
+    def test_runtime_sources_are_restored_after_canonical_builds(self):
         repository = Path(__file__).resolve().parents[2]
         analytical = json.loads((repository / "benchmarks/analytical/manifest.json").read_text())
         claims = json.loads((repository / "benchmarks/regressions/claim-timing.json").read_text())
@@ -52,22 +52,26 @@ class ControlledRunnerTest(unittest.TestCase):
                 (candidate / "benchmarks/regressions/claim-timing.json").write_text(json.dumps(claims))
                 head = "a" * 40
                 shared_revision = None
+                source_revisions = {}
 
                 def source(revision, role):
                     nonlocal shared_revision
                     if role == "reference":
-                        self.assertEqual(revision, controller.REFERENCE)
+                        source_revisions[reference] = revision
                         return reference
                     shared_revision = revision
+                    source_revisions[candidate] = revision
                     return candidate
 
                 def build(revision, role, include_claims):
-                    if role == "claims-reference" and not cached:
-                        source(revision, role)
+                    if role != "claims-reference" or not cached:
+                        source(revision, "reference")
                     return {name: {"revision": revision} for name in ("analytical_comparison", "row_claim_contention")}
 
                 def compare(host, kind, current, baseline, *args):
                     self.assertEqual(shared_revision, head)
+                    self.assertEqual(source_revisions[reference], controller.REFERENCE)
+                    self.assertEqual(source_revisions[candidate], head)
                     self.assertEqual(current[0], candidate if kind == "analytical" else None)
                     self.assertEqual(baseline[0], reference if kind == "analytical" else None)
                     self.assertEqual(current[1]["revision"], head)

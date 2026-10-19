@@ -14,6 +14,9 @@ on:
       - benchmarks/regressions/**
       - scripts/run-performance-checks.py
       - scripts/tests/test_performance_checks.py
+      - scripts/performance_change_scope.py
+      - scripts/tests/test_performance_change_scope.py
+      - "!benchmarks/regressions/**/*.md"
   push:
     branches: [main]
     paths:
@@ -28,21 +31,55 @@ on:
       - benchmarks/regressions/**
       - scripts/run-performance-checks.py
       - scripts/tests/test_performance_checks.py
+      - scripts/performance_change_scope.py
+      - scripts/tests/test_performance_change_scope.py
+      - "!benchmarks/regressions/**/*.md"
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
+  scope:
+    name: Select deterministic regression inputs
+    runs-on: ubuntu-24.04
+    outputs:
+      required: ${{ steps.select.outputs.required }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Verify input selection
+        run: python3 -m unittest discover -s scripts/tests -p test_performance_change_scope.py
+      - name: Select changed product and regression inputs
+        id: select
+        env:
+          PERFORMANCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          PERFORMANCE_PREVIOUS_HEAD: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
+        run: |
+          if [[ -z "$PERFORMANCE_BASE" || "$PERFORMANCE_BASE" =~ ^0+$ ]]; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          else
+            if ! git fetch --no-tags --depth=200 origin "$PERFORMANCE_BASE"; then
+              echo "required=true" >> "$GITHUB_OUTPUT"
+            elif [[ -n "$PERFORMANCE_PREVIOUS_HEAD" ]]; then
+              if git fetch --no-tags --depth=200 origin "$PERFORMANCE_PREVIOUS_HEAD"; then
+                python3 scripts/performance_change_scope.py --base "$PERFORMANCE_BASE" --before "$PERFORMANCE_PREVIOUS_HEAD" >> "$GITHUB_OUTPUT"
+              else
+                echo "required=true" >> "$GITHUB_OUTPUT"
+              fi
+            else
+              python3 scripts/performance_change_scope.py --base "$PERFORMANCE_BASE" >> "$GITHUB_OUTPUT"
+            fi
+          fi
   platform:
+    needs: scope
+    if: needs.scope.outputs.required == 'true'
     name: Regression checks (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-14]
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ matrix.os }}
+      cancel-in-progress: true
     uses: ./.github/workflows/performance-platform.yml
     with:
       os: ${{ matrix.os }}
