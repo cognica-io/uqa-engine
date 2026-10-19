@@ -19,6 +19,7 @@ mod context;
 pub mod entry;
 pub mod identity;
 mod locking;
+mod preparation;
 mod recursion;
 mod type_changes;
 pub use context::*;
@@ -111,7 +112,7 @@ pub fn run_alter_table<S: Clone + 'static>(
         mut actions,
     } = stmt;
     context.constraints.access.ensure_table_owner(&table)?;
-    let prepared_types = type_changes::prepare(context, &table, &qualifier, &mut actions)?;
+    let prepared_types = preparation::prepare(context, &table, &qualifier, &mut actions)?;
     let mut rewrites = type_changes::TypeRewrites::capture(
         context,
         &table,
