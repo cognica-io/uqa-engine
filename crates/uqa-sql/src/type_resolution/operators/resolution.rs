@@ -6,6 +6,11 @@
 
 //! Catalog operator selection shares `PostgreSQL` function matching/ranking and owns only the requested operator's candidate types.
 
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::sync::{LazyLock, RwLock};
+
+use super::super::overload_resolution::builtin_canonical_type_name;
 use super::super::{common::base_type, BuiltinFunctionOverload};
 use super::{binary_operator_name, catalog::SIGNATURES, undefined_binary_operator};
 use crate::{
@@ -13,6 +18,39 @@ use crate::{
     SQLError,
 };
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
+
+/// An operand type of a builtin scalar operator selection. The hash covers only the variant, which equal types always share; equality compares the complete type.
+#[derive(Clone, PartialEq, Eq)]
+struct OperandType(Option<ColumnType>);
+
+impl Hash for OperandType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.as_ref().map(std::mem::discriminant).hash(state);
+    }
+}
+
+type SelectionKey = (Box<str>, OperandType, OperandType);
+
+/// Operator selection is a function of the operator name and its operand types. Selections whose operands are builtin scalars or unknown, a bounded set, are made once per process; other operands are selected at every request.
+static BUILTIN_SELECTIONS: LazyLock<RwLock<HashMap<SelectionKey, [ColumnType; 3]>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// Remaining allowance that every builtin scalar selection stays below. With at least this much available, a fresh selection cannot exhaust the allowance, so a retained selection reports the same outcome; a smaller allowance selects afresh and keeps its quota errors independent of earlier selections.
+const RETAINED_SELECTION_ALLOWANCE: usize = 1 << 20;
+
+fn selection_key(
+    name: &str,
+    left: Option<&ColumnType>,
+    right: Option<&ColumnType>,
+) -> Option<SelectionKey> {
+    let operand = |ty: Option<&ColumnType>| match ty {
+        None => Some(OperandType(None)),
+        Some(ty) => builtin_canonical_type_name(ty)
+            .is_some()
+            .then(|| OperandType(Some(ty.clone()))),
+    };
+    Some((name.into(), operand(left)?, operand(right)?))
+}
 
 /// Selected declared operand types and result type for a binary SQL operator.
 #[doc(hidden)]
@@ -61,6 +99,35 @@ pub(crate) fn named_binary_operator_types_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<[ColumnType; 3]>, SQLError> {
     control.check()?;
+    let key = control
+        .budget()
+        .is_none_or(|budget| budget.available() >= RETAINED_SELECTION_ALLOWANCE)
+        .then(|| selection_key(name, left, right))
+        .flatten();
+    let retained = key.as_ref().and_then(|key| {
+        BUILTIN_SELECTIONS
+            .read()
+            .ok()
+            .and_then(|selections| selections.get(key).cloned())
+    });
+    if let Some([left, right, output]) = retained {
+        return result(&left, &right, &output, control);
+    }
+    let selected = select_binary_operator_types(name, left, right, control)?;
+    if let Some(key) = key {
+        if let Ok(mut selections) = BUILTIN_SELECTIONS.write() {
+            selections.entry(key).or_insert_with(|| (*selected).clone());
+        }
+    }
+    Ok(selected)
+}
+
+fn select_binary_operator_types(
+    name: &str,
+    left: Option<&ColumnType>,
+    right: Option<&ColumnType>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<[ColumnType; 3]>, SQLError> {
     let arguments = normalized_arguments(left, right, control)?;
     // One unknown operand first tries the exact known base type, before preferred-type candidate selection.
     let exact_left = arguments[0].as_ref().or(arguments[1].as_ref());
