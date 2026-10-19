@@ -44,3 +44,7 @@ Local verification passes both new Execution owner cases and all forty selected 
 The first transaction-publication commit also passes all 508 selected local transaction, savepoint and TPC-H cases. Those broader results belong to `46c43c8d9`; the final SELECT-spool change uses the focused owner/public checks above. The inventory now contains 1,187 checks / 1,693 required cases. Actual automatic Linux/macOS evidence for the final source remains pending; no timing claim is made.
 
 Final SQL/Execution/Engine library-and-test Clippy with denied warnings passes for the SELECT-spool change, as do formatting, dependency/ownership and harness checks. The unrelated session-index fixture failure in integrated-source performance CI is tracked in #1143 and is being corrected without weakening its assertions.
+
+## Upstream schema integration
+
+The COPY publication branch incorporates the completed lexical-lineage and correlated-schema changes from `6ebc2289b`, including the regression fixture dependency-reuse correction. The only overlapping paths were HISTORY and the regression inventory; every independent source file remains byte-identical to its originating unit. The three-way inventory merge preserves both sets of assertions (1,191 checks / 1,697 required cases), and all 33 regression-runner tests pass with process inspection enabled. Automatic combined-source results remain required before merge.
