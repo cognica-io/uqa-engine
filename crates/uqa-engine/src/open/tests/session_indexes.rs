@@ -22,12 +22,23 @@ fn engine(provider: usize, path: &std::path::Path) -> Engine {
         .unwrap(),
         _ => unreachable!(),
     };
+    pause_statistics(&engine);
+    engine
+}
+
+fn pause_statistics(engine: &Engine) {
     engine.release_automatic_statistics_client();
     engine
         .session
         .statistics_worker
         .store(true, Ordering::Release);
-    engine
+    assert!(!engine.session.statistics_client.load(Ordering::Acquire));
+}
+
+fn quiet_session(engine: &Engine) -> Engine {
+    let session = engine.new_session().unwrap();
+    pause_statistics(&session);
+    session
 }
 
 #[rstest::rstest]
@@ -42,10 +53,12 @@ fn independent_sessions_reuse_physical_index_preparation(#[case] provider: usize
         for index in 0..fillers {
             engine.sql(&format!("CREATE TABLE filler_{index}(id int PRIMARY KEY,body text); CREATE INDEX filler_idx_{index} ON filler_{index}(body)"), &[]).unwrap();
         }
-        let first = engine.new_session().unwrap();
+        // Initialize maintenance metadata before any public child can start its worker.
+        engine.sql("ANALYZE", &[]).unwrap();
+        let first = quiet_session(&engine);
         let original = first.physical_index_definitions().unwrap();
         for _ in 0..4 {
-            let next = engine.new_session().unwrap();
+            let next = quiet_session(&engine);
             assert!(Arc::ptr_eq(
                 &first.durable.catalog_indexes.snapshot(),
                 &next.durable.catalog_indexes.snapshot()
@@ -91,7 +104,7 @@ fn shared_index_preparation_preserves_private_and_committed_definitions(#[case] 
         };
     let retained = engine.physical_index_definitions().unwrap();
     let original = fields(&retained);
-    let writer = engine.new_session().unwrap();
+    let writer = quiet_session(&engine);
     writer
         .sql("BEGIN; CREATE INDEX private_label ON items(label)", &[])
         .unwrap();
@@ -131,7 +144,7 @@ fn shared_index_preparation_preserves_private_and_committed_definitions(#[case] 
             .value_at(0, 0),
         Some(&Value::Int(2))
     );
-    let sibling = engine.new_session().unwrap();
+    let sibling = quiet_session(&engine);
     writer.cancel();
     assert_eq!(
         sibling
