@@ -33,6 +33,7 @@ mod range;
 pub(crate) use range::datum as range_datum;
 mod regex;
 pub use regex::{check_constant_similar_translation, RegexMatches, RegexSplit};
+pub use regex::{current_regex_cache, RegexCache, RegexCacheScope};
 mod time;
 mod uuid;
 

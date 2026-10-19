@@ -14,6 +14,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reuse resolved builtin numeric row casts within their prepared expression and input schema, preserving current callbacks, cancellation, memory admission, rounding and overflow diagnostics.
 
+- Reuse compiled regular expressions by pattern, flags and collation in a bounded session cache. Charge retained state to its owning allowance, preserve invocation cancellation and scratch limits, and release memory on eviction and session destruction.
+
+- Encode COPY TO text/CSV incrementally with admitted per-field scratch and bounded cancellation checks, preserving PostgreSQL bytes, duplicate output columns and partial-write failures without allocating a second complete output buffer.
+
 - Reuse the result schema produced by ordered statement input analysis, avoiding a second complete binding pass while preserving output types, collations, anonymous-record fields and procedural dependency scopes.
 
 - Preserve every comma-separated input of UPDATE FROM and DELETE USING so empty or missing later sources cannot cause unintended row changes. Retain source order, aliases and LATERAL dependencies through the shared SQL source-list compiler.

@@ -23,6 +23,15 @@ impl<'a, 'c> Allowance<'a, 'c> {
             lease: call.control.empty_reservation(),
         }
     }
+
+    pub(super) fn retain(
+        &mut self,
+        admitted: Option<MemoryReservation>,
+    ) -> super::super::cache::RetainedAllowance {
+        // A different retention owner is admitted before the invocation releases its lease. A shared owner transfers the existing lease without double charging.
+        let previous = self.lease.take();
+        super::super::cache::RetainedAllowance(admitted.or(previous))
+    }
 }
 
 impl RegexResources for Allowance<'_, '_> {

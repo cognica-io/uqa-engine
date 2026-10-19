@@ -337,6 +337,7 @@ pub(super) struct SessionContext {
     pub(super) transactions: Mutex<Vec<TransactionFrame>>,
     /// Memory and serialized providers retain query selections under one session allowance, shared by nested workers and surviving views.
     pub(super) query_retention: uqa_core::memory::MemoryBudget,
+    pub(super) regex_cache: Mutex<Option<Arc<uqa_sql::expr::RegexCache>>>,
     pub(super) diskann_temporary: uqa_storage::diskann_index::build::DiskANNTemporaryBudget,
     /// One row-lock recheck context per in-flight SQL statement. Query-bearing commands, prepared execution, and `EXPLAIN ANALYZE` spawn nested plan executors that must share the outermost statement's context, while a host-callback statement nested inside another statement owns its own frame.
     pub(super) row_lock_statements: Mutex<
@@ -403,6 +404,7 @@ impl SessionContext {
             sequence_snapshot_reads: std::sync::atomic::AtomicU64::new(0),
             random_state: Mutex::new(random_state),
             transactions: Mutex::new(Vec::new()),
+            regex_cache: Mutex::new(None),
             query_retention: uqa_core::memory::MemoryBudget::new(
                 uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
             ),
