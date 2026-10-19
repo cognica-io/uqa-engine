@@ -157,9 +157,17 @@ pub(super) struct ParameterTypes<'a> {
 }
 
 /// Original expression identities for input constants and selected fixed calls, used only while one prepared plan remains in place. No pointer is dereferenced. Analysis borrows the original expressions (including grouping aliases and table-function arguments), so neither repeated text nor CTE analysis order can conflate two inputs.
+/// A constant read during analysis and retained in the executable plan.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ConvertedInput {
+    pub(super) expression: ScalarExpr,
+    /// The conversion read a session setting, the transaction clock or the catalog, so an ordinary message must read the text again instead of reusing the plan.
+    pub(super) session_dependent: bool,
+}
+
 #[derive(Default)]
 pub(super) struct InputConstants(
-    BTreeMap<NonNull<ScalarExpr>, ScalarExpr>,
+    BTreeMap<NonNull<ScalarExpr>, ConvertedInput>,
     BTreeMap<NonNull<ScalarExpr>, crate::ast::FunctionBinding>,
     BTreeMap<NonNull<ScalarExpr>, super::membership::MembershipAnalysis>,
     collations::CollationInputs,
@@ -181,26 +189,7 @@ impl InputConstants {
                     .values()
                     .flat_map(|membership| membership.left_constants.iter().flatten()),
             )
-            .all(|mut expression| {
-                loop {
-                    match crate::catalog::collations::expression::scalar_clause(expression) {
-                        Ok(Some(clause)) => expression = clause.argument,
-                        Ok(None) => break,
-                        Err(_) => return false,
-                    }
-                }
-                let ScalarExpr::TypedLiteral {
-                    bound_type: Some(ty),
-                    ..
-                } = expression
-                else {
-                    return false;
-                };
-                !crate::expr::requires_domain_array_input(ty)
-                    && !matches!(ty, ColumnType::Composite(_))
-                    && crate::type_resolution::cast_volatility(&ColumnType::Text, ty)
-                        == crate::ast::FunctionVolatility::Immutable
-            })
+            .all(|input| !input.session_dependent)
     }
 
     fn apply_node(&mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
@@ -221,7 +210,7 @@ impl InputConstants {
             }
         }
         if let Some(constant) = self.0.remove(&identity) {
-            *expression = constant;
+            *expression = constant.expression;
         }
         self.3.apply(identity, expression)?;
         self.4.apply(identity, expression)?;
@@ -366,7 +355,7 @@ impl<'a> ParameterTypes<'a> {
         Ok(())
     }
 
-    pub(super) fn take_literal(&mut self, expression: &ScalarExpr) -> Option<ScalarExpr> {
+    pub(super) fn take_literal(&mut self, expression: &ScalarExpr) -> Option<ConvertedInput> {
         let constants = self.input_constants.as_mut()?;
         constants.3.take_literal(expression, &mut constants.0)
     }
@@ -597,21 +586,30 @@ impl<'a> ParameterTypes<'a> {
         .into_uncontrolled()
         .expect("ordinary literal input has no reservation");
         if self.input_constants.as_ref().is_some_and(|constants| {
-            matches!(constants.0.get(&origin), Some(ScalarExpr::TypedLiteral { bound_type: Some(ty), .. }) if *ty == input_type)
+            matches!(
+                constants.0.get(&origin),
+                Some(ConvertedInput {
+                    expression: ScalarExpr::TypedLiteral { bound_type: Some(ty), .. },
+                    ..
+                }) if *ty == input_type
+            )
         }) {
             return Ok(());
         }
-        if let Some(value) = self.input_value(text, &input_type)? {
+        if let Some(input) = self.input_value(text, &input_type)? {
             if let Some(constants) = &mut self.input_constants {
                 constants.0.insert(
                     origin,
-                    ScalarExpr::TypedLiteral {
-                        collation_oid: None,
-                        composite_source: None,
-                        value,
-                        ty: input_type.catalog_name(),
-                        bound_type: Some(input_type),
-                        parameter_index: None,
+                    ConvertedInput {
+                        expression: ScalarExpr::TypedLiteral {
+                            collation_oid: None,
+                            composite_source: None,
+                            value: input.value,
+                            ty: input_type.catalog_name(),
+                            bound_type: Some(input_type),
+                            parameter_index: None,
+                        },
+                        session_dependent: input.session_dependent,
                     },
                 );
             }
@@ -619,7 +617,11 @@ impl<'a> ParameterTypes<'a> {
         Ok(())
     }
 
-    fn input_value(&self, text: &str, input_type: &ColumnType) -> Result<Option<Value>, SQLError> {
+    fn input_value(
+        &self,
+        text: &str,
+        input_type: &ColumnType,
+    ) -> Result<Option<ReadInput>, SQLError> {
         if crate::expr::requires_catalog_constant_input(input_type) {
             if self.input_constants.is_none() {
                 return Ok(None);
@@ -630,7 +632,9 @@ impl<'a> ParameterTypes<'a> {
                     input_type.sql_name()
                 ))
             })?;
-            return catalog.read_unknown_input(text, input_type).map(Some);
+            return catalog
+                .read_unknown_input(text, input_type)
+                .map(|value| Some(ReadInput::session_dependent(value)));
         }
         if self.input_constants.is_some() && crate::expr::enums::is_enum_bearing(input_type) {
             if let Some(value) = crate::expr::enums::fold_unknown_literal(
@@ -638,7 +642,7 @@ impl<'a> ParameterTypes<'a> {
                 &Value::Str(text.into()),
                 input_type,
             )? {
-                return Ok(Some(value));
+                return Ok(Some(ReadInput::session_dependent(value)));
             }
         }
         if crate::type_resolution::catalog_input_type(input_type) {
@@ -646,10 +650,19 @@ impl<'a> ParameterTypes<'a> {
                 crate::schema::dependencies::oid_alias::read_unknown_constant(
                     catalog, input_type, text,
                 )
+                .map(|value| value.map(ReadInput::session_dependent))
             });
         }
-        crate::expr::cast_value_from(&Value::Str(text.into()), &input_type.catalog_name(), None)
-            .map(Some)
+        let value = crate::expr::cast_value_from(
+            &Value::Str(text.into()),
+            &input_type.catalog_name(),
+            None,
+        )?;
+        let session_dependent = input_reads_session(text, input_type, &value);
+        Ok(Some(ReadInput {
+            value,
+            session_dependent,
+        }))
     }
 
     pub(super) fn values(&self) -> Cow<'_, [SQLParam]> {
@@ -690,6 +703,57 @@ pub(super) fn error(sqlstate: &str, message: String) -> SQLError {
     SQLError::Routine {
         sqlstate: sqlstate.into(),
         message,
+    }
+}
+
+/// A text input read by its input function, with whether an ordinary message must read it again.
+struct ReadInput {
+    value: Value,
+    session_dependent: bool,
+}
+
+impl ReadInput {
+    /// A value read through the catalog, whose descriptors a later message may see changed.
+    fn session_dependent(value: Value) -> Self {
+        Self {
+            value,
+            session_dependent: true,
+        }
+    }
+}
+
+/// Whether an ordinary message must read `text` again. Domain arrays and composites read the catalog; a type whose input function is stable reads a session setting or the transaction clock, unless the text reproduces `value` under every setting.
+fn input_reads_session(text: &str, input_type: &ColumnType, value: &Value) -> bool {
+    if crate::expr::requires_domain_array_input(input_type)
+        || matches!(input_type, ColumnType::Composite(_))
+    {
+        return true;
+    }
+    if crate::type_resolution::cast_volatility(&ColumnType::Text, input_type)
+        == crate::ast::FunctionVolatility::Immutable
+    {
+        return false;
+    }
+    !(temporal_input_type(input_type)
+        && crate::expr::text_input_is_session_independent(text, input_type, value))
+}
+
+/// Types whose text input reads only the thread's date order, interval style and transaction clock, and arrays of them.
+fn temporal_input_type(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Array(element) => temporal_input_type(element),
+        ColumnType::Date
+        | ColumnType::Time
+        | ColumnType::TimePrecision(_)
+        | ColumnType::TimeTz
+        | ColumnType::TimeTzPrecision(_)
+        | ColumnType::Timestamp
+        | ColumnType::TimestampPrecision(_)
+        | ColumnType::TimestampTz
+        | ColumnType::TimestampTzPrecision(_)
+        | ColumnType::Interval
+        | ColumnType::IntervalWithFields { .. } => true,
+        _ => false,
     }
 }
 

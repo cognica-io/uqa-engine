@@ -62,32 +62,6 @@ pub(super) fn is_coalesce(name: &str, binding: Option<&FunctionBinding>) -> bool
     name.eq_ignore_ascii_case("coalesce") && binding.is_none_or(|binding| binding.builtin)
 }
 
-pub(in crate::optimizer) fn immutable_cast_type(ty: &ColumnType) -> bool {
-    match ty {
-        ColumnType::Array(element) => immutable_cast_type(element),
-        ColumnType::SmallInteger
-        | ColumnType::Integer
-        | ColumnType::BigInteger
-        | ColumnType::Oid
-        | ColumnType::Xid
-        | ColumnType::Boolean
-        | ColumnType::Text
-        | ColumnType::Name
-        | ColumnType::Uuid
-        | ColumnType::Varchar(_)
-        | ColumnType::Bpchar
-        | ColumnType::Character(_)
-        | ColumnType::Real
-        | ColumnType::DoublePrecision
-        | ColumnType::Numeric { .. }
-        | ColumnType::Json
-        | ColumnType::JsonB
-        | ColumnType::Bytea
-        | ColumnType::InternalChar => true,
-        _ => false,
-    }
-}
-
 fn constant_cast_type(
     name: &str,
     types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
@@ -95,12 +69,7 @@ fn constant_cast_type(
     if let Some(types) = types {
         return types.resolve_catalog_column_type_name(name).ok();
     }
-    // Only a parser-selected namespace determines a type without the live catalog. A free identifier can select a domain through search_path.
-    let parsed = uqa_sql::parse_regtype_name(name).ok()??;
-    if !matches!(parsed.names.as_slice(), [schema, _] if schema == "pg_catalog") {
-        return None;
-    }
-    ColumnType::from_sql_name(name).ok()
+    uqa_sql::type_resolution::pg_catalog_builtin_type(name)
 }
 
 fn is_constant(
@@ -138,7 +107,7 @@ fn is_constant(
         ScalarExpr::Cast { expr, ty, .. } => {
             constant(expr)
                 && constant_cast_type(ty, types).is_some_and(|target| {
-                    immutable_cast_type(&target)
+                    uqa_sql::type_resolution::immutable_cast_type(&target)
                         && constant_scalar_type(expr, resolver).is_ok_and(|source| {
                             source.is_none_or(|source| {
                                 uqa_sql::type_resolution::cast_volatility(&source, &target)

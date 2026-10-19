@@ -7,8 +7,8 @@
 //! Selected collation metadata follows logical bindings independently of value slots.
 
 use super::{
-    ColumnIdentity, ColumnType, HashMap, InternalColumnRef, RowSchema, SchemaLayoutError,
-    SchemaLayoutResult,
+    ColumnIdentity, ColumnType, InternalColumnRef, RowSchema, SchemaLayoutError,
+    SchemaLayoutResult, SchemaMap,
 };
 use crate::catalog::type_metadata::pg_type_collation_oid;
 use std::collections::BTreeMap;
@@ -181,9 +181,9 @@ impl Collations {
     pub(super) fn retain(
         &mut self,
         columns: &[Option<ColumnType>],
-        aliases: &HashMap<ColumnIdentity, Option<ColumnType>>,
-        internal: &HashMap<InternalColumnRef, Option<ColumnType>>,
-        virtual_columns: &HashMap<ColumnIdentity, Option<ColumnType>>,
+        aliases: &SchemaMap<ColumnIdentity, Option<ColumnType>>,
+        internal: &SchemaMap<InternalColumnRef, Option<ColumnType>>,
+        virtual_columns: &SchemaMap<ColumnIdentity, Option<ColumnType>>,
     ) {
         let Some(bindings) = &mut self.0 else {
             return;

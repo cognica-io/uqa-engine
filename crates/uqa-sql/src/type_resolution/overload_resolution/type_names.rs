@@ -163,10 +163,44 @@ pub fn canonical_column_type_name(ty: &ColumnType) -> String {
         .expect("ordinary column type normalization has no reservation")
 }
 
+/// Fixed overload spelling of a builtin scalar type, identical to normalizing its SQL name. Type modifiers never take part in overload identity.
+pub(in crate::type_resolution) const fn builtin_canonical_type_name(
+    ty: &ColumnType,
+) -> Option<&'static str> {
+    Some(match ty {
+        ColumnType::SmallInteger => "int2",
+        ColumnType::Integer => "int4",
+        ColumnType::BigInteger => "int8",
+        ColumnType::Real => "float4",
+        ColumnType::DoublePrecision => "float8",
+        ColumnType::Numeric { .. } => "numeric",
+        ColumnType::Boolean => "bool",
+        ColumnType::Text => "text",
+        ColumnType::Name => "name",
+        ColumnType::Varchar(_) => "varchar",
+        ColumnType::Bpchar | ColumnType::Character(_) => "bpchar",
+        ColumnType::Date => "date",
+        ColumnType::Time | ColumnType::TimePrecision(_) => "time",
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => "timetz",
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => "timestamp",
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => "timestamptz",
+        ColumnType::Interval => "interval",
+        ColumnType::Bytea => "bytea",
+        ColumnType::Uuid => "uuid",
+        ColumnType::Json => "json",
+        ColumnType::JsonB => "jsonb",
+        ColumnType::Oid => "oid",
+        _ => return None,
+    })
+}
+
 pub(in crate::type_resolution) fn canonical_column_type_name_with_control(
     ty: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
+    if let Some(name) = builtin_canonical_type_name(ty) {
+        return control.copy_text(name);
+    }
     // User-defined type spellings are neither unique across schemas nor stable across renames, so overload matching identifies them by OID.
     if let Some(identity) = ty.user_type_identity() {
         if let Some(element) = array_element_spelling(&identity, control)? {

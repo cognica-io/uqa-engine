@@ -53,6 +53,44 @@ pub fn cast_volatility(source: &ColumnType, target: &ColumnType) -> FunctionVola
     }
 }
 
+/// Targets whose conversion from a constant reads neither a catalog descriptor nor a session setting. Together with an immutable `cast_volatility`, the conversion can run once instead of at every evaluation.
+#[must_use]
+pub fn immutable_cast_type(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Array(element) => immutable_cast_type(element),
+        ColumnType::SmallInteger
+        | ColumnType::Integer
+        | ColumnType::BigInteger
+        | ColumnType::Oid
+        | ColumnType::Xid
+        | ColumnType::Boolean
+        | ColumnType::Text
+        | ColumnType::Name
+        | ColumnType::Uuid
+        | ColumnType::Varchar(_)
+        | ColumnType::Bpchar
+        | ColumnType::Character(_)
+        | ColumnType::Real
+        | ColumnType::DoublePrecision
+        | ColumnType::Numeric { .. }
+        | ColumnType::Json
+        | ColumnType::JsonB
+        | ColumnType::Bytea
+        | ColumnType::InternalChar => true,
+        _ => false,
+    }
+}
+
+/// The builtin type named with an explicit `pg_catalog` namespace. Only such a spelling identifies its type without the live catalog; a free identifier can select a domain or another type through `search_path`.
+#[must_use]
+pub fn pg_catalog_builtin_type(name: &str) -> Option<ColumnType> {
+    let parsed = crate::parse_regtype_name(name).ok()??;
+    if !matches!(parsed.names.as_slice(), [schema, _] if schema == "pg_catalog") {
+        return None;
+    }
+    ColumnType::from_sql_name(name).ok()
+}
+
 fn input_output_volatility(source: &ColumnType, target: &ColumnType) -> FunctionVolatility {
     if output_is_stable(source) || input_is_stable(target) {
         FunctionVolatility::Stable

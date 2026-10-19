@@ -9,7 +9,7 @@
 mod variadic;
 
 use super::{
-    bound_function_resolution_error, candidates::Candidates,
+    bound_function_resolution_error, builtin_canonical_type_name, candidates::Candidates,
     canonical_column_type_name_with_control, canonical_routine_type_name_with_control,
     function_resolution_error, match_signature_with_control, rank_function_matches_with_control,
     MatchedBuiltinFunction, MatchedFunctionSignature, RankedFunctionMatch, SignatureParameters,
@@ -43,6 +43,9 @@ impl SignatureParameters for BuiltinFunctionOverload {
         control: &ProductionControl<'_>,
     ) -> Result<Produced<String>, ValueRetentionError> {
         canonical_column_type_name_with_control(&self.argument_types[index], control)
+    }
+    fn builtin_canonical_type(&self, index: usize) -> Option<&'static str> {
+        builtin_canonical_type_name(&self.argument_types[index])
     }
 }
 

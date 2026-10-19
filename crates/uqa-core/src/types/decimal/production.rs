@@ -6,10 +6,8 @@
 
 //! Cast conversions transfer admitted decimal representations and quantize their decimal digits.
 
-use num_bigint::BigInt;
-use num_traits::Signed;
-
 use super::arithmetic::IntegralRounding;
+use super::coefficient::Coefficient;
 
 use super::{DecimalRepr, DecimalValue, MAX_FRACTIONAL_DIGITS};
 use crate::{
@@ -36,7 +34,12 @@ impl DecimalValue {
                 if *scale == 0 || self.is_zero() {
                     return Ok(true);
                 }
-                // Divisibility by 10^scale is exactly the condition that every discarded least-significant decimal digit is zero.
+                // Divisibility by 10^scale is exactly the condition that every discarded least-significant decimal digit is zero. A nonzero word has at most 39 digits, so a wider scale always leaves a nonzero fraction.
+                if let Some(word) = coefficient.word() {
+                    return Ok(10_i128
+                        .checked_pow(*scale)
+                        .is_some_and(|divisor| word % divisor == 0));
+                }
                 let digits =
                     super::format_budgeted::coefficient_digits_with_control(coefficient, control)?;
                 for digit in digits.iter().take(*scale as usize) {
@@ -120,14 +123,11 @@ impl DecimalValue {
         value: i64,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, ValueRetentionError> {
-        // Primitive construction has at most two native coefficient limbs. Preserve the decimal owner's normalized four-times-limb plus three-limb slack contract before constructing either the coefficient or boxed representation.
-        let bits = (u64::BITS - value.unsigned_abs().leading_zeros()) as usize;
-        let bytes = size_of::<DecimalRepr>()
-            + (bits.div_ceil(usize::BITS as usize).max(1) * 4 + 3) * size_of::<usize>();
-        let memory = control.reserve(bytes)?;
+        // A primitive is a word coefficient, which retains only its boxed representation.
+        let memory = control.reserve(size_of::<DecimalRepr>())?;
         control.finish(
             Self::with_repr(DecimalRepr::Finite {
-                coefficient: BigInt::from(value),
+                coefficient: Coefficient::from(value),
                 scale: 0,
             }),
             memory,

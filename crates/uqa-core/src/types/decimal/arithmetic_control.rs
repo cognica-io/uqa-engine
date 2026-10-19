@@ -10,8 +10,9 @@ use num_bigint::BigInt;
 use num_traits::Zero;
 
 use super::{
-    coefficient, format_budgeted::coefficient_digits_with_control, DecimalRepr, DecimalValue,
-    MAX_DISPLAY_SCALE, MAX_FRACTIONAL_DIGITS, MAX_INTEGER_DIGITS,
+    coefficient::{self, Coefficient},
+    format_budgeted::{big_digits_with_control, coefficient_digits_with_control},
+    DecimalRepr, DecimalValue, MAX_DISPLAY_SCALE, MAX_FRACTIONAL_DIGITS, MAX_INTEGER_DIGITS,
 };
 use crate::{
     memory::{Produced, ProductionControl},
@@ -73,12 +74,16 @@ impl DecimalValue {
                 },
             ) => {
                 let scale = (*left_scale).max(*right_scale);
-                let left_aligned = aligned(left, *left_scale, scale, control)?;
-                let right_aligned = aligned(right, *right_scale, scale, control)?;
-                finite(
+                if let Some(sum) = word_sum(left, *left_scale, right, *right_scale, scale, false) {
+                    return finite(Coefficient::word_produced(sum, control)?, scale, control);
+                }
+                let (left, right) = (left.big(), right.big());
+                let left_aligned = aligned(&left, *left_scale, scale, control)?;
+                let right_aligned = aligned(&right, *right_scale, scale, control)?;
+                finite_big(
                     coefficient::add(
-                        left_aligned.as_deref().unwrap_or(left),
-                        right_aligned.as_deref().unwrap_or(right),
+                        left_aligned.as_deref().unwrap_or(&left),
+                        right_aligned.as_deref().unwrap_or(&right),
                         control,
                     )?,
                     scale,
@@ -93,6 +98,28 @@ impl DecimalValue {
         rhs: &Self,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Produced<Self>>, ValueRetentionError> {
+        if let (
+            DecimalRepr::Finite {
+                coefficient: left,
+                scale: left_scale,
+            },
+            DecimalRepr::Finite {
+                coefficient: right,
+                scale: right_scale,
+            },
+        ) = (self.repr(), rhs.repr())
+        {
+            let scale = (*left_scale).max(*right_scale);
+            if let Some(difference) = word_sum(left, *left_scale, right, *right_scale, scale, true)
+            {
+                control.check()?;
+                return checked(
+                    Coefficient::word_produced(difference, control)
+                        .map_err(Failure::from)
+                        .and_then(|coefficient| finite(coefficient, scale, control)),
+                );
+            }
+        }
         let rhs = rhs.negated_with_control(control)?;
         self.checked_add_with_control(&rhs, control)
     }
@@ -133,16 +160,29 @@ impl DecimalValue {
         else {
             unreachable!("special numeric handled above")
         };
-        let coefficient = coefficient::multiply(left, right, control)?;
         let scale = left_scale
             .checked_add(*right_scale)
             .ok_or(Failure::Invalid)?;
         if scale <= MAX_FRACTIONAL_DIGITS {
-            return finite(coefficient, scale, control);
+            if let Some(product) = left
+                .word()
+                .zip(right.word())
+                .and_then(|(left, right)| left.checked_mul(right))
+            {
+                return finite(
+                    Coefficient::word_produced(product, control)?,
+                    scale,
+                    control,
+                );
+            }
+        }
+        let coefficient = coefficient::multiply(&left.big(), &right.big(), control)?;
+        if scale <= MAX_FRACTIONAL_DIGITS {
+            return finite_big(coefficient, scale, control);
         }
         let divisor = coefficient::power_of_ten(scale - MAX_FRACTIONAL_DIGITS, control)?;
         let coefficient = divide_rounded(&coefficient, &divisor, control)?;
-        finite(coefficient, MAX_FRACTIONAL_DIGITS, control)
+        finite_big(coefficient, MAX_FRACTIONAL_DIGITS, control)
     }
 
     pub fn checked_div_to_scale_with_control(
@@ -200,14 +240,15 @@ impl DecimalValue {
         };
         let shift =
             i64::from(*divisor_scale) + i64::from(result_scale) - i64::from(*dividend_scale);
+        let (dividend, divisor) = (dividend.big(), divisor.big());
         let (numerator, denominator) = if shift >= 0 {
             let power = coefficient::power_of_ten(
                 u32::try_from(shift).map_err(|_| Failure::Invalid)?,
                 control,
             )?;
             (
-                coefficient::multiply(dividend, &power, control)?,
-                coefficient::clone(divisor, control)?,
+                coefficient::multiply(&dividend, &power, control)?,
+                coefficient::clone(&divisor, control)?,
             )
         } else {
             let power = coefficient::power_of_ten(
@@ -216,11 +257,11 @@ impl DecimalValue {
                 control,
             )?;
             (
-                coefficient::clone(dividend, control)?,
-                coefficient::multiply(divisor, &power, control)?,
+                coefficient::clone(&dividend, control)?,
+                coefficient::multiply(&divisor, &power, control)?,
             )
         };
-        finite(
+        finite_big(
             divide_rounded(&numerator, &denominator, control)?,
             result_scale,
             control,
@@ -264,12 +305,13 @@ impl DecimalValue {
             unreachable!("special numeric handled above")
         };
         let scale = (*left_scale).max(*right_scale);
-        let left_aligned = aligned(left, *left_scale, scale, control)?;
-        let right_aligned = aligned(right, *right_scale, scale, control)?;
-        finite(
+        let (left, right) = (left.big(), right.big());
+        let left_aligned = aligned(&left, *left_scale, scale, control)?;
+        let right_aligned = aligned(&right, *right_scale, scale, control)?;
+        finite_big(
             coefficient::remainder(
-                left_aligned.as_deref().unwrap_or(left),
-                right_aligned.as_deref().unwrap_or(right),
+                left_aligned.as_deref().unwrap_or(&left),
+                right_aligned.as_deref().unwrap_or(&right),
                 control,
             )?,
             scale,
@@ -278,18 +320,30 @@ impl DecimalValue {
     }
 }
 
-pub(super) fn finite(
+/// A finite value from a kernel's arbitrary-precision result; a result that fits a word retains no limb allocation.
+pub(super) fn finite_big(
     value: Produced<BigInt>,
+    scale: u32,
+    control: &ProductionControl<'_>,
+) -> Calculation<Produced<DecimalValue>> {
+    finite(Coefficient::produced(value, control)?, scale, control)
+}
+
+pub(super) fn finite(
+    value: Produced<Coefficient>,
     scale: u32,
     control: &ProductionControl<'_>,
 ) -> Calculation<Produced<DecimalValue>> {
     if scale > MAX_FRACTIONAL_DIGITS {
         return Err(Failure::Invalid);
     }
-    if integer_digits_may_exceed_limit(&value, scale) {
-        let digits = coefficient_digits_with_control(&value, control)?;
-        if digits.len().saturating_sub(scale as usize) > MAX_INTEGER_DIGITS {
-            return Err(Failure::Invalid);
+    // A word has at most 39 digits, far below the integer digit limit.
+    if let Coefficient::Big(coefficient) = &*value {
+        if integer_digits_may_exceed_limit(coefficient, scale) {
+            let digits = big_digits_with_control(coefficient, control)?;
+            if digits.len().saturating_sub(scale as usize) > MAX_INTEGER_DIGITS {
+                return Err(Failure::Invalid);
+            }
         }
     }
     let header = control.reserve(size_of::<DecimalRepr>())?;
@@ -331,6 +385,24 @@ fn integer_digits_may_exceed_limit(coefficient: &BigInt, scale: u32) -> bool {
 }
 
 /// The coefficient at `target_scale`, or `None` when the scale already matches and the coefficient can be used as it is. A power of ten that fits in a machine word multiplies the coefficient directly.
+/// The exact sum or difference of two machine-word coefficients aligned to `scale`, when it fits 128 bits.
+fn word_sum(
+    left: &Coefficient,
+    left_scale: u32,
+    right: &Coefficient,
+    right_scale: u32,
+    scale: u32,
+    subtract: bool,
+) -> Option<i128> {
+    let left = left.aligned_word(left_scale, scale)?;
+    let right = right.aligned_word(right_scale, scale)?;
+    if subtract {
+        left.checked_sub(right)
+    } else {
+        left.checked_add(right)
+    }
+}
+
 fn aligned(
     value: &BigInt,
     source_scale: u32,

@@ -83,7 +83,7 @@ mod string_binary;
 
 pub use cast_compatibility::{
     assignment_type_compatible, cast_catalog_entry, cast_volatility, explicit_type_compatible,
-    CastCatalogEntry, CastMethod,
+    immutable_cast_type, pg_catalog_builtin_type, CastCatalogEntry, CastMethod,
 };
 pub(crate) use cast_compatibility::{cast_catalog_entry_with_control, preserves_record_identity};
 #[doc(hidden)]

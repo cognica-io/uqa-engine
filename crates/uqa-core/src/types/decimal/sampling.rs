@@ -32,8 +32,8 @@ impl DecimalValue {
             return Ok(None);
         };
         let scale = (*lower_scale).max(*upper_scale);
-        let lower = align_coefficient(lower_coefficient, *lower_scale, scale);
-        let upper = align_coefficient(upper_coefficient, *upper_scale, scale);
+        let lower = align_coefficient(&lower_coefficient.big(), *lower_scale, scale);
+        let upper = align_coefficient(&upper_coefficient.big(), *upper_scale, scale);
         if lower > upper {
             return Ok(None);
         }

@@ -47,11 +47,12 @@ pub use signature::match_function_signature;
 pub(super) use signature::{match_signature_with_control, SignatureParameters};
 
 mod type_names;
+pub(super) use type_names::{
+    builtin_canonical_type_name, canonical_column_type_name_with_control,
+    canonical_routine_type_name_with_control,
+};
 pub use type_names::{
     canonical_column_type_name, canonical_routine_type_name, parse_enum_type_identity,
-};
-pub(super) use type_names::{
-    canonical_column_type_name_with_control, canonical_routine_type_name_with_control,
 };
 
 #[must_use]

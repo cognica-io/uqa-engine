@@ -6,8 +6,10 @@
 
 //! Admitted workspaces for the existing num-bigint coefficient kernels.
 
+use std::{borrow::Cow, cmp::Ordering, fmt};
+
 use num_bigint::BigInt;
-use num_traits::Signed;
+use num_traits::{Signed, Zero};
 
 use crate::{
     memory::{MemoryError, Produced, ProductionControl},
@@ -17,6 +19,197 @@ use crate::{
 mod workspace;
 
 type Result<T> = std::result::Result<T, ValueRetentionError>;
+
+/// A finite coefficient: a machine word while the value fits one, so ordinary numeric values hold no heap allocation, and an arbitrary-precision integer beyond that. A `Big` coefficient never holds a value that fits `i128`; every constructor keeps that canonical form, so structural equality of representations is equality of values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Coefficient {
+    Word(i128),
+    Big(BigInt),
+}
+
+impl Coefficient {
+    pub(super) const ZERO: Self = Self::Word(0);
+
+    pub(super) fn from_big(value: BigInt) -> Self {
+        match i128::try_from(&value) {
+            Ok(word) => Self::Word(word),
+            Err(_) => Self::Big(value),
+        }
+    }
+
+    pub(super) fn word(&self) -> Option<i128> {
+        match self {
+            Self::Word(word) => Some(*word),
+            Self::Big(_) => None,
+        }
+    }
+
+    /// The coefficient as an arbitrary-precision integer, borrowed when it already is one.
+    pub(super) fn big(&self) -> Cow<'_, BigInt> {
+        match self {
+            Self::Word(word) => Cow::Owned(BigInt::from(*word)),
+            Self::Big(value) => Cow::Borrowed(value),
+        }
+    }
+
+    pub(super) fn is_zero(&self) -> bool {
+        match self {
+            Self::Word(word) => *word == 0,
+            Self::Big(value) => value.is_zero(),
+        }
+    }
+
+    pub(super) fn is_negative(&self) -> bool {
+        match self {
+            Self::Word(word) => *word < 0,
+            Self::Big(value) => value.is_negative(),
+        }
+    }
+
+    pub(super) fn sign(&self) -> i8 {
+        match self {
+            Self::Word(word) => word.signum() as i8,
+            Self::Big(value) => {
+                if value.is_negative() {
+                    -1
+                } else {
+                    i8::from(!value.is_zero())
+                }
+            }
+        }
+    }
+
+    pub(super) fn negated(&self) -> Self {
+        match self {
+            Self::Word(word) => word
+                .checked_neg()
+                .map_or_else(|| Self::Big(-BigInt::from(*word)), Self::Word),
+            Self::Big(value) => Self::from_big(-value),
+        }
+    }
+
+    pub(super) fn abs(&self) -> Self {
+        match self {
+            Self::Word(word) => word
+                .checked_abs()
+                .map_or_else(|| Self::Big(BigInt::from(*word).abs()), Self::Word),
+            Self::Big(value) => Self::from_big(value.abs()),
+        }
+    }
+
+    /// The number of decimal digits of the magnitude; zero has one.
+    pub(super) fn digit_count(&self) -> usize {
+        match self {
+            Self::Word(0) => 1,
+            Self::Word(word) => word.unsigned_abs().ilog10() as usize + 1,
+            Self::Big(value) => value.abs().to_str_radix(10).len(),
+        }
+    }
+
+    /// The word coefficient scaled from `source_scale` to `target_scale` in 128-bit arithmetic. `None` leaves the value to the arbitrary-precision kernels.
+    pub(super) fn aligned_word(&self, source_scale: u32, target_scale: u32) -> Option<i128> {
+        let word = self.word()?;
+        let power = target_scale.checked_sub(source_scale)?;
+        word.checked_mul(10_i128.checked_pow(power)?)
+    }
+
+    /// The bytes a retained coefficient holds beyond its representation: none for a word, the normalized limb allocation for an arbitrary-precision integer.
+    pub(super) fn retained_bytes(&self) -> usize {
+        match self {
+            Self::Word(_) => 0,
+            Self::Big(value) => {
+                let bits = usize::try_from(value.bits()).unwrap_or(usize::MAX);
+                let limbs = bits.div_ceil(usize::BITS as usize).max(1);
+                // num-bigint 0.4.6 normalizes when len < capacity / 4. Integer division leaves up to three additional limbs at that boundary.
+                limbs
+                    .saturating_mul(4)
+                    .saturating_add(3)
+                    .saturating_mul(size_of::<usize>())
+            }
+        }
+    }
+
+    /// The retained coefficient of a kernel result. A result that fits a word keeps no limb allocation, so the lease its kernel reserved is released.
+    pub(super) fn produced(
+        value: Produced<BigInt>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>> {
+        let (value, memory) = value.into_parts();
+        match i128::try_from(&value) {
+            Ok(word) => {
+                drop(memory);
+                control.finish(Self::Word(word), control.empty_reservation())
+            }
+            Err(_) => control.finish(Self::Big(value), memory),
+        }
+    }
+
+    /// A word result, which retains nothing beyond the representation that holds it.
+    pub(super) fn word_produced(
+        value: i128,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>> {
+        control.check()?;
+        control.finish(Self::Word(value), control.empty_reservation())
+    }
+}
+
+impl From<i128> for Coefficient {
+    fn from(value: i128) -> Self {
+        Self::Word(value)
+    }
+}
+
+impl From<i64> for Coefficient {
+    fn from(value: i64) -> Self {
+        Self::Word(i128::from(value))
+    }
+}
+
+impl From<BigInt> for Coefficient {
+    fn from(value: BigInt) -> Self {
+        Self::from_big(value)
+    }
+}
+
+impl fmt::Display for Coefficient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Word(word) => write!(f, "{word}"),
+            Self::Big(value) => write!(f, "{value}"),
+        }
+    }
+}
+
+impl PartialOrd for Coefficient {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Coefficient {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Word(left), Self::Word(right)) => left.cmp(right),
+            (Self::Big(left), Self::Big(right)) => left.cmp(right),
+            // An arbitrary-precision coefficient lies beyond every word, on the side of its sign.
+            (Self::Word(_), Self::Big(right)) => {
+                if right.is_negative() {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+            (Self::Big(left), Self::Word(_)) => {
+                if left.is_negative() {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            }
+        }
+    }
+}
 
 pub(super) fn add(
     left: &BigInt,

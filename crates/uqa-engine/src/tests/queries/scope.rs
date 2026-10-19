@@ -81,6 +81,41 @@ fn immutable_inputs_reuse_optimized_plans_while_parameter_types_are_reanalyzed()
 }
 
 #[test]
+fn session_independent_temporal_inputs_reuse_optimized_plans() {
+    let engine = Engine::new();
+    let date = |text: &str| Value::Temporal(uqa_core::TemporalValue::parse_date(text).unwrap());
+    // An ISO date reads the same under every DateStyle, so its optimized plan is reused across messages.
+    let iso = "SELECT '2020-02-03'::date AS value";
+    assert_eq!(
+        engine.sql(iso, &[]).unwrap().rows[0]["value"],
+        date("2020-02-03")
+    );
+    let first = engine.cached_optimized_sql_plan(iso).unwrap();
+    engine.set_variable("DateStyle", "ISO, DMY").unwrap();
+    assert_eq!(
+        engine.sql(iso, &[]).unwrap().rows[0]["value"],
+        date("2020-02-03")
+    );
+    assert!(Arc::ptr_eq(
+        &first,
+        &engine.cached_optimized_sql_plan(iso).unwrap()
+    ));
+    // A literal whose field order DateStyle selects is read again by every message.
+    let ambiguous = "SELECT '02-03-2020'::date AS value";
+    assert_eq!(
+        engine.sql(ambiguous, &[]).unwrap().rows[0]["value"],
+        date("2020-03-02")
+    );
+    assert!(engine.cached_optimized_sql_plan(ambiguous).is_none());
+    engine.set_variable("DateStyle", "ISO, MDY").unwrap();
+    assert_eq!(
+        engine.sql(ambiguous, &[]).unwrap().rows[0]["value"],
+        date("2020-02-03")
+    );
+    assert!(engine.cached_optimized_sql_plan(ambiguous).is_none());
+}
+
+#[test]
 fn simple_query_transaction_boundaries_refresh_temporal_input_clocks() {
     fn verify(engine: &Engine) {
         let _caller_clock = uqa_sql::expr::TransactionClockScope::enter(11);

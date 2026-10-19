@@ -7,9 +7,9 @@
 //! One structural matcher borrows ordinary or fixed registry parameter declarations and owns its scratch/results.
 
 use super::{
-    canonical_column_type_name_with_control, canonical_routine_type_name_with_control,
-    canonical_type_is_preferred, routine_type_accepts_implicit_cast, FunctionParameterDescriptor,
-    MatchedFunctionSignature,
+    builtin_canonical_type_name, canonical_column_type_name_with_control,
+    canonical_routine_type_name_with_control, canonical_type_is_preferred,
+    routine_type_accepts_implicit_cast, FunctionParameterDescriptor, MatchedFunctionSignature,
 };
 use crate::ast::ColumnType;
 use crate::type_resolution::common::base_type;
@@ -30,6 +30,10 @@ pub(in crate::type_resolution) trait SignatureParameters {
         index: usize,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<String>, ValueRetentionError>;
+    /// The fixed spelling `canonical_type` returns for a builtin scalar parameter, borrowed without producing text.
+    fn builtin_canonical_type(&self, _index: usize) -> Option<&'static str> {
+        None
+    }
 }
 
 impl SignatureParameters for [FunctionParameterDescriptor] {
@@ -158,11 +162,6 @@ pub(in crate::type_resolution) fn match_signature_with_control<
             return Ok(None);
         }
     }
-    let mut matched_argument_types = ProductionVec::new(*control);
-    matched_argument_types.reserve(argument_positions.len())?;
-    for &index in argument_positions.iter() {
-        matched_argument_types.push_produced(parameters.canonical_type(index, control)?)?;
-    }
     let mut raw_exact_matches = 0_usize;
     let mut exact_matches = 0_usize;
     let mut preferred_matches = 0_usize;
@@ -177,6 +176,24 @@ pub(in crate::type_resolution) fn match_signature_with_control<
         let Some(actual_type) = actual else {
             continue;
         };
+        // Builtin scalar spellings are fixed, so they are compared without producing text for every candidate.
+        if let (Some(raw_actual), Some(actual), Some(declared)) = (
+            builtin_canonical_type_name(actual_type),
+            builtin_canonical_type_name(base_type(actual_type)),
+            parameters.builtin_canonical_type(index),
+        ) {
+            if raw_actual == declared {
+                raw_exact_matches += 1;
+                exact_matches += 1;
+            } else if actual == declared {
+                exact_matches += 1;
+            } else if routine_type_accepts_implicit_cast(actual, declared) {
+                preferred_matches += usize::from(canonical_type_is_preferred(declared));
+            } else {
+                return Ok(None);
+            }
+            continue;
+        }
         let declared = parameters.canonical_type(index, control)?;
         if parameters.accepts_polymorphic_types() {
             let compatible = match declared.as_str() {
@@ -218,6 +235,11 @@ pub(in crate::type_resolution) fn match_signature_with_control<
         } else {
             return Ok(None);
         }
+    }
+    let mut matched_argument_types = ProductionVec::new(*control);
+    matched_argument_types.reserve(argument_positions.len())?;
+    for &index in argument_positions.iter() {
+        matched_argument_types.push_produced(parameters.canonical_type(index, control)?)?;
     }
     let matched_argument_types = matched_argument_types.finish()?;
     let (argument_types, type_memory) = matched_argument_types.into_parts();

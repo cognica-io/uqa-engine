@@ -11,8 +11,11 @@ use super::{
     ordinary_output, plain, real_type_name, scalar_source_type, Produced, ProductionControl,
     ProductionVec, SQLError, ScalarEvalContext, ScalarExpr, Value,
 };
+use crate::scalar::state::{ColumnSlot, ConstantCast, ContextSchema};
+use std::sync::OnceLock;
 use uqa_core::ArrayValue;
 use uqa_sql::ast::BinaryOp;
+use uqa_sql::expr::RowLookup;
 use uqa_sql::expr::{
     cast_value_with_type_resolution_with_control, eval_binary_values_with_engine,
     negate_value_with_control, truthy,
@@ -214,6 +217,37 @@ pub(super) fn cast(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    let Some(constant) = context.constant_cast(expr) else {
+        return convert(expr, ty, context, control).map(|(_, converted)| converted);
+    };
+    match constant.get() {
+        Some(ConstantCast::Retained(value)) => control.copy_value(value).map_err(Into::into),
+        Some(ConstantCast::PerEvaluation) => {
+            convert(expr, ty, context, control).map(|(_, converted)| converted)
+        }
+        None => {
+            let (source, converted) = convert(expr, ty, context, control)?;
+            // A concurrent first evaluation sets the same conversion of the same literal.
+            let _ = constant.set(
+                if immutable_constant_cast(expr, source.as_deref().map(String::as_str), ty) {
+                    ConstantCast::Retained((*converted).clone())
+                } else {
+                    ConstantCast::PerEvaluation
+                },
+            );
+            Ok(converted)
+        }
+    }
+}
+
+fn convert(
+    expr: &ScalarExpr,
+    ty: &str,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(Option<Produced<String>>, Produced<Value>), SQLError> {
+    #[cfg(test)]
+    crate::scalar::state::CONSTANT_CAST_CONVERSIONS.with(|count| count.set(count.get() + 1));
     let source_ty = context.with_type_schema(|schema| {
         uqa_sql::type_resolution::scalar_cast_source_type_name_with_control(
             expr,
@@ -223,31 +257,139 @@ pub(super) fn cast(
         )
     })?;
     let value = eval_scalar_inner(expr, context, control)?;
-    cast_value_with_type_resolution_with_control(
+    let converted = cast_value_with_type_resolution_with_control(
         &value,
         source_ty.as_deref().map(String::as_str),
         ty,
         context.function_hook(),
         control,
-    )
+    )?;
+    Ok((source_ty, converted))
+}
+
+/// A literal's conversion can be retained for the rest of the execution only when no evaluation could convert it differently: the target is spelled in `pg_catalog`, which `search_path` cannot redirect, both types are builtin scalars, and the cast reads neither a catalog descriptor nor a session setting.
+fn immutable_constant_cast(operand: &ScalarExpr, source: Option<&str>, target: &str) -> bool {
+    let (ScalarExpr::Literal(operand) | ScalarExpr::TypedLiteral { value: operand, .. }) = operand
+    else {
+        return false;
+    };
+    if uqa_sql::expr::composites::literal::contains_records(operand)
+        || uqa_sql::expr::datums::contains_datum(operand)
+    {
+        return false;
+    }
+    let Some(target) = uqa_sql::type_resolution::pg_catalog_builtin_type(target) else {
+        return false;
+    };
+    if !uqa_sql::type_resolution::immutable_cast_type(&target) {
+        return false;
+    }
+    source.is_none_or(|source| {
+        uqa_sql::ColumnType::from_sql_name(source).is_ok_and(|source| {
+            uqa_sql::type_resolution::immutable_cast_type(&source)
+                && uqa_sql::type_resolution::cast_volatility(&source, &target)
+                    == uqa_sql::ast::FunctionVolatility::Immutable
+        })
+    })
 }
 
 pub(super) fn column(
+    expression: &ScalarExpr,
     name: &str,
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    let retained = context.column_slot(expression);
+    if let Some(value) = retained.and_then(|slot| retained_value(slot, context)) {
+        return control.copy_value(value).map_err(Into::into);
+    }
+    #[cfg(test)]
+    crate::scalar::state::COLUMN_NAME_LOOKUPS.with(|count| count.set(count.get() + 1));
     if context.row_schema().is_some_and(|schema| {
         !schema.has_unqualified_column(name)
             && !schema.column_is_ambiguous(name)
             && schema.has_qualifier(name)
     }) {
-        ordinary_output(evaluate_qualified_whole_row(name, context), control)
-    } else {
-        context
-            .sql_context()
-            .column_value_with_control(name, control)
+        return ordinary_output(evaluate_qualified_whole_row(name, context), control);
     }
+    let value = context
+        .sql_context()
+        .column_value_with_control(name, control)?;
+    let context_schema = context
+        .row_schema()
+        .map_or(ContextSchema::Absent, |schema| {
+            ContextSchema::Shared(schema.clone())
+        });
+    retain_key(retained, context, context_schema, |row| {
+        row.column_key(name)
+    });
+    Ok(value)
+}
+
+pub(super) fn qualified_column(
+    expression: &ScalarExpr,
+    qualifier: &str,
+    column: &str,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let retained = context.column_slot(expression);
+    if let Some(value) = retained.and_then(|slot| retained_value(slot, context)) {
+        return control.copy_value(value).map_err(Into::into);
+    }
+    #[cfg(test)]
+    crate::scalar::state::COLUMN_NAME_LOOKUPS.with(|count| count.set(count.get() + 1));
+    let value = context
+        .sql_context()
+        .qualified_column_value_with_control(qualifier, column, control)?;
+    retain_key(retained, context, ContextSchema::Unused, |row| {
+        row.qualified_column_key(qualifier, column)
+    });
+    Ok(value)
+}
+
+/// Retain the key the rows' schema resolves a reference to. The reference named one unambiguous column of these rows, so later rows whose schema shares the index read the key without resolving the name again.
+fn retain_key(
+    slot: Option<&OnceLock<ColumnSlot>>,
+    context: &ScalarEvalContext<'_>,
+    context_schema: ContextSchema,
+    key: impl FnOnce(&dyn RowLookup) -> Option<usize>,
+) {
+    if let (Some(slot), Some(row)) = (slot, context.row_lookup()) {
+        if let Some(schema) = row.resolution_schema() {
+            let _ = slot.set(ColumnSlot {
+                context_schema,
+                row_schema: schema.clone(),
+                key_space: row.key_space(),
+                key: key(row),
+            });
+        }
+    }
+}
+
+/// The value of a reference whose key was retained for rows of the schema the row now reads, under the schema the context now carries.
+fn retained_value<'a>(
+    slot: &OnceLock<ColumnSlot>,
+    context: &ScalarEvalContext<'a>,
+) -> Option<&'a Value> {
+    let resolved = slot.get()?;
+    let row = context.row_lookup()?;
+    if row.key_space() != resolved.key_space
+        || !row.resolution_schema()?.shares_index(&resolved.row_schema)
+    {
+        return None;
+    }
+    match (&resolved.context_schema, context.row_schema()) {
+        (ContextSchema::Unused, _) | (ContextSchema::Absent, None) => {}
+        (ContextSchema::Shared(retained), Some(current)) if current.shares_index(retained) => {}
+        _ => return None,
+    }
+    Some(
+        resolved
+            .key
+            .and_then(|key| row.keyed_value(key))
+            .unwrap_or(&crate::batch::NULL_VALUE),
+    )
 }
 
 pub(super) fn exists(

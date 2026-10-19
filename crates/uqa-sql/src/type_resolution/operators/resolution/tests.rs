@@ -280,3 +280,186 @@ fn containment_operator_identities_and_bounded_types_match_postgresql() {
         );
     }
 }
+
+#[test]
+fn retained_builtin_selections_equal_fresh_selections() {
+    let numeric = ColumnType::Numeric {
+        precision: Some(15),
+        scale: Some(2),
+    };
+    let cases = [
+        ("*", Some(numeric.clone()), Some(ColumnType::Integer)),
+        ("-", Some(ColumnType::Integer), Some(numeric.clone())),
+        (
+            "=",
+            Some(ColumnType::Bpchar),
+            Some(ColumnType::Character(10)),
+        ),
+        ("<", Some(ColumnType::Date), None),
+        ("+", None, Some(ColumnType::BigInteger)),
+        (
+            "||",
+            Some(ColumnType::Text),
+            Some(ColumnType::Varchar(Some(5))),
+        ),
+    ];
+    let control = ProductionControl::uncontrolled();
+    for (name, left, right) in &cases {
+        let fresh =
+            select_binary_operator_types(name, left.as_ref(), right.as_ref(), &control).unwrap();
+        for _ in 0..3 {
+            let selected = named_binary_operator_types_with_control(
+                name,
+                left.as_ref(),
+                right.as_ref(),
+                &control,
+            )
+            .unwrap();
+            assert_eq!(*selected, *fresh, "{left:?} {name} {right:?}");
+        }
+        let key = selection_key(name, left.as_ref(), right.as_ref()).unwrap();
+        assert_eq!(
+            BUILTIN_SELECTIONS.read().unwrap().get(&key),
+            Some(&*fresh),
+            "{left:?} {name} {right:?}"
+        );
+    }
+    let domain = ColumnType::Domain {
+        schema: "public".into(),
+        name: "positive".into(),
+        oid: 16_384,
+        array_oid: None,
+        collation_oid: None,
+        base: Box::new(ColumnType::Integer),
+    };
+    assert!(selection_key("+", Some(&domain), Some(&ColumnType::Integer)).is_none());
+}
+
+#[test]
+fn fresh_builtin_selections_stay_below_the_retained_selection_allowance() {
+    let operands = [
+        None,
+        Some(ColumnType::Boolean),
+        Some(ColumnType::SmallInteger),
+        Some(ColumnType::Integer),
+        Some(ColumnType::BigInteger),
+        Some(ColumnType::Real),
+        Some(ColumnType::DoublePrecision),
+        Some(ColumnType::Numeric {
+            precision: Some(15),
+            scale: Some(2),
+        }),
+        Some(ColumnType::Text),
+        Some(ColumnType::Varchar(Some(25))),
+        Some(ColumnType::Character(10)),
+        Some(ColumnType::Date),
+        Some(ColumnType::Timestamp),
+        Some(ColumnType::TimestampTz),
+        Some(ColumnType::Interval),
+        Some(ColumnType::Bytea),
+        Some(ColumnType::JsonB),
+    ];
+    let cancellation = CancellationToken::new();
+    let mut names: Vec<&str> = SIGNATURES.iter().map(|signature| signature.0).collect();
+    names.sort_unstable();
+    names.dedup();
+    for name in names {
+        for left in &operands {
+            for right in &operands {
+                let budget = MemoryBudget::new(RETAINED_SELECTION_ALLOWANCE);
+                let control = ProductionControl::new(&budget, &cancellation, &cancellation);
+                let selected =
+                    select_binary_operator_types(name, left.as_ref(), right.as_ref(), &control);
+                assert_ne!(
+                    selected.as_ref().err().and_then(SQLError::sqlstate),
+                    Some("53200"),
+                    "{left:?} {name} {right:?}"
+                );
+                assert!(
+                    budget.peak() < RETAINED_SELECTION_ALLOWANCE,
+                    "{left:?} {name} {right:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounded() {
+    // Other tests retain selections concurrently, so the assertions read keys, never counts.
+    let contains = |name: &str, left: Option<ColumnType>, right: Option<ColumnType>| {
+        BUILTIN_SELECTIONS.read().unwrap().contains_key(&(
+            name.into(),
+            OperandType(left),
+            OperandType(right),
+        ))
+    };
+    let numeric = |precision, scale| ColumnType::Numeric {
+        precision: Some(precision),
+        scale: Some(scale),
+    };
+    let first = named_binary_operator_types("*", Some(&numeric(15, 2)), Some(&ColumnType::Integer))
+        .unwrap();
+    let second =
+        named_binary_operator_types("*", Some(&numeric(7, 3)), Some(&ColumnType::Integer)).unwrap();
+    assert_eq!(first, second);
+    assert!(contains(
+        "*",
+        Some(ColumnType::Numeric {
+            precision: None,
+            scale: None,
+        }),
+        Some(ColumnType::Integer),
+    ));
+    assert!(!contains(
+        "*",
+        Some(numeric(15, 2)),
+        Some(ColumnType::Integer)
+    ));
+    assert!(!contains(
+        "*",
+        Some(numeric(7, 3)),
+        Some(ColumnType::Integer)
+    ));
+    let text = named_binary_operator_types(
+        "||",
+        Some(&ColumnType::Varchar(Some(12))),
+        Some(&ColumnType::Varchar(Some(3))),
+    )
+    .unwrap();
+    let plain_text = named_binary_operator_types(
+        "||",
+        Some(&ColumnType::Varchar(None)),
+        Some(&ColumnType::Varchar(None)),
+    )
+    .unwrap();
+    assert_eq!(text, plain_text);
+    assert!(contains(
+        "||",
+        Some(ColumnType::Varchar(None)),
+        Some(ColumnType::Varchar(None)),
+    ));
+    assert!(!contains(
+        "||",
+        Some(ColumnType::Varchar(Some(12))),
+        Some(ColumnType::Varchar(Some(3))),
+    ));
+    // Inserting as many distinct keys as the bound holds discards the retained selections at least once instead of growing past the bound; the first key of the sequence is gone afterwards.
+    let types = [
+        ColumnType::Integer,
+        ColumnType::Integer,
+        ColumnType::Integer,
+    ];
+    for index in 0..RETAINED_SELECTIONS {
+        retain_selection(
+            (
+                format!("bounded_operator_{index}").into(),
+                OperandType(None),
+                OperandType(None),
+            ),
+            &types,
+        );
+        assert!(BUILTIN_SELECTIONS.read().unwrap().len() <= RETAINED_SELECTIONS);
+    }
+    assert!(!contains("bounded_operator_0", None, None));
+}

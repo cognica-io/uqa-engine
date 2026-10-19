@@ -6,8 +6,6 @@
 
 //! Primitive and floating-point conversions for decimal values.
 
-use num_bigint::BigInt;
-
 use super::DecimalValue;
 
 mod exact;
@@ -21,7 +19,7 @@ impl DecimalValue {
     }
 
     pub fn from_i128(value: i128) -> Option<Self> {
-        Self::finite(BigInt::from(value), 0)
+        Self::finite(value, 0)
     }
 
     pub fn from_bool(value: bool) -> Self {

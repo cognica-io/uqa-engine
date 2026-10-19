@@ -9,10 +9,10 @@
 use num_bigint::BigInt;
 use num_traits::Zero;
 
-use super::arithmetic_control::{divide_rounded, finite, Calculation, Failure};
+use super::arithmetic_control::{divide_rounded, finite_big, Calculation, Failure};
 use super::transcendental::{round, rounded_decimal_product, select_decimal_power_scale};
 use super::{
-    coefficient, format_budgeted::coefficient_digits_with_control, DecimalRepr, DecimalValue,
+    coefficient, format_budgeted::big_digits_with_control, DecimalRepr, DecimalValue,
     MAX_DISPLAY_SCALE, MAX_INTEGER_DIGITS,
 };
 use crate::memory::{Produced, ProductionControl};
@@ -143,7 +143,7 @@ impl PowerIntermediate {
             return Err(Failure::Invalid);
         };
         Ok(Self {
-            coefficient: coefficient::clone(coefficient, control)?,
+            coefficient: coefficient::clone(&coefficient.big(), control)?,
             scale: *scale,
         })
     }
@@ -166,7 +166,7 @@ impl PowerIntermediate {
         if self.coefficient.is_zero() {
             return Ok(0);
         }
-        let digits = coefficient_digits_with_control(&self.coefficient, control)?.len();
+        let digits = big_digits_with_control(&self.coefficient, control)?.len();
         i32::try_from(digits)
             .map_err(|_| Failure::Invalid)?
             .checked_sub(i32::try_from(self.scale).map_err(|_| Failure::Invalid)?)
@@ -206,7 +206,7 @@ impl PowerIntermediate {
             control,
         )?;
         let coefficient = divide_rounded(&numerator, &self.coefficient, control)?;
-        finite(coefficient, result_scale, control)
+        finite_big(coefficient, result_scale, control)
     }
 
     fn into_decimal(
@@ -216,7 +216,7 @@ impl PowerIntermediate {
     ) -> Calculation<Produced<DecimalValue>> {
         let coefficient =
             quantize_coefficient(self.coefficient, self.scale, result_scale, control)?;
-        finite(coefficient, result_scale, control)
+        finite_big(coefficient, result_scale, control)
     }
 }
 

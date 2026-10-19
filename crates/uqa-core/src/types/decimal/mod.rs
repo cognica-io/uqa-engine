@@ -20,7 +20,9 @@ mod sampling;
 mod transcendental;
 
 use num_bigint::BigInt;
-use num_traits::{Signed, Zero};
+use num_traits::Zero;
+
+use coefficient::Coefficient;
 
 const MAX_INTEGER_DIGITS: usize = 131_072;
 const MAX_FRACTIONAL_DIGITS: u32 = 16_383;
@@ -29,7 +31,10 @@ const MAX_RESULT_SCALE: u32 = 2_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DecimalRepr {
-    Finite { coefficient: BigInt, scale: u32 },
+    Finite {
+        coefficient: Coefficient,
+        scale: u32,
+    },
     NegativeInfinity,
     PositiveInfinity,
     NaN,
@@ -93,25 +98,18 @@ impl DecimalValue {
     /// Return a conservative byte charge for the boxed representation and any heap-backed coefficient storage retained by this value.
     pub fn retained_bytes(&self) -> usize {
         let coefficient_bytes = match self.repr() {
-            DecimalRepr::Finite { coefficient, .. } => {
-                let bits = usize::try_from(coefficient.bits()).unwrap_or(usize::MAX);
-                let digits = bits.div_ceil(usize::BITS as usize).max(1);
-                // num-bigint 0.4.6 normalizes when len < capacity / 4. Integer division leaves up to three additional limbs at that boundary.
-                digits
-                    .saturating_mul(4)
-                    .saturating_add(3)
-                    .saturating_mul(std::mem::size_of::<usize>())
-            }
+            DecimalRepr::Finite { coefficient, .. } => coefficient.retained_bytes(),
             _ => 0,
         };
         std::mem::size_of::<DecimalRepr>().saturating_add(coefficient_bytes)
     }
 
-    fn finite(coefficient: BigInt, scale: u32) -> Option<Self> {
+    fn finite(coefficient: impl Into<Coefficient>, scale: u32) -> Option<Self> {
         if scale > MAX_FRACTIONAL_DIGITS {
             return None;
         }
-        let integer_digits = decimal_digit_count(&coefficient).saturating_sub(scale as usize);
+        let coefficient = coefficient.into();
+        let integer_digits = coefficient.digit_count().saturating_sub(scale as usize);
         if integer_digits > MAX_INTEGER_DIGITS {
             return None;
         }
@@ -132,13 +130,7 @@ impl DecimalValue {
 
     fn sign(&self) -> i8 {
         match self.repr() {
-            DecimalRepr::Finite { coefficient, .. } => {
-                if coefficient.is_negative() {
-                    -1
-                } else {
-                    i8::from(!coefficient.is_zero())
-                }
-            }
+            DecimalRepr::Finite { coefficient, .. } => coefficient.sign(),
             DecimalRepr::NegativeInfinity => -1,
             DecimalRepr::PositiveInfinity | DecimalRepr::NaN => 1,
         }
@@ -147,7 +139,7 @@ impl DecimalValue {
     fn negated(&self) -> Self {
         match self.repr() {
             DecimalRepr::Finite { coefficient, scale } => Self::with_repr(DecimalRepr::Finite {
-                coefficient: -coefficient,
+                coefficient: coefficient.negated(),
                 scale: *scale,
             }),
             DecimalRepr::NegativeInfinity => Self::positive_infinity(),
@@ -165,23 +157,28 @@ fn pow10(power: u32) -> BigInt {
     BigInt::from(10_u8).pow(power)
 }
 
-fn decimal_digit_count(coefficient: &BigInt) -> usize {
+/// The coefficient and scale without trailing fractional zeros.
+fn canonical_finite_parts(coefficient: &Coefficient, scale: u32) -> (Coefficient, u32) {
     if coefficient.is_zero() {
-        1
-    } else {
-        coefficient.abs().to_str_radix(10).len()
+        return (Coefficient::ZERO, 0);
     }
-}
-
-fn canonical_finite_parts(coefficient: &BigInt, scale: u32) -> (BigInt, u32) {
-    if coefficient.is_zero() {
-        return (BigInt::zero(), 0);
-    }
-    let mut coefficient = coefficient.clone();
     let mut scale = scale;
-    while scale > 0 && (&coefficient % 10_u8).is_zero() {
-        coefficient /= 10_u8;
-        scale -= 1;
+    match coefficient {
+        Coefficient::Word(word) => {
+            let mut word = *word;
+            while scale > 0 && word % 10 == 0 {
+                word /= 10;
+                scale -= 1;
+            }
+            (Coefficient::Word(word), scale)
+        }
+        Coefficient::Big(value) => {
+            let mut coefficient = value.clone();
+            while scale > 0 && (&coefficient % 10_u8).is_zero() {
+                coefficient /= 10_u8;
+                scale -= 1;
+            }
+            (Coefficient::from_big(coefficient), scale)
+        }
     }
-    (coefficient, scale)
 }

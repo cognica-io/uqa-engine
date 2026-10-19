@@ -295,6 +295,15 @@ pub trait EngineHook {
 /// Read-only row interface used by the expression evaluator. Most callers
 /// use a materialised [`ResultRow`], while hot execution paths can expose a
 /// projected value slice without rebuilding a string-keyed map for every row.
+/// The address space of a row lookup's column keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowKeySpace {
+    /// Physical slots of the resolution schema's rows.
+    PhysicalSlot,
+    /// Logical positions of the resolution schema's columns.
+    LogicalPosition,
+}
+
 pub trait RowLookup {
     fn column(&self, name: &str) -> Option<&Value>;
 
@@ -317,6 +326,31 @@ pub trait RowLookup {
     /// projected execution sources override it so compiled hot paths can avoid
     /// repeating string lookup for every expression and row.
     fn positional_column(&self, _index: usize) -> Option<&Value> {
+        None
+    }
+
+    /// The schema whose name resolution `column` and `qualified_column` apply. A lookup returning it resolves names to keys with `column_key` and `qualified_column_key` and reads them with `keyed_value`, so `column(name)` equals `column_key(name).and_then(|key| keyed_value(key))`; the default disables key retention.
+    fn resolution_schema(&self) -> Option<&crate::RowSchema> {
+        None
+    }
+
+    /// The space the keys of `column_key` and `qualified_column_key` address. A key retained for one space is never read through a lookup of another.
+    fn key_space(&self) -> RowKeySpace {
+        RowKeySpace::PhysicalSlot
+    }
+
+    /// The key `column` reads `name` through under `resolution_schema`; `None` is a name the row does not carry.
+    fn column_key(&self, _name: &str) -> Option<usize> {
+        None
+    }
+
+    /// The key `qualified_column` reads `qualifier.column` through under `resolution_schema`.
+    fn qualified_column_key(&self, _qualifier: &str, _column: &str) -> Option<usize> {
+        None
+    }
+
+    /// The value at a key `column_key` or `qualified_column_key` produced; `None` for an absent or NULL value.
+    fn keyed_value(&self, _key: usize) -> Option<&Value> {
         None
     }
 
