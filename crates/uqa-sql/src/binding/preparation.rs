@@ -19,6 +19,8 @@ mod json_operators;
 mod membership;
 mod parameters;
 mod queries;
+#[cfg(test)]
+pub(crate) use queries::BLOCK_ANALYSES;
 mod routines;
 mod rows;
 pub(crate) use routines::{
@@ -44,6 +46,12 @@ use schema_expressions::{SchemaExpressionContext, SchemaExpressionKind};
 #[derive(Debug)]
 pub(crate) struct PreparedInputAnalysis {
     pub parameter_types: Vec<Option<ColumnType>>,
+    pub dependencies: crate::prepared::dependencies::PreparedAnalysisDependencies,
+}
+
+pub(crate) struct ExecutableInputAnalysis {
+    pub result: super::statements::AnalyzedResult,
+    pub reusable: bool,
     pub dependencies: crate::prepared::dependencies::PreparedAnalysisDependencies,
 }
 
@@ -97,9 +105,8 @@ pub(crate) fn read_executable_inputs(
     params: &[crate::SQLParam],
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
-) -> Result<bool, SQLError> {
+) -> Result<ExecutableInputAnalysis, SQLError> {
     read_executable_inputs_inner(routines, plan, params, binding, aliases, false)
-        .map(|(reusable, _)| reusable)
 }
 
 pub(crate) fn read_procedural_inputs(
@@ -108,9 +115,8 @@ pub(crate) fn read_procedural_inputs(
     params: &[crate::SQLParam],
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
-) -> Result<crate::prepared::dependencies::PreparedAnalysisDependencies, SQLError> {
+) -> Result<ExecutableInputAnalysis, SQLError> {
     read_executable_inputs_inner(routines, plan, params, binding, aliases, true)
-        .map(|(_, dependencies)| dependencies)
 }
 
 fn read_executable_inputs_inner(
@@ -120,13 +126,9 @@ fn read_executable_inputs_inner(
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
     track_dependencies: bool,
-) -> Result<
-    (
-        bool,
-        crate::prepared::dependencies::PreparedAnalysisDependencies,
-    ),
-    SQLError,
-> {
+) -> Result<ExecutableInputAnalysis, SQLError> {
+    use super::statements::AnalyzedResult;
+
     let declared = super::statements::parameter_input_types(params)?;
     let mut scope = SchemaScope::for_analysis(binding)?;
     scope.prepared_dependencies = track_dependencies.then(Default::default);
@@ -143,24 +145,25 @@ fn read_executable_inputs_inner(
         schema_expression: None,
     };
     let mut finish_parameters = false;
-    match &*plan {
-        UnifiedPlan::Query(query) => {
-            analysis.query(query, None)?;
-        }
+    let result = match &*plan {
+        UnifiedPlan::Query(query) => AnalyzedResult::Schema(analysis.query(query, None)?),
         UnifiedPlan::Command(command) => match command.as_ref() {
             crate::plan::CommandPlan::CreateView { query, .. }
             | crate::plan::CommandPlan::CreateTableAs { query, .. }
             | crate::plan::CommandPlan::CreateMaterializedView { query, .. }
             | crate::plan::CommandPlan::DeclareCursor { query, .. } => {
                 analysis.query(query, None)?;
+                AnalyzedResult::Command
             }
             _ if command.mutation_target().is_some() => {
-                analysis.command(command)?;
                 finish_parameters = true;
+                analysis
+                    .command(command)?
+                    .map_or(AnalyzedResult::Command, AnalyzedResult::Schema)
             }
-            _ => {}
+            _ => AnalyzedResult::Command,
         },
-    }
+    };
     let constants = analysis.parameters.take_input_constants();
     if finish_parameters {
         analysis.parameters.finish()?;
@@ -179,7 +182,11 @@ fn read_executable_inputs_inner(
             dependencies.include_expression(expression);
         });
     }
-    Ok((reusable, dependencies))
+    Ok(ExecutableInputAnalysis {
+        result,
+        reusable,
+        dependencies,
+    })
 }
 
 pub fn infer_prepared_parameter_types(
