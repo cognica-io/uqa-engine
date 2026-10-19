@@ -16,11 +16,24 @@ The correction adds no dependency or feature and changes no value operator or re
 - [x] Finish local owner, exact TPC-H, procedural and prepared-result validation on the delivery branch.
 - [x] Review accounting, error precedence and dependency/ownership checks; update HISTORY and the PR body.
 - [x] Verify actual automatic Linux and macOS bounded-work, memory and output results for the delivered source.
-- [ ] Merge this correction and remove its branch.
+- [x] Merge this correction and remove its branch.
 
 Local validation passes 2,120 SQL unit tests, 67 integration tests and 1,469 selected Engine cases, including all 22 TPC-H fixtures. Automatic run 39307635675 passes actual Linux and macOS execution: each report contains 1,143 checks / 1,643 cases and eight process histories, with zero failures, errors or skips. Both downloaded reports independently match source `4645582ad1eb5652df0274139c4dd389fad2e4cb`, tree `6cbb365c0d9ac358376f0f38a52c043287c9af64` and every selected source/case identity. The subsequent main reconciliation changes documentation and controller/selection files only; all product and regression inputs are identical.
 
-This change does not close #1117: execution-time block binding, nested privilege coverage and outer-scope composition remain. The fixed TPC-H fixture, original diagnostics and controlled timing criteria remain required for the complete issue.
+PR #1135 merged the statement-result correction as `e2f7eac1e68e648922b03a7cde4b7c9a791862b1`; its remote and local branches were removed.
+
+## Executable source binding
+
+Execution previously discarded the source schema returned by SQL's `bind_source_plan_schema_for_execution`, then immediately called the read-only source binder again on the same execution-owned source. The next bounded correction passes the first schema to query-block validation. SQL still owns routine identity and row-shape derivation; Execution owns the scope and transfer. No catalog, privilege or cross-statement cache is introduced.
+
+The first binder's contract derives its returned schema from the exact routine identities installed into that source. No source, parameter, CTE or outer-scope mutation occurs before the redundant second binding. Passing this existing result therefore preserves the schema, selected routines and original error order. Pseudo-column and outer-row overlays still follow binding; expression/type/set-context and privilege checks remain in place. Runtime-defined extension sources, schemaless projections and final physical reference validation retain their existing paths. This changes metadata work only, without changing SQL row carriers or evaluating, reordering or removing user expressions.
+
+- [x] Confirm SQL/Execution ownership, features and dependency direction.
+- [x] Remove the duplicate read-only source-binding pass and retain the original execution schema.
+- [x] Complete local Execution and affected Engine consumer verification, strict Clippy and ownership checks: 2,619 tests pass, including every Execution case and selected Engine table-function, LATERAL, subquery, prepared, CTE, row-lock, privilege and exact TPC-H cases. Strict Execution all-target Clippy, formatting and ownership/harness checks pass.
+- [ ] Review actual automatic Linux/macOS work, memory and output results, then merge and remove the branch.
+
+These corrections do not close #1117: repeated validation context construction, nested privilege coverage and outer-scope composition remain. The fixed TPC-H fixture, original diagnostics and controlled timing criteria remain required for the complete issue.
 
 ## Original performance task records
 

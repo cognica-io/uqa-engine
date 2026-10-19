@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reuse the result schema produced by ordered statement input analysis, avoiding a second complete binding pass while preserving output types, collations, anonymous-record fields and procedural dependency scopes.
 
+- Reuse the source schema derived while binding executable FROM routines, avoiding another source-binding pass before query-block validation without changing privilege checks or physical source validation.
+
 - Preserve every comma-separated input of UPDATE FROM and DELETE USING so empty or missing later sources cannot cause unintended row changes. Retain source order, aliases and LATERAL dependencies through the shared SQL source-list compiler.
 
 - Implement PostgreSQL’s binary `^@` text-prefix operator with native operator resolution, strict NULL and collation diagnostics, and retained CHECK/index/view identities. The shared `starts_with` kernel borrows text inputs and observes cancellation between bounded comparison chunks.

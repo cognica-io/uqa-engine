@@ -7,7 +7,7 @@
 //! Query-block validation and physical source selection.
 
 use super::{
-    bind_source_plan_schema, bind_source_plan_schema_for_execution, binding_context,
+    bind_source_plan_schema_for_execution, binding_context,
     ensure_select_privileges_for_query_block, execute_query_block_operator_output,
     expand_from_star_columns, overlay_outer_schema, projection_columns,
     run_select_without_from_output, run_single_foreign_select_output,
@@ -18,22 +18,17 @@ use super::{
     SingleRelation, SourceContext, SourcePlan,
 };
 
-pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 'static>(
+fn run_bound_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
     block: &'a QueryBlockPlan,
     stmt: &'a QueryBlockPlan,
     params: &'a [SQLParam],
     ctes: &'a mut CteScope<S>,
     output_mode: QueryOutputMode<'a>,
+    source_schema: &crate::RowSchema,
 ) -> Result<QueryOutput, SQLError> {
     let outer = ctes.row_lock_outer_row().map(|row| row.schema.clone());
-    let source_schema = stmt.from.as_ref().map_or_else(
-        || Ok(crate::RowSchema::default()),
-        |source| {
-            bind_source_plan_schema(context.ctes.routines, source, params, ctes, outer.as_ref())
-        },
-    )?;
-    let source_schema = with_query_table_pseudo_columns(&source_schema);
+    let source_schema = with_query_table_pseudo_columns(source_schema);
     let expression_schema = overlay_outer_schema(&source_schema, outer.as_ref());
     validate_query_block_expression_types(
         context.ctes.routines,
@@ -395,21 +390,24 @@ pub fn execute_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     let defer_distinct_limit = uqa_sql::semantics::should_defer_distinct_limit(block);
     let mut execution = uqa_sql::semantics::select_execution_stmt(block, defer_distinct_limit);
     let outer = scoped_ctes.row_lock_outer_row().map(|row| &row.schema);
-    if let Some(source) = execution.from.as_mut() {
+    let source_schema = if let Some(source) = execution.from.as_mut() {
         bind_source_plan_schema_for_execution(
             context.ctes.routines,
             source,
             params,
             &scoped_ctes,
             outer,
-        )?;
-    }
-    run_query_block_with_prepared_exists_output(
+        )?
+    } else {
+        crate::RowSchema::default()
+    };
+    run_bound_query_block_output(
         context,
         block,
         &execution,
         params,
         &mut scoped_ctes,
         output_mode,
+        &source_schema,
     )
 }
