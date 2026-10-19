@@ -11,7 +11,7 @@ use uqa_core::{
     ArrayValue, Value,
 };
 
-use super::super::casting::{cast_value_from_with_control, parse_pg_array_literal_with_control};
+use super::super::casting::{cast_value_from_with_control, parse_pg_array_literal_with_input};
 use super::{format_regtype_elements_with_control, format_regtype_value_with_control, EngineHook};
 use crate::{
     ast::ColumnType,
@@ -80,10 +80,21 @@ pub fn read_catalog_array_input(
         ));
     }
     let control = ProductionControl::uncontrolled();
-    let parsed = parse_pg_array_literal_with_control(text, &control)?
-        .into_uncontrolled()
-        .map_err(|_| SQLError::Internal("ordinary catalog array input owner".into()))?;
-    cast_catalog_array(&Value::Array(parsed), None, target, engine, &control)?
+    let element = array_leaf_type(target);
+    let target_name = element.catalog_name_with_control(&control)?;
+    let array = parse_pg_array_literal_with_input(text, &control, |value| {
+        cast_value_with_type_resolution_with_control(
+            &value,
+            None,
+            &target_name,
+            Some(engine),
+            &control,
+        )
+    })?;
+    let (array, memory) = array.into_parts();
+    let oid = crate::catalog::type_metadata::pg_type_oid(element) as u32;
+    control
+        .finish(Value::Array(array.with_element_type_oid(Some(oid))), memory)?
         .into_uncontrolled()
         .map_err(|_| SQLError::Internal("ordinary catalog array input owner".into()))
 }
@@ -690,45 +701,52 @@ fn cast_array(
         .transpose()?;
     let source = vector_name.as_deref().map(String::as_str).or(source);
     let target_element_name = target_element.catalog_name_with_control(control)?;
-    let parsed;
-    let array = match value {
-        Value::Array(array) => array,
-        Value::LegacyVector(vector) => vector.as_array(),
-        Value::Str(text) => {
-            parsed = parse_pg_array_literal_with_control(text, control)?;
-            &parsed
-        }
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "CAST AS {target_name}: expected array, got {other:?}"
-            )))
-        }
-    };
-    let elements = cast_array_elements(
-        array.elements(),
-        source,
-        &target_element_name,
-        engine,
-        control,
-    )?;
-    let normalize_empty =
-        if let Some(source) = vector_element.filter(|_| array.elements().is_empty()) {
-            source != *target_element
-                && !crate::type_resolution::cast_catalog_entry_with_control(
-                    &source,
-                    target_element,
-                    control,
-                )?
-                .is_some_and(|entry| entry.method == crate::type_resolution::CastMethod::Binary)
-        } else {
-            false
-        };
-    let array = if normalize_empty {
-        ArrayValue::try_new_with_control(elements, control)?
+    let array = if let Value::Str(text) = value {
+        parse_pg_array_literal_with_input(text, control, |value| {
+            cast_value_with_type_resolution_with_control(
+                &value,
+                source,
+                &target_element_name,
+                engine,
+                control,
+            )
+        })?
     } else {
-        rebuild_array(array, elements, control)?
-    }
-    .ok_or_else(|| SQLError::TypeMismatch("array dimensions changed during cast".into()))?;
+        let array = match value {
+            Value::Array(array) => array,
+            Value::LegacyVector(vector) => vector.as_array(),
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "CAST AS {target_name}: expected array, got {other:?}"
+                )))
+            }
+        };
+        let elements = cast_array_elements(
+            array.elements(),
+            source,
+            &target_element_name,
+            engine,
+            control,
+        )?;
+        let normalize_empty =
+            if let Some(source) = vector_element.filter(|_| array.elements().is_empty()) {
+                source != *target_element
+                    && !crate::type_resolution::cast_catalog_entry_with_control(
+                        &source,
+                        target_element,
+                        control,
+                    )?
+                    .is_some_and(|entry| entry.method == crate::type_resolution::CastMethod::Binary)
+            } else {
+                false
+            };
+        if normalize_empty {
+            ArrayValue::try_new_with_control(elements, control)?
+        } else {
+            rebuild_array(array, elements, control)?
+        }
+        .ok_or_else(|| SQLError::TypeMismatch("array dimensions changed during cast".into()))?
+    };
     let (array, memory) = array.into_parts();
     let oid = if matches!(target_element, ColumnType::Regrole) {
         Some(crate::catalog::type_metadata::pg_type_oid(&ColumnType::Regrole) as u32)

@@ -153,6 +153,7 @@ impl Engine {
         RoutineDefinitionContext {
             compilation: self.stored_routine_compilation_context(),
             sources: self,
+            overloads: self,
             regclasses: self,
         }
     }

@@ -1,12 +1,28 @@
 # Performance baseline
 
-This document records UQA Engine benchmark baselines measured on developer hardware. The commands and deterministic inputs are reproducible, but the absolute numbers are machine-specific and have not been independently reproduced. Unless a section explicitly compares another engine, the measurements are internal regression baselines rather than evidence of competitive OLAP performance. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner.
+This document records UQA Engine benchmark baselines measured on developer hardware and, where a section says so, on temporary cloud hosts. The commands and deterministic inputs are reproducible, but the absolute numbers are machine-specific and have not been independently reproduced. Unless a section explicitly compares another engine, the measurements are internal regression baselines rather than evidence of competitive OLAP performance. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner or a published package.
+
+## PostgreSQL 18 TPC-H-derived release comparison (2026-10-19)
+
+The [TPC-H benchmark README](../../benchmarks/tpch/README.md#released-package-comparison-with-postgresql-18-2026-10-19) records the first comparison of a published package: `uqa` 0.6.0 from PyPI through its `usql` command against PostgreSQL 18.6 through `psql`, on a temporary EC2 `c7g.4xlarge` Graviton3 host. [`scripts/run-tpch-release-comparison.py`](../../scripts/run-tpch-release-comparison.py) checked PostgreSQL and every UQA process against the checked-in PostgreSQL 18 results, then ran six rounds in alternating engine order for 204 timed executions per query and engine. The host was not controlled, so the ratios are a dated comparison rather than a regression gate.
+
+| Metric | UQA 0.6.0 | PostgreSQL 18 `psql` | PostgreSQL 18 execution |
+| --- | ---: | ---: | ---: |
+| Exact query results | 22 / 22 | Reference | Reference |
+| Queries at or below the PostgreSQL median under either boundary | 1 / 22 | Reference | Reference |
+| Sum of medians excluding Q20 | 316.397 ms | 21.959 ms | 18.122 ms |
+| Q09 median | 12.534 ms | 1.954 ms | 1.684 ms |
+| Q18 median | 14.715 ms | 1.882 ms | 1.783 ms |
+
+`usql` times `Engine::sql`, the boundary of the source-built release runner. The `psql` column adds the PostgreSQL protocol round trip, while the execution column is the executor-only `EXPLAIN ANALYZE` boundary used by the snapshot below. The only query where UQA is faster is Q20, whose PostgreSQL plan is pathological at this scale.
+
+The result reverses the 2026-08-09 development snapshot below. An interleaved same-host rerun on the Apple M1 Ultra measured the snapshot commit `613251702` at 14.776 ms and `v0.6.0` at 184.655 ms for the Q20-excluded sum of medians, with per-query factors from 2.6x to 348x and identical results. Sampled `v0.6.0` stacks attribute most of the added time to type resolution through textual type names, both in operator type selection repeated during each execution's analysis and in casts during per-row scalar evaluation; decimal arithmetic is a smaller share. [#1108](https://github.com/cognica-io/uqa-engine/issues/1108) tracks the correction, and the README records the per-query tables and the release timeline.
 
 ## PostgreSQL 17 TPC-H-derived compatibility pass (2026-08-09)
 
-The checked-in [`benchmarks/tpch`](../../benchmarks/tpch/README.md) workload contains all 22 default TPC-H-derived queries and deterministic `dbgen` data at scale factor `0.001`. It is an exact SQL compatibility and local latency fixture, not a compliant or audited TPC-H result. `cargo test -p uqa-engine --test integration sql_tpch::` verifies columns, ordered rows, NULLs, text bytes, and type-aware canonical numeric values against PostgreSQL 17.10 before timing is considered.
+This historical development snapshot is superseded by the 2026-10-19 release comparison above. The checked-in [`benchmarks/tpch`](../../benchmarks/tpch/README.md) workload contains all 22 default TPC-H-derived queries and deterministic `dbgen` data at scale factor `0.001`. It is an exact SQL compatibility and local latency fixture, not a compliant or audited TPC-H result. `cargo test -p uqa-engine --test integration sql_tpch::` verifies columns, ordered rows, NULLs, text bytes, and type-aware canonical numeric values against PostgreSQL 17.10 before timing is considered.
 
-The current UQA snapshot was built with `cargo build --release -p uqa-engine --example tpch_runner --locked` on an Apple M1 Ultra arm64 host with Rust 1.90.0. UQA values are medians of 201 executions after an untimed validation execution; PostgreSQL values are medians of five executions in the dedicated PostgreSQL 17.10 arm64 container on the same host. The runs were not interleaved, so their ratios are local directional evidence rather than a base/head regression estimate.
+The 2026-08-09 UQA snapshot was built with `cargo build --release -p uqa-engine --example tpch_runner --locked` on an Apple M1 Ultra arm64 host with Rust 1.90.0. UQA values are medians of 201 executions after an untimed validation execution; PostgreSQL values are medians of five executions in the dedicated PostgreSQL 17.10 arm64 container on the same host. The runs were not interleaved, so their ratios are local directional evidence rather than a base/head regression estimate.
 
 | Metric | Initial UQA release snapshot | Current UQA | PostgreSQL 17 |
 | --- | ---: | ---: | ---: |
@@ -16,7 +32,7 @@ The current UQA snapshot was built with `cargo build --release -p uqa-engine --e
 | Q09 median | 4.059 ms | 1.774 ms | 1.432 ms |
 | Q18 median | 4.708 ms | 1.227 ms | 1.340 ms |
 
-The 69.1% reduction in the Q20-excluded UQA median sum records the optimization trajectory, not a statistically paired speedup claim. Q20 is excluded because PostgreSQL's 396.945 ms plan is pathological at this tiny scale; summing per-query medians is a compact status indicator rather than a throughput metric. The full 22-row table, query runner options, fixture provenance, and live differential command are in the [TPC-H benchmark README](../../benchmarks/tpch/README.md).
+The 69.1% reduction in the Q20-excluded UQA median sum records the optimization trajectory, not a statistically paired speedup claim. Q20 is excluded because PostgreSQL's 396.945 ms plan is pathological at this tiny scale; summing per-query medians is a compact status indicator rather than a throughput metric. The full 22-row table is preserved in the [v0.6.0 TPC-H benchmark README](https://github.com/cognica-io/uqa-engine/blob/v0.6.0/benchmarks/tpch/README.md#local-postgresql-17-comparison-2026-08-09); the current [TPC-H benchmark README](../../benchmarks/tpch/README.md) keeps the query runner options, fixture provenance, and live differential command.
 
 Sampling and exact regression tests drove the following execution changes:
 

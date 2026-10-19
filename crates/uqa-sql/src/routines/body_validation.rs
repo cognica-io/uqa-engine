@@ -89,7 +89,7 @@ pub fn validate_sql_function_body(
         }
         last = Some(match query_result {
             Some(result) => result,
-            None => analyze_body_statement(context, &statement, &params, &scope)?,
+            None => analyze_body_statement(context, &statement, &params, &scope, true)?,
         });
     }
     if check_result {
@@ -98,11 +98,12 @@ pub fn validate_sql_function_body(
     Ok(())
 }
 
-fn analyze_body_statement(
+pub(super) fn analyze_body_statement(
     context: &SQLBodyValidationContext<'_>,
     plan: &UnifiedPlan,
     params: &[SQLParam],
     scope: &dyn StatementBindingScope,
+    reject_output_arguments: bool,
 ) -> Result<AnalyzedResult, SQLError> {
     if let UnifiedPlan::Command(command) = plan {
         if let CommandPlan::Call { name, args } = command.as_ref() {
@@ -140,7 +141,7 @@ fn analyze_body_statement(
                     )?;
                 }
             }
-            if !resolved.function.def.output_params().is_empty() {
+            if reject_output_arguments && !resolved.function.def.output_params().is_empty() {
                 return Err(output_argument_call_error());
             }
             return Ok(AnalyzedResult::Command);
