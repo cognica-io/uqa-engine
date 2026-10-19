@@ -8,3 +8,10 @@ slow-timeout = { period = "30s", terminate-after = 10, grace-period = "10s" }
 path = "junit.xml"
 store-success-output = false
 store-failure-output = true
+
+[test-groups.native-session-schedules]
+max-threads = 1
+
+[[profile.ci.overrides]]
+filter = 'package(=uqa-engine) & test(native_session_groups_preserve_metadata_under_concurrent_load)'
+test-group = 'native-session-schedules'

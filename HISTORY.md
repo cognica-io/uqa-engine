@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reject utility commands in SQL-standard function and procedure definitions with PostgreSQL diagnostics, preserving nested query and CALL analysis, statement error order, quoted bodies and transactional catalog state.
 
+- Bind column dependencies inside SQL-standard `VALUES` bodies so unrelated view deletion and column changes retain their PostgreSQL behavior, including after reopening persistent stores.
+
 - Keep persistent IVF and HNSW writers bound to their completed index definitions when another session commits during index creation, preventing canonical vectors from being written without the corresponding index metadata.
 
 - Report malformed array input with PostgreSQL SQLSTATE, primary message and separate DETAIL; preserve dimension declarations, quoted elements, whitespace and empty-array normalization.

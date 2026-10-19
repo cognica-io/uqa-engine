@@ -28,6 +28,8 @@ mod routine_rename;
 mod scalar_overloads;
 #[path = "sql_routine_identity/security_roles.rs"]
 mod security_roles;
+#[path = "sql_routine_identity/stored_values.rs"]
+mod stored_values;
 #[path = "sql_routine_identity/trigger_when_dependencies.rs"]
 mod trigger_when_dependencies;
 #[path = "sql_routine_identity/utility_bodies.rs"]

@@ -327,13 +327,14 @@
       "package": "uqa-engine",
       "kind": "test",
       "test": "native_session_groups_preserve_metadata_under_concurrent_load",
-      "cases": 1,
+      "cases": 2,
       "source": "crates/uqa-engine/tests/sessions/ivf_publication.rs",
       "capability": "Concurrent native session metadata correctness",
-      "workload": "Two fixed rounds run the original 69 native session tests in serial and with sixteen threads in separate simultaneous processes, including all four SQLite file modes.",
+      "workload": "Two required round cases each run the original 69 native session tests in serial and with sixteen threads in separate simultaneous processes, including all four SQLite file modes; CI serializes the round cases and retains child progress.",
       "invariant": "Every original fixture passes in every round and schedule; no retry, skipped fixture or isolated-test scheduling can hide the within-process metadata inconsistency.",
       "case_names": [
-        ""
+        "case_1_first",
+        "case_2_second"
       ]
     },
     {
@@ -3822,6 +3823,35 @@
       "capability": "Trigger record descriptor persistence",
       "workload": "Eleven independent PostgreSQL observations cover OLD/NEW, whole-record copies, NULLs, repeated invocations and persistent reopening on four providers.",
       "invariant": "Declared field types and collations survive invocation, copying, field lookup and reopen without changing tuple values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_values_bind_parameters_and_preserve_column_identity_across_rename",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_columns/tests.rs",
+      "capability": "Stored VALUES column identity",
+      "workload": "Bare and ordered VALUES with a scalar subquery, positional source aliases and an unresolved routine parameter.",
+      "invariant": "Dependency collection and serialized column renames preserve relation identity and unresolved parameters.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "stored_values_dependencies_match_postgresql_after_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/stored_values.rs",
+      "capability": "Stored VALUES lifecycle",
+      "workload": "48 PostgreSQL reference messages for accepted SQL-standard statement kinds, VALUES routines and catalog changes across memory, SQLite, SQLite K/V and redb, with committed definitions reopened before use.",
+      "invariant": "Results and diagnostics match PostgreSQL; unrelated view and column changes succeed while used columns remain protected.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     },
     {
       "package": "uqa-sql",
