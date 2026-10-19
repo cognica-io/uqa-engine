@@ -58,6 +58,14 @@ fn verify_streamed_document_values(engine: &Engine) {
             vec![Value::Int(7), Value::Int(11)],
         ),
         (
+            "SELECT value, known FROM docs d CROSS JOIN known_view k",
+            vec![Value::Int(7), Value::Int(11)],
+        ),
+        (
+            "WITH known_rows AS (SELECT known FROM known_view) SELECT value, known FROM docs d CROSS JOIN known_rows k",
+            vec![Value::Int(7), Value::Int(11)],
+        ),
+        (
             "SELECT _doc_id, value FROM docs",
             vec![Value::Int(1), Value::Int(7)],
         ),
@@ -142,7 +150,7 @@ fn streamed_document_fields_survive_ctes_and_reopen(#[case] provider: usize) {
     engine.create_default_table("docs", Vec::new()).unwrap();
     engine
         .sql(
-            "CREATE TABLE known(known integer); INSERT INTO known VALUES(11)",
+            "CREATE TABLE known(known integer); INSERT INTO known VALUES(11); CREATE VIEW known_view AS SELECT known, known+1 AS unused FROM known",
             &[],
         )
         .unwrap();

@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Check view and folded CTE routine privileges against the selected executable expressions before row production, including lateral and scalar correlation, `LIMIT 0`, `EXPLAIN`, and preceding sequence effects; retain materialized CTE and set-returning function requirements.
+
 - Restrict combined set-operation ORDER BY to output names and positions, preserving PostgreSQL clause-analysis order, literal and ordinal diagnostics, hidden operand names, prepared values and stored views.
 
 - Reject utility commands in SQL-standard function and procedure definitions with PostgreSQL diagnostics, preserving nested query and CALL analysis, statement error order, quoted bodies and transactional catalog state.

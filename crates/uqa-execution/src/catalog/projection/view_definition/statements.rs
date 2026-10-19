@@ -419,6 +419,7 @@ impl Deparser<'_> {
             .1;
         self.source_columns(
             &SourcePlan::Table {
+                executable_query: None,
                 name: target.table.to_string(),
                 qualifier: target.alias.map_or(local, str::to_string),
                 alias: target.alias.map(str::to_string),

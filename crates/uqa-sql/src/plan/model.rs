@@ -237,6 +237,9 @@ pub struct TableFunctionPlan {
 pub enum SourcePlan {
     Table {
         name: String,
+        /// The statement's prepared view or folded CTE. Stored syntax never retains an execution-specific projection or folded value.
+        #[serde(skip)]
+        executable_query: Option<Box<QueryPlan>>,
         #[serde(default)]
         qualifier: String,
         alias: Option<String>,

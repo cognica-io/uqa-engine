@@ -55,6 +55,7 @@ impl Collector<'_> {
         path: &str,
     ) -> Result<(), SQLError> {
         let SourcePlan::Table {
+            executable_query: _,
             name,
             qualifier,
             alias,
