@@ -122,13 +122,12 @@ fn analyze_inputs(
             _ => {}
         }
     }
-    let dependencies = crate::binding::preparation::read_procedural_inputs(
+    let analysis = crate::binding::preparation::read_procedural_inputs(
         context.routines,
         plan,
         params,
         binding,
         context.aliases,
     )?;
-    let result = super::analyze_bound_result(context.routines, plan, params, binding)?;
-    Ok((result, dependencies))
+    Ok((analysis.result, analysis.dependencies))
 }

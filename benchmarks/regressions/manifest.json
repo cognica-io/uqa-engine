@@ -14863,7 +14863,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -15308,6 +15308,58 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_analysis_derives_each_query_result_once",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "Shared ordered statement analysis",
+      "workload": "SELECT and five query-bearing command forms, including EXPLAIN.",
+      "invariant": "Each complete block result is analyzed once; later adapters reuse the selected schema."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_analysis_retains_postgresql_result_metadata",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "Shared ordered statement analysis",
+      "workload": "PostgreSQL output descriptions for typmods, unknown values, VALUES, modifying CTEs, RETURNING and duplicate column labels.",
+      "invariant": "Names, positional declared types and collations match the independent PostgreSQL reference."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_analysis_retains_parameter_identity_and_anonymous_record_fields",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "Shared ordered statement analysis",
+      "workload": "Declared parameter types and an anonymous ROW in one output schema.",
+      "invariant": "The original parameter identity and complete field types survive input normalization."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_analysis_keeps_its_first_query_schema_and_dependency_scope",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/procedural.rs",
+      "capability": "Shared ordered statement analysis",
+      "workload": "A procedural query occurrence with a numeric modifier under one retained binding scope.",
+      "invariant": "One block analysis preserves the result modifier and releases the original catalog scope."
     }
   ]
 }
