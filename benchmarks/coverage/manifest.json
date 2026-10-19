@@ -51,6 +51,10 @@
       "tokens": ["bench_external_analytical", "uqa_cursor"]
     },
     {
+      "path": "crates/uqa-engine/benches/regex_predicates.rs",
+      "tokens": ["regex_predicates", "equality", "literal", "character_class", "Value::Int(10_000)", "SamplingMode::Linear"]
+    },
+    {
       "path": "crates/uqa-engine/benches/compiler.rs",
       "tokens": [
         "compile_dml_delete",
