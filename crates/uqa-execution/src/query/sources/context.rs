@@ -31,12 +31,14 @@ pub trait SourcePlanning<S: Clone>: Sync {
         source: &SourcePlan,
         filter: Option<&ScalarExpr>,
         scope: &CteScope<S>,
+        schema: Option<&crate::RowSchema>,
     ) -> Result<Option<ColumnPrune>, SQLError>;
     fn column_prune(
         &self,
         statement: &QueryBlockPlan,
         source: &SourcePlan,
         scope: &CteScope<S>,
+        schema: Option<&crate::RowSchema>,
     ) -> Result<Option<ColumnPrune>, SQLError>;
     fn qualifier_filters(
         &self,

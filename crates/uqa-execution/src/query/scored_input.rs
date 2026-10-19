@@ -635,6 +635,15 @@ impl ScoredDocumentSource {
         self
     }
 
+    /// Open document fields are explicitly addressable without expanding the source's declared wildcard row.
+    pub fn without_wildcard_columns(mut self) -> Self {
+        self.schema = crate::RowSchema::with_wildcard_hidden_positions(
+            &self.schema,
+            0..self.schema.columns().len(),
+        );
+        self
+    }
+
     /// Keep the catalog's whole-row identity alongside selected fields and hidden retrieval metadata.
     pub fn with_row_type(
         mut self,

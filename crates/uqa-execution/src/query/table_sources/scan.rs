@@ -102,7 +102,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
         .as_ref()
         .map(SourceProjection::metadata)
         .unwrap_or_default();
-    let table_columns = uqa_sql::semantics::bound_source_column_names(
+    let mut table_columns = uqa_sql::semantics::bound_source_column_names(
         root_table
             .columns
             .iter()
@@ -119,6 +119,12 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
                 column_aliases.len()
             ),
         });
+    }
+    let open_document = root_table.columns.is_empty() && !root_table.columns_declared;
+    if open_document {
+        if let Some(wanted) = &wanted {
+            table_columns.extend(requested_document_fields(wanted));
+        }
     }
     // The name a filter writes for each column of the table: its alias, or its own name.
     let visible_names = table_columns
@@ -150,12 +156,16 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
         })
         .collect::<Vec<_>>();
     let (mut columns, mut schema): (Vec<_>, Vec<_>) = selected_columns.into_iter().unzip();
-    let include_table_oid = wanted
-        .as_ref()
-        .is_some_and(|wanted| wanted.contains(TABLE_OID_COLUMN));
-    let include_xmin = wanted
-        .as_ref()
-        .is_some_and(|wanted| wanted.contains(XMIN_COLUMN));
+    let include_table_oid = wanted.as_ref().is_some_and(|wanted| {
+        wanted
+            .requested_columns()
+            .any(|column| column == TABLE_OID_COLUMN)
+    });
+    let include_xmin = wanted.as_ref().is_some_and(|wanted| {
+        wanted
+            .requested_columns()
+            .any(|column| column == XMIN_COLUMN)
+    });
     if include_xmin {
         columns.push(XMIN_COLUMN.into());
         schema.push(XMIN_COLUMN.into());
@@ -174,6 +184,10 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
                 .map_err(SQLError::Internal)?,
         ),
     )?;
+    if open_document {
+        physical_schema =
+            crate::RowSchema::with_wildcard_hidden_positions(&physical_schema, 0..schema.len());
+    }
     let metadata_relation = uqa_sql::ast::InternalRelationId::allocate();
     let mut metadata_attributes = Vec::with_capacity(2);
     if metadata.includes_doc_id() {
@@ -379,6 +393,20 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
 fn expression_references_tableoid(expression: &crate::ScalarExpr) -> bool {
     let mut columns = std::collections::BTreeSet::new();
     expression.collect_columns(&mut columns) && columns.contains(TABLE_OID_COLUMN)
+}
+
+fn requested_document_fields(projection: &SourceProjection) -> Vec<String> {
+    let metadata = projection.metadata();
+    projection
+        .requested_columns()
+        .filter(|column| match *column {
+            XMIN_COLUMN | TABLE_OID_COLUMN => false,
+            uqa_sql::semantics::DOC_ID_COLUMN => !metadata.includes_doc_id(),
+            uqa_sql::semantics::SCORE_COLUMN => !metadata.includes_score(),
+            _ => true,
+        })
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Keep a scan's selected stored fields, public aliases and system-column metadata in one positional layout.

@@ -47,9 +47,10 @@ impl SourcePlanning<StatementReadSnapshot> for Engine {
         source: &SourcePlan,
         filter: Option<&ScalarExpr>,
         scope: &CteScope<StatementReadSnapshot>,
+        schema: Option<&uqa_sql::RowSchema>,
     ) -> Result<Option<ColumnPrune>, SQLError> {
         super::query_planning::column_prune_for_stmt_with_filter(
-            self, statement, source, filter, scope,
+            self, statement, source, filter, scope, schema,
         )
     }
     fn column_prune(
@@ -57,8 +58,9 @@ impl SourcePlanning<StatementReadSnapshot> for Engine {
         statement: &QueryBlockPlan,
         source: &SourcePlan,
         scope: &CteScope<StatementReadSnapshot>,
+        schema: Option<&uqa_sql::RowSchema>,
     ) -> Result<Option<ColumnPrune>, SQLError> {
-        super::query_planning::column_prune_for_stmt(self, statement, source, scope)
+        super::query_planning::column_prune_for_stmt(self, statement, source, scope, schema)
     }
     fn qualifier_filters(
         &self,
