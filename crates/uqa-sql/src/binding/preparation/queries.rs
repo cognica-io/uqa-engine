@@ -80,27 +80,12 @@ impl Preparation<'_> {
                 subqueries,
                 ..
             } => {
-                let left = self.query_output(left, outer, true)?;
-                let right = self.query_output(right, outer, true)?;
-                let output = self.set_output(left, right, *kind, *all)?;
-                let schema = output.schema();
-                for order in order_by {
-                    let value = self.alias_expression(
-                        &order.expr,
-                        &output,
-                        &schema,
-                        &schema,
-                        subqueries,
-                        "ORDER BY",
-                    )?;
-                    if let Some(ty) = value.ty {
-                        crate::type_resolution::ComparisonSupport::Ordering
-                            .require_in_catalog(&ty, self.routines)?;
-                    }
-                    self.parameters
-                        .collations
-                        .require_key(&order.expr, value.derivation);
-                }
+                let mut left_output = self.query_output(left, outer, true)?;
+                let mut right_output = self.query_output(right, outer, true)?;
+                left_output.retain_set_operand_names(left);
+                right_output.retain_set_operand_names(right);
+                let output = self.set_output(left_output, right_output, *kind, *all)?;
+                self.set_ordering(order_by, &output, subqueries)?;
                 let input = overlay_outer_schema(&RowSchema::default(), outer);
                 self.slice(limit.as_deref(), offset.as_deref(), &input, subqueries)?;
                 Ok(output)
@@ -111,7 +96,7 @@ impl Preparation<'_> {
     pub(super) fn set_output(
         &mut self,
         mut left: QueryOutput,
-        right: QueryOutput,
+        mut right: QueryOutput,
         kind: crate::ast::SetOpKind,
         all: bool,
     ) -> Result<QueryOutput, SQLError> {
@@ -162,6 +147,7 @@ impl Preparation<'_> {
             *left = result;
         }
         left.key_origins.clear();
+        left.set_sources.append(&mut right.set_sources);
         Ok(left)
     }
 
@@ -357,6 +343,7 @@ impl Preparation<'_> {
             types: Vec::new(),
             open: false,
             key_origins: Vec::new(),
+            set_sources: Vec::new(),
         };
         for projection in projections {
             let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
@@ -473,6 +460,7 @@ impl Preparation<'_> {
         Ok(QueryOutput {
             open: false,
             key_origins: Vec::new(),
+            set_sources: Vec::new(),
             columns: (1..=width)
                 .map(|position| format!("column{position}"))
                 .collect(),
@@ -480,7 +468,7 @@ impl Preparation<'_> {
         })
     }
 
-    fn alias_expression(
+    pub(super) fn alias_expression(
         &mut self,
         expression: &ScalarExpr,
         output: &QueryOutput,

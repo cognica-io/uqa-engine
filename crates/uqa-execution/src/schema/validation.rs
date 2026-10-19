@@ -136,13 +136,26 @@ pub fn validate_not_null_rows(
     table: &str,
     column: &str,
 ) -> Result<(), SQLError> {
+    validate_not_null_columns(reads, table, &[column])
+}
+
+/// Validate retained NOT NULL requirements in physical column order with one row traversal.
+pub fn validate_not_null_columns(
+    reads: &dyn MutationRead,
+    table: &str,
+    columns: &[&str],
+) -> Result<(), SQLError> {
     let relation = uqa_core::RelationIdentity::from_legacy_name(table)
         .map_err(|error| SQLError::Internal(format!("resolve NOT NULL relation: {error}")))?;
     for doc_id in reads.live_table_doc_ids(table)? {
         let Some(document) = reads.get_document(table, doc_id)? else {
             continue;
         };
-        if matches!(document.get(column), None | Some(Value::Null)) {
+        if let Some(column) = columns
+            .iter()
+            .copied()
+            .find(|column| matches!(document.get(*column), None | Some(Value::Null)))
+        {
             return Err(constraint_error(
                 "23502",
                 format!(

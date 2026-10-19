@@ -27,6 +27,7 @@ pub(crate) use routines::{
 };
 mod schema_expressions;
 mod set_contexts;
+mod set_ordering;
 mod sources;
 #[cfg(test)]
 mod tests;
@@ -538,6 +539,8 @@ struct QueryOutput {
     open: bool,
     /// Sparse original targets for indeterminate output collations; addresses are never dereferenced.
     key_origins: Vec<(usize, std::ptr::NonNull<ScalarExpr>)>,
+    /// Leaf output names of this set-operation query, retained only for inaccessible-column diagnostics.
+    set_sources: Vec<Vec<String>>,
 }
 
 impl QueryOutput {
