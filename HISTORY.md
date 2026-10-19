@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Added a released-package TPC-H comparison that validates an installed `usql` and a local PostgreSQL 18 server against the checked-in PostgreSQL 18 results and times both in alternating rounds. The 0.6.0 measurement and the latency regression since the 2026-08-09 snapshot, tracked in #1108, are recorded in the TPC-H benchmark README.
+
 ### Fixed
 
 - Reject utility commands in SQL-standard function and procedure definitions with PostgreSQL diagnostics, preserving nested query and CALL analysis, statement error order, quoted bodies and transactional catalog state.
