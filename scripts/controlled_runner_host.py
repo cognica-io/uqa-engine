@@ -67,7 +67,8 @@ class ControlledHost:
                               ("cc", "/usr/bin/gcc", "--version"),
                               ("ld", "/usr/bin/ld", "--version"))}
         self.build_environment = digest({"toolchain": self.toolchain, "profile": "bench",
-                                         "incremental": False, "features": "default + target-required", "schema": 2})
+                                         "incremental": False, "features": "default + target-required",
+                                         "source_policy": "one canonical build checkout", "schema": 3})
         self.make_writable(self.workspace)
 
     def make_writable(self, path: Path):
@@ -132,15 +133,20 @@ class ControlledHost:
 
     def build(self, revision: str, role: str, claims: bool) -> dict:
         self.progress("build", role=role, revision=revision)
+        source_tree = self.git("rev-parse", revision + "^{tree}")
         expected = {"analytical_comparison", "row_claim_contention"} if claims else {"analytical_comparison"}
         for record in BINARY_ROOT.glob("*/artifacts.json"):
             cached = json.loads(record.read_text())
             if set(cached) == expected and all(item["revision"] == revision
                     and item.get("build_environment") == self.build_environment
+                    and item.get("source_path") == str(REPOSITORY.resolve())
+                    and item.get("source_tree") == source_tree
                     and file_hash(Path(item["path"])) == item["sha256"] for item in cached.values()):
                 (self.output / (role + "-build.json")).write_text(json.dumps(cached, indent=2) + "\n")
                 return cached
-        source = self.source(revision, role)
+        # Cargo fingerprints are shared by workspace targets. A second checkout's old timestamps can make another revision's executable appear fresh.
+        source = self.source(revision, "reference")
+        self.prepare_build_cache(source)
         metadata_output = self.unit("metadata-" + role,
             [str(self.rust_bin / "cargo"), "metadata", "--no-deps", "--format-version", "1", "--locked", "--offline"],
             source)
@@ -161,6 +167,10 @@ class ControlledHost:
                 continue
             if name not in {"analytical_comparison", "row_claim_contention"}:
                 continue
+            manifest_path = Path(row["manifest_path"]).resolve()
+            source_path = Path(row["target"]["src_path"]).resolve()
+            if not manifest_path.is_relative_to(source.resolve()) or not source_path.is_relative_to(source.resolve()):
+                raise QualificationError("Cargo artifact does not belong to the canonical source checkout")
             profile = row["profile"]
             if profile["opt_level"] != "3" or profile["debug_assertions"]:
                 raise QualificationError("timing requires the optimized benchmark profile")
@@ -173,12 +183,34 @@ class ControlledHost:
             destination.chmod(0o555)
             artifacts[name] = {"path": str(destination), "sha256": file_hash(destination),
                                "revision": revision, "profile": profile, "features": row["features"],
-                               "build_environment": self.build_environment}
+                               "build_environment": self.build_environment,
+                               "source_path": str(source.resolve()), "source_tree": source_tree,
+                               "artifact_manifest_path": str(manifest_path), "artifact_src_path": str(source_path)}
         if set(artifacts) != expected:
             raise QualificationError("Cargo omitted a required controlled workload")
+        if self.git("rev-parse", "HEAD", cwd=source) != revision or self.git("status", "--porcelain", cwd=source):
+            raise QualificationError("canonical source changed during the build")
         (BINARY_ROOT / role / "artifacts.json").write_text(json.dumps(artifacts, indent=2) + "\n")
         (self.output / (role + "-build.json")).write_text(json.dumps(artifacts, indent=2) + "\n")
         return artifacts
+
+    def prepare_build_cache(self, source: Path):
+        """Invalidate pre-existing multi-checkout output once, then reuse one canonical Cargo build tree."""
+        if source.resolve() != REPOSITORY.resolve():
+            raise QualificationError("build cache requires the canonical source checkout")
+        target = REPOSITORY / "target" / "reference"
+        marker = target / "source-checkout.json"
+        identity = {"schema": 1, "source_path": str(source.resolve())}
+        try:
+            cached = json.loads(marker.read_text())
+        except (OSError, ValueError):
+            cached = None
+        if cached == identity:
+            return
+        self.unit("clean-legacy-build-output", [str(self.rust_bin / "cargo"), "clean", "--profile", "bench",
+                  "--target-dir", str(target)], source)
+        self.make_writable(target)
+        marker.write_text(json.dumps(identity) + "\n")
 
     def isolate(self) -> dict:
         self.progress("establish-host-control")

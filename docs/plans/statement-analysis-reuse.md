@@ -13,10 +13,12 @@ The correction adds no dependency or feature and changes no value operator or re
 - [x] Reproduce repeated block analysis with a deterministic owner test before changing product code.
 - [x] Transfer the already-derived result through ordinary and procedural statement analysis.
 - [x] Check output names and declared types independently with PostgreSQL 18.4 in Docker.
-- [ ] Finish local owner, exact TPC-H, procedural and prepared-result validation on the delivery branch.
-- [ ] Review accounting, error precedence and dependency/ownership checks; update HISTORY and the PR body.
-- [ ] Verify actual automatic Linux and macOS bounded-work, memory and output results for the delivered source.
+- [x] Finish local owner, exact TPC-H, procedural and prepared-result validation on the delivery branch.
+- [x] Review accounting, error precedence and dependency/ownership checks; update HISTORY and the PR body.
+- [x] Verify actual automatic Linux and macOS bounded-work, memory and output results for the delivered source.
 - [ ] Merge this correction and remove its branch.
+
+Local validation passes 2,120 SQL unit tests, 67 integration tests and 1,469 selected Engine cases, including all 22 TPC-H fixtures. Automatic run 39307635675 passes actual Linux and macOS execution: each report contains 1,143 checks / 1,643 cases and eight process histories, with zero failures, errors or skips. Both downloaded reports independently match source `4645582ad1eb5652df0274139c4dd389fad2e4cb`, tree `6cbb365c0d9ac358376f0f38a52c043287c9af64` and every selected source/case identity. The subsequent main reconciliation changes documentation and controller/selection files only; all product and regression inputs are identical.
 
 This change does not close #1117: execution-time block binding, nested privilege coverage and outer-scope composition remain. The fixed TPC-H fixture, original diagnostics and controlled timing criteria remain required for the complete issue.
 
@@ -24,9 +26,9 @@ This change does not close #1117: execution-time block binding, nested privilege
 
 | Issue | Preserved work |
 | --- | --- |
-| #1063 | PR #1133 implements admitted regex reuse; actual automatic regression checks and the fixed controlled comparison are pending. |
+| #1063 | PR #1133 implements admitted regex reuse; Linux execution passes. An earlier-source controlled comparison passed all three fixed cases; final-source timing and macOS execution remain pending. |
 | #348 | Remove SQLite's published dependency flag without hiding downstream Rust type/native-link compatibility; the reviewed fork delivery choice is pending. |
 | #714 | PR #1134 implements bounded incremental encoding; query-result production is still materialized and needs its own correction. |
-| #1108 | Retain selected cast/operator descriptors through execution; preserve temporal settings, exact output and the original controlled historical comparison. |
+| #1108 | PR #1137 retains builtin numeric cast descriptors with deterministic 10,000-row evidence. Remaining operators, nonnumeric casts and controlled historical comparison stay open. |
 | #1117 | This correction removes the duplicate statement-result pass; block binding, privilege lineage, outer scopes and controlled comparison remain open. |
 | #653 | Diagnose retained instruction-throughput variation; historical inconclusive measurements remain unchanged. |

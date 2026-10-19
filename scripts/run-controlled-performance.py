@@ -160,11 +160,14 @@ def execute(host, revision):
     artifacts = host.build(REFERENCE, "reference", False)
     if json.loads((source / "benchmarks/analytical/manifest.json").read_text()) != analytical:
         raise QualificationError("immutable analytical reference workload differs")
-    reference = (source, artifacts["analytical_comparison"])
     claim_artifacts = host.build(claims["reference_revision"], "claims-reference", True)
-    # A claim-reference cache miss may have used the shared candidate checkout.
-    head_source = host.source(revision, "head")
     head_artifacts = host.build(revision, "head", True)
+    # Builds use one canonical checkout; restore each workload's immutable runtime files only after every executable is retained.
+    source = host.source(REFERENCE, "reference")
+    head_source = host.source(revision, "head")
+    if json.loads((source / "benchmarks/analytical/manifest.json").read_text()) != analytical:
+        raise QualificationError("restored analytical reference workload differs")
+    reference = (source, artifacts["analytical_comparison"])
     control = host.isolate()
     environment = digest(control)
     analytical_protocol = controlled_analytical_protocol(analytical["regression_protocol"])
