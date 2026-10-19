@@ -12,6 +12,9 @@ use crate::ast::ColumnType;
 
 use super::{ColumnIdentity, RowSchema, SchemaBuildMetadata, SchemaSet, NULL_SLOT};
 
+#[cfg(test)]
+mod tests;
+
 impl RowSchema {
     /// Overlay a statically typed correlated outer scope. The outer columns remain hidden from schema iteration and star expansion, but both qualified and unqualified lookup aliases retain their declared SQL types for expression binding.
     pub fn with_typed_outer_scope(
@@ -315,7 +318,7 @@ impl RowSchema {
             })
             .map(|(identity, ty)| (identity.clone(), ty.cloned()))
             .collect::<Vec<_>>();
-        let mut schema = Self::with_typed_virtual_identities(&schema, &virtual_identities);
+        let mut schema = Self::with_owned_virtual_identities(schema, &virtual_identities);
         let index = std::sync::Arc::make_mut(&mut schema.index);
         for (identity, _) in &virtual_identities {
             if input.index.cold.binding_only.contains_key(identity) {
