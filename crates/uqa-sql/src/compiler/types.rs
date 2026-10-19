@@ -6,6 +6,9 @@
 
 //! Column type and foreign-key constraint lowering helpers.
 
+use std::collections::HashMap;
+use std::sync::{LazyLock, RwLock};
+
 use pg_query::protobuf::Node;
 use pg_query::NodeEnum;
 
@@ -43,8 +46,31 @@ fn scanner_isspace(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
 }
 
+/// A parsed type name is a function of its spelling alone, so each distinct spelling is parsed once per process. Reaching the bound discards the retained spellings instead of growing.
+static PARSED_TYPE_NAMES: LazyLock<RwLock<HashMap<Box<str>, Option<ParsedRegtypeName>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+const RETAINED_TYPE_NAMES: usize = 4096;
+
 /// Parse exactly one `PostgreSQL` type-name string without accepting adjacent SQL expressions. `None` is the soft-failure shape used for inputs such as an empty string or `SETOF integer`; lexical and type-name syntax errors are retained for the caller.
 pub fn parse_regtype_name(input: &str) -> Result<Option<ParsedRegtypeName>> {
+    let retained = PARSED_TYPE_NAMES
+        .read()
+        .ok()
+        .and_then(|names| names.get(input).cloned());
+    if let Some(parsed) = retained {
+        return Ok(parsed);
+    }
+    let parsed = parse_regtype_name_text(input)?;
+    if let Ok(mut names) = PARSED_TYPE_NAMES.write() {
+        if names.len() >= RETAINED_TYPE_NAMES {
+            names.clear();
+        }
+        names.insert(input.into(), parsed.clone());
+    }
+    Ok(parsed)
+}
+
+fn parse_regtype_name_text(input: &str) -> Result<Option<ParsedRegtypeName>> {
     if input.bytes().all(scanner_isspace) {
         return Ok(None);
     }
@@ -647,3 +673,6 @@ fn expect_integer_const(node: &Node) -> Result<i64> {
         ))),
     }
 }
+
+#[cfg(test)]
+mod tests;
