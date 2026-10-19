@@ -15867,6 +15867,32 @@
       "capability": "Shared ordered statement analysis",
       "workload": "A procedural query occurrence with a numeric modifier under one retained binding scope.",
       "invariant": "One block analysis preserves the result modifier and releases the original catalog scope."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "nested_privilege_analysis_does_not_copy_outer_column_lineage",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/semantics/privileges.rs",
+      "capability": "Borrowed correlated privilege lineage",
+      "workload": "Analyze a 1024-column relation through 24 nested scalar-query scopes, then authorize the selected outer column.",
+      "invariant": "Total allocations stay below 4MiB while the original ordered column privilege check is preserved; outer lineage maps are not copied per nested scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "borrowed_privilege_scopes_preserve_correlated_and_join_requirements",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/semantics/privileges.rs",
+      "capability": "Nested privilege scope correctness",
+      "workload": "Correlated scalar queries, ON/USING joins and LATERAL with column grants and a denied nested column, independently checked on PostgreSQL18.4.",
+      "invariant": "Preserve the invoking role, ordered base-column authorization and nested42501 denial while borrowing immutable scopes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

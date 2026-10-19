@@ -35,13 +35,23 @@ The first binder's contract derives its returned schema from the exact routine i
 
 These corrections do not close #1117: repeated validation context construction, nested privilege coverage and outer-scope composition remain. The fixed TPC-H fixture, original diagnostics and controlled timing criteria remain required for the complete issue.
 
+## Borrowed privilege lineage
+
+SQL privilege analysis previously copied complete outer column-lineage maps while extending lexical scope for nested scalar queries, joins and LATERAL inputs. The owning analysis now passes borrowed immutable lineage references in the same inner-to-outer order. A join builds its separate ON scope only when an ON expression exists. No privilege analysis or catalog callback is omitted; view-owner, CTE and routine subjects retain their existing paths.
+
+The source lineages remain alive for their nested synchronous analysis, and their contents do not mutate through these references. Substituting a reference for an owned clone preserves every qualified/unqualified lookup, shadowing decision, required-column union and ordered authorization call. The unused ON-scope construction had no semantic callbacks. This changes metadata ownership only, without changing query values, multiplicity, SQL evaluation or diagnostics.
+
+The allocation regression retains a 1024-column outer relation and 24 nested scalar blocks. Before the correction it allocates 31,935,877 bytes and fails the fixed 4MiB ceiling; the same workload passes afterward. The owning SQL tests preserve correlated, ON/USING and LATERAL requirements, the invoking role and nested 42501 rejection. Independent PostgreSQL 18.4 returns the expected four result values and denies the same nested column. All 2,218 local SQL library/integration cases pass, including the unchanged maximum-size allocation rejection test. The allocation checks use the existing SQL integration harness so their global counting allocator does not alter library boundary tests. Strict SQL library/test Clippy and formatting pass. Final platform qualification remains pending.
+
+The fixture constructs the same 24-level logical plan directly because compiling its SQL spelling independently exposed the protobuf recursion defect [#1146](https://github.com/cognica-io/uqa-engine/issues/1146). PostgreSQL accepts that spelling. The parser defect remains separate; no fixture-depth reduction or larger process stack is used to satisfy the lineage allocation check.
+
 ## Original performance task records
 
 | Issue | Preserved work |
 | --- | --- |
-| #1063 | PR #1133 implements admitted regex reuse; Linux execution passes. An earlier-source controlled comparison passed all three fixed cases; final-source timing and macOS execution remain pending. |
-| #348 | Remove SQLite's published dependency flag without hiding downstream Rust type/native-link compatibility; the reviewed fork delivery choice is pending. |
-| #714 | PR #1134 implements bounded incremental encoding; query-result production is still materialized and needs its own correction. |
-| #1108 | PR #1137 retains builtin numeric cast descriptors with deterministic 10,000-row evidence. Remaining operators, nonnumeric casts and controlled historical comparison stay open. |
-| #1117 | This correction removes the duplicate statement-result pass; block binding, privilege lineage, outer scopes and controlled comparison remain open. |
-| #653 | Diagnose retained instruction-throughput variation; historical inconclusive measurements remain unchanged. |
+| #1063 | PR #1133 at `d64c09e2b` passes 42 local SQL cases; final automatic platform checks and its exact-source controlled comparison are in progress. Earlier accepted timing remains scoped to `a7022cf0a`. |
+| #348 | Managed driver publication is complete. PR #1144 passes 63 local cases and twelve legacy lifecycle scenarios; current-source Linux qualification passes and macOS remains pending. |
+| #714 | PR #1134 incremental encoding, #1142 bounded SELECT/output rollback and #1145 ordinary RETURNING/CTE delivery are locally verified. Rewrite-rule action/capture ownership and final platform/public-path acceptance remain. |
+| #1108 | PR #1137 retains numeric descriptors with 10,000-row work evidence and current-source Linux qualification. Nonnumeric/operator/routine reuse and controlled historical comparison remain. |
+| #1117 | Statement-result reuse is merged; executable source reuse and borrowed privilege lineage are delivered by this PR. Further block/outer-schema reuse, nested privilege coverage and controlled acceptance remain. |
+| #653 | Main run 39317722346 independently passes all twenty controlled comparisons and stops EC2 afterward. The historical instruction-throughput variation remains unexplained. |
