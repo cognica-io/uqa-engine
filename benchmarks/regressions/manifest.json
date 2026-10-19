@@ -14672,6 +14672,32 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_introspection_binds_before_integer_width_is_erased",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/tests.rs",
+      "capability": "Declared type observation",
+      "workload": "Bind a smallint column before its physical integer value erases width.",
+      "invariant": "The result remains regtype with the selected PostgreSQL type OID; the original argument remains in the call for normal evaluation instead of being discarded by constant substitution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "qualified_type_introspection_binds_inside_an_expression",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/tests.rs",
+      "capability": "Declared type observation",
+      "workload": "Bind a qualified pg_typeof call under IS NULL over a declared real column.",
+      "invariant": "The result remains regtype with the selected PostgreSQL type OID; the original argument remains in the call for normal evaluation instead of being discarded by constant substitution.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -543,14 +543,26 @@ fn type_introspection_binds_before_integer_width_is_erased() {
         order_by: Vec::new(),
         filter: None,
     };
+    let bound = bind_type_introspection(expression, &schema, &[]);
     assert_eq!(
-        bind_type_introspection(expression, &schema, &[]),
-        ScalarExpr::Cast {
-            implicit: true,
-            expr: Box::new(ScalarExpr::Literal(Value::Int(21))),
-            ty: "pg_catalog.\"regtype\"".into(),
-        }
+        scalar_type(&bound, &schema, &[]).unwrap(),
+        Some(ColumnType::Regtype)
     );
+    let ScalarExpr::Func {
+        binding: Some(binding),
+        args,
+        ..
+    } = bound
+    else {
+        panic!("type observation must preserve its argument evaluation");
+    };
+    assert_eq!(
+        binding.dispatch,
+        Some(FunctionDispatch::TypeOf { type_oid: 21 })
+    );
+    assert_eq!(binding.name, "pg_catalog.pg_typeof");
+    assert_eq!(binding.argument_types, ["any"]);
+    assert_eq!(args, [ScalarExpr::Column("v".into())]);
 }
 
 #[test]
@@ -663,17 +675,32 @@ fn qualified_type_introspection_binds_inside_an_expression() {
         }),
         negated: false,
     };
+    let ScalarExpr::IsNull { expr, negated } = bind_type_introspection(expression, &schema, &[])
+    else {
+        panic!("the surrounding expression must be retained");
+    };
+    assert!(!negated);
     assert_eq!(
-        bind_type_introspection(expression, &schema, &[]),
-        ScalarExpr::IsNull {
-            expr: Box::new(ScalarExpr::Cast {
-                implicit: true,
-                expr: Box::new(ScalarExpr::Literal(Value::Int(700))),
-                ty: "pg_catalog.\"regtype\"".into(),
-            }),
-            negated: false,
-        }
+        scalar_type(&expr, &schema, &[]).unwrap(),
+        Some(ColumnType::Regtype)
     );
+    let ScalarExpr::Func {
+        name,
+        binding: Some(binding),
+        args,
+        ..
+    } = *expr
+    else {
+        panic!("qualified type observation must preserve its argument evaluation");
+    };
+    assert_eq!(name, "PG_CATALOG.PG_TYPEOF");
+    assert_eq!(
+        binding.dispatch,
+        Some(FunctionDispatch::TypeOf { type_oid: 700 })
+    );
+    assert_eq!(binding.name, "pg_catalog.pg_typeof");
+    assert_eq!(binding.argument_types, ["any"]);
+    assert_eq!(args, [ScalarExpr::Column("v".into())]);
 }
 
 #[test]
