@@ -88,3 +88,91 @@ fn routine_name_failure_releases_partial_scratch_and_keeps_cancellation() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn builtin_scalar_overload_names_match_sql_name_normalization() {
+    let control = ProductionControl::uncontrolled();
+    for ty in [
+        ColumnType::SmallInteger,
+        ColumnType::Integer,
+        ColumnType::BigInteger,
+        ColumnType::Real,
+        ColumnType::DoublePrecision,
+        ColumnType::Numeric {
+            precision: None,
+            scale: None,
+        },
+        ColumnType::Numeric {
+            precision: Some(15),
+            scale: Some(2),
+        },
+        ColumnType::Numeric {
+            precision: Some(10),
+            scale: Some(-2),
+        },
+        ColumnType::Boolean,
+        ColumnType::Text,
+        ColumnType::Name,
+        ColumnType::Varchar(None),
+        ColumnType::Varchar(Some(25)),
+        ColumnType::Bpchar,
+        ColumnType::Character(1),
+        ColumnType::Character(10),
+        ColumnType::Date,
+        ColumnType::Time,
+        ColumnType::TimePrecision(3),
+        ColumnType::TimeTz,
+        ColumnType::TimeTzPrecision(0),
+        ColumnType::Timestamp,
+        ColumnType::TimestampPrecision(6),
+        ColumnType::TimestampTz,
+        ColumnType::TimestampTzPrecision(2),
+        ColumnType::Interval,
+        ColumnType::Bytea,
+        ColumnType::Uuid,
+        ColumnType::Json,
+        ColumnType::JsonB,
+        ColumnType::Oid,
+    ] {
+        let sql_name = ty.sql_name_with_control(&control).unwrap();
+        let normalized = canonical_routine_type_name_with_control(&sql_name, &control).unwrap();
+        assert_eq!(
+            builtin_canonical_type_name(&ty),
+            Some(normalized.as_str()),
+            "{ty:?} spelled {}",
+            sql_name.as_str()
+        );
+        assert_eq!(canonical_column_type_name(&ty), normalized.as_str());
+    }
+    for ty in [
+        ColumnType::Array(Box::new(ColumnType::Integer)),
+        ColumnType::Named("custom".into()),
+        ColumnType::Bit(Some(3)),
+        ColumnType::IntervalWithFields {
+            fields: crate::ast::IntervalFields::YearToMonth,
+            precision: None,
+        },
+    ] {
+        assert_eq!(builtin_canonical_type_name(&ty), None, "{ty:?}");
+    }
+}
+
+#[test]
+fn builtin_scalar_overload_names_retain_exact_reservations() {
+    let budget = MemoryBudget::new(64);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let name = canonical_column_type_name_with_control(
+        &ColumnType::Numeric {
+            precision: Some(15),
+            scale: Some(2),
+        },
+        &control,
+    )
+    .unwrap();
+    assert_eq!(&*name, "numeric");
+    assert_eq!(name.reserved_bytes(), name.capacity());
+    assert_eq!(budget.used(), name.reserved_bytes());
+    drop(name);
+    assert_eq!(budget.used(), 0);
+}
