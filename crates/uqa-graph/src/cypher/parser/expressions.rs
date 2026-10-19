@@ -13,70 +13,38 @@ use super::{
 
 impl Parser {
     pub(super) fn parse_expression(&mut self) -> Result<CypherExpr, ParseError> {
-        let expression = self.with_expression_recursion(Self::parse_or)?;
+        let expression = self.with_expression_recursion(|parser| parser.parse_precedence(1))?;
         self.check_expression_depth(&expression)?;
         Ok(expression)
     }
 
-    pub(super) fn parse_or(&mut self) -> Result<CypherExpr, ParseError> {
-        let mut left = self.parse_xor()?;
-        while self.match_keyword("OR") {
-            let right = self.parse_xor()?;
-            left = CypherExpr::BinaryOp(BinaryOp {
-                op: "OR".into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            });
-            self.check_expression_depth(&left)?;
-        }
-        Ok(left)
-    }
-
-    pub(super) fn parse_xor(&mut self) -> Result<CypherExpr, ParseError> {
-        let mut left = self.parse_and()?;
-        while self.match_keyword("XOR") {
-            let right = self.parse_and()?;
-            left = CypherExpr::BinaryOp(BinaryOp {
-                op: "XOR".into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            });
-            self.check_expression_depth(&left)?;
-        }
-        Ok(left)
-    }
-
-    pub(super) fn parse_and(&mut self) -> Result<CypherExpr, ParseError> {
-        let mut left = self.parse_not()?;
-        while self.match_keyword("AND") {
-            let right = self.parse_not()?;
-            left = CypherExpr::BinaryOp(BinaryOp {
-                op: "AND".into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            });
-            self.check_expression_depth(&left)?;
-        }
-        Ok(left)
-    }
-
-    pub(super) fn parse_not(&mut self) -> Result<CypherExpr, ParseError> {
-        if self.match_keyword("NOT") {
-            let operand = self.with_expression_recursion(Self::parse_not)?;
-            return Ok(CypherExpr::UnaryOp(UnaryOp {
+    // Climbing precedence avoids retaining the entire precedence ladder for every nested atom. Each binary family is left-associative, including AGE's power and chained comparisons.
+    fn parse_precedence(&mut self, minimum: u8) -> Result<CypherExpr, ParseError> {
+        let mut left = if minimum <= 4 && self.match_keyword("NOT") {
+            let operand = self.with_expression_recursion(|parser| parser.parse_precedence(4))?;
+            CypherExpr::UnaryOp(UnaryOp {
                 op: "NOT".into(),
                 operand: Box::new(operand),
-            }));
-        }
-        self.parse_comparison()
-    }
-
-    pub(super) fn parse_comparison(&mut self) -> Result<CypherExpr, ParseError> {
-        let mut left = self.parse_addition()?;
-
+            })
+        } else if self.match_kind(TokenKind::Minus).is_some() {
+            let operand = self.with_expression_recursion(|parser| parser.parse_precedence(9))?;
+            CypherExpr::UnaryOp(UnaryOp {
+                op: "-".into(),
+                operand: Box::new(operand),
+            })
+        } else {
+            self.parse_postfix()?
+        };
         loop {
             self.check_expression_depth(&left)?;
-            if self.match_keyword("IS") {
+            let Some((precedence, operator)) = self.binary_operator() else {
+                break;
+            };
+            if precedence < minimum {
+                break;
+            }
+            self.advance();
+            if operator == "IS" {
                 left = if self.match_keyword("NOT") {
                     self.expect_keyword("NULL")?;
                     CypherExpr::IsNotNull(IsNotNull {
@@ -90,142 +58,57 @@ impl Parser {
                 };
                 continue;
             }
-
-            if self.match_keyword("IN") {
-                let right = self.parse_addition()?;
-                left = CypherExpr::InList(InList {
+            if matches!(operator, "STARTS WITH" | "ENDS WITH") {
+                self.expect_keyword("WITH")?;
+            }
+            let right = self.parse_precedence(precedence + 1)?;
+            left = if operator == "IN" {
+                CypherExpr::InList(InList {
                     expr: Box::new(left),
                     list_expr: Box::new(right),
-                });
-                continue;
-            }
-
-            if self.match_keyword("STARTS") {
-                self.expect_keyword("WITH")?;
-                let right = self.parse_addition()?;
-                left = CypherExpr::BinaryOp(BinaryOp {
-                    op: "STARTS WITH".into(),
+                })
+            } else {
+                CypherExpr::BinaryOp(BinaryOp {
+                    op: operator.into(),
                     left: Box::new(left),
                     right: Box::new(right),
-                });
-                continue;
-            }
-            if self.match_keyword("ENDS") {
-                self.expect_keyword("WITH")?;
-                let right = self.parse_addition()?;
-                left = CypherExpr::BinaryOp(BinaryOp {
-                    op: "ENDS WITH".into(),
-                    left: Box::new(left),
-                    right: Box::new(right),
-                });
-                continue;
-            }
-            if self.match_keyword("CONTAINS") {
-                let right = self.parse_addition()?;
-                left = CypherExpr::BinaryOp(BinaryOp {
-                    op: "CONTAINS".into(),
-                    left: Box::new(left),
-                    right: Box::new(right),
-                });
-                continue;
-            }
-
-            // `=~` regular-expression operator.
-            if self.match_kind(TokenKind::RegexMatch).is_some() {
-                let right = self.parse_addition()?;
-                left = CypherExpr::BinaryOp(BinaryOp {
-                    op: "=~".into(),
-                    left: Box::new(left),
-                    right: Box::new(right),
-                });
-                continue;
-            }
-
-            let op = match self.peek().kind {
-                TokenKind::Eq => Some("="),
-                TokenKind::Neq => Some("<>"),
-                TokenKind::Lt => Some("<"),
-                TokenKind::Gt => Some(">"),
-                TokenKind::Lte => Some("<="),
-                TokenKind::Gte => Some(">="),
-                _ => None,
+                })
             };
-            let Some(op) = op else {
-                break;
-            };
-            // Comparisons chain left-associatively in AGE:
-            // `1 < 2 < 3` evaluates as `(1 < 2) < 3`.
-            self.advance();
-            let right = self.parse_addition()?;
-            left = CypherExpr::BinaryOp(BinaryOp {
-                op: op.into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            });
         }
         Ok(left)
     }
 
-    pub(super) fn parse_addition(&mut self) -> Result<CypherExpr, ParseError> {
-        let mut left = self.parse_multiplication()?;
-        while matches!(self.peek().kind, TokenKind::Plus | TokenKind::Minus) {
-            let op = self.advance().value;
-            let right = self.parse_multiplication()?;
-            left = CypherExpr::BinaryOp(BinaryOp {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            });
-            self.check_expression_depth(&left)?;
+    fn binary_operator(&self) -> Option<(u8, &'static str)> {
+        for (keyword, precedence, operator) in [
+            ("OR", 1, "OR"),
+            ("XOR", 2, "XOR"),
+            ("AND", 3, "AND"),
+            ("IS", 5, "IS"),
+            ("IN", 5, "IN"),
+            ("STARTS", 5, "STARTS WITH"),
+            ("ENDS", 5, "ENDS WITH"),
+            ("CONTAINS", 5, "CONTAINS"),
+        ] {
+            if self.at_keyword(keyword) {
+                return Some((precedence, operator));
+            }
         }
-        Ok(left)
-    }
-
-    pub(super) fn parse_multiplication(&mut self) -> Result<CypherExpr, ParseError> {
-        let mut left = self.parse_power()?;
-        while matches!(
-            self.peek().kind,
-            TokenKind::Star | TokenKind::Slash | TokenKind::Percent
-        ) {
-            let op = self.advance().value;
-            let right = self.parse_power()?;
-            left = CypherExpr::BinaryOp(BinaryOp {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            });
-            self.check_expression_depth(&left)?;
+        match self.peek().kind {
+            TokenKind::Eq => Some((5, "=")),
+            TokenKind::Neq => Some((5, "<>")),
+            TokenKind::Lt => Some((5, "<")),
+            TokenKind::Gt => Some((5, ">")),
+            TokenKind::Lte => Some((5, "<=")),
+            TokenKind::Gte => Some((5, ">=")),
+            TokenKind::RegexMatch => Some((5, "=~")),
+            TokenKind::Plus => Some((6, "+")),
+            TokenKind::Minus => Some((6, "-")),
+            TokenKind::Star => Some((7, "*")),
+            TokenKind::Slash => Some((7, "/")),
+            TokenKind::Percent => Some((7, "%")),
+            TokenKind::Caret => Some((8, "^")),
+            _ => None,
         }
-        Ok(left)
-    }
-
-    pub(super) fn parse_power(&mut self) -> Result<CypherExpr, ParseError> {
-        // `^` binds tighter than `*` but looser than unary minus and
-        // chains left-associatively (AGE: `-2^2` = 4.0, `2^3^2` = 64.0).
-        let mut left = self.parse_unary()?;
-        while self.peek().kind == TokenKind::Caret {
-            self.advance();
-            let right = self.parse_unary()?;
-            left = CypherExpr::BinaryOp(BinaryOp {
-                op: "^".into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            });
-            self.check_expression_depth(&left)?;
-        }
-        Ok(left)
-    }
-
-    pub(super) fn parse_unary(&mut self) -> Result<CypherExpr, ParseError> {
-        if self.peek().kind == TokenKind::Minus {
-            self.advance();
-            let operand = self.with_expression_recursion(Self::parse_unary)?;
-            return Ok(CypherExpr::UnaryOp(UnaryOp {
-                op: "-".into(),
-                operand: Box::new(operand),
-            }));
-        }
-        self.parse_postfix()
     }
 
     pub(super) fn parse_postfix(&mut self) -> Result<CypherExpr, ParseError> {

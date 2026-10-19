@@ -14776,6 +14776,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "test",
+      "test": "expression_depth_boundary_is_consistent",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-graph/tests/cypher_fuzz.rs",
+      "capability": "Cypher parser stack and depth",
+      "workload": "Accepted and rejected nested lists, parentheses, NOT and addition chains at the existing depth-64 boundary on a 2 MiB thread stack.",
+      "invariant": "Depth 63 remains accepted and depth 64 reports ExpressionTooDeep without a native stack overflow or a larger stack."
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "test",
+      "test": "boolean_arithmetic_and_postfix_precedence_is_preserved",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-graph/tests/cypher_fuzz.rs",
+      "capability": "Cypher parser stack and depth",
+      "workload": "Boolean, arithmetic, comparison, membership, postfix and power expressions compared with explicit grouping, plus illegal NOT positions.",
+      "invariant": "Existing operator precedence and left associativity survive bounded precedence parsing without admitting invalid syntax."
     }
   ]
 }

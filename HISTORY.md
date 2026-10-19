@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Prevent native stack overflow in Cypher expression parsing while preserving operator precedence, associativity and the existing depth limit.
+
 - Correct factorial numeric range, bigint argument binding and PostgreSQL diagnostics, retaining exact results through 32177! with memory admission and cancellation.
 
 - Fix GROUP BY output errors for constant and nested expressions over single-row VALUES and subqueries, including grouping sets, HAVING and ORDER BY.
