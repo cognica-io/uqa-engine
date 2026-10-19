@@ -30,7 +30,7 @@ pub use connection_lease::SQLiteConnectionLease;
 pub use detect::{detect_database_file_format, DatabaseFileFormat};
 pub use document_store::SQLiteDocumentStore;
 pub use inverted_index::SQLiteInvertedIndex;
-/// The exact SQLite driver used by managed physical-connection callbacks.
+/// The exact `SQLite` driver used by managed physical-connection callbacks.
 pub use rusqlite;
 pub use uqa_storage::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignServerRow,

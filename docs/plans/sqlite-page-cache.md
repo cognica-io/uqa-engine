@@ -17,6 +17,6 @@ The SQLite provider owns the compiled-option and connection-local reclamation re
 - [ ] Verify UQA provider, spill and durable file-mode cases locally against the published dependencies, plus formatting and ownership checks.
 - [ ] Inspect actual automatic Linux/macOS work, memory and output regressions for the delivered UQA source, then merge and close #348.
 
-Current UQA local evidence: all 39 connection cases and all 11 encrypted temporary-storage/indexed-spill cases pass against the published packages. Native and Emscripten dependency graphs retain the expected features, optional foreign-handler isolation passes, and all 17 repository-policy unit tests pass. Durable Engine file modes, released-file migration and strict Clippy are still running or pending.
+Current UQA local evidence: all 39 connection cases, all 11 encrypted temporary-storage/indexed-spill cases and all 13 Engine durable file-mode cases pass against the published packages. Native and Emscripten dependency graphs retain the expected features, optional foreign-handler isolation passes, and all 17 repository-policy unit tests pass. Strict Clippy for the provider, Execution and Engine passes. The actual released-file migration verification is still running.
 
 These checks establish the compiled correction and behavior preservation. They do not claim a measured throughput gain, resolve historical measurement variance in #653 or close other performance issues.
