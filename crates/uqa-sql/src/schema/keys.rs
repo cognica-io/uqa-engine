@@ -18,6 +18,54 @@ pub struct AddedKeyRelation<'a> {
     pub partition: Option<&'a crate::ast::PartitionSpec>,
 }
 
+/// Check existing NOT NULL constraints while preparing a primary-key action, before any ALTER action changes the original columns or transforms the key declaration.
+pub fn validate_primary_key_not_null_constraints(
+    table: &str,
+    columns: &[ColumnDef],
+    key: &TableKeyConstraint,
+) -> Result<(), SQLError> {
+    if key.kind != TableKeyConstraintKind::PrimaryKey {
+        return Ok(());
+    }
+    for name in &key.columns {
+        let Some(column) = columns
+            .iter()
+            .find(|column| column.name == *name && column.not_null)
+        else {
+            continue;
+        };
+        let (property, hint) = if column.not_null_no_inherit {
+            (
+                "NO INHERIT",
+                "You might need to make the existing constraint inheritable using ALTER TABLE ... ALTER CONSTRAINT ... INHERIT.",
+            )
+        } else if !column.not_null_validated {
+            (
+                "NOT VALID",
+                "You might need to validate it using ALTER TABLE ... VALIDATE CONSTRAINT.",
+            )
+        } else {
+            continue;
+        };
+        let constraint = column
+            .not_null_name
+            .as_deref()
+            .ok_or_else(|| SQLError::Internal("existing NOT NULL constraint has no name".into()))?;
+        let relation =
+            uqa_core::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+        return Err(SQLError::Diagnostic {
+            sqlstate: "55000".into(),
+            message: format!("cannot create primary key on column \"{name}\""),
+            detail: Some(format!(
+                "The constraint \"{constraint}\" on column \"{name}\" of table \"{}\", marked {property}, is incompatible with a primary key.",
+                relation.name,
+            )),
+            hint: Some(hint.into()),
+        });
+    }
+    Ok(())
+}
+
 /// Validate a key that ALTER TABLE adds, before its index is named: its declaration as `transformIndexConstraint` checks it, a primary key's columns as the NOT NULL constraints that `ATPrepAddPrimaryKey` adds before the index, and then the checks of `DefineIndex`, which resolves the key's columns.
 pub fn validate_added_key(
     relation: &AddedKeyRelation<'_>,

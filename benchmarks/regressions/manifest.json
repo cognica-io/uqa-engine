@@ -8181,6 +8181,35 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "primary_key_not_null_preparation_matches_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/keys/tests.rs",
+      "capability": "Primary-key NOT NULL requirements",
+      "workload": "Independent PostgreSQL diagnostics for existing NO INHERIT and NOT VALID constraints, repeated or missing key columns, and a valid UNIQUE control.",
+      "invariant": "SQL preserves SQLSTATE, primary message, DETAIL, HINT and flag precedence without rejecting valid or unrelated declarations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "primary_key_not_null_requirements_match_postgresql_after_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_unique_constraint/not_null.rs",
+      "capability": "Primary-key NOT NULL requirements",
+      "workload": "Replay 125 PostgreSQL 18.6 observations over memory, native SQLite, SQLite K/V and redb, reopening persistent definitions before ALTER actions.",
+      "invariant": "Written-order preparation uses original columns; failed changes preserve constraints and rows, standalone constraint repair permits the key, and SQL diagnostics match PostgreSQL.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "constraint_alteration_reports_postgresql_tuple_replacements",
       "source": "crates/uqa-sql/src/schema/constraint_changes/tests.rs",
       "cases": 1,

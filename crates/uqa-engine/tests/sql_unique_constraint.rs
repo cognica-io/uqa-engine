@@ -535,6 +535,9 @@ mod declarations;
 #[path = "sql_unique_constraint/partitioned.rs"]
 mod partitioned;
 
+#[path = "sql_unique_constraint/not_null.rs"]
+mod not_null;
+
 #[path = "sql_unique_constraint/work.rs"]
 mod work;
 

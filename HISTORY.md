@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Preserve explicitly requested schemaless document fields in streaming derived tables and CTEs instead of returning NULL after source projection.
 
+- Reject primary keys over existing NO INHERIT or unvalidated NOT NULL constraints with PostgreSQL diagnostics, preserving original column metadata and written-order ALTER COLUMN TYPE analysis.
+
 ## [0.6.0] - 2026-10-18
 
 ### Added
