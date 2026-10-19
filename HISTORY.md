@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve every comma-separated input of UPDATE FROM and DELETE USING so empty or missing later sources cannot cause unintended row changes. Retain source order, aliases and LATERAL dependencies through the shared SQL source-list compiler.
+
 - Implement PostgreSQL’s binary `^@` text-prefix operator with native operator resolution, strict NULL and collation diagnostics, and retained CHECK/index/view identities. The shared `starts_with` kernel borrows text inputs and observes cancellation between bounded comparison chunks.
 
 - Compare dates with timestamps using PostgreSQL midnight, timezone and infinity semantics through joins, membership predicates and stored queries. Preserve invoking TimeZone and DateStyle for casts inside filters, finite dates beyond timestamp range, and timestamp years such as 294000 through the integer Gregorian calendar. Node and browser HTTP output preserve the same calendar and temporal precision instead of host Date limits.

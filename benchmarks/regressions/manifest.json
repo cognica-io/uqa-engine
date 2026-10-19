@@ -15279,6 +15279,35 @@
       "capability": "Native SQL index expression identity",
       "workload": "Six independently captured PostgreSQL prefix, LIKE, concatenation, numeric, field-selection and ordinary-function index expressions in compact and pretty output.",
       "invariant": "Indexes and partition keys share borrowed, zero-allocation printed-call classification; native operator expressions retain required parentheses while ordinary calls retain their existing form."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_source_lists_preserve_every_input_and_lateral_marker",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/compiler/tests/data_commands.rs",
+      "capability": "Complete mutation source lists",
+      "workload": "Zero, one, two and three input relations, mixed explicit JOIN precedence and a dependent LATERAL input.",
+      "invariant": "Ordered compilation preserves every input, alias and lateral marker instead of discarding a suffix of the source list.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "mutation_source_lists_match_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/dml_source_lists.rs",
+      "capability": "Mutation source support and atomicity",
+      "workload": "162 independently captured PostgreSQL observations across memory, native SQLite, SQLite Key/Value and redb; durable reopen checks all 53 retained target outcome rows.",
+      "invariant": "Empty source products never mutate targets; all later sources are validated before publication, valid joins and lateral sources preserve selected targets, and duplicate matches mutate each target once.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

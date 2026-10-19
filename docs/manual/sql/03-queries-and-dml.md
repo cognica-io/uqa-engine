@@ -404,6 +404,8 @@ WHERE b.account_id = a.account_id
 RETURNING a.account_id, a.balance;
 ```
 
+Every comma-separated FROM item participates in the source join. An empty input prevents a matching joined row, and a missing relation anywhere in the list fails before target changes are published. Aliases and dependencies on preceding inputs through LATERAL retain their source order. A target row is updated once even when multiple source rows match it; select a unique source match when the assigned values could otherwise differ.
+
 Assignments can use expressions and scalar subqueries. Existing rows are validated against the resulting schema and constraints before publication.
 
 For a table UPDATE without FROM, `WHERE text_match(body, $1)` qualifies rows by document membership in the existing GIN retrieval result; the query parameter is inferred as text. AND, OR and NOT compose that membership with ordinary scalar conditions, including conditions using CTEs and scalar subqueries. Search scores do not become SQL truth values. Retrieval input retains the statement's read generation across nested writes, and a row changed by another transaction during a lock wait is checked against the refreshed retrieval state before assignment.
@@ -423,6 +425,8 @@ DELETE FROM sessions AS s
 USING expired_users AS e
 WHERE e.user_id = s.user_id;
 ```
+
+Every comma-separated USING item participates in the source join, with the same empty-input, relation-validation and source-visibility rules as UPDATE FROM. A target row is deleted once even when multiple source rows match it.
 
 Foreign-key actions can update or delete related rows as part of the same transaction. Parent-key checks and cascading actions probe an available child index whose equality matches the foreign-key comparison before loading candidate child rows, including the `parent_id` prefix of `PRIMARY KEY (parent_id, kind)`. Private changes and newly committed references retain the same visibility and locking rules. A NULL parent key does not select NULL child keys for an action.
 
