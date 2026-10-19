@@ -274,16 +274,12 @@ impl TemporalValue {
             return control.copy_text(infinity.as_str());
         }
         match self {
-            Self::Date { days } => {
-                let (year, month, day) = super::calendar::to_output_calendar(*days);
-                let displayed = if year > 0 { year } else { 1 - year };
-                let mut out = ProductionString::new(*control);
-                out.push_str(&control.format(format_args!("{displayed:04}-{month:02}-{day:02}"))?)?;
-                if year <= 0 {
-                    out.push_str(" BC")?;
-                }
-                out.finish()
-            }
+            Self::Date { days } => super::date_style::format_date(
+                *days,
+                super::TemporalDateStyle::Iso,
+                super::TemporalDateOrder::YearMonthDay,
+                control,
+            ),
             Self::Time { micros } => format_time(*micros, control),
             Self::TimeTz {
                 micros,

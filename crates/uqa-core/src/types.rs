@@ -80,8 +80,8 @@ pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingE
 pub use record::RecordValue;
 pub use row::{RecordFieldType, RowValue};
 pub use temporal::{
-    TemporalDateOrder, TemporalInfinity, TemporalInputError, TemporalIntervalStyle,
-    TemporalTimeZone, TemporalValue,
+    TemporalDateOrder, TemporalDateStyle, TemporalInfinity, TemporalInputError,
+    TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
 };
 pub use value::{
     compare_bytes_with_control, fixed_char_comparison_text_with_control, JsonValueDecoder, Value,

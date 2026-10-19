@@ -46,7 +46,7 @@ pub use types::{
     Edge, EdgeId, EnumLabelKey, EnumLabelKeyError, EnumLabelKeyParseError, EnumValue, FieldName,
     GeneralizedPayload, GeneralizedPostingEntry, IndexStats, JsonValueDecoder, JsonbKeyError,
     LegacyVectorKind, LegacyVectorValue, PathExpr, PathSegment, Payload, PostingEntry,
-    RecordFieldType, RecordValue, RowValue, TemporalDateOrder, TemporalInfinity,
+    RecordFieldType, RecordValue, RowValue, TemporalDateOrder, TemporalDateStyle, TemporalInfinity,
     TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue, TokenOccurrence,
     TokenOccurrenceError, TokenOffsets, Value, ValueRetentionError, VectorGeneration,
     VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,

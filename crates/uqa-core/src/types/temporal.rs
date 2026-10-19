@@ -14,6 +14,7 @@ use crate::{
     ValueRetentionError,
 };
 
+mod date_style;
 mod infinite;
 mod input;
 mod interval_input;
@@ -22,6 +23,7 @@ mod keys;
 mod production;
 mod timezone;
 
+pub use date_style::TemporalDateStyle;
 pub use infinite::TemporalInfinity;
 mod calendar;
 pub use input::{TemporalDateOrder, TemporalInputError};
