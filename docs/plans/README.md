@@ -1,6 +1,6 @@
 # Implementation plans
 
-[Open performance corrections](open-performance-corrections.md) tracks all six performance issues open on 2026-10-20, their remaining root corrections and source-scoped verification. Regex retention #1063 is the first bounded delivery; the other issues remain explicit pending obligations.
+The [open performance ledger](open-performance-corrections.md) preserves all six original issues and their source-scoped evidence. The [SQLite page-cache correction](sqlite-page-cache.md) is merged in [PR #1144](https://github.com/cognica-io/uqa-engine/pull/1144), closing #348 after local and actual Linux/macOS qualification. Regex #1063 passes its final controlled comparison; current platform and remaining COPY, type, analysis and historical-noise obligations are recorded in the ledger.
 
 The [bounded COPY output plan](bounded-copy-output.md) preserves #714's full snapshot, memory and output acceptance. [PR #1134](https://github.com/cognica-io/uqa-engine/pull/1134) implements incremental text/CSV encoding and passes sixteen local SQL cases, eight public Engine COPY cases and strict Clippy; automatic platform qualification is pending. Complete query-result materialization remains a separate delivery before issue closure. Original performance tasks #1063, #348, #714, #1108, #1117 and #653 remain recorded in the PR.
 

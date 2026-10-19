@@ -293,6 +293,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -300,6 +302,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -307,6 +311,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -314,6 +320,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -321,6 +329,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -328,6 +338,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -335,6 +347,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -342,6 +356,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -349,6 +365,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -356,6 +374,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -363,6 +383,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -374,6 +396,8 @@
     "uqa-storage-redb": [
       "libsqlite3-sys",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-sqlite"
     ],
     "uqa-storage-sqlite": [
@@ -386,6 +410,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
@@ -393,6 +419,8 @@
       "libsqlite3-sys",
       "redb",
       "rusqlite",
+      "uqa-libsqlite3-sys",
+      "uqa-rusqlite",
       "uqa-storage-redb",
       "uqa-storage-sqlite"
     ]

@@ -42,7 +42,7 @@ jobs:
         run: python3 scripts/run-performance-checks.py --build-archive "$RUNNER_TEMP/uqa-performance-tests.tar.zst"
       - name: Build the independent-process claim fixture
         run: |
-          cargo build -p uqa-execution --example row_claim_contention --locked
+          python3 scripts/run-performance-checks.py --build-claim-fixture
           tar -czf "$RUNNER_TEMP/uqa-claim-fixture.tar.gz" -C target/debug/examples row_claim_contention
       - uses: actions/upload-artifact@v7.0.2
         with:
