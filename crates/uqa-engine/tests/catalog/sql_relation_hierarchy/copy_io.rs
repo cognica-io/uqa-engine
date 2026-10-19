@@ -25,6 +25,7 @@ fn copy_output_preserves_session_style_duplicate_labels_and_mutation_returning()
         ),
         "P1DT2H\t1\t2\n"
     );
+    assert_eq!(copy_to_string(&engine, "COPY (SELECT set_config('IntervalStyle', 'postgres_verbose', false), INTERVAL '1 day 2 hours') TO STDOUT"), "postgres_verbose\t@ 1 day 2 hours\n");
     exec(
         &engine,
         "CREATE TABLE copy_returning (id INTEGER PRIMARY KEY, value TEXT)",

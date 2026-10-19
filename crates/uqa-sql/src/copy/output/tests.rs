@@ -316,6 +316,52 @@ fn custom_csv_options_preserve_null_quotes_and_escape_bytes() {
 }
 
 #[test]
+fn interval_output_reads_live_settings_and_restores_its_caller() {
+    use uqa_core::{TemporalIntervalStyle, TemporalValue};
+    struct Session(std::cell::Cell<TemporalIntervalStyle>);
+    impl EngineHook for Session {
+        fn nextval(&self, _: &str) -> Result<i64, SQLError> {
+            unreachable!()
+        }
+        fn currval(&self, _: &str) -> Result<i64, SQLError> {
+            unreachable!()
+        }
+        fn setval(&self, _: &str, _: i64, _: bool) -> Result<i64, SQLError> {
+            unreachable!()
+        }
+        fn temporal_interval_style(&self) -> Result<Option<TemporalIntervalStyle>, SQLError> {
+            Ok(Some(self.0.get()))
+        }
+    }
+    let _scope = crate::expr::IntervalStyleScope::enter(TemporalIntervalStyle::Postgres);
+    let session = Session(std::cell::Cell::new(TemporalIntervalStyle::Iso8601));
+    let budget = MemoryBudget::new(1024);
+    let cancellation = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &cancellation, &cancellation);
+    let value = Value::Temporal(TemporalValue::Interval {
+        months: 0,
+        days: 1,
+        micros: 7_200_000_000,
+    });
+    let options = options("text");
+    let mut output = Vec::new();
+    let mut encoder = CopyEncoder::new(&options, &mut output, Some(&session), control).unwrap();
+    encoder
+        .write_row([(Some(&value), Some(&ColumnType::Interval))])
+        .unwrap();
+    session.0.set(TemporalIntervalStyle::PostgresVerbose);
+    encoder
+        .write_row([(Some(&value), Some(&ColumnType::Interval))])
+        .unwrap();
+    assert_eq!(output, b"P1DT2H\n@ 1 day 2 hours\n");
+    assert_eq!(
+        crate::expr::temporal_interval_style(),
+        TemporalIntervalStyle::Postgres
+    );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn csv_single_column_end_marker_matches_postgresql_quoting() {
     let options = options("csv");
     let marker = Value::Str(r"\.".into());

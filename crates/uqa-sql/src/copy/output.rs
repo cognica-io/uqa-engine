@@ -215,6 +215,11 @@ fn value_text<'v>(
     if matches!(value, Value::Null) {
         return Ok(None);
     }
+    let _interval_style = if crate::expr::interval_style::output_can_contain_interval(value) {
+        crate::expr::interval_style::live_scope(engine, control)?
+    } else {
+        None
+    };
     Ok(Some(match value {
         Value::Str(text) | Value::Json(text) | Value::JsonB(text) | Value::FixedChar(text) => {
             FieldText::Borrowed(text)

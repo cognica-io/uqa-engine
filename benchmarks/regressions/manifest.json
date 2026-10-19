@@ -15659,6 +15659,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "interval_output_reads_live_settings_and_restores_its_caller",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "Change the live interval output setting between encoded rows under a different caller scope.",
+      "invariant": "Both row encodings match PostgreSQL, the caller scope is restored and admitted scratch is released.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
