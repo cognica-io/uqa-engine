@@ -19,13 +19,15 @@ UQA Engine targets PostgreSQL 18-compatible syntax and behavior while remaining 
 - Apache AGE-shaped `cypher(...) AS (...)` integrates graph results into SQL, and the AGE catalog surface (`LOAD 'age'`, `ag_catalog.ag_graph`, `ag_catalog.ag_label`, the `agtype` / `graphid` types, and the graph and label management functions) lets AGE drivers bootstrap against the embedded engine.
 - Recursive CTE `SEARCH` and `CYCLE` preserve PostgreSQL 18 depth/breadth sequence types, path-sensitive cycle rows, generated-column visibility, recursive wildcard behavior, `UNION` distinctness, iteration-wide limiting, validation order, and stored-plan reopen behavior; `MATERIALIZED` and `NOT MATERIALIZED` select PostgreSQL's eligible folding policy while recursive and volatile definitions remain materialized.
 
+- [Array element and slice assignments](03-queries-and-dml.md#insert) preserve subscripts, bounds and failure atomicity. [Grouped subquery assignments](03-queries-and-dml.md#update) implement positional values, zero-row NULLs and cardinality errors in UPDATE, ON CONFLICT and MERGE. These implemented surfaces have independent PostgreSQL fixtures in `dml.assignment-subscripts` and `dml.grouped-subquery-assignments`.
+
 The fixture coverage is evidence for those queries and types, not a claim of complete PostgreSQL 18 compatibility.
 
 The [official regression inventory](../internals/09-verification.md#compatibility-evidence) covers all 354 PostgreSQL 18.4 core and isolation tests, including the four tests outside the default schedules. Its full PostgreSQL reference runs in pre-merge CI. UQA execution of that corpus still requires the real SQL server boundary and complete failure triage; the imported tests remain unaudited for UQA until their own results are recorded.
 
 <!-- pg18-milestone-snapshot:start -->
 
-Manifest inventory: 156 evidence items — 98 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
+Manifest inventory: 157 evidence items — 99 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
 
 Current milestone snapshot: complete — `M2` (Protocol 3.2); in progress — `M0` (PG18 baseline), `M1` (Discovered semantic fixes), `M3` (PG18 DDL and types), `M4` (Core regression parity), `M5` (Client parity); not started — `M6` (Complete compatibility). Each milestone status is derived from its owned evidence items and remains bounded by its exit gate.
 
@@ -64,8 +66,6 @@ Unsupported forms fail before catalog mutation. That failure is fail-safe behavi
 ## Open PostgreSQL 18 query-clause bugs
 
 - Collations, domains, user-defined equality operators, and the complete common-type matrix for `JOIN ... USING` columns with different declared types
-- Array element and slice assignment targets lose their subscripts during compilation ([#148](https://github.com/cognica-io/uqa-engine/issues/148)). A valid scalar element assignment is rejected, while an invalid array RHS can replace the whole column; catalog-vector assignment diagnostics also differ. Target preservation, PostgreSQL type resolution and failure atomicity are required corrections.
-- A multiple-column assignment from a sub-SELECT, `SET (a, b) = (SELECT ...)`, in `UPDATE`, `ON CONFLICT DO UPDATE`, and `MERGE` reports `0A000`; PostgreSQL evaluates the sub-SELECT once for each target row and assigns its columns. Row-constructor sources are implemented.
 
 Each missing clause above must be implemented with PostgreSQL 18 semantics; source-query rewriting is not an accepted compatibility solution.
 

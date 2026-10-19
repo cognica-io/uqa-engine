@@ -16,6 +16,8 @@ use uqa_engine::Engine;
 
 #[path = "pg18_semantics/date_timestamp_comparison.rs"]
 mod date_timestamp_comparison;
+#[path = "pg18_semantics/dml_source_lists.rs"]
+mod dml_source_lists;
 #[path = "pg18_semantics/interval_arithmetic.rs"]
 mod interval_arithmetic;
 #[path = "pg18_semantics/jsonb_comparisons.rs"]

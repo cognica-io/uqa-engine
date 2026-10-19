@@ -139,7 +139,7 @@ The following compact ledger is the readable projection of the machine-readable 
 
 <!-- pg18-manifest-status:start -->
 
-Manifest inventory: 156 evidence items — 98 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
+Manifest inventory: 157 evidence items — 99 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
 
 | Milestone | Name | Status | Exit gate |
 | --- | --- | --- | --- |
@@ -309,6 +309,7 @@ Manifest inventory: 156 evidence items — 98 `verified`, 57 `partial`, 0 `expli
 | `function.factorial-bigint-numeric` | `M1` | `verified` |
 | `types.date-timestamp-comparison` | `M1` | `verified` |
 | `expressions.text-prefix-operator` | `M1` | `verified` |
+| `dml.complete-source-lists` | `M1` | `verified` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -1481,4 +1482,10 @@ PR #752 corrects #750/#751 in SQL and Execution: view INSERT VALUES/SELECT prese
 
 Independent PostgreSQL 18.4 references cover 60 operand pairs, nine wide-year timestamp values, 96 DATE output cases and 99 reverse timezone casts. The public comparison/cast fixture has 181 observations, 118 repeated after durable reopen; a separate 39-observation fixture combines temporal predicates with an equivalent one-token search support set. Both fixtures pass memory, native SQLite, SQLite Key/Value and redb, with persistent reopen. Automatic delivery results and the preserved task checklist are recorded in the PR. Broader input/range work remains #289, and row-constructor subquery arity remains #997; scalar record fields preserve PostgreSQL's reached-field type identity errors.
 
-Delivery: [PR #1127](https://github.com/cognica-io/uqa-engine/pull/1127) merged as `d67a7fdd6`, closing #1012/#1128/#1129 and removing its branch. Final-source Linux run [39251719409](https://github.com/cognica-io/uqa-engine/actions/runs/39251719409) passes all 1,131 checks / 1,625 required cases plus eight independent-process correctness cases, without failures or skips. All six FDW configurations pass [39250147690](https://github.com/cognica-io/uqa-engine/actions/runs/39250147690), with the separately tested HTTP-only follow-up preserving effective FDW inputs; final HTTP carrier parity passes [39251719307](https://github.com/cognica-io/uqa-engine/actions/runs/39251719307). The PR retains exact source comparisons and the maintainer-approved macOS performance exception; no wall-clock performance acceptance is claimed.
+Delivery: [PR #1127](https://github.com/cognica-io/uqa-engine/pull/1127) merged as `d67a7fdd6`, closing #1012/#1128/#1129 and removing its branch. Final-source Linux and macOS run [39251719409](https://github.com/cognica-io/uqa-engine/actions/runs/39251719409) passes all 1,131 checks / 1,625 required cases plus eight independent-process correctness cases, without failures or skips. All six FDW configurations pass [39250147690](https://github.com/cognica-io/uqa-engine/actions/runs/39250147690), with the separately tested HTTP-only follow-up preserving effective FDW inputs; final HTTP carrier parity passes [39251719307](https://github.com/cognica-io/uqa-engine/actions/runs/39251719307). The PR retains exact source comparisons and both actual platform reports; macOS completed after the maintainer-authorized merge. No wall-clock performance acceptance is claimed.
+
+## Mutation source lists
+
+Issue [#1130](https://github.com/cognica-io/uqa-engine/issues/1130) reproduced unintended UPDATE and DELETE because compilation kept only the first FROM/USING item. SQL now shares the existing ordered source-list lowering between SELECT, UPDATE and DELETE. No execution algorithm, transaction boundary or provider interface changes. A separately captured PostgreSQL 18.4 transcript has 162 observations for empty second/third inputs, missing later relations, aliases, mixed joins, valid LATERAL dependencies, duplicate matches and durable target outcomes. Local and automatic delivery evidence is recorded in the fixing PR.
+
+For ordinary inputs, the candidate relation is $Q = \sigma_p(T \times S_1 \times \cdots \times S_n)$, and mutation reaches each target identity represented in $Q$ once. If any $S_i$ is empty, $Q$ is empty. Preserving the complete ordered source tree also retains each LATERAL input's dependence on its preceding inputs; source validation remains before publication. This correction restores the existing relational product and mutation semantics instead of introducing another carrier or operator.

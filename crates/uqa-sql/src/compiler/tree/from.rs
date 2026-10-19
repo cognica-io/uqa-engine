@@ -12,6 +12,29 @@ use super::{
 };
 use crate::ast::{OperatorJoinRelations, TableFunction};
 
+/// Preserve every ordered FROM/USING item and its lateral marker before binding or mutation.
+pub(in crate::compiler) fn compile_from_list(nodes: &[Node]) -> Result<Option<FromClause>> {
+    let Some(first) = nodes.first() else {
+        return Ok(None);
+    };
+    let mut current = compile_from_node(first)?;
+    for node in nodes.iter().skip(1) {
+        let lateral = right_is_lateral(node);
+        current = FromClause::Join {
+            left: Box::new(current),
+            right: Box::new(compile_from_node(node)?),
+            kind: JoinKind::Cross,
+            on: None,
+            using: None,
+            natural: false,
+            alias: None,
+            column_aliases: Vec::new(),
+            lateral,
+        };
+    }
+    Ok(Some(current))
+}
+
 fn compile_relation_argument(node: &Node, function_name: &str, side: &str) -> Result<String> {
     let Some(NodeEnum::ColumnRef(reference)) = node.node.as_ref() else {
         return Err(SQLError::TypeMismatch(format!(
