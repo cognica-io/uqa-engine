@@ -131,6 +131,10 @@ impl RowLookup for ProjectedRow<'_, '_> {
         Some(self.schema)
     }
 
+    fn key_space(&self) -> uqa_sql::expr::RowKeySpace {
+        uqa_sql::expr::RowKeySpace::LogicalPosition
+    }
+
     fn column_key(&self, name: &str) -> Option<usize> {
         self.schema.unqualified_position(name)
     }

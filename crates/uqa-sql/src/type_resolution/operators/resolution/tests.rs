@@ -383,3 +383,83 @@ fn fresh_builtin_selections_stay_below_the_retained_selection_allowance() {
         }
     }
 }
+
+#[test]
+fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounded() {
+    // Other tests retain selections concurrently, so the assertions read keys, never counts.
+    let contains = |name: &str, left: Option<ColumnType>, right: Option<ColumnType>| {
+        BUILTIN_SELECTIONS.read().unwrap().contains_key(&(
+            name.into(),
+            OperandType(left),
+            OperandType(right),
+        ))
+    };
+    let numeric = |precision, scale| ColumnType::Numeric {
+        precision: Some(precision),
+        scale: Some(scale),
+    };
+    let first = named_binary_operator_types("*", Some(&numeric(15, 2)), Some(&ColumnType::Integer))
+        .unwrap();
+    let second =
+        named_binary_operator_types("*", Some(&numeric(7, 3)), Some(&ColumnType::Integer)).unwrap();
+    assert_eq!(first, second);
+    assert!(contains(
+        "*",
+        Some(ColumnType::Numeric {
+            precision: None,
+            scale: None,
+        }),
+        Some(ColumnType::Integer),
+    ));
+    assert!(!contains(
+        "*",
+        Some(numeric(15, 2)),
+        Some(ColumnType::Integer)
+    ));
+    assert!(!contains(
+        "*",
+        Some(numeric(7, 3)),
+        Some(ColumnType::Integer)
+    ));
+    let text = named_binary_operator_types(
+        "||",
+        Some(&ColumnType::Varchar(Some(12))),
+        Some(&ColumnType::Varchar(Some(3))),
+    )
+    .unwrap();
+    let plain_text = named_binary_operator_types(
+        "||",
+        Some(&ColumnType::Varchar(None)),
+        Some(&ColumnType::Varchar(None)),
+    )
+    .unwrap();
+    assert_eq!(text, plain_text);
+    assert!(contains(
+        "||",
+        Some(ColumnType::Varchar(None)),
+        Some(ColumnType::Varchar(None)),
+    ));
+    assert!(!contains(
+        "||",
+        Some(ColumnType::Varchar(Some(12))),
+        Some(ColumnType::Varchar(Some(3))),
+    ));
+    // Inserting as many distinct keys as the bound holds discards the retained selections at least once instead of growing past the bound; the first key of the sequence is gone afterwards.
+    let types = [
+        ColumnType::Integer,
+        ColumnType::Integer,
+        ColumnType::Integer,
+    ];
+    for index in 0..RETAINED_SELECTIONS {
+        retain_selection(
+            (
+                format!("bounded_operator_{index}").into(),
+                OperandType(None),
+                OperandType(None),
+            ),
+            &types,
+        );
+        assert!(BUILTIN_SELECTIONS.read().unwrap().len() <= RETAINED_SELECTIONS);
+    }
+    assert!(!contains("bounded_operator_0", None, None));
+}
