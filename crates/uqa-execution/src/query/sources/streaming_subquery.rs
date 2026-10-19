@@ -109,7 +109,10 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
     ctes.lock_identities.emit = emit_lock_identities;
     ctes.lock_identities.retain_after_lock = previous_lock_identities.emit;
     let result = (|| {
-        let column_prune = context.planning.column_prune(block, from, ctes)?;
+        let column_prune =
+            context
+                .planning
+                .column_prune(block, from, ctes, Some(&source_schema))?;
         let qualifier_filters = context.planning.qualifier_filters(block, from, ctes)?;
         let source_row_locks = crate::query::locking::resolve_row_locks(
             context.locking,

@@ -108,8 +108,9 @@ pub(crate) fn column_prune_for_stmt(
     stmt: &QueryBlockPlan,
     from: &SourcePlan,
     ctes: &CteScope,
+    schema: Option<&uqa_sql::RowSchema>,
 ) -> Result<Option<ColumnPrune>, SQLError> {
-    column_prune_for_stmt_with_filter(engine, stmt, from, stmt.r#where.as_ref(), ctes)
+    column_prune_for_stmt_with_filter(engine, stmt, from, stmt.r#where.as_ref(), ctes, schema)
 }
 
 pub(crate) fn column_prune_for_stmt_with_filter(
@@ -118,6 +119,7 @@ pub(crate) fn column_prune_for_stmt_with_filter(
     from: &SourcePlan,
     filter: Option<&ScalarExpr>,
     ctes: &CteScope,
+    schema: Option<&uqa_sql::RowSchema>,
 ) -> Result<Option<ColumnPrune>, SQLError> {
     let catalog = ctes.catalog_read_view()?;
     let resolution = ctes.relation_name_resolution()?;
@@ -127,6 +129,7 @@ pub(crate) fn column_prune_for_stmt_with_filter(
             resolution: &resolution,
             volatility: engine,
             is_visible_cte: &|name| ctes.is_visible_cte(name),
+            source_schema: schema,
         },
         stmt,
         from,

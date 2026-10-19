@@ -160,7 +160,17 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
         RelationalPlan::QueryBlock(block) => {
             scope.scalar_subqueries.clone_from(&block.subqueries);
             if let Some(from) = &block.from {
-                let prune = context.planning.column_prune(block, from, &scope)?;
+                let source_schema = crate::query::binding::bind_source_plan_schema(
+                    context.ctes.routines,
+                    from,
+                    params,
+                    &scope,
+                    scope.row_lock_outer_row().map(|row| &row.schema),
+                )?;
+                let prune =
+                    context
+                        .planning
+                        .column_prune(block, from, &scope, Some(&source_schema))?;
                 prepare_source(
                     context,
                     block.from.as_mut().expect("source checked"),

@@ -46,6 +46,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     let table_snapshot = catalog
         .table_resolved(&resolution, table)?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let open_document = table_snapshot.columns.is_empty() && !table_snapshot.columns_declared;
     let has_stored_score_column = table_snapshot
         .columns
         .iter()
@@ -162,7 +163,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     let source_projection = if let Some(source) = stmt.from.as_ref() {
         context
             .planning
-            .column_prune_with_filter(stmt, source, physical_filter.as_ref(), ctes)?
+            .column_prune_with_filter(stmt, source, physical_filter.as_ref(), ctes, Some(schema))?
             .and_then(|prune| prune.get(qualifier).cloned())
     } else {
         None
@@ -184,7 +185,13 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         bound_columns,
     )?;
     let source_schema: Vec<String> = source_projection
-        .and_then(SourceProjection::explicit_columns)
+        .and_then(|projection| {
+            if open_document {
+                Some(projection.requested_columns().map(str::to_owned).collect())
+            } else {
+                projection.explicit_columns()
+            }
+        })
         .map_or_else(
             || table_columns,
             |columns| {
@@ -314,6 +321,11 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         Some(qualifier),
         source_schema.iter().map(column_metadata),
     );
+    let predicate_schema = if open_document {
+        crate::RowSchema::with_wildcard_hidden_positions(&predicate_schema, 0..source_schema.len())
+    } else {
+        predicate_schema
+    };
     // A pushed predicate reads the stored fields alone. A column the scan attaches from row metadata is left to the residual filter, which sees the whole row.
     let stored_fields = source_schema
         .iter()
@@ -377,6 +389,11 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     .with_qualifier(qualifier)
     .with_row_type(qualifier, schema.whole_row_type(qualifier).cloned())?
     .with_lock_origin(lock_origin);
+    let source = if open_document {
+        source.without_wildcard_columns()
+    } else {
+        source
+    };
     let source = crate::query::scored_input::defer_entries(
         source,
         pending,

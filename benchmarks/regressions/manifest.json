@@ -284,6 +284,61 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "concurrent_vector_registration_retains_completed_bindings",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/open/tests/vector_publication.rs",
+      "capability": "Persistent vector index publication",
+      "workload": "Six concurrent engines cover plain, encrypted, compressed and compressed-encrypted native SQLite, SQLite Key/Value and redb; each forces a peer ANALYZE commit between physical IVF/HNSW construction and catalog registration, then exercises rollback, writes from both sessions and reopening.",
+      "invariant": "Every published writer uses its registered method, committed vectors remain searchable, uncommitted writes stay private and rollback removes the new definition and its writes.",
+      "case_names": [
+        "case_1_ivf",
+        "case_2_hnsw"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_publication_retains_completed_persistent_handles",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/open/tests/vector_publication.rs",
+      "capability": "Persistent vector build retention",
+      "workload": "Build IVF and HNSW over existing rows across all four native SQLite file modes, SQLite Key/Value and redb, publish the catalog and insert another row.",
+      "invariant": "Publication retains the completed handle and its populated cache when its physical configuration already matches, without reopening or rematerializing the index.",
+      "case_names": [
+        "case_1_ivf",
+        "case_2_hnsw"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_publication_retains_memory_vector_contents",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/open/tests/vector_publication.rs",
+      "capability": "Memory vector index publication",
+      "workload": "Build IVF and HNSW over existing rows in memory and in a persistent engine temporary table, then insert another row.",
+      "invariant": "Catalog publication retains every existing vector and accepts the next write without replacing the populated memory handle.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_temporary"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "native_session_groups_preserve_metadata_under_concurrent_load",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sessions/ivf_publication.rs",
+      "capability": "Concurrent native session metadata correctness",
+      "workload": "Two fixed rounds run the original 69 native session tests in serial and with sixteen threads in separate simultaneous processes, including all four SQLite file modes.",
+      "invariant": "Every original fixture passes in every round and schedule; no retry, skipped fixture or isolated-test scheduling can hide the within-process metadata inconsistency.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "shared_sessions_open_each_store_once_and_keep_current_counts",
       "cases": 3,
       "source": "crates/uqa-engine/src/open/tests/session_stores.rs",
@@ -295,6 +350,55 @@
         "case_2_sqlite_kv",
         "case_3_redb"
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "streamed_document_fields_survive_ctes_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_subquery/runtime_schema.rs",
+      "capability": "Streaming schemaless document projection",
+      "workload": "Read explicit document fields directly, through derived tables and folded/materialized CTEs on memory, native SQLite, SQLite Key/Value and redb, including durable reopen.",
+      "invariant": "Every source shape preserves the requested field values and result columns instead of replacing the payload with NULL.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "conservative_projection_retains_explicit_document_demands",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/column_pruning/tests.rs",
+      "capability": "Named document field demands",
+      "workload": "Combine a named field with a wildcard, a volatile expression or a scalar subquery predicate.",
+      "invariant": "Conservative projection retains the named fields without pretending it can prune the complete declared source row.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "bound_columns_do_not_become_competing_open_document_fields",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/column_pruning/tests.rs",
+      "capability": "Mixed document and SQL source binding",
+      "workload": "Join a declared SQL relation and an open document source with both statically bound and runtime field references.",
+      "invariant": "A bound SQL input remains owned by its declared relation, while unresolved document field demands remain available.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "document_field_projection_does_not_copy_unrequested_payload",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_sources/scan/tests.rs",
+      "capability": "Bounded document field projection",
+      "workload": "Read a present and an absent field from a document with an unrelated 2 MiB payload using the real local row source.",
+      "invariant": "The result preserves the value and missing-field NULL within a 64 KiB allocation bound, without copying the unrequested payload.",
+      "case_names": [""]
     },
     {
       "package": "uqa-engine",
@@ -14185,13 +14289,26 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_recursive_ctes_keep_the_complete_query_descriptor",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests.rs",
+      "capability": "Deferred recursive source descriptors",
+      "workload": "Read recursive source types through full WITH plans and deferred scopes, including sibling inputs, positional aliases and SEARCH/CYCLE columns.",
+      "invariant": "Repeated deferred binding preserves the complete row descriptor and resolves recursive self references through their seed schema.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "test",
       "test": "view_routine_initialization_matches_postgresql",
       "cases": 4,
       "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
       "capability": "Named query routine initialization",
-      "workload": "164 independent PostgreSQL 18.4 messages covering views, folded and materialized CTEs, aliases, LIMIT 0, EXPLAIN, set calls and sequence-observed planning/execution on memory, SQLite, SQLite K/V and redb.",
+      "workload": "173 independent PostgreSQL 18.4 messages covering views, folded, materialized and recursive CTEs, aliases, LIMIT 0, EXPLAIN, set calls and sequence-observed planning/execution on memory, SQLite, SQLite K/V and redb.",
       "invariant": "Selected expressions preserve exact rows and privilege errors, constant preparation runs once per occurrence, and denied routines prevent preceding row-production effects.",
       "case_names": [
         "case_1_memory",

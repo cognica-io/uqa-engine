@@ -28,7 +28,17 @@ pub fn build_row_lock_recheck_operator<'a, S: Clone + Send + Sync + 'static>(
             "row-lock recheck requires a FROM clause".into(),
         ));
     };
-    let column_prune = context.planning.column_prune(statement, from, ctes)?;
+    let source_schema = crate::query::binding::bind_source_plan_schema(
+        context.ctes.routines,
+        from,
+        params,
+        ctes,
+        ctes.row_lock_outer_row().map(|row| &row.schema),
+    )?;
+    let column_prune =
+        context
+            .planning
+            .column_prune(statement, from, ctes, Some(&source_schema))?;
     let qualifier_filters = context.planning.qualifier_filters(statement, from, ctes)?;
     let source_row_locks = crate::query::locking::resolve_row_locks(
         context.locking,

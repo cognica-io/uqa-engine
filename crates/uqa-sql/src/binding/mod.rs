@@ -389,10 +389,12 @@ impl SchemaScope {
                 }
                 if let Some(plan) = cte_name.and_then(|name| self.deferred_ctes.remove(&name)) {
                     let result = self
-                        .bind_cte_body(routines, &plan.body, params, outer)
-                        .and_then(|schema| {
-                            let schema = rename_schema(&schema, &plan.columns, Some(qualifier));
-                            alias_table_schema(&schema, qualifier, column_aliases)
+                        .bind_cte_schemas(routines, std::slice::from_ref(&plan), params, outer)
+                        .and_then(|previous| {
+                            let schema = self.ctes.get(&plan.name).expect("CTE schema was bound");
+                            let result = alias_table_schema(schema, qualifier, column_aliases);
+                            self.restore_cte_schemas(previous);
+                            result
                         });
                     self.deferred_ctes.insert(plan.name.clone(), plan);
                     return result;

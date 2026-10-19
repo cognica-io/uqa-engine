@@ -49,6 +49,14 @@ pub trait IndexRegistryPublication {
     fn publish_index(&self, row: CatalogIndexRow);
     fn forget_index(&self, relation: &RelationIdentity);
     fn refresh_index_table(&self, table: &str) -> StorageBackendResult<()>;
+    /// Attach the completed persistent build after all catalog reservations and publications. Memory and temporary handles retain their original contents.
+    fn rebind_persistent_vector_field(
+        &self,
+        table: &str,
+        field: &str,
+        dimensions: u32,
+        spec: uqa_storage::VectorIndexSpec,
+    ) -> StorageBackendResult<()>;
     /// Replace a name-bound live handle while retaining its stored generation and canonical data.
     fn rebind_diskann_index(&self, row: &CatalogIndexRow) -> StorageBackendResult<()>;
 }
@@ -158,11 +166,14 @@ impl IndexRegistryChange {
         for row in self.removals {
             publication.forget_index(&row.relation);
         }
-        for row in self.upserts {
-            publication.publish_index(row);
+        for row in &self.upserts {
+            publication.publish_index(row.clone());
         }
         for table in tables {
             publication.refresh_index_table(&table)?;
+        }
+        for row in &self.upserts {
+            builds::rebind(context, row)?;
         }
         Ok(())
     }
