@@ -154,6 +154,10 @@ class TPCHReleaseComparisonTest(unittest.TestCase):
         manifest = json.loads((ROOT / "benchmarks" / "tpch" / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(rendered_rows, sum(manifest["data"]["rows"].values()))
 
+    def test_meta_arguments_quote_paths_as_one_argument(self) -> None:
+        path = pathlib.PurePosixPath("/data/o'brien dir/a\\b.sql")
+        self.assertEqual(self.script.meta_argument(path), "'/data/o''brien dir/a\\\\b.sql'")
+
     def test_rounds_alternate_engine_order(self) -> None:
         self.assertEqual(self.script.round_order(0), ("uqa", "postgres_round_trip", "postgres_explain"))
         self.assertEqual(self.script.round_order(1), ("postgres_explain", "postgres_round_trip", "uqa"))

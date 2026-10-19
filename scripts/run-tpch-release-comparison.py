@@ -81,6 +81,11 @@ def without_semicolon(query: str) -> str:
     return query.rstrip().removesuffix(";").rstrip()
 
 
+def meta_argument(path: pathlib.PurePath) -> str:
+    """Quote a path as one single-quoted psql or usql meta-command argument."""
+    return "'" + str(path).replace("\\", "\\\\").replace("'", "''") + "'"
+
+
 def canonical_numeric(cell: str) -> str:
     if not NUMERIC.fullmatch(cell):
         return cell
@@ -345,12 +350,16 @@ class ReleaseComparison:
         return [statement] * (1 + self.args.iterations)
 
     def run_uqa(self, label: str) -> dict[int, list[float]]:
-        lines = ["\\set ON_ERROR_STOP on", f"\\i {FIXTURE / 'schema.sql'}", f"\\i {self.load_path}"]
+        lines = [
+            "\\set ON_ERROR_STOP on",
+            f"\\i {meta_argument(FIXTURE / 'schema.sql')}",
+            f"\\i {meta_argument(self.load_path)}",
+        ]
         if self.args.uqa_analyze:
             lines.append("ANALYZE;")
         lines.append("\\pset format json")
         for number, query in enumerate(self.queries, 1):
-            lines += [f"\\o {self.output / f'{label}-q{number:02}.json'}", query, "\\o"]
+            lines += [f"\\o {meta_argument(self.output / f'{label}-q{number:02}.json')}", query, "\\o"]
         lines += ["\\pset format unaligned", "\\t on", "\\timing on"]
         for number, query in enumerate(self.queries, 1):
             lines.append(f"\\echo @@Q{number:02}")
