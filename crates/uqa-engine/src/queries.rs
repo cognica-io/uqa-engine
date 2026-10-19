@@ -63,11 +63,35 @@ impl Drop for SQLExecutionScope<'_> {
 }
 
 impl Engine {
-    /// The thread context this session's statements evaluate under: its transaction clock, live date order and interval style, and its cancellation token. Direct APIs that evaluate SQL expressions outside a statement enter the same context.
+    /// Bind retained regex state after provider initialization, which can install the native session allowance during initial catalog restoration.
+    pub(crate) fn session_regex_cache(&self) -> std::sync::Arc<uqa_sql::expr::RegexCache> {
+        let budget = self
+            .storage
+            .backend
+            .as_ref()
+            .and_then(|backend| backend.retention_control())
+            .map_or_else(
+                || self.session.query_retention.clone(),
+                |control| control.memory().clone(),
+            );
+        let mut retained = self.session.regex_cache.lock();
+        if let Some(cache) = retained
+            .as_ref()
+            .filter(|cache| cache.shares_allowance(&budget))
+        {
+            return cache.clone();
+        }
+        let cache = std::sync::Arc::new(uqa_sql::expr::RegexCache::new(budget));
+        *retained = Some(cache.clone());
+        cache
+    }
+
+    /// The thread context this session's statements evaluate under: its transaction clock, live date order and interval style, cancellation token and retained regex cache. Direct APIs that evaluate SQL expressions outside a statement enter the same context.
     pub(crate) fn statement_thread_context(
         &self,
     ) -> uqa_execution::statement::thread_context::StatementThreadContext {
         uqa_execution::statement::thread_context::StatementThreadContext {
+            regex_cache: Some(self.session_regex_cache()),
             temporal_input: uqa_sql::expr::TemporalInputContext {
                 transaction_clock_micros: self.session_transaction_clock_micros(),
                 interval_style: self.session.interval_style(),

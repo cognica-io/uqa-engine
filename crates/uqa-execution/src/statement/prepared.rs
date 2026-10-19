@@ -54,6 +54,7 @@ pub fn register_plan(
     source_sql: Option<&str>,
 ) -> Result<(), SQLError> {
     let _statement_thread = super::thread_context::StatementThreadContext {
+        regex_cache: uqa_sql::expr::current_regex_cache(),
         temporal_input: uqa_sql::expr::TemporalInputContext {
             transaction_clock_micros: context
                 .transaction_timestamp_micros

@@ -3,6 +3,9 @@ name: Regular expression WASM checks
 on:
   pull_request:
     paths:
+      - ".github/actions/select-validation-inputs/**"
+      - "scripts/performance_change_scope.py"
+      - "scripts/tests/test_performance_change_scope.py"
       - "crates/uqa-pg-regex/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -12,6 +15,9 @@ on:
   push:
     branches: [main]
     paths:
+      - ".github/actions/select-validation-inputs/**"
+      - "scripts/performance_change_scope.py"
+      - "scripts/tests/test_performance_change_scope.py"
       - "crates/uqa-pg-regex/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -22,14 +28,28 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
+  scope:
+    name: Select regex inputs
+    runs-on: ubuntu-24.04
+    outputs:
+      required: ${{ steps.select.outputs.required }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: select
+        uses: ./.github/actions/select-validation-inputs
+        with:
+          kind: regex
+          base: ${{ github.event.pull_request.base.sha || github.event.before }}
+          before: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
   wasm:
+    needs: scope
+    if: needs.scope.outputs.required == 'true'
     name: Emscripten frame and memory bounds (Rust ${{ matrix.rust }})
     runs-on: ubuntu-24.04
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ matrix.rust }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:

@@ -283,6 +283,7 @@ mod cancellation_tests {
         let token = CancellationToken::new();
         token.cancel();
         let statement = crate::statement::thread_context::StatementThreadContext {
+            regex_cache: None,
             temporal_input: uqa_sql::expr::TemporalInputContext {
                 transaction_clock_micros: Some(123),
                 ..uqa_sql::expr::TemporalInputContext::current()
@@ -297,6 +298,7 @@ mod cancellation_tests {
         };
         let dispatch_outside = || {
             let _detached = crate::statement::thread_context::StatementThreadContext {
+                regex_cache: None,
                 temporal_input: uqa_sql::expr::TemporalInputContext {
                     transaction_clock_micros: None,
                     ..uqa_sql::expr::TemporalInputContext::current()

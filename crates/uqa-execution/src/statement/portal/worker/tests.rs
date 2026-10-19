@@ -225,6 +225,7 @@ fn unopened_worker(directional: bool) -> Vec<SessionPortalWorkerResponse> {
     run(
         &UnopenedQuery,
         &crate::statement::thread_context::StatementThreadContext {
+            regex_cache: None,
             temporal_input: uqa_sql::expr::TemporalInputContext {
                 transaction_clock_micros: Some(313),
                 date_order: uqa_core::TemporalDateOrder::DayMonthYear,

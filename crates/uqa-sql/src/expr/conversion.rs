@@ -73,6 +73,7 @@ pub(crate) fn bytea_to_string_with_control(
 ) -> Result<Produced<String>> {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut text = ProductionString::new(*control);
+    text.reserve(values.len().saturating_mul(2).saturating_add(2))?;
     text.push_str("\\x")?;
     for byte in values {
         text.push(char::from(HEX[usize::from(byte >> 4)]))?;

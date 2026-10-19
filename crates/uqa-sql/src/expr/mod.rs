@@ -33,6 +33,7 @@ mod range;
 pub(crate) use range::datum as range_datum;
 mod regex;
 pub use regex::{check_constant_similar_translation, RegexMatches, RegexSplit};
+pub use regex::{current_regex_cache, RegexCache, RegexCacheScope};
 mod time;
 mod uuid;
 
@@ -60,6 +61,7 @@ use uuid::generate_random_uuid;
 pub use uuid::parse_uuid_bytes;
 mod binary;
 mod casting;
+pub use casting::numeric::NumericCast;
 mod collation;
 pub use collation::compare_unicode_with_control;
 mod collation_for;
@@ -174,10 +176,10 @@ pub use call_dispatch::{
     eval_function_call, eval_generated_function_call_with_control,
 };
 pub use context::{
-    cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,
-    coercion_type_name, format_regtype_value, format_regtype_value_with_control,
-    read_catalog_array_input, read_catalog_input, CatalogInputFunctions, EngineHook, EvalContext,
-    RowKeySpace, RowLookup,
+    cast_value_with_numeric_resolution_with_control, cast_value_with_type_resolution,
+    cast_value_with_type_resolution_with_control, coercion_type_name, format_regtype_value,
+    format_regtype_value_with_control, read_catalog_array_input, read_catalog_input,
+    CatalogInputFunctions, EngineHook, EvalContext, RowKeySpace, RowLookup,
 };
 pub(crate) use context::{
     format_regtype_value_with_catalog_and_control, requires_catalog_constant_input,

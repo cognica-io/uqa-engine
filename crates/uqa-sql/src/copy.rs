@@ -18,8 +18,10 @@ use pg_query::NodeEnum;
 use crate::SQLError;
 
 mod codec;
+mod output;
 
 pub use codec::{decode_copy_input, encode_copy_result, encode_copy_result_with_engine};
+pub use output::{write_copy_result, CopyEncoder};
 
 /// COPY stream direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

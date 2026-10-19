@@ -23,6 +23,7 @@ impl Engine {
     /// Write a `PostgreSQL` text or CSV `COPY ... TO STDOUT` stream and return the number of emitted rows.
     pub fn copy_to(&self, statement: &str, mut output: impl Write) -> Result<u64, SQLError> {
         let _statement = self.lock_statement_gate();
+        let _thread = self.statement_thread_context().enter();
         let result = self.synchronize_for_copy().and_then(|()| {
             uqa_execution::copy::copy_to(&self.copy_execution_context(), statement, &mut output)
         });

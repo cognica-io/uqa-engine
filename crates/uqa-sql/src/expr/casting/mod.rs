@@ -10,6 +10,7 @@ mod array;
 mod binary_oid;
 mod bit_string;
 mod legacy_vector;
+pub(crate) mod numeric;
 mod temporal;
 
 use super::conversion::value_to_string_with_control;
@@ -201,27 +202,18 @@ pub fn cast_value_from_with_control(
         }
         "numeric" | "decimal" => {
             let value = super::conversion::to_decimal_with_control(v, control)?;
-            let value = if let Some(modifier) = modifier {
+            let modifier = if let Some(modifier) = modifier {
                 let mut parts = modifier.split(',').map(str::trim);
                 let precision: u32 = parts
                     .next()
                     .and_then(|p| p.parse().ok())
                     .ok_or_else(|| SQLError::TypeMismatch("bad numeric precision".into()))?;
                 let scale: i32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                let rounded = value
-                    .round_to_scale_with_control(scale, control)?
-                    .ok_or_else(|| out_of_range("numeric"))?;
-                if !rounded.fits_precision_with_control(precision, scale, control)? {
-                    return Err(crate::assignment::conversion::numeric_field_overflow(
-                        precision, scale,
-                    ));
-                }
-                rounded
+                Some((precision, scale))
             } else {
-                value
+                None
             };
-            let (value, memory) = value.into_parts();
-            return Ok(control.finish(Value::Decimal(value), memory)?);
+            return numeric::finish(value, modifier, control);
         }
         "regproc" | "regprocedure" | "regrole" | "regtype" if matches!(v, Value::Int(_)) => {
             cast_oid(v, source_ty, control)

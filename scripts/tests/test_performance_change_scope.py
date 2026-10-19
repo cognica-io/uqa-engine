@@ -11,7 +11,8 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from performance_change_scope import requires_regression_build, requires_revision_build
+from performance_change_scope import (requires_dependency_check, requires_regex_build,
+                                      requires_regression_build, requires_revision_build)
 
 
 class PerformanceChangeScopeTest(unittest.TestCase):
@@ -40,6 +41,23 @@ class PerformanceChangeScopeTest(unittest.TestCase):
                                 capture_output=True, check=True)
         self.assertEqual(result.stdout, b"required=true\n")
         self.assertFalse(requires_regression_build([]))
+
+    def test_auxiliary_checks_select_only_their_actual_inputs(self):
+        for select in [requires_regex_build, requires_dependency_check]:
+            self.assertFalse(select(["docs/README.md", "crates/uqa-sql/src/binding.rs",
+                                     "scripts/performance_change_scope.py",
+                                     ".github/actions/select-validation-inputs/action.yml"]))
+            for path in ["Cargo.toml", "Cargo.lock"]:
+                with self.subTest(selector=select.__name__, path=path):
+                    self.assertTrue(select([path]))
+        for path in ["crates/uqa-pg-regex/src/lib.rs", "rust-toolchain.toml",
+                     "scripts/emscripten-flags.py", ".github/workflows/regular-expression-checks.yml"]:
+            self.assertTrue(requires_regex_build([path]))
+        for path in ["crates/uqa-sql/Cargo.toml", "deny.toml",
+                     ".github/workflows/dependency-checks.yml"]:
+            self.assertTrue(requires_dependency_check([path]))
+        self.assertFalse(requires_regex_build(["crates/uqa-sql/Cargo.toml"]))
+        self.assertFalse(requires_dependency_check(["crates/uqa-pg-regex/src/lib.rs"]))
 
 
 class RevisionScopeTest(unittest.TestCase):
@@ -138,5 +156,35 @@ class RevisionScopeTest(unittest.TestCase):
         script = Path(__file__).resolve().parents[1] / "performance_change_scope.py"
         result = subprocess.run([sys.executable, str(script), "--base", self.base,
                                  "--before", self.before], cwd=self.repository,
+                                capture_output=True, check=True)
+        self.assertEqual(result.stdout, b"required=false\n")
+
+    def test_auxiliary_selection_uses_the_same_head_and_base_history_guards(self):
+        self.assertFalse(requires_revision_build(self.base, repository=self.repository,
+                                                select=requires_regex_build))
+        self.assertFalse(requires_revision_build(self.base, repository=self.repository,
+                                                select=requires_dependency_check))
+        self.git("checkout", "main")
+        self.write("crates/uqa-pg-regex/src/lib.rs", "regex change\n")
+        changed = self.commit("Change regex on base")
+        self.git("revert", "--no-edit", changed)
+        self.merge_base()
+        self.assertTrue(requires_revision_build(self.base, self.before, repository=self.repository,
+                                               select=requires_regex_build))
+        self.assertFalse(requires_revision_build(self.base, self.before, repository=self.repository,
+                                                select=requires_dependency_check))
+
+    def test_dependency_manifest_change_is_selected_on_a_documented_pr(self):
+        self.write("crates/example/Cargo.toml", "[package]\nname = 'example'\n")
+        self.commit("Change native dependencies")
+        self.assertTrue(requires_revision_build(self.base, self.before, repository=self.repository,
+                                               select=requires_dependency_check))
+        self.assertFalse(requires_revision_build(self.base, self.before, repository=self.repository,
+                                                select=requires_regex_build))
+
+    def test_cli_selects_an_auxiliary_input_set(self):
+        script = Path(__file__).resolve().parents[1] / "performance_change_scope.py"
+        result = subprocess.run([sys.executable, str(script), "--base", self.base,
+                                 "--kind", "regex"], cwd=self.repository,
                                 capture_output=True, check=True)
         self.assertEqual(result.stdout, b"required=false\n")

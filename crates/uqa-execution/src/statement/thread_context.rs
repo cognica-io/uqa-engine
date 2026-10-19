@@ -8,9 +8,11 @@
 
 use super::thread_scope::StatementThreadScope;
 
-/// The temporal input a statement's expressions read and the cancellation work inside one scalar evaluation observes. A statement enters the context it runs under for its analysis, planning and execution; work dispatched to another thread captures the dispatching thread's context and enters it on that thread.
+/// The temporal input, cancellation and retained regex cache a statement's expressions use. A statement enters the context it runs under for its analysis, planning and execution; work dispatched to another thread captures the dispatching thread's context and enters it on that thread.
 #[derive(Clone)]
 pub struct StatementThreadContext {
+    /// The session-owned compiled-pattern allowance, or `None` outside a session.
+    pub regex_cache: Option<std::sync::Arc<uqa_sql::expr::RegexCache>>,
     pub temporal_input: uqa_sql::expr::TemporalInputContext,
     /// The running statement's cancellation token, or `None` for work dispatched from outside any statement.
     pub cancellation: Option<uqa_core::CancellationToken>,
@@ -21,6 +23,7 @@ impl StatementThreadContext {
     #[must_use]
     pub fn current() -> Self {
         Self {
+            regex_cache: uqa_sql::expr::current_regex_cache(),
             temporal_input: uqa_sql::expr::TemporalInputContext::current(),
             cancellation: uqa_sql::expr::statement_cancellation(),
         }
