@@ -428,6 +428,110 @@ fn cache_admission_failures_return_every_partial_charge() {
 }
 
 #[test]
+fn impossible_admission_preserves_idle_patterns_under_shared_and_parent_pressure() {
+    for shared in [false, true] {
+        for parented in [false, true] {
+            let parent = MemoryBudget::new(1 << 20);
+            let budget = if parented {
+                parent.child(1 << 22)
+            } else {
+                parent.clone()
+            };
+            let cache = Arc::new(RegexCache::new(budget.clone()));
+            let scope = RegexCacheScope::enter(Some(cache.clone()));
+            predicate(
+                "stable",
+                REG_ADVANCED,
+                950,
+                "stable",
+                &ProductionControl::uncontrolled(),
+            )
+            .unwrap();
+            // Model another owner consuming the remaining allowance between successful compilation and optional cache admission.
+            let compiled = shared.then(|| budget.reserve(64).unwrap());
+            let other_owner = parent.reserve(parent.available()).unwrap();
+            let pattern = if shared {
+                "x".repeat(1 << 19)
+            } else {
+                "next".into()
+            };
+            assert!(cache
+                .admit(
+                    &pattern,
+                    if shared { 64 } else { 1 << 19 },
+                    shared.then_some(&budget),
+                    cache.generation()
+                )
+                .is_none());
+            assert_eq!(
+                cache.entries.lock().unwrap().values.len(),
+                1,
+                "shared={shared}, parented={parented}"
+            );
+            drop(other_owner);
+            drop(compiled);
+            let before = COMPILES.get();
+            assert!(predicate(
+                "stable",
+                REG_ADVANCED,
+                950,
+                "stable",
+                &ProductionControl::uncontrolled()
+            )
+            .unwrap());
+            assert_eq!(COMPILES.get(), before);
+            drop(scope);
+            drop(cache);
+            assert_eq!(parent.used(), 0);
+        }
+    }
+}
+
+#[test]
+fn admission_reclaims_only_useful_idle_entries() {
+    let budget = MemoryBudget::new(1 << 20);
+    let cache = Arc::new(RegexCache::new(budget.clone()));
+    let scope = RegexCacheScope::enter(Some(cache.clone()));
+    for pattern in ["first", "second"] {
+        predicate(
+            pattern,
+            REG_ADVANCED,
+            950,
+            pattern,
+            &ProductionControl::uncontrolled(),
+        )
+        .unwrap();
+    }
+    let other_owner = budget.reserve(budget.available()).unwrap();
+    let admission = cache.admit("next", 64, None, cache.generation()).unwrap();
+    assert_eq!(cache.entries.lock().unwrap().values.len(), 1);
+    drop(admission);
+    drop(other_owner);
+    let before = COMPILES.get();
+    assert!(predicate(
+        "second",
+        REG_ADVANCED,
+        950,
+        "second",
+        &ProductionControl::uncontrolled()
+    )
+    .unwrap());
+    assert_eq!(COMPILES.get(), before);
+    assert!(predicate(
+        "first",
+        REG_ADVANCED,
+        950,
+        "first",
+        &ProductionControl::uncontrolled()
+    )
+    .unwrap());
+    assert_eq!(COMPILES.get(), before + 1);
+    drop(scope);
+    drop(cache);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn completed_compilations_transfer_only_their_live_bytes_to_retention() {
     for shared in [false, true] {
         let scratch = MemoryBudget::new(1 << 20);
