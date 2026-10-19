@@ -151,3 +151,94 @@ fn failed_stack_allocation_releases_compilation_and_preserves_compiled_state() {
     drop(regex);
     assert_eq!(resources.reserved, resources.released);
 }
+
+#[derive(Default)]
+struct SharedResources {
+    live: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    cancelled: bool,
+    refuse: bool,
+}
+
+impl RegexResources for SharedResources {
+    fn reserve(&mut self, bytes: usize) -> bool {
+        if self.refuse {
+            return false;
+        }
+        self.live
+            .fetch_add(bytes, std::sync::atomic::Ordering::SeqCst);
+        true
+    }
+    fn release(&mut self, bytes: usize) {
+        assert!(
+            self.live
+                .fetch_sub(bytes, std::sync::atomic::Ordering::SeqCst)
+                >= bytes
+        );
+    }
+    fn cancel_requested(&mut self) -> bool {
+        self.cancelled
+    }
+    fn stack_too_deep(&mut self, _: usize) -> bool {
+        false
+    }
+}
+
+#[test]
+fn retained_patterns_keep_original_charges_and_use_each_invocations_resources() {
+    use std::sync::atomic::Ordering;
+    let mut original = SharedResources::default();
+    let charged = original.live.clone();
+    let expression =
+        Regex::compile("(a|ab)+", REG_ADVANCED, RegexCollation::C, &mut original).unwrap();
+    let mut retained = expression.into_retained(std::mem::take);
+    let compiled_bytes = charged.load(Ordering::SeqCst);
+    assert_eq!(compiled_bytes, retained.reserved_bytes());
+    assert!(compiled_bytes > 0);
+    let mut scratch = SharedResources::default();
+    let scratch_live = scratch.live.clone();
+    let mut spans = [MatchSpan::UNSET; 2];
+    for _ in 0..10 {
+        assert!(retained
+            .exec(&code_points("abab"), 0, &mut spans, &mut scratch)
+            .unwrap());
+        assert_eq!(spans[0].range(), Some(0..4));
+        assert_eq!(scratch_live.load(Ordering::SeqCst), 0);
+        assert_eq!(charged.load(Ordering::SeqCst), compiled_bytes);
+    }
+    scratch.cancelled = true;
+    assert_eq!(
+        retained.exec(&code_points("abab"), 0, &mut spans, &mut scratch),
+        Err(RegexError::Cancelled)
+    );
+    scratch.cancelled = false;
+    scratch.refuse = true;
+    assert!(retained
+        .exec(&code_points("abab"), 0, &mut spans, &mut scratch)
+        .is_err());
+    assert_eq!(scratch_live.load(Ordering::SeqCst), 0);
+    assert_eq!(charged.load(Ordering::SeqCst), compiled_bytes);
+    // No compiled allocation or resource callback refers to the compiling thread.
+    std::thread::spawn(move || {
+        let mut scratch = SharedResources::default();
+        assert!(retained
+            .exec(&code_points("ab"), 0, &mut spans, &mut scratch)
+            .unwrap());
+        drop(retained);
+    })
+    .join()
+    .unwrap();
+    assert_eq!(charged.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_failed_resource_transfer_releases_the_still_borrowed_compiled_context() {
+    use std::sync::atomic::Ordering;
+    let mut resources = SharedResources::default();
+    let live = resources.live.clone();
+    let expression = Regex::compile("a+", REG_ADVANCED, RegexCollation::C, &mut resources).unwrap();
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        expression.into_retained::<SharedResources>(|_| panic!("owner admission failed"));
+    }))
+    .is_err());
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+}

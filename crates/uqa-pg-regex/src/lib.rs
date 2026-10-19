@@ -67,7 +67,7 @@ pub use flags::{
     REG_NOMATCH, REG_NOSPEC, REG_NOSUB, REG_OKAY, REG_QUOTE,
 };
 pub use memory::MAX_ALLOC_SIZE;
-pub use regex::Regex;
+pub use regex::{Regex, RetainedRegex};
 pub use resources::RegexResources;
 pub use span::MatchSpan;
 pub use stack::{MAX_STACK_DEPTH, STACK_DEPTH_SLOP};

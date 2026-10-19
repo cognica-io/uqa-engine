@@ -15308,6 +15308,32 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "lib",
+      "test": "retained_patterns_keep_original_charges_and_use_each_invocations_resources",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/src/regex/tests.rs",
+      "capability": "Retained PostgreSQL regular expressions",
+      "workload": "Retain a compiled pattern, repeat matching, refuse and cancel later scratch, then match and destroy it on another thread.",
+      "invariant": "Compiled bytes remain on the original owner; every invocation returns its scratch and observes its own failures; cross-thread destruction releases every original byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "lib",
+      "test": "a_failed_resource_transfer_releases_the_still_borrowed_compiled_context",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/src/regex/tests.rs",
+      "capability": "Retained PostgreSQL regular expressions",
+      "workload": "Panic while acquiring the owner for a compiled pattern.",
+      "invariant": "The still-borrowed context is freed and its original charge returned before unwinding completes."
     }
   ]
 }

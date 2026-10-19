@@ -27,10 +27,10 @@ use crate::stack::{self, Attempt};
 /// The compiled state lives in its own memory context, charged to the resources passed to [`Regex::compile`]; dropping the expression deletes that context and releases every reserved byte, as `RE_compile_and_cache` deletes the context of an expression it discards. Executions allocate their working memory in a separate context that is empty again when [`Regex::exec`] returns. Compilation and execution run with the stack headroom described at [`crate::MAX_STACK_DEPTH`].
 ///
 /// An expression borrows its resources mutably for its whole life and is used by one thread at a time; it is neither `Send` nor `Sync`. Expressions on different threads are independent.
-pub struct Regex<'r> {
+pub struct Regex<'r, R: RegexResources + ?Sized = dyn RegexResources + 'r> {
     expression: NonNull<RegexT>,
     context: Option<OwnedContext>,
-    resources: &'r mut dyn RegexResources,
+    resources: &'r mut R,
     subexpressions: usize,
 }
 
@@ -49,7 +49,7 @@ impl Stop {
     }
 }
 
-impl<'r> Regex<'r> {
+impl<'r, R: RegexResources + ?Sized> Regex<'r, R> {
     /// Compile `pattern` with `flags` under `collation`, as `pg_regcomp` does for `PostgreSQL`'s SQL functions.
     ///
     /// Like `RE_compile_and_cache`, the wrapper converts the pattern into a buffer of one code point slot per pattern byte plus one and gives the compiled expression its own memory context, both in memory charged to `resources`. Their requests fail as `palloc` and context creation fail in `PostgreSQL`: a pattern of 268,435,455 bytes or more with [`RegexError::InvalidAllocationSize`] before anything is allocated, and a refused reservation with [`RegexError::OutOfMemory`].
@@ -59,10 +59,10 @@ impl<'r> Regex<'r> {
         pattern: &str,
         flags: CompileFlags,
         collation: RegexCollation,
-        resources: &'r mut dyn RegexResources,
+        resources: &'r mut R,
     ) -> Result<Self, RegexError> {
         let bytes = pattern_buffer_bytes(pattern.len())?;
-        let Some(context) = OwnedContext::new(resources) else {
+        let Some(context) = OwnedContext::new(&mut &mut *resources) else {
             return Err(RegexError::OutOfMemory);
         };
         // Cover the complete operation, including a restart and the stack switch. Every failure releases the context before a caller's panic continues.
@@ -74,7 +74,7 @@ impl<'r> Regex<'r> {
                     bytes,
                     flags,
                     collation,
-                    &mut *resources,
+                    &mut &mut *resources,
                     depth_limit,
                 )
             })
@@ -95,7 +95,7 @@ impl<'r> Regex<'r> {
                 })
             }
             Err(stop) => {
-                context.release(resources);
+                context.release(&mut &mut *resources);
                 Err(stop.resume())
             }
         }
@@ -122,42 +122,41 @@ impl<'r> Regex<'r> {
         search_start: usize,
         matches: &mut [MatchSpan],
     ) -> Result<bool, RegexError> {
-        if c_long::try_from(input.len()).is_err() {
-            return Err(RegexError::Code(REG_INVARG));
+        exec_expression(
+            self.expression,
+            &mut &mut *self.resources,
+            input,
+            search_start,
+            matches,
+        )
+    }
+
+    /// Transfer the compiled context and its existing reservation to a retained owner.
+    /// The transfer moves the resource charge, without releasing or readmitting it. The
+    /// callback must leave the borrowed hooks able to release any bytes it does not transfer.
+    /// Each later execution receives its own scratch/cancellation hooks.
+    pub fn into_retained<T: RegexResources>(
+        mut self,
+        transfer: impl FnOnce(&mut R) -> T,
+    ) -> RetainedRegex<T> {
+        let resources = transfer(self.resources);
+        RetainedRegex {
+            expression: self.expression,
+            context: self.context.take(),
+            resources,
+            subexpressions: self.subexpressions,
         }
-        let expression = self.expression;
-        let resources = &mut *self.resources;
-        let outcome = stack::run(|depth_limit| {
-            execute(
-                expression,
-                &mut *resources,
-                input,
-                search_start,
-                &mut *matches,
-                depth_limit,
-            )
-        });
-        let result = match outcome {
-            Ok(Some(Ok(REG_OKAY))) => return Ok(true),
-            Ok(Some(Ok(REG_NOMATCH))) => Ok(false),
-            Ok(Some(Ok(code))) => Err(Stop::Error(RegexError::Code(code))),
-            Ok(Some(Err(stop))) => Err(stop),
-            Ok(None) => Err(Stop::Error(RegexError::Code(REG_ETOOBIG))),
-            Err(error) => Err(Stop::Error(error)),
-        };
-        matches.fill(MatchSpan::UNSET);
-        result.map_err(Stop::resume)
     }
 }
 
-impl Drop for Regex<'_> {
+impl<R: RegexResources + ?Sized> Drop for Regex<'_, R> {
     fn drop(&mut self) {
         let Some(context) = self.context.take() else {
             return;
         };
         // Deleting the context frees the compiled expression, as RE_compile_and_cache deletes the context of an expression it discards instead of calling pg_regfree; no engine code runs.
         let released = panic::catch_unwind(AssertUnwindSafe(|| {
-            context.release(&mut *self.resources);
+            context.release(&mut &mut *self.resources);
         }));
         // All memory is freed before the release hook runs. During unwinding from another panic, a second panic would abort the process, so the hook's panic ends here.
         if let Err(payload) = released {
@@ -166,6 +165,94 @@ impl Drop for Regex<'_> {
             }
         }
     }
+}
+
+/// A compiled expression with its owned resource reservation. Matching uses only the
+/// invoking call's hooks; dropping the expression releases the original reservation.
+/// A retained expression may move between threads but is never executed concurrently.
+pub struct RetainedRegex<R: RegexResources> {
+    expression: NonNull<RegexT>,
+    context: Option<OwnedContext>,
+    resources: R,
+    subexpressions: usize,
+}
+
+// SAFETY: all mutable compiled allocations belong to the heap context, whose address
+// is stable. Compilation retains no stack, thread-local operation frame or resource
+// pointer. Shared character-class vectors are immutable process-lifetime allocations.
+// Execution requires exclusive access and creates its frame and scratch on its caller.
+unsafe impl<R: RegexResources + Send> Send for RetainedRegex<R> {}
+
+impl<R: RegexResources> RetainedRegex<R> {
+    /// Number of capturing subexpressions in the retained pattern.
+    pub fn subexpression_count(&self) -> usize {
+        self.subexpressions
+    }
+
+    /// Bytes charged to the retained compilation owner.
+    pub fn reserved_bytes(&self) -> usize {
+        self.context
+            .as_ref()
+            .map_or(0, OwnedContext::reserved_bytes)
+    }
+
+    /// Search with the current invocation's scratch allowance and cancellation hooks.
+    pub fn exec(
+        &mut self,
+        input: &[u32],
+        search_start: usize,
+        matches: &mut [MatchSpan],
+        resources: &mut dyn RegexResources,
+    ) -> Result<bool, RegexError> {
+        exec_expression(self.expression, resources, input, search_start, matches)
+    }
+}
+
+impl<R: RegexResources> Drop for RetainedRegex<R> {
+    fn drop(&mut self) {
+        if let Some(context) = self.context.take() {
+            let released = panic::catch_unwind(AssertUnwindSafe(|| {
+                context.release(&mut self.resources);
+            }));
+            if let Err(payload) = released {
+                if !std::thread::panicking() {
+                    panic::resume_unwind(payload);
+                }
+            }
+        }
+    }
+}
+
+fn exec_expression(
+    expression: NonNull<RegexT>,
+    resources: &mut dyn RegexResources,
+    input: &[u32],
+    search_start: usize,
+    matches: &mut [MatchSpan],
+) -> Result<bool, RegexError> {
+    if c_long::try_from(input.len()).is_err() {
+        return Err(RegexError::Code(REG_INVARG));
+    }
+    let outcome = stack::run(|depth_limit| {
+        execute(
+            expression,
+            &mut *resources,
+            input,
+            search_start,
+            &mut *matches,
+            depth_limit,
+        )
+    });
+    let result = match outcome {
+        Ok(Some(Ok(REG_OKAY))) => return Ok(true),
+        Ok(Some(Ok(REG_NOMATCH))) => Ok(false),
+        Ok(Some(Ok(code))) => Err(Stop::Error(RegexError::Code(code))),
+        Ok(Some(Err(stop))) => Err(stop),
+        Ok(None) => Err(Stop::Error(RegexError::Code(REG_ETOOBIG))),
+        Err(error) => Err(Stop::Error(error)),
+    };
+    matches.fill(MatchSpan::UNSET);
+    result.map_err(Stop::resume)
 }
 
 /// The size of `RE_compile_and_cache`'s code point buffer for a pattern of `length` bytes, which `palloc` validates before allocating.
