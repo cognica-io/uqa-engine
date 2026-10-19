@@ -129,7 +129,11 @@ fn coercion_type_name_with_control(
 fn is_string_type(ty: &ColumnType) -> bool {
     matches!(
         ty,
-        ColumnType::Text | ColumnType::Name | ColumnType::Varchar(_) | ColumnType::Character(_)
+        ColumnType::Text
+            | ColumnType::Name
+            | ColumnType::Varchar(_)
+            | ColumnType::Character(_)
+            | ColumnType::Bpchar
     )
 }
 
@@ -361,6 +365,10 @@ pub fn cast_value_with_type_resolution_with_control(
         control.check()?;
         if matches!(target, ColumnType::Array(_))
             && (requires_catalog_array_cast(target)
+                || resolved_source_type.as_deref().is_some_and(|source| {
+                    crate::type_resolution::cast_volatility(source, target)
+                        != crate::ast::FunctionVolatility::Immutable
+                })
                 || super::super::enums::contains_enum_carrier(value)
                 || resolved_source_type
                     .as_deref()
@@ -546,7 +554,12 @@ fn cast_resolved_value(
             return Ok(control.finish(Value::Int(oid), control.empty_reservation())?);
         }
     }
-    let zoned = timezone::cast_local_timestamp(value, target_column_type, engine, control)?;
+    if let Some(output) =
+        datestyle::date_output(value, target_ty, target_column_type, engine, control)?
+    {
+        return Ok(output);
+    }
+    let zoned = timezone::cast_timestamp(value, target_column_type, engine, control)?;
     cast_value_from_with_control(
         zoned.as_ref().unwrap_or(value),
         target_ty,

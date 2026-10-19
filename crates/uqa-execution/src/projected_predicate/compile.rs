@@ -155,9 +155,7 @@ pub(super) fn compile(
             }
             let expression = require(expr, schema, params)?;
             match expression {
-                // A typed SQL literal is represented as CAST(literal AS type).
-                // Evaluate it once while preparing the predicate instead of
-                // reparsing (notably DATE/TIMESTAMP text) for every input row.
+                // Session-independent noninteger literal casts can be evaluated once; integer casts retain row-evaluation error timing.
                 ProjectedExpr::Literal(value) if is_integer_type(ty) => ProjectedExpr::Cast {
                     expression: Box::new(ProjectedExpr::Literal(value)),
                     ty: ty.clone(),

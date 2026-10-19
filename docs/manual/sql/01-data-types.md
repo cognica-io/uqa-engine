@@ -152,6 +152,8 @@ Date-only timestamp inputs can carry an adjacent positive offset or `Z`, such as
 
 Casting a typed `DATE` or `TIMESTAMP` to `TIMESTAMPTZ` interprets the local date or time in the invoking session's `TimeZone`; a date supplies midnight. Gaps use the pre-transition offset and folds use the post-transition offset. Implicit argument and assignment casts use the same conversion, including prepared statements and stored defaults evaluated after a timezone change. This conversion is stable, so an immutable generated expression cannot acquire it implicitly.
 
+Casting `TIMESTAMPTZ` to `TIMESTAMP` or `DATE` first observes the instant in the invoking `TimeZone`, then applies the target precision or selects its civil day. A `DATE` cast to a string uses the live `DateStyle` (`ISO`, `SQL`, `Postgres` or `German`) before the target's length and padding rules. These conversions retain the same settings inside predicates, prepared statements and array-element casts; already analyzed temporal constants retain their original values.
+
 ```sql execute
 SET TIME ZONE 'Asia/Seoul';
 SELECT extract(epoch FROM timestamp '2024-01-02 03:04:05'::timestamptz) AS utc_seconds;

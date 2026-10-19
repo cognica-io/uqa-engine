@@ -7,6 +7,7 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod datestyle;
 mod domain_inputs;
 mod enum_arrays;
 mod legacy_vectors;

@@ -208,8 +208,8 @@ impl SubqueryResult {
             &uqa_core::memory::ProductionControl::uncontrolled(),
             |value, ty| {
                 uqa_sql::expr::equal_selected_values_with_catalog(
-                    value,
                     needle,
+                    value,
                     ty,
                     &uqa_core::memory::ProductionControl::uncontrolled(),
                     Some(catalog),
@@ -237,7 +237,7 @@ impl SubqueryResult {
         control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<Option<bool>, SQLError> {
         self.contains_matching(needle, control, |value, ty| {
-            uqa_sql::expr::equal_selected_values_with_engine(value, needle, ty, control, engine)
+            uqa_sql::expr::equal_selected_values_with_engine(needle, value, ty, control, engine)
         })
     }
 

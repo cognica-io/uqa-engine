@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! A positional evaluator without session hooks can only select session-independent operators.
+//! A positional evaluator without session hooks can only select session-independent operators and casts.
 
 use crate::{RowSchema, ScalarExpr};
 use uqa_sql::{
@@ -23,6 +23,14 @@ pub(super) fn required(
         Ok(needs_session(op, left.as_ref(), right.as_ref()))
     };
     match expression {
+        ScalarExpr::Cast { expr, .. } => {
+            let source = crate::scalar_type(expr, schema, params)?;
+            let target = crate::scalar_type(expression, schema, params)?;
+            Ok(source.zip(target).is_none_or(|(source, target)| {
+                uqa_sql::type_resolution::cast_volatility(&source, &target)
+                    != FunctionVolatility::Immutable
+            }))
+        }
         ScalarExpr::Binary { op, lhs, rhs } => pair(*op, lhs, rhs),
         ScalarExpr::Between { expr, low, high } => {
             Ok(pair(BinaryOp::GreaterEqual, expr, low)? || pair(BinaryOp::LessEqual, expr, high)?)

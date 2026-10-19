@@ -15044,8 +15044,8 @@
       "cases": 4,
       "source": "crates/uqa-engine/tests/pg18_semantics/date_timestamp_comparison.rs",
       "capability": "Public cross-type datetime comparison",
-      "workload": "127 independent PostgreSQL observations on memory, native SQLite, SQLite Key/Value and redb, plus 65 observations after each durable reopen.",
-      "invariant": "Joins, IN/NOT IN, ANY/ALL, indexed and scan filters, DISTINCT, prepared values, domain casts, routine results, enum membership, infinities and wide dates preserve rows, types, command tags and diagnostics.",
+      "workload": "181 independent PostgreSQL observations on memory, native SQLite, SQLite Key/Value and redb, plus 118 observations after each durable reopen.",
+      "invariant": "Joins, IN/NOT IN, ANY/ALL, indexed and scan filters, session-dependent casts, DISTINCT, prepared values, domain casts, routine results, enum membership, infinities and wide dates preserve rows, types, command tags and diagnostics.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite",
@@ -15064,6 +15064,139 @@
       "invariant": "Declared catalog identity is preserved without re-evaluating the value; memory and both cancellation scopes remain active.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "session_dependent_cast_predicates_keep_the_invoking_evaluator",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/projected_predicate.rs",
+      "capability": "Session-dependent projected casts",
+      "workload": "Temporal input/output and nested timezone casts, unknown input metadata and immutable numeric/date controls.",
+      "invariant": "SQL cast volatility determines admission; casts needing the invoking session retain canonical evaluation while known immutable casts stay positional.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "projected_predicate_retains_analyzed_datetime_literals",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/projected_predicate.rs",
+      "capability": "Analyzed temporal predicate constants",
+      "workload": "Raw text-to-date input compared with an already analyzed typed date constant.",
+      "invariant": "Session-dependent text input is not folded without DateStyle; an analyzed date retains its original owned value without reparsing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "date_output_styles_match_postgresql_without_changing_the_carrier",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/temporal/date_style/tests.rs",
+      "capability": "DATE output style",
+      "workload": "96 independent PostgreSQL observations over four styles, three orders, eras, wide years and infinities.",
+      "invariant": "Styles affect output only; canonical storage and physical date identity remain unchanged and scratch is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "date_output_style_retains_quota_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/temporal/date_style/tests.rs",
+      "capability": "DATE output resources",
+      "workload": "Four styles under a zero allowance and independently cancelled original/invoking scopes.",
+      "invariant": "Formatting never bypasses admission or cancellation and failed output leaves no reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "zoned_casts_to_civil_values_match_postgresql_at_transitions_and_extrema",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/tests/timezone.rs",
+      "capability": "Session timezone cast output",
+      "workload": "99 independent PostgreSQL observations across UTC, Seoul and New York, both DST transitions, precision, BC/extreme years and infinities.",
+      "invariant": "Each finite conversion reads the invoking zone once; civil dates and timestamps retain PostgreSQL boundary values and errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "reverse_zone_casts_keep_array_shape_precision_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/tests/timezone.rs",
+      "capability": "Session timezone cast ownership",
+      "workload": "An array with a negative lower bound, NULL and a rounded timestamp, then cancellation in each session-zone callback.",
+      "invariant": "Array bounds and precision survive conversion; cancellation releases all retained callback data.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "date_string_casts_share_live_output_and_destination_modifiers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/tests/datestyle.rs",
+      "capability": "DATE string cast semantics",
+      "workload": "Live SQL/DMY output to text, limited varchar, padded character and an array retaining negative bounds and NULL.",
+      "invariant": "Date output precedes destination modifiers and array elements use the same invoking setting without changing NULL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "date_output_callbacks_and_retained_text_share_the_production_scope",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/tests/datestyle.rs",
+      "capability": "DATE string cast resources",
+      "workload": "A BC date, retained output, zero allowance and independently cancelled setting callbacks.",
+      "invariant": "Text and setting storage remain admitted; success retains only the output and all failures release scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "temporal_filters_retain_sql_comparison_instead_of_carrier_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/retrieval/tests.rs",
+      "capability": "Selected temporal retrieval filters",
+      "workload": "All six comparison operators in both directions and raw/fused ranges with temporal bounds, plus unchanged numeric controls.",
+      "invariant": "Untyped document predicates cannot replace selected temporal SQL comparison or the invoking timezone.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "temporal_retrieval_filters_match_postgresql_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/date_timestamp_comparison.rs",
+      "capability": "Temporal search-filter support",
+      "workload": "39 independent PostgreSQL observations with a matching single-token search fixture on memory, native SQLite, SQLite Key/Value and redb, including durable reopen.",
+      "invariant": "Equality, inequality, reversed operands and range filters retain SQL datetime comparison and timezone semantics after the search leaf.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
       ]
     }
   ]

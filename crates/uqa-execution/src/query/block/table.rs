@@ -106,7 +106,12 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     let (mut scored, mut physical_filter) = if pending.is_some() {
         (ScoredInput::entries(Vec::new(), score_bearing_filter), None)
     } else {
-        match &block.access {
+        // Access classification precedes runtime constant binding. If lowering declines a search composition, its search leaves still require the mixed executor; an ordinary scalar filter cannot execute them.
+        let access = match &block.access {
+            AccessPathPlan::OperatorTree { .. } if score_bearing_filter => &AccessPathPlan::Hybrid,
+            access => access,
+        };
+        match access {
             AccessPathPlan::Row => (ScoredInput::All, predicate.clone()),
             AccessPathPlan::Hybrid => {
                 let rows = match stmt.r#where.as_ref() {

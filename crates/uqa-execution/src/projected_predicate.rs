@@ -354,12 +354,21 @@ mod tests {
 
     #[test]
     fn session_dependent_datetime_predicates_keep_the_invoking_evaluator() {
-        let schema = RowSchema::with_types(vec!["d".into()], vec![Some(ColumnType::Date)]);
+        let schema = RowSchema::with_types(
+            ["d", "t", "z"].map(str::to_owned).to_vec(),
+            [
+                ColumnType::Date,
+                ColumnType::Timestamp,
+                ColumnType::TimestampTz,
+            ]
+            .map(Some)
+            .to_vec(),
+        );
         for sql in [
-            "d = TIMESTAMPTZ '2020-01-01+00'",
-            "TIMESTAMPTZ '2020-01-01+00' < d",
-            "d BETWEEN TIMESTAMPTZ '2020-01-01+00' AND TIMESTAMPTZ '2020-01-02+00'",
-            "d IN (TIMESTAMPTZ '2020-01-01+00')",
+            "d = z",
+            "z < d",
+            "d BETWEEN z AND z",
+            "d IN (z)",
             "d = ANY(ARRAY[TIMESTAMPTZ '2020-01-01+00'])",
             "d <> ALL(ARRAY[TIMESTAMPTZ '2020-01-01+00'])",
         ] {
@@ -370,7 +379,7 @@ mod tests {
                 "{sql}"
             );
         }
-        for sql in ["d = DATE '2020-01-01'", "d = TIMESTAMP '2020-01-01'"] {
+        for sql in ["d = d", "d = t", "t = d"] {
             assert!(
                 ProjectedPredicate::compile_with_schema(&parsed_expression(sql), &schema, &[])
                     .unwrap()
@@ -381,7 +390,55 @@ mod tests {
     }
 
     #[test]
-    fn projected_predicate_folds_typed_literals_once() {
+    fn session_dependent_cast_predicates_keep_the_invoking_evaluator() {
+        let schema = RowSchema::with_types(
+            ["d", "t", "z", "s", "n"].map(str::to_owned).to_vec(),
+            [
+                ColumnType::Date,
+                ColumnType::Timestamp,
+                ColumnType::TimestampTz,
+                ColumnType::Text,
+                ColumnType::Integer,
+            ]
+            .map(Some)
+            .to_vec(),
+        );
+        for sql in [
+            "d::timestamptz = z",
+            "t::timestamptz = z",
+            "z::timestamp = t",
+            "z::date = d",
+            "d::timestamp::timestamptz = z",
+            "d::text = s",
+            "s::date = d",
+            "s::timestamptz = z",
+        ] {
+            assert!(
+                ProjectedPredicate::compile_with_schema(&parsed_expression(sql), &schema, &[])
+                    .unwrap()
+                    .is_none(),
+                "{sql}"
+            );
+        }
+        for sql in ["d::timestamp = t", "n::bigint = n", "n::text = s"] {
+            assert!(
+                ProjectedPredicate::compile_with_schema(&parsed_expression(sql), &schema, &[])
+                    .unwrap()
+                    .is_some(),
+                "{sql}"
+            );
+        }
+        assert!(ProjectedPredicate::compile(
+            &parsed_expression("x::smallint = 1"),
+            &["x".into()],
+            &[],
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn projected_predicate_retains_analyzed_datetime_literals() {
         let expression = ScalarExpr::Binary {
             op: BinaryOp::Less,
             lhs: Box::new(ScalarExpr::Column("day".into())),
@@ -389,6 +446,27 @@ mod tests {
                 implicit: false,
                 expr: Box::new(ScalarExpr::Literal(Value::Str("1995-03-15".into()))),
                 ty: "date".into(),
+            }),
+        };
+        // Text input still needs the invoking DateStyle. An analyzed temporal constant already owns its value and remains eligible for positional evaluation.
+        assert!(
+            ProjectedPredicate::compile(&expression, &["day".into()], &[])
+                .unwrap()
+                .is_none()
+        );
+        let ScalarExpr::Binary { op, lhs, .. } = expression else {
+            unreachable!();
+        };
+        let expression = ScalarExpr::Binary {
+            op,
+            lhs,
+            rhs: Box::new(ScalarExpr::TypedLiteral {
+                value: Value::Temporal(uqa_core::TemporalValue::Date { days: 9204 }),
+                ty: "date".into(),
+                bound_type: Some(ColumnType::Date),
+                collation_oid: None,
+                composite_source: None,
+                parameter_index: None,
             }),
         };
         let predicate = ProjectedPredicate::compile(&expression, &["day".into()], &[])
@@ -415,7 +493,8 @@ mod tests {
             }))),
             rhs: Box::new(ScalarExpr::Literal(Value::Int(-1))),
         };
-        let predicate = ProjectedPredicate::compile(&expression, &["x".into()], &[])
+        let schema = RowSchema::with_types(vec!["x".into()], vec![Some(ColumnType::Integer)]);
+        let predicate = ProjectedPredicate::compile_with_schema(&expression, &schema, &[])
             .unwrap()
             .unwrap();
 
