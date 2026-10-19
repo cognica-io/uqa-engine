@@ -14672,6 +14672,110 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "factorial_matches_postgresql_numeric_range_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/scalar_postgres/immutable/tests.rs",
+      "capability": "Factorial numeric semantics",
+      "workload": "Exact factorial values through 100, negative inputs and immediate rejection above 32177.",
+      "invariant": "Exact values and PostgreSQL SQLSTATE/message remain correct without an i128 overflow boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "factorial_accepts_postgresql_maximum_without_leaking_reservations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/scalar_postgres/immutable/tests.rs",
+      "capability": "Factorial numeric semantics",
+      "workload": "The maximum input 32177 under a 4 MiB shared production budget, with a checksum of all 131068 output digits.",
+      "invariant": "The full result matches independent PostgreSQL output and all result, rendering and checksum reservations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "factorial_releases_partial_numeric_products_on_budget_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/scalar_postgres/immutable/tests.rs",
+      "capability": "Factorial numeric semantics",
+      "workload": "Factorial 500 with six budgets from zero to 32768 bytes.",
+      "invariant": "Partial numeric production reports 53200 and releases every earlier factor/product lease; sufficient budget succeeds.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "factorial_binds_postgresql_bigint_arguments_and_numeric_result",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/tests/fixed_overloads.rs",
+      "capability": "Factorial numeric semantics",
+      "workload": "Unknown and integer-width inputs, invalid arities and explicit numeric, floating, text and Boolean arguments.",
+      "invariant": "Bigint input and numeric output are selected through the ordinary fixed-builtin resolver; invalid signatures report 42883.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_and_integer_dispatch_check_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/scalar_postgres/immutable/tests.rs",
+      "capability": "Factorial numeric semantics",
+      "workload": "Immutable scalar families including factorial under original-owner and invoking-owner cancellation.",
+      "invariant": "Both cancellation scopes report 57014 before argument handling and release all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "factorial_numeric_range_and_signatures_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/pg18_semantics/arithmetic_and_casts.rs",
+      "capability": "Factorial numeric semantics",
+      "workload": "37 independent PostgreSQL observations for exact values, numeric boundaries, typed inputs, NULL, row inputs, prepared parameters and a user-defined text overload.",
+      "invariant": "Rows, numeric type OIDs, command tags and SQL error fields match the independent PostgreSQL reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_introspection_binds_before_integer_width_is_erased",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/tests.rs",
+      "capability": "Declared type observation",
+      "workload": "Bind a smallint column before its physical integer value erases width.",
+      "invariant": "The result remains regtype with the selected PostgreSQL type OID; the original argument remains in the call for normal evaluation instead of being discarded by constant substitution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "qualified_type_introspection_binds_inside_an_expression",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/tests.rs",
+      "capability": "Declared type observation",
+      "workload": "Bind a qualified pg_typeof call under IS NULL over a declared real column.",
+      "invariant": "The result remains regtype with the selected PostgreSQL type OID; the original argument remains in the call for normal evaluation instead of being discarded by constant substitution.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

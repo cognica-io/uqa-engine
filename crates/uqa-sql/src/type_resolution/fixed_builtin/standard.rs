@@ -34,6 +34,7 @@ declarations! { pub(super) fn lookup(name);
         ],
         "lower" | "upper" | "initcap" => &[Signature::new(&[T::Text], T::Text)],
         "replace" => &[Signature::new(&[T::Text, T::Text, T::Text], T::Text)],
+        "factorial" => &[Signature::new(&[T::BigInteger], numeric_type())],
         "mod" => &[
             Signature::new(&[T::SmallInteger, T::SmallInteger], T::SmallInteger),
             Signature::new(&[T::Integer, T::Integer], T::Integer),

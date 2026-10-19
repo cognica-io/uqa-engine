@@ -81,24 +81,36 @@ fn factorial(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced
     let n = to_i64_with_control(value, control)?;
     if n < 0 {
         return Err(SQLError::Routine {
-            sqlstate: "2201F".into(),
+            sqlstate: "22003".into(),
             message: "factorial of a negative number is undefined".into(),
         });
     }
-    let mut accumulator = 1_i128;
-    for factor in 2..=i128::from(n) {
-        control.check()?;
-        accumulator = accumulator
-            .checked_mul(factor)
-            .ok_or_else(|| out_of_range("numeric"))?;
+    let overflow = || SQLError::Routine {
+        sqlstate: "22003".into(),
+        message: "value overflows numeric format".into(),
+    };
+    if n > 32_177 {
+        return Err(overflow());
     }
-    if let Ok(small) = i64::try_from(accumulator) {
+    // Preserve the primitive calculation through 33!, the last factorial that fits i128.
+    let mut prefix = 1_i128;
+    for factor in 2..=i128::from(n.min(33)) {
+        control.check()?;
+        prefix = prefix.checked_mul(factor).ok_or_else(overflow)?;
+    }
+    if let Ok(small) = i64::try_from(prefix) {
         return inline(Value::Int(small), control);
     }
-    let text = control.format(format_args!("{accumulator}"))?;
-    let value =
-        DecimalValue::parse_with_control(&text, control)?.ok_or_else(|| out_of_range("numeric"))?;
-    let (value, memory) = value.into_parts();
+    let text = control.format(format_args!("{prefix}"))?;
+    let mut accumulator = DecimalValue::parse_with_control(&text, control)?.ok_or_else(overflow)?;
+    drop(text);
+    for factor in 34..=n {
+        let factor = DecimalValue::from_i64_with_control(factor, control)?;
+        accumulator = accumulator
+            .checked_mul_with_control(&factor, control)?
+            .ok_or_else(overflow)?;
+    }
+    let (value, memory) = accumulator.into_parts();
     Ok(control.finish(Value::Decimal(value), memory)?)
 }
 

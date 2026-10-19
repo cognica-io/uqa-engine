@@ -118,13 +118,18 @@ fn immutable_leafs_share_ordinary_null_arity_and_value_semantics() {
 }
 
 #[test]
-fn factorial_preserves_integer_decimal_and_existing_overflow_results() {
+fn factorial_matches_postgresql_numeric_range_and_diagnostics() {
     let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
     for (argument, expected) in [
         (21, "51090942171709440000"),
         (33, "8683317618811886495518194401280000000"),
+        (34, "295232799039604140847618609643520000000"),
+        (
+            100,
+            "93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000",
+        ),
     ] {
         let output = evaluate("factorial", &[Value::Int(argument)], &control);
         let Value::Decimal(value) = &*output else {
@@ -141,14 +146,66 @@ fn factorial_preserves_integer_decimal_and_existing_overflow_results() {
         drop(output);
         assert_eq!(budget.used(), 0);
     }
-    for (value, state) in [(-1, "2201F"), (34, "22003"), (i64::MAX, "22003")] {
+    for (value, message) in [
+        (-1, "factorial of a negative number is undefined"),
+        (i64::MIN, "factorial of a negative number is undefined"),
+        (32_178, "value overflows numeric format"),
+        (i64::MAX, "value overflows numeric format"),
+    ] {
         let error =
             eval_postgres_immutable_with_control("factorial", &[Value::Int(value)], &control)
                 .unwrap()
                 .unwrap_err();
-        assert_eq!(error.sqlstate(), Some(state));
+        assert_eq!(error.sqlstate(), Some("22003"));
+        assert!(error.to_string().contains(message), "{error}");
         assert_eq!(budget.used(), 0);
     }
+}
+
+#[test]
+fn factorial_accepts_postgresql_maximum_without_leaking_reservations() {
+    let budget = MemoryBudget::new(4 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let output = evaluate("factorial", &[Value::Int(32_177)], &control);
+    let Value::Decimal(value) = &*output else {
+        panic!("factorial must retain its exact numeric representation");
+    };
+    assert_eq!(budget.used(), output.reserved_bytes());
+    let digits = value.to_sql_string_with_control(&control).unwrap();
+    assert_eq!(digits.len(), 131_068);
+    // Independently captured from PostgreSQL 18.4, including every decimal digit.
+    let hash = crate::expr::encoding::md5_hex_with_control(digits.as_bytes(), &control).unwrap();
+    assert_eq!(&*hash, "fbe79b4686595a726243cc471350f25d");
+    drop(hash);
+    drop(digits);
+    drop(output);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn factorial_releases_partial_numeric_products_on_budget_failure() {
+    let token = CancellationToken::new();
+    let mut failed = false;
+    let mut completed = false;
+    for limit in [0, 64, 128, 512, 4096, 32_768] {
+        let budget = MemoryBudget::new(limit);
+        let control = ProductionControl::new(&budget, &token, &token);
+        match eval_postgres_immutable_with_control("factorial", &[Value::Int(500)], &control)
+            .unwrap()
+        {
+            Ok(output) => {
+                completed = true;
+                assert_eq!(budget.used(), output.reserved_bytes());
+            }
+            Err(error) => {
+                failed = true;
+                assert_eq!(error.sqlstate(), Some("53200"));
+            }
+        }
+        assert_eq!(budget.used(), 0);
+    }
+    assert!(failed && completed);
 }
 
 #[test]
