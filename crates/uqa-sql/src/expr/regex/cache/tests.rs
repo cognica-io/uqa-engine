@@ -271,6 +271,41 @@ fn failed_compilations_keep_errors_and_release_partial_contexts() {
 }
 
 #[test]
+fn exhausted_retention_preserves_compilation_results_and_diagnostics() {
+    let retained = MemoryBudget::new(0);
+    let cache = Arc::new(RegexCache::new(retained.clone()));
+    let _scope = RegexCacheScope::enter(Some(cache));
+    let ordinary = ProductionControl::uncontrolled();
+    assert!(predicate("a+", REG_ADVANCED, 950, "aa", &ordinary).unwrap());
+    let error = predicate("(", REG_ADVANCED, 950, "", &ordinary).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("2201B"));
+    assert_eq!(
+        error.to_string(),
+        "invalid regular expression: parentheses () not balanced"
+    );
+    let error = predicate(
+        "((((a{1,100}){1,100}){1,100}){1,100})",
+        REG_ADVANCED,
+        950,
+        "ab",
+        &ordinary,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("2201B"));
+    assert_eq!(
+        error.to_string(),
+        "invalid regular expression: regular expression is too complex"
+    );
+    let scratch = MemoryBudget::new(0);
+    let token = CancellationToken::new();
+    let controlled = ProductionControl::new(&scratch, &token, &token);
+    let error = predicate("a+", REG_ADVANCED, 950, "aa", &controlled).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert_eq!(retained.used(), 0);
+    assert_eq!(scratch.used(), 0);
+}
+
+#[test]
 fn cleared_active_patterns_cannot_repopulate_a_new_cache_generation() {
     let budget = MemoryBudget::new(1 << 20);
     let cache = Arc::new(RegexCache::new(budget.clone()));
@@ -294,7 +329,7 @@ fn cleared_active_patterns_cannot_repopulate_a_new_cache_generation() {
 }
 
 #[test]
-fn retained_byte_pressure_reclaims_idle_patterns_before_refusing_compilation() {
+fn retained_byte_pressure_reclaims_idle_patterns_before_declining_retention() {
     let probe = MemoryBudget::new(1 << 20);
     {
         let cache = Arc::new(RegexCache::new(probe.clone()));
@@ -368,28 +403,65 @@ fn simultaneous_invocations_do_not_hold_the_cache_mutex_during_matching() {
 
 #[test]
 fn cache_admission_failures_return_every_partial_charge() {
-    // These are memory limits, not timed trials. Refuse the slot, key and
-    // compilation allocations in turn until the complete pattern can be held.
+    // Refuse slots, keys and completed-state retention at increasing limits. Every invocation still uses its original compilation allowance.
     for limit in (0..=262_144).step_by(4096) {
         let budget = MemoryBudget::new(limit);
         let cache = Arc::new(RegexCache::new(budget.clone()));
         let scope = RegexCacheScope::enter(Some(cache.clone()));
-        let result = predicate(
+        assert!(predicate(
             "(a|b)*c{1,20}",
             REG_ADVANCED,
             950,
             "abc",
             &ProductionControl::uncontrolled(),
-        );
-        if let Err(error) = &result {
-            assert_eq!(error.sqlstate(), Some("53200"));
-        }
+        )
+        .unwrap());
+        let retained = !cache.entries.lock().unwrap().values.is_empty();
         drop(scope);
         drop(cache);
         assert_eq!(budget.used(), 0, "limit {limit}");
-        if result.is_ok() {
+        if retained {
             return;
         }
     }
     panic!("the fixed fixture must fit the final allowance");
+}
+
+#[test]
+fn completed_compilations_transfer_only_their_live_bytes_to_retention() {
+    for shared in [false, true] {
+        let scratch = MemoryBudget::new(1 << 20);
+        let retained = if shared {
+            scratch.clone()
+        } else {
+            MemoryBudget::new(1 << 20)
+        };
+        let cache = Arc::new(RegexCache::new(retained.clone()));
+        let scope = RegexCacheScope::enter(Some(cache.clone()));
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&scratch, &token, &token);
+        let call = RegexCall::new(&control);
+        let mut allowance = call.allowance();
+        let compiled = call
+            .compile("(a|b)*c{1,20}", REG_ADVANCED, 950, &mut allowance)
+            .unwrap();
+        assert!(matches!(
+            compiled,
+            crate::expr::regex::engine::Invocation::Cached { .. }
+        ));
+        assert!(retained.used() > 0);
+        if !shared {
+            assert!(
+                scratch.peak() > retained.used(),
+                "transient compilation state is not retained"
+            );
+            assert_eq!(scratch.used(), 0);
+        }
+        drop(compiled);
+        drop(allowance);
+        drop(scope);
+        drop(cache);
+        assert_eq!(scratch.used(), 0);
+        assert_eq!(retained.used(), 0);
+    }
 }

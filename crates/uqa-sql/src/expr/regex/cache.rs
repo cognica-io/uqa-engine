@@ -44,6 +44,12 @@ pub(super) struct Entry {
     pub(super) regex: RetainedRegex<RetainedAllowance>,
 }
 
+pub(super) struct Admission {
+    pub(super) pattern: BudgetedString,
+    pub(super) generation: u64,
+    pub(super) memory: Option<MemoryReservation>,
+}
+
 impl Entry {
     fn matches(&self, pattern: &str, flags: CompileFlags, collation: u32) -> bool {
         &*self.pattern == pattern && self.flags == flags && self.collation == collation
@@ -98,6 +104,50 @@ impl RegexCache {
             .iter()
             .position(|entry| entry.matches(pattern, flags, collation))?;
         Some(entries.values.remove(index))
+    }
+
+    pub(super) fn generation(&self) -> u64 {
+        self.entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .generation
+    }
+
+    /// Retain only completed compiled state. Refused retention leaves the ordinary invocation usable with its original resource contract.
+    pub(super) fn admit(
+        &self,
+        pattern: &str,
+        bytes: usize,
+        original: Option<&MemoryBudget>,
+        generation: u64,
+    ) -> Option<Admission> {
+        if self.prepare().ok()? != generation {
+            return None;
+        }
+        let mut key = BudgetedString::new(&self.budget);
+        loop {
+            match key.push_str(pattern) {
+                Ok(()) => break,
+                Err(_) if self.evict() => {}
+                Err(_) => return None,
+            }
+        }
+        let memory = if original.is_some_and(|budget| self.budget.shares_allowance(budget)) {
+            None
+        } else {
+            loop {
+                match self.budget.reserve(bytes) {
+                    Ok(memory) => break Some(memory),
+                    Err(_) if self.evict() => {}
+                    Err(_) => return None,
+                }
+            }
+        };
+        Some(Admission {
+            pattern: key,
+            generation,
+            memory,
+        })
     }
 
     pub(super) fn prepare(&self) -> Result<u64, MemoryError> {

@@ -52,42 +52,42 @@ impl<'c> RegexCall<'c> {
         let collation_oid = collation;
         let collation = RegexCollation::from_oid(collation)
             .map_err(|error| self.failure(error, "invalid regular expression"))?;
-        if let Some(cache) = current_regex_cache() {
+        let cache = current_regex_cache();
+        if let Some(cache) = &cache {
             if let Some(entry) = cache.take(pattern, flags, collation_oid) {
                 return Ok(Invocation::Cached {
                     entry: Some(entry),
+                    cache: cache.clone(),
+                });
+            }
+        }
+        let generation = cache.as_ref().map(|cache| cache.generation());
+        // Compilation scratch belongs to this invocation. Cache capacity must not change valid patterns or PostgreSQL's compilation diagnostics.
+        let compiled = Regex::compile_with_resources(pattern, flags, collation, allowance)
+            .map_err(|error| self.failure(error, "invalid regular expression"))?;
+        if let Some(cache) = cache {
+            #[cfg(test)]
+            super::cache::tests::compiled();
+            if let Some(admission) = cache.admit(
+                pattern,
+                compiled.reserved_bytes(),
+                self.control.budget(),
+                generation.expect("cache generation captured before compilation"),
+            ) {
+                let regex = compiled.into_retained(|allowance| allowance.retain(admission.memory));
+                return Ok(Invocation::Cached {
+                    entry: Some(Entry {
+                        pattern: admission.pattern,
+                        flags,
+                        collation: collation_oid,
+                        generation: admission.generation,
+                        regex,
+                    }),
                     cache,
                 });
             }
-            let generation = cache.prepare()?;
-            let mut key = uqa_core::memory::BudgetedString::new(&cache.budget);
-            loop {
-                match key.push_str(pattern) {
-                    Ok(()) => break,
-                    Err(_) if cache.evict() => {}
-                    Err(error) => return Err(error.into()),
-                }
-            }
-            let mut retained = Allowance::cached(self, &cache);
-            let compiled = Regex::compile_with_resources(pattern, flags, collation, &mut retained)
-                .map_err(|error| self.failure(error, "invalid regular expression"))?;
-            #[cfg(test)]
-            super::cache::tests::compiled();
-            let regex = compiled.into_retained(Allowance::retain);
-            return Ok(Invocation::Cached {
-                entry: Some(Entry {
-                    pattern: key,
-                    flags,
-                    collation: collation_oid,
-                    generation,
-                    regex,
-                }),
-                cache,
-            });
         }
-        Regex::compile_with_resources(pattern, flags, collation, allowance)
-            .map(Invocation::Fresh)
-            .map_err(|error| self.failure(error, "invalid regular expression"))
+        Ok(Invocation::Fresh(compiled))
     }
 
     /// Search `input` from code point `start` as `RE_wchar_execute` does, filling one span per slot of `spans`; a failure is `regular expression failed: <explanation>`.

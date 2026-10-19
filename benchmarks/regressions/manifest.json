@@ -15429,7 +15429,7 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
-      "test": "retained_byte_pressure_reclaims_idle_patterns_before_refusing_compilation",
+      "test": "retained_byte_pressure_reclaims_idle_patterns_before_declining_retention",
       "cases": 1,
       "case_names": [
         ""
@@ -15503,6 +15503,32 @@
       "capability": "Bounded retained regular expressions",
       "workload": "Fill all 32 cache slots, compile an invalid pattern, then visit every retained pattern again.",
       "invariant": "The invalid pattern returns 2201B without evicting a valid pattern, changing retained bytes or recompiling any cached pattern."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "exhausted_retention_preserves_compilation_results_and_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Exhaust cache retention while executing valid, invalid and excessively complex patterns, refuse actual compilation scratch, and transfer completed state between shared or separate owners.",
+      "invariant": "Retention capacity cannot alter compilation results or PostgreSQL diagnostics; transient compilation uses its original allowance, completed retained state remains charged, and every lease is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "completed_compilations_transfer_only_their_live_bytes_to_retention",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Exhaust cache retention while executing valid, invalid and excessively complex patterns, refuse actual compilation scratch, and transfer completed state between shared or separate owners.",
+      "invariant": "Retention capacity cannot alter compilation results or PostgreSQL diagnostics; transient compilation uses its original allowance, completed retained state remains charged, and every lease is released."
     }
   ]
 }
