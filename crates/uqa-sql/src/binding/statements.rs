@@ -149,42 +149,16 @@ fn analyze_plan_result_inner(
     reusable: &mut bool,
 ) -> Result<AnalyzedResult, SQLError> {
     let binding = scope.binding_context()?;
-    *reusable &=
+    let analysis =
         super::preparation::read_executable_inputs(routines, plan, params, &binding, aliases)?;
+    *reusable &= analysis.reusable;
     if let UnifiedPlan::Command(command) = plan {
         if let CommandPlan::Explain { body, .. } = command.as_mut() {
             analyze_plan_result_inner(routines, aliases, body, params, scope, reusable)?;
             return Ok(AnalyzedResult::Command);
         }
     }
-    analyze_bound_result(routines, plan, params, &binding)
-}
-
-fn analyze_bound_result(
-    routines: &dyn RoutineResolution,
-    plan: &UnifiedPlan,
-    params: &[SQLParam],
-    binding: &BindingContext<'_>,
-) -> Result<AnalyzedResult, SQLError> {
-    let rows = AnalyzedResult::Schema;
-    match plan {
-        UnifiedPlan::Query(query) => {
-            super::analyze_query_plan_schema(routines, query, params, binding, None).map(rows)
-        }
-        UnifiedPlan::Command(command) => match command.as_ref() {
-            CommandPlan::CreateView { query, .. }
-            | CommandPlan::CreateTableAs { query, .. }
-            | CommandPlan::CreateMaterializedView { query, .. }
-            | CommandPlan::DeclareCursor { query, .. } => {
-                super::analyze_query_plan_schema(routines, query, params, binding, None)?;
-                Ok(AnalyzedResult::Command)
-            }
-            _ => Ok(
-                super::analyze_prepared_command_schema(routines, command, params, binding)?
-                    .map_or(AnalyzedResult::Command, rows),
-            ),
-        },
-    }
+    Ok(analysis.result)
 }
 
 pub fn analyze_command_parameters(

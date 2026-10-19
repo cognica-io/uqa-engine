@@ -14,6 +14,11 @@ use super::{
 use crate::plan::{ProjectionPlan, QueryBlockPlan, RelationalPlan};
 use crate::semantics::sets::placement::SetPlacement;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static BLOCK_ANALYSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Preparation<'_> {
     pub(super) fn query(
         &mut self,
@@ -186,6 +191,8 @@ impl Preparation<'_> {
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
+        #[cfg(test)]
+        BLOCK_ANALYSES.with(|count| count.set(count.get() + 1));
         let input = overlay_outer_schema(source, outer);
         let input = self.scope.with_stored_outer_internal_aliases(&input);
         let mut output = self.projections(&block.projections, source, &input, &block.subqueries)?;

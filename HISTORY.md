@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reuse compiled regular expressions by pattern, flags and collation in a bounded session cache. Charge retained state to its owning allowance, preserve invocation cancellation and scratch limits, and release memory on eviction and session destruction.
 
+- Reuse the result schema produced by ordered statement input analysis, avoiding a second complete binding pass while preserving output types, collations, anonymous-record fields and procedural dependency scopes.
+
 - Preserve every comma-separated input of UPDATE FROM and DELETE USING so empty or missing later sources cannot cause unintended row changes. Retain source order, aliases and LATERAL dependencies through the shared SQL source-list compiler.
 
 - Implement PostgreSQL’s binary `^@` text-prefix operator with native operator resolution, strict NULL and collation diagnostics, and retained CHECK/index/view identities. The shared `starts_with` kernel borrows text inputs and observes cancellation between bounded comparison chunks.
