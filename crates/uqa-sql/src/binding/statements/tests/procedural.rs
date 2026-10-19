@@ -13,6 +13,41 @@ use crate::routines::{
 use std::sync::Arc;
 
 struct Procedures(Vec<Arc<SQLUserFunction>>);
+
+#[test]
+fn procedural_analysis_keeps_its_first_query_schema_and_dependency_scope() {
+    let procedures = Procedures::new();
+    let scopes = Scopes::default();
+    let context = StatementAnalysisContext {
+        scopes: &scopes,
+        routines: &NoRoutines,
+        aliases: &NoRoutines,
+    };
+    let overloads = RoutineOverloadContext {
+        catalog: &procedures,
+    };
+    let mut plan = UnifiedPlan::lower(
+        crate::compile("SELECT id::numeric(12,2) AS value FROM items")
+            .unwrap()
+            .remove(0),
+    );
+    crate::binding::preparation::BLOCK_ANALYSES.with(|count| count.set(0));
+    let analysis =
+        analyze_procedural_plan(&context, &overloads, &procedures, &mut plan, &[]).unwrap();
+    assert_eq!(
+        crate::binding::preparation::BLOCK_ANALYSES.with(std::cell::Cell::get),
+        1
+    );
+    assert_eq!(
+        analysis.result.column_types().unwrap(),
+        [Some(ColumnType::Numeric {
+            precision: Some(12),
+            scale: Some(2),
+        })]
+    );
+    assert_eq!(*scopes.events.borrow(), ["scope", "binding", "release"]);
+}
+
 impl Procedures {
     fn new() -> Self {
         let crate::Statement::CreateFunction(mut definition) = crate::compile(
