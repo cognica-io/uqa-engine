@@ -383,3 +383,58 @@ fn fresh_builtin_selections_stay_below_the_retained_selection_allowance() {
         }
     }
 }
+
+#[test]
+fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounded() {
+    let retained = || BUILTIN_SELECTIONS.read().unwrap().len();
+    let numeric = |precision, scale| ColumnType::Numeric {
+        precision: Some(precision),
+        scale: Some(scale),
+    };
+    let first = named_binary_operator_types("*", Some(&numeric(15, 2)), Some(&ColumnType::Integer))
+        .unwrap();
+    let text = named_binary_operator_types(
+        "||",
+        Some(&ColumnType::Varchar(Some(12))),
+        Some(&ColumnType::Varchar(Some(3))),
+    )
+    .unwrap();
+    let count = retained();
+    let second =
+        named_binary_operator_types("*", Some(&numeric(7, 3)), Some(&ColumnType::Integer)).unwrap();
+    let plain_text = named_binary_operator_types(
+        "||",
+        Some(&ColumnType::Varchar(None)),
+        Some(&ColumnType::Varchar(None)),
+    )
+    .unwrap();
+    assert_eq!(first, second);
+    assert_eq!(text, plain_text);
+    assert_eq!(retained(), count);
+    assert!(BUILTIN_SELECTIONS.read().unwrap().contains_key(&(
+        "*".into(),
+        OperandType(Some(ColumnType::Numeric {
+            precision: None,
+            scale: None,
+        })),
+        OperandType(Some(ColumnType::Integer)),
+    )));
+    // Reaching the bound discards the retained selections instead of growing past it.
+    let types = [
+        ColumnType::Integer,
+        ColumnType::Integer,
+        ColumnType::Integer,
+    ];
+    for index in 0..RETAINED_SELECTIONS {
+        retain_selection(
+            (
+                format!("bounded_operator_{index}").into(),
+                OperandType(None),
+                OperandType(None),
+            ),
+            &types,
+        );
+        assert!(retained() <= RETAINED_SELECTIONS);
+    }
+    assert!(retained() < RETAINED_SELECTIONS);
+}
