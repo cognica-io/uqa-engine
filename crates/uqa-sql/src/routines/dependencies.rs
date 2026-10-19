@@ -13,7 +13,10 @@ use crate::{
         bind_expression_plan_routines_for_storage,
         stored_columns::StoredSourceCatalog,
         stored_relations::bind_stored_statement_relations,
-        stored_routines::{bind_prepared_catalog_statement_routines, CatalogRoutineContext},
+        stored_routines::{
+            bind_catalog_statement_routines, bind_prepared_catalog_statement_routines,
+            CatalogRoutineContext,
+        },
         syntax_sites::expression_syntax_sites,
     },
     catalog::{resolution::RelationLookupMode, stored_ast},
@@ -164,25 +167,34 @@ fn bind_sql_standard_body(
             &binding.context(),
             &parameters,
         )?;
-        let syntax = lowered.clone();
-        // Complete this statement's input and target analysis before a later utility can reject the body. Keep converted constants in the same plan whose sites are stored below.
-        crate::binding::prepare_routine_body_inputs(
-            context.routines,
-            &mut lowered,
-            &positional,
-            &binding.context(),
-            context.catalog,
-            None,
-        )?;
-        let routines = bind_prepared_catalog_statement_routines(
-            &CatalogRoutineContext {
-                routines: context.routines,
-                binding: &binding.context(),
-            },
-            &syntax,
-            &lowered,
-            &positional,
-        )?;
+        let routines = CatalogRoutineContext {
+            routines: context.routines,
+            binding: &binding.context(),
+        };
+        let routines = match mode {
+            RoutineCompilationMode::Definition => {
+                // Fresh syntax completes input/target analysis before the next statement. Retain its original sites when storing converted constants.
+                let mut prepared = lowered.clone();
+                crate::binding::prepare_routine_body_inputs(
+                    context.routines,
+                    &mut prepared,
+                    &positional,
+                    routines.binding,
+                    context.catalog,
+                    None,
+                )?;
+                bind_prepared_catalog_statement_routines(
+                    &routines,
+                    &lowered,
+                    &prepared,
+                    &positional,
+                )?
+            }
+            // A stored definition keeps analyzed targets, including dropped MERGE attributes whose expressions remain dependencies. Execution normalizes its own copy against live target identities.
+            RoutineCompilationMode::Persisted => {
+                bind_catalog_statement_routines(&routines, &lowered, &positional)?
+            }
+        };
         changed |= stored_ast::bind_stored_statement_sites(statement, &routines.sites)?;
     }
     if let Some(statement) = statements.last_mut() {

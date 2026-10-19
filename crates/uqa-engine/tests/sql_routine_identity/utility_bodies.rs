@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Routine definition errors preserve PostgreSQL statement order and transaction effects.
+//! Routine definition errors preserve `PostgreSQL` statement order and transaction effects.
 
 use std::sync::Arc;
 use uqa_engine::Engine;

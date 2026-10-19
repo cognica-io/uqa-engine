@@ -371,7 +371,7 @@ fn sql_standard_utility_error(command: &crate::plan::CommandPlan) -> SQLError {
     ))
 }
 
-/// PostgreSQL transforms the query inputs of CTAS, EXPLAIN and cursors, and resolves CALL, before rejecting the resulting utility. Other utility targets remain unexamined.
+/// `PostgreSQL` transforms the query inputs of CTAS, EXPLAIN and cursors, and resolves CALL, before rejecting the resulting utility. Other utility targets remain unexamined.
 pub(super) fn validate_sql_standard_statement_inputs(
     context: &RoutineCompilationContext<'_>,
     overloads: &super::resolution::RoutineOverloadContext<'_>,
