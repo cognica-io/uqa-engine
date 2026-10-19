@@ -101,6 +101,10 @@ pub enum FunctionDispatch {
         collation_oid: u32,
         noncollatable_type_oid: Option<u32>,
     },
+    /// The analyzed argument type of `pg_typeof`; ordinary argument evaluation still precedes the observation.
+    TypeOf {
+        type_oid: u32,
+    },
     NamedArgument,
     VariadicArgument,
     ArraySubscripts,
@@ -265,6 +269,7 @@ impl FunctionDispatch {
             Self::BooleanTest(test) => test.label(),
             Self::Collate { .. } => "COLLATE",
             Self::CollationFor { .. } => "pg_catalog.pg_collation_for",
+            Self::TypeOf { .. } => "pg_catalog.pg_typeof",
             Self::NamedArgument => "named argument",
             Self::VariadicArgument => "VARIADIC argument",
             Self::ArraySubscripts | Self::Subscript => "subscript",

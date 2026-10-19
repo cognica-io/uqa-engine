@@ -73,12 +73,18 @@ pub(super) fn lookup(name: &str) -> Option<(&'static str, &'static [Signature])>
     if let Some(signatures) = super::regular_expressions::lookup(local) {
         return Some(signatures);
     }
-    if local.eq_ignore_ascii_case("pg_collation_for") {
+    if local.eq_ignore_ascii_case("pg_collation_for") || local.eq_ignore_ascii_case("pg_typeof") {
         static ARGUMENTS: std::sync::LazyLock<[ColumnType; 1]> =
             std::sync::LazyLock::new(|| [ColumnType::Named("any".into())]);
-        static SIGNATURES: std::sync::LazyLock<[Signature; 1]> =
+        static COLLATION_SIGNATURES: std::sync::LazyLock<[Signature; 1]> =
             std::sync::LazyLock::new(|| [Signature::new(&*ARGUMENTS, ColumnType::Text)]);
-        return Some(("pg_collation_for", &*SIGNATURES));
+        static TYPE_SIGNATURES: std::sync::LazyLock<[Signature; 1]> =
+            std::sync::LazyLock::new(|| [Signature::new(&*ARGUMENTS, ColumnType::Regtype)]);
+        return Some(if local.eq_ignore_ascii_case("pg_typeof") {
+            ("pg_typeof", &*TYPE_SIGNATURES)
+        } else {
+            ("pg_collation_for", &*COLLATION_SIGNATURES)
+        });
     }
     lookup_local(local)
 }

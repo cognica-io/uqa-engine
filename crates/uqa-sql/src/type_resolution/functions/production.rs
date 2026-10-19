@@ -517,6 +517,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                     .map(Some);
             }
             FunctionDispatch::CollationFor { .. } => return inline(ColumnType::Text, control),
+            FunctionDispatch::TypeOf { .. } => return inline(ColumnType::Regtype, control),
             FunctionDispatch::Collate { oid } => {
                 let [_, ScalarExpr::Literal(Value::Str(name))] = args else {
                     return Err(SQLError::Internal("invalid COLLATE expression".into()));

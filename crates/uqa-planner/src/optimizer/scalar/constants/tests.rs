@@ -200,7 +200,7 @@ fn bound_call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
         .map(|call| call.selected.binding)
     };
     let selected = match name {
-        "lower" | "upper" | "replace" => text_signature(),
+        "lower" | "upper" | "replace" | "pg_typeof" => text_signature(),
         // A text call of a regular-expression function carries the catalog declaration overload resolution selects.
         "regexp_match" | "regexp_matches" if args.len() == 2 => text_signature(),
         _ => None,
@@ -292,13 +292,14 @@ fn computed_strings_retain_text_type_instead_of_becoming_unknown_literals() {
         } if value == "LABEL"
     ));
     let bound = uqa_sql::bind_type_introspection(
-        bound_call("pg_typeof", vec![folded]),
+        bound_call("pg_typeof", vec![folded.clone()]),
         &RowSchema::default(),
         &[],
     );
     assert!(matches!(
-        bound, ScalarExpr::Cast { expr, .. }
-            if matches!(*expr, ScalarExpr::Literal(Value::Int(25)))
+        bound, ScalarExpr::Func { binding: Some(binding), args, .. }
+            if binding.dispatch == Some(uqa_sql::ast::FunctionDispatch::TypeOf { type_oid: 25 })
+                && args == [folded]
     ));
 }
 

@@ -451,10 +451,6 @@ pub(super) fn is_user_defined_type(ty: &ColumnType) -> bool {
     }
 }
 
-pub(super) fn is_pg_typeof(name: &str) -> bool {
-    name.eq_ignore_ascii_case("pg_typeof") || name.eq_ignore_ascii_case("pg_catalog.pg_typeof")
-}
-
 pub(super) fn is_common_type_function(name: &str) -> bool {
     ["coalesce", "greatest", "least"]
         .iter()

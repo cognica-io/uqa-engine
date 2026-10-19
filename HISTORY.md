@@ -12,6 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve normal argument evaluation in `pg_typeof`, including volatile effects, errors, privileges, NULL and declared type identities through stored views and provider reopening.
 - Reject utility commands in SQL-standard function and procedure definitions with PostgreSQL diagnostics, preserving nested query and CALL analysis, statement error order, quoted bodies and transactional catalog state.
 
 - Bind column dependencies inside SQL-standard `VALUES` bodies so unrelated view deletion and column changes retain their PostgreSQL behavior, including after reopening persistent stores.
