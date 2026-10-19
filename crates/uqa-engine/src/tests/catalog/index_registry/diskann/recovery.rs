@@ -8,37 +8,44 @@ use super::{assert_search, kind, sessions, sql};
 
 #[test]
 fn diskann_and_existing_vector_cache_rebinding_uses_registered_dimensions() {
-    let (finished, completion) = std::sync::mpsc::channel();
-    let worker = std::thread::spawn(move || {
-        for provider in 0..3 {
-            for method in ["diskann", "hnsw", "ivf"] {
-                let (_directory, engine, _peer) = sessions(provider);
-                sql(&engine, "CREATE TABLE diskann_docs(id int, embedding tensor(2)); INSERT INTO diskann_docs VALUES(1,ARRAY[ARRAY[1.0,0.0]]),(2,ARRAY[ARRAY[0.0,1.0]])");
-                sql(
-                    &engine,
-                    &format!("CREATE INDEX diskann_idx ON diskann_docs USING {method}(embedding)"),
-                );
-                assert_search(&engine, &[(1, 1.0), (2, 0.0)]);
-                let snapshot = engine.capture_statement_read_snapshot().unwrap();
-                let reader = engine.statement_read_snapshot_engine(&snapshot);
-                engine.publish_table_data_changes();
-                assert_search(&reader, &[(1, 1.0), (2, 0.0)]);
-                assert_eq!(
-                    kind(&engine),
-                    if provider == 0 && method == "ivf" {
-                        "sqlite-ivf"
-                    } else {
-                        method
-                    }
-                );
-            }
+    for provider in 0..3 {
+        for method in ["diskann", "hnsw", "ivf"] {
+            // Each independent cache owner has its own liveness check; unrelated provider setup must not consume another owner's deadline.
+            let (finished, completion) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                assert_vector_cache_rebinding(provider, method);
+                finished.send(()).unwrap();
+            });
+            completion
+                .recv_timeout(std::time::Duration::from_secs(60))
+                .unwrap_or_else(|error| {
+                    panic!("provider {provider}, {method}: cache refresh must not recursively acquire its own mutex: {error}")
+                });
+            worker.join().unwrap();
         }
-        finished.send(()).unwrap();
-    });
-    completion
-        .recv_timeout(std::time::Duration::from_secs(60))
-        .expect("cache refresh must not recursively acquire its own mutex");
-    worker.join().unwrap();
+    }
+}
+
+fn assert_vector_cache_rebinding(provider: usize, method: &str) {
+    let (_directory, engine, _peer) = sessions(provider);
+    sql(&engine, "CREATE TABLE diskann_docs(id int, embedding tensor(2)); INSERT INTO diskann_docs VALUES(1,ARRAY[ARRAY[1.0,0.0]]),(2,ARRAY[ARRAY[0.0,1.0]])");
+    sql(
+        &engine,
+        &format!("CREATE INDEX diskann_idx ON diskann_docs USING {method}(embedding)"),
+    );
+    assert_search(&engine, &[(1, 1.0), (2, 0.0)]);
+    let snapshot = engine.capture_statement_read_snapshot().unwrap();
+    let reader = engine.statement_read_snapshot_engine(&snapshot);
+    engine.publish_table_data_changes();
+    assert_search(&reader, &[(1, 1.0), (2, 0.0)]);
+    assert_eq!(
+        kind(&engine),
+        if provider == 0 && method == "ivf" {
+            "sqlite-ivf"
+        } else {
+            method
+        }
+    );
 }
 
 #[test]

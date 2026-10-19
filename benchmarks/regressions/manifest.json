@@ -14854,6 +14854,19 @@
       "capability": "Scalar optimizer stack and retained metadata",
       "workload": "Thirty-two chr/concatenation calls under lower and explicit C collation, analyzed, optimized and observed on a 2 MiB stack.",
       "invariant": "Call simplification returns the exact lowercase value and retains its original result schema and collation without enlarging the stack."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "diskann_and_existing_vector_cache_rebinding_uses_registered_dimensions",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
+      "capability": "Vector cache owner liveness and retained dimensions",
+      "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
