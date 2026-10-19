@@ -15946,8 +15946,8 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/mutation/returning/rows/tests.rs",
       "capability": "Bounded RETURNING accumulation",
-      "workload": "A 32MiB RETURNING result under a 64KiB producer budget with duplicate output labels.",
-      "invariant": "Exact row order, positions, count and SHA-256; peak allocation below 1MiB and complete spill cleanup.",
+      "workload": "A 32MiB RETURNING result produced and delivered through the actual COPY encoder under a 64KiB producer budget, with duplicate output labels.",
+      "invariant": "Exact encoded order, positions, count, bytes and SHA-256; combined producer/output peak allocation below 1MiB, one flush, no retained scratch and complete spill cleanup.",
       "case_names": [
         ""
       ]
@@ -15985,7 +15985,7 @@
       "cases": 4,
       "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
       "capability": "Spilled mutation output",
-      "workload": "INSERT SELECT, UPDATE, UPDATE FROM, MERGE and DELETE USING return large text under 1KiB work memory across all four providers.",
+      "workload": "INSERT SELECT, UPDATE, UPDATE FROM, MERGE, DELETE USING and a modifying CTE return large text under 1KiB work memory across all four providers.",
       "invariant": "Independent PostgreSQL 18.4 bytes, duplicate labels, OLD/NEW values, empty headers and persistent reopening are preserved.",
       "case_names": [
         "case_1_memory",

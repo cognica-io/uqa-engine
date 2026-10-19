@@ -5,6 +5,7 @@
 //
 
 //! Physical capture and outer projection of a rule action's RETURNING rows.
+use crate::mutation::output::MutationOutput;
 use crate::{
     mutation::{
         returning::{
@@ -40,7 +41,7 @@ impl RuleReturningResult {
         self,
         context: ReturningExecutionContext<'_, S>,
         shape: DmlReturningShape<'_, S>,
-    ) -> Result<SQLResult, SQLError> {
+    ) -> Result<MutationOutput, SQLError> {
         if self.current.len() != self.old.len()
             || self.current.len() != self.new.len()
             || self.current.len() != self.contexts.len()

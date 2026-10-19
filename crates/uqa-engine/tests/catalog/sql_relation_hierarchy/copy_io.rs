@@ -52,6 +52,7 @@ fn copy_spilled_returning_preserves_values_and_row_images(#[case] provider: usiz
         writeln!(expected, "{id},{body}").unwrap();
     }
     assert_eq!(inserted, expected);
+    assert_eq!(copy_to_string(&engine, "COPY (WITH changed AS (UPDATE returning_spill SET body = body RETURNING id AS item, body AS item) SELECT * FROM changed ORDER BY 1) TO STDOUT WITH (FORMAT csv, HEADER)"), expected);
     let updated = copy_to_string(&engine, "COPY (UPDATE returning_spill SET body = body || '!' RETURNING old.body AS item, new.body AS item) TO STDOUT WITH (FORMAT csv)");
     assert_eq!(updated, format!("{body},{body}!\n").repeat(8));
     let from = copy_to_string(&engine, "COPY (UPDATE returning_spill AS t SET body = body || '?' FROM (VALUES (1)) AS s(id) WHERE t.id = s.id RETURNING old.body, new.body) TO STDOUT WITH (FORMAT csv)");

@@ -5,13 +5,14 @@
 //
 
 //! Name resolution before command entry and fresh execution inputs inside the transaction.
+use crate::mutation::output::MutationOutput;
 use crate::mutation::{
     statement::context::MutationStatementContext, views::commands::SourceOutputPruning,
 };
 use uqa_sql::{
     routines::RoutineResolution,
     semantics::{conflict::InferenceContext, returning::ReturningAnalysisContext},
-    SQLError, SQLResult,
+    SQLError,
 };
 
 pub trait MutationTargetResolution {
@@ -24,9 +25,9 @@ pub struct MutationCommandContext<'a, S: Clone + 'static> {
     pub prune_source_outputs: SourceOutputPruning,
 }
 pub type MutationCommand<'a, S> =
-    Box<dyn FnOnce(&MutationCommandContext<'_, S>) -> Result<SQLResult, SQLError> + 'a>;
+    Box<dyn FnOnce(&MutationCommandContext<'_, S>) -> Result<MutationOutput, SQLError> + 'a>;
 pub trait MutationCommandBoundary<S: Clone + 'static> {
-    fn with_command(&self, command: MutationCommand<'_, S>) -> Result<SQLResult, SQLError>;
+    fn with_command(&self, command: MutationCommand<'_, S>) -> Result<MutationOutput, SQLError>;
 }
 pub struct MutationEntryContext<'a, S: Clone + 'static> {
     pub targets: &'a dyn MutationTargetResolution,

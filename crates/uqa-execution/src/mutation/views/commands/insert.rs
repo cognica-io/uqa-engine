@@ -11,8 +11,9 @@ use super::{
     run_suppressed_view_insert_rules, target_columns, validate_returning_alias_relations,
     values_from_result, view_document, with_mutation_snapshot, BTreeSet, CteScope,
     DmlReturningShape, InsertPlan, MutationStatementContext, ReturningValueProjectionRow, SQLError,
-    SQLParam, SQLResult, ScalarExpr, SourceOutputPruning, TriggerViewChecks, Value,
+    SQLParam, ScalarExpr, SourceOutputPruning, TriggerViewChecks, Value,
 };
+use crate::mutation::output::MutationOutput;
 
 #[expect(
     clippy::too_many_lines,
@@ -24,7 +25,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
     stmt: &InsertPlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let target = resolve_view_target(context.mutation.rules.views.rewrite, &stmt.table)?;
     if stmt.on_conflict.is_some() {
         return Err(SQLError::Routine {
@@ -90,7 +91,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
     }
     let mut statement_scope = None;
     let mut execute_read =
-        |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
+        |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
             let ctes = statement_scope.insert(read_context.mutation.scopes.command_scope(
                 stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,

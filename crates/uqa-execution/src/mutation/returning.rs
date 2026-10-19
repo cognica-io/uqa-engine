@@ -14,7 +14,6 @@ use crate::{
     query::{relational::RelationalContext, CteScope},
     OwnedPhysicalRow, PhysicalRow, RowSchema,
 };
-use std::collections::BTreeSet;
 use uqa_core::Value;
 use uqa_sql::{
     ast::ReturningAliases,
@@ -25,10 +24,11 @@ use uqa_sql::{
         returning::{expanded_returning_projections, returning_target_schema, ReturningCatalog},
         returning_expression_schema, returning_schema_for_target, DOC_ID_COLUMN, TABLE_OID_COLUMN,
     },
-    SQLError, SQLParam, SQLResult,
+    SQLError, SQLParam,
 };
 
 mod rows;
+pub(crate) use rows::ReturningBatchReader;
 pub use rows::ReturningRows;
 
 #[derive(Clone)]
@@ -235,7 +235,7 @@ pub fn dml_returning_result<S: Clone + 'static>(
     shape: DmlReturningShape<'_, S>,
     rows: ReturningRows,
     affected_rows: u64,
-) -> Result<SQLResult, SQLError> {
+) -> Result<crate::mutation::output::MutationOutput, SQLError> {
     let projections = expanded_returning_projections(
         services.catalog,
         shape.table,
@@ -252,7 +252,7 @@ pub fn dml_returning_result_with_projections<S: Clone + 'static>(
     projections: &[ProjectionPlan],
     rows: ReturningRows,
     affected_rows: u64,
-) -> Result<SQLResult, SQLError> {
+) -> Result<crate::mutation::output::MutationOutput, SQLError> {
     let star_schema = returning_target_schema(services.catalog, shape.table)?;
     let expression_schema = returning_expression_schema(
         &star_schema,
@@ -269,24 +269,11 @@ pub fn dml_returning_result_with_projections<S: Clone + 'static>(
         shape.params,
         shape.ctes,
     )?;
-    let preserve_positions =
-        output.columns().iter().collect::<BTreeSet<_>>().len() != output.columns().len();
-    let mut named_rows = Vec::with_capacity(rows.len());
-    let mut positional_rows = preserve_positions.then(|| Vec::with_capacity(rows.len()));
-    for row in rows.into_rows()? {
-        let row = row?;
-        if let Some(positional_rows) = positional_rows.as_mut() {
-            positional_rows.push(row.view().iter().map(|(_, value)| value.clone()).collect());
-        }
-        named_rows.push(row.into_result_row());
-    }
-    let mut result = SQLResult::from_schema_rows_with_positions(
+    crate::mutation::output::MutationOutput::from_returning(
         output.for_result_columns(output.columns()),
-        named_rows,
-        positional_rows,
-    );
-    result.affected_rows = affected_rows;
-    Ok(result)
+        rows,
+        affected_rows,
+    )
 }
 
 pub fn returning_row_context<S: Clone + 'static>(

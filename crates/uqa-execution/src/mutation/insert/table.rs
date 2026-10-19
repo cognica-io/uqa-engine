@@ -16,6 +16,7 @@ use super::{
     supplied_identities::SuppliedIdentities,
     triggers::insert_statement_events,
 };
+use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::{
     mutation::{
@@ -48,7 +49,7 @@ use uqa_sql::{
             required_view_rule_insert_input_positions, view_rule_insert_column_type,
         },
     },
-    SQLError, SQLParam, SQLResult,
+    SQLError, SQLParam,
 };
 use uqa_storage::document_store::Document;
 
@@ -66,7 +67,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
     stmt: &InsertPlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let mutation = &context.mutation;
     let preparation = mutation.preparation;
     let assignment = preparation.referential.assignment;
@@ -259,7 +260,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
     }
     let mut statement_scope = None;
     let mut execute_read =
-        |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
+        |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
             let read_assignment = read_context.mutation.preparation.referential.assignment;
             let scope = statement_scope.insert(read_context.mutation.scopes.command_scope(
                 stmt.statement_privilege_subject.as_ref(),
@@ -412,7 +413,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                             affected,
                         );
                     }
-                    return Ok(SQLResult::from_affected(affected));
+                    return Ok(MutationOutput::from_affected(affected));
                 }
                 if rule_source_rows.is_none() {
                     let mut source = source.clone();
@@ -896,7 +897,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             } else {
                 0
             };
-            Ok(SQLResult::from_affected(
+            Ok(MutationOutput::from_affected(
                 if affected == 0 && !insert_original_query {
                     rule_affected
                 } else {

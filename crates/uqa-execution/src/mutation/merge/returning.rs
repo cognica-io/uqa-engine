@@ -6,6 +6,7 @@
 
 //! MERGE `RETURNING` row construction and projection.
 
+use crate::mutation::output::MutationOutput;
 use crate::mutation::{
     returning::{
         dml_returning_result_with_projections, returning_row_context, returning_value_context,
@@ -20,7 +21,7 @@ use uqa_sql::semantics::merge::{
 };
 use uqa_sql::{
     plan::{MergePlan, ProjectionPlan},
-    SQLError, SQLParam, SQLResult,
+    SQLError, SQLParam,
 };
 
 #[derive(Clone)]
@@ -194,7 +195,7 @@ pub fn build_view_merge_returning_row<S: Clone + 'static>(
 pub fn finish_view_merge_returning<S: Clone + 'static>(
     context: &ReturningExecutionContext<'_, S>,
     input: ViewMergeReturningResult<'_, S>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let ViewMergeReturningResult {
         stmt,
         source_schema,
@@ -205,7 +206,7 @@ pub fn finish_view_merge_returning<S: Clone + 'static>(
         affected,
     } = input;
     if stmt.returning.is_empty() {
-        return Ok(SQLResult::from_affected(affected));
+        return Ok(MutationOutput::from_affected(affected));
     }
     let projections = expanded_merge_returning_projections(
         context.catalog,

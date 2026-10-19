@@ -6,10 +6,11 @@
 
 //! Resolve DML targets and enter one mutation command with its inherited CTE scope.
 use super::{dispatch, insert::table::InsertPlanning};
+use crate::mutation::output::MutationOutput;
 use crate::query::CteScope;
 use uqa_sql::{
     plan::{CommandPlan, DeletePlan, InsertPlan, MergePlan, UpdatePlan},
-    SQLError, SQLParam, SQLResult,
+    SQLError, SQLParam,
 };
 mod context;
 pub use context::*;
@@ -19,7 +20,7 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
     mut statement: InsertPlan,
     params: &[SQLParam],
     ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     statement.table = context
         .targets
         .resolve_target(&statement.table, statement.target_relation_bound)?;
@@ -43,7 +44,7 @@ pub fn run_update<S: Clone + Send + Sync + 'static>(
     mut statement: UpdatePlan,
     params: &[SQLParam],
     ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     statement.table = context
         .targets
         .resolve_target(&statement.table, statement.target_relation_bound)?;
@@ -63,7 +64,7 @@ pub fn run_delete<S: Clone + Send + Sync + 'static>(
     mut statement: DeletePlan,
     params: &[SQLParam],
     ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     statement.table = context
         .targets
         .resolve_target(&statement.table, statement.target_relation_bound)?;
@@ -90,7 +91,7 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
     mut statement: MergePlan,
     params: &[SQLParam],
     ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     statement.target = context.targets.resolve_target(&statement.target, false)?;
     context.transactions.with_command(Box::new(move |context| {
         dispatch::run_merge(
@@ -108,7 +109,7 @@ pub fn execute_cte_command<S: Clone + Send + Sync + 'static>(
     command: &CommandPlan,
     params: &[SQLParam],
     ctes: &CteScope<S>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     if let Some(error) = crate::catalog::projection::virtual_relation_mutation_error(
         &ctes.catalog_read_view()?,
         &ctes.relation_name_resolution()?,

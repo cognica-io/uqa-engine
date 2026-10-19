@@ -12,7 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Accumulate mutation RETURNING values in bounded spill batches and detach unselected OLD/NEW payloads, preserving output positions and statement rollback. Public SQL results still materialize their requested rows.
+- Accumulate mutation RETURNING values in bounded spill batches, detach unselected OLD/NEW payloads and pass ordinary mutation output directly to COPY and modifying CTE consumers. Preserve output positions and statement rollback; public SQL results still materialize their requested rows.
 
 - Deliver COPY SELECT rows through the bounded query spool and keep sink output and flush inside the statement transaction, preserving the selected rows and rolling back failed or cancelled mutating exports.
 

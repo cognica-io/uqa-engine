@@ -9,6 +9,7 @@ use super::{
     candidate::MutationLockTarget, errors::dml_storage_error, expressions::eval_mutation_expr,
     locking::lock_mutation_target,
 };
+use crate::mutation::output::MutationOutput;
 use crate::query::locking::context::update_lock_strength;
 use std::collections::BTreeMap;
 use uqa_core::Value;
@@ -21,7 +22,7 @@ use uqa_sql::{
         mutation_inputs::{expr_is_row_independent, top_level_column},
         mutation_patch as patch_eligibility,
     },
-    SQLError, SQLParam, SQLResult, ScalarExpr,
+    SQLError, SQLParam, ScalarExpr,
 };
 pub mod context;
 pub use context::{PointMutationContext, RowIndependentUpdateValues, RowUpdateVectors};
@@ -30,7 +31,7 @@ pub fn try_run_point_update<S: Clone + 'static>(
     context: PointMutationContext<'_, S>,
     stmt: &UpdatePlan,
     params: &[SQLParam],
-) -> Result<Option<SQLResult>, SQLError> {
+) -> Result<Option<MutationOutput>, SQLError> {
     let columns = context
         .constraints
         .catalog
@@ -67,7 +68,7 @@ pub fn try_run_point_update<S: Clone + 'static>(
         return Ok(None);
     }
     if matches!(lookup_value, Value::Null) {
-        return Ok(Some(SQLResult::from_affected(0)));
+        return Ok(Some(MutationOutput::from_affected(0)));
     }
     if !patch_eligibility::point_lookup_field_is_unique(
         context.constraints.catalog,
@@ -93,7 +94,7 @@ pub fn try_run_point_update<S: Clone + 'static>(
             .storage
             .find_doc_id_by_field(&stmt.table, &lookup_field, &lookup_value)?
     else {
-        return Ok(Some(SQLResult::from_affected(0)));
+        return Ok(Some(MutationOutput::from_affected(0)));
     };
     let target = lock_mutation_target(
         context.locking.session,
@@ -112,7 +113,7 @@ pub fn try_run_point_update<S: Clone + 'static>(
         ),
     )?;
     let MutationLockTarget::Present { doc_id, .. } = target else {
-        return Ok(Some(SQLResult::from_affected(0)));
+        return Ok(Some(MutationOutput::from_affected(0)));
     };
     context.transaction.prepare_writer()?;
     if context
@@ -120,10 +121,10 @@ pub fn try_run_point_update<S: Clone + 'static>(
         .find_doc_id_by_field(&stmt.table, &lookup_field, &lookup_value)?
         != Some(doc_id)
     {
-        return Ok(Some(SQLResult::from_affected(0)));
+        return Ok(Some(MutationOutput::from_affected(0)));
     }
     let affected = patch_point_row(&context, &stmt.table, doc_id, &updates, &vectors)?;
-    Ok(Some(SQLResult::from_affected(u64::from(affected))))
+    Ok(Some(MutationOutput::from_affected(u64::from(affected))))
 }
 
 /// Write the patched fields of the row that `table` holds at `doc_id`, and note the row for the statements that started the running one.

@@ -31,6 +31,7 @@ use crate::scalar::plan::{analyze_physical_call_arguments, eval_physical_call_ar
 pub enum StatementOutput {
     Query(QueryOutput),
     Command(SQLResult),
+    Mutation(crate::mutation::output::MutationOutput),
 }
 
 /// Owns top-level plan orchestration. Relational, mutation, DDL, procedural,
@@ -143,7 +144,10 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         )
     }
 
-    fn execute_insert(&self, plan: &InsertPlan) -> Result<SQLResult, SQLError> {
+    fn execute_insert(
+        &self,
+        plan: &InsertPlan,
+    ) -> Result<crate::mutation::output::MutationOutput, SQLError> {
         let mut plan = plan.clone();
         self.apply_statement_privilege_subject(
             &mut plan.statement_privilege_subject,
@@ -157,7 +161,10 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         )
     }
 
-    fn execute_update(&self, plan: &UpdatePlan) -> Result<SQLResult, SQLError> {
+    fn execute_update(
+        &self,
+        plan: &UpdatePlan,
+    ) -> Result<crate::mutation::output::MutationOutput, SQLError> {
         let mut plan = plan.clone();
         self.apply_statement_privilege_subject(
             &mut plan.statement_privilege_subject,
@@ -171,7 +178,10 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         )
     }
 
-    fn execute_delete(&self, plan: &DeletePlan) -> Result<SQLResult, SQLError> {
+    fn execute_delete(
+        &self,
+        plan: &DeletePlan,
+    ) -> Result<crate::mutation::output::MutationOutput, SQLError> {
         let mut plan = plan.clone();
         self.apply_statement_privilege_subject(
             &mut plan.statement_privilege_subject,
@@ -370,7 +380,10 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         Ok(SQLResult::empty())
     }
 
-    fn execute_merge(&self, plan: &MergePlan) -> Result<SQLResult, SQLError> {
+    fn execute_merge(
+        &self,
+        plan: &MergePlan,
+    ) -> Result<crate::mutation::output::MutationOutput, SQLError> {
         let mut plan = plan.clone();
         self.apply_statement_privilege_subject(
             &mut plan.statement_privilege_subject,
@@ -424,11 +437,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             })
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "preserves SELECT schema and row identity"
-    )]
-    fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
+    fn validate_command_target(&self, command: &CommandPlan) -> Result<(), SQLError> {
         if uqa_sql::semantics::virtual_relation_mutation_candidate(command) {
             let ctes = self.context.queries.statement_scope(None);
             if let Some(error) = crate::catalog::projection::virtual_relation_mutation_error(
@@ -446,6 +455,15 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 return Err(error);
             }
         }
+        Ok(())
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves SELECT schema and row identity"
+    )]
+    fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
+        self.validate_command_target(command)?;
         match command {
             CommandPlan::CreateTable(statement) => {
                 crate::schema::table_creation::entry::run_create_table(
@@ -471,9 +489,9 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                     statement,
                 )
             }
-            CommandPlan::Insert(plan) => self.execute_insert(plan),
-            CommandPlan::Update(plan) => self.execute_update(plan),
-            CommandPlan::Delete(plan) => self.execute_delete(plan),
+            CommandPlan::Insert(plan) => self.execute_insert(plan)?.into_sql_result(),
+            CommandPlan::Update(plan) => self.execute_update(plan)?.into_sql_result(),
+            CommandPlan::Delete(plan) => self.execute_delete(plan)?.into_sql_result(),
             CommandPlan::Drop(statement) => crate::schema::removal::entry::run_drop_statement(
                 self.context.schemas.removal,
                 statement.clone(),
@@ -912,7 +930,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 )
                 .map(|()| SQLResult::empty())
             }
-            CommandPlan::Merge(plan) => self.execute_merge(plan),
+            CommandPlan::Merge(plan) => self.execute_merge(plan)?.into_sql_result(),
             CommandPlan::CreateFunction(definition) => {
                 crate::routines::registration::register_sql_function(
                     &self.context.routines.inputs.registration_context(),

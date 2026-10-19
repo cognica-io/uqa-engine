@@ -12,8 +12,9 @@ use super::{
     resolve_view_target, target_row, validate_dml_expression_qualifiers,
     validate_returning_alias_relations, view_document, with_mutation_snapshot, BTreeSet, CteScope,
     DeletePlan, DmlReturningShape, MutationStatementContext, ReturningValueProjectionRow, SQLError,
-    SQLParam, SQLResult, SourceOutputPruning, ViewDmlSourceMatch, ViewSourceQualification,
+    SQLParam, SourceOutputPruning, ViewDmlSourceMatch, ViewSourceQualification,
 };
+use crate::mutation::output::MutationOutput;
 
 #[expect(
     clippy::too_many_lines,
@@ -25,7 +26,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
     stmt: &DeletePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let target = resolve_view_target(context.mutation.rules.views.rewrite, &stmt.table)?;
     if stmt.source.is_none() {
         let allowed = BTreeSet::from([stmt.target_qualifier.clone()]);
@@ -78,7 +79,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
     }
     let mut statement_scope = None;
     let mut execute_read =
-        |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
+        |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
             let ctes = statement_scope.insert(read_context.mutation.scopes.command_scope(
                 stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,

@@ -5,6 +5,7 @@
 //
 
 //! Joined UPDATE execution using independent read and write statement generations.
+use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::MutationStatementContext;
 use crate::mutation::{
     assignment::MutationAssignmentTarget,
@@ -21,7 +22,7 @@ use crate::query::{scope::StatementCommands, CteScope};
 use uqa_sql::{
     plan::{SourcePlan, UpdatePlan},
     semantics::returning::validate_returning_alias_relations,
-    SQLError, SQLParam, SQLResult,
+    SQLError, SQLParam,
 };
 
 #[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
@@ -33,7 +34,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
     statement_commands: &StatementCommands,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let from_rows = crate::query::sources::build_join_spill_with_ctes(
         &read_context.query.source,
         from_clause,
@@ -525,7 +526,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             affected,
         );
     }
-    Ok(SQLResult::from_affected(affected))
+    Ok(MutationOutput::from_affected(affected))
 }
 
 struct MatchingUpdateSources {

@@ -57,6 +57,10 @@ impl ReturningRows {
         self.len() == 0
     }
 
+    pub(crate) fn schema(&self) -> Option<&RowSchema> {
+        self.schema.as_ref()
+    }
+
     pub fn push(&mut self, row: OwnedPhysicalRow) -> Result<(), SQLError> {
         self.cancellation.check()?;
         self.len()
@@ -109,20 +113,53 @@ impl ReturningRows {
         Ok(())
     }
 
-    pub fn into_rows(mut self) -> Result<ReturningRowReader, SQLError> {
+    pub(crate) fn into_batches(mut self) -> Result<ReturningBatchReader, SQLError> {
         self.flush()?;
-        Ok(ReturningRowReader {
-            rows: self.buffer.drain_rows().map_err(physical_exec_error)?,
+        Ok(ReturningBatchReader {
+            rows: self.buffer.drain().map_err(physical_exec_error)?,
             cancellation: self.cancellation,
+            failed: false,
+        })
+    }
+
+    pub fn into_rows(self) -> Result<ReturningRowReader, SQLError> {
+        let cancellation = self.cancellation.clone();
+        Ok(ReturningRowReader {
+            rows: SpillRows::new(self.into_batches()?),
+            cancellation,
             failed: false,
         })
     }
 }
 
 pub struct ReturningRowReader {
-    rows: SpillRows<SpillDrain>,
+    rows: SpillRows<ReturningBatchReader>,
     cancellation: CancellationToken,
     failed: bool,
+}
+
+pub(crate) struct ReturningBatchReader {
+    rows: SpillDrain,
+    cancellation: CancellationToken,
+    failed: bool,
+}
+
+impl Iterator for ReturningBatchReader {
+    type Item = crate::physical::ExecResult<Batch>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed {
+            return None;
+        }
+        let result = self
+            .cancellation
+            .check()
+            .map_err(SQLError::from)
+            .map_err(crate::physical::ExecError::from)
+            .and_then(|()| self.rows.next().transpose());
+        self.failed = result.is_err();
+        result.transpose()
+    }
 }
 
 impl Iterator for ReturningRowReader {

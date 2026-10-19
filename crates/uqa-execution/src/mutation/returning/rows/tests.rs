@@ -11,12 +11,38 @@ use uqa_core::Value;
 
 #[test]
 fn returning_rows_spill_without_retaining_complete_output() {
+    struct Sink {
+        digest: Sha256,
+        bytes: usize,
+        flushes: usize,
+    }
+    impl std::io::Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.digest.update(bytes);
+            self.bytes += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
     let directory = tempfile::tempdir().unwrap();
     let token = CancellationToken::new();
     let mut rows = ReturningRows::with_budget(64 * 1024, token);
     rows.buffer = SpillBuffer::new_in(32 * 1024, directory.path());
     let schema = RowSchema::new(vec!["item".into(), "item".into()]);
-    let mut actual = Sha256::new();
+    let mut sink = Sink {
+        digest: Sha256::new(),
+        bytes: 0,
+        flushes: 0,
+    };
+    let options = uqa_sql::copy::compile_copy("COPY (SELECT 1) TO STDOUT")
+        .unwrap()
+        .options;
+    let memory = uqa_core::memory::MemoryBudget::new(64 * 1024);
+    let token = CancellationToken::new();
+    let control = uqa_core::memory::ProductionControl::new(&memory, &token, &token);
     let allocations = allocation_counter::measure(|| {
         for index in 0..2048 {
             rows.push(OwnedPhysicalRow::new(
@@ -27,25 +53,39 @@ fn returning_rows_spill_without_retaining_complete_output() {
         }
         assert_eq!(rows.len(), 2048);
         assert!(rows.buffer.has_spilled());
-        let mut count = 0;
-        for row in rows.into_rows().unwrap() {
-            let row = row.unwrap();
-            assert_eq!(row.schema.columns(), ["item", "item"]);
-            assert_eq!(row.view().value_at(0), Some(&Value::Int(count)));
-            let Some(Value::Str(body)) = row.view().value_at(1) else {
-                panic!("RETURNING payload lost its position")
-            };
-            actual.update(body.as_bytes());
-            count += 1;
-        }
-        assert_eq!(count, 2048);
+        let declared = RowSchema::with_types(
+            schema.columns().to_vec(),
+            vec![
+                Some(uqa_sql::ColumnType::Integer),
+                Some(uqa_sql::ColumnType::Text),
+            ],
+        );
+        let result =
+            crate::mutation::output::MutationOutput::from_returning(declared, rows, 2048).unwrap();
+        assert_eq!(
+            crate::copy::write_statement_output(
+                crate::statement::plan_executor::StatementOutput::Mutation(result),
+                &options,
+                &mut sink,
+                None,
+                &control
+            )
+            .unwrap(),
+            2048
+        );
     });
     let mut expected = Sha256::new();
-    for _ in 0..2048 {
-        expected.update([b'x'; 16384]);
+    let mut expected_bytes = 0;
+    for index in 0..2048 {
+        let row = format!("{index}\t{}\n", "x".repeat(16384));
+        expected_bytes += row.len();
+        expected.update(row.as_bytes());
     }
-    assert_eq!(actual.finalize(), expected.finalize());
-    // Two admitted batches, one incoming/decoded row and encoding scratch may coexist; 32 MiB of complete output may not.
+    assert_eq!(sink.digest.finalize(), expected.finalize());
+    assert_eq!(sink.bytes, expected_bytes);
+    assert_eq!(sink.flushes, 1);
+    assert_eq!(memory.used(), 0);
+    // Production and COPY delivery share the bound; neither complete physical nor public result rows may coexist with the 32 MiB export.
     assert!(allocations.bytes_max < 1024 * 1024, "{allocations:?}");
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
 }
@@ -101,6 +141,20 @@ fn returning_rows_release_spills_after_cancellation_and_write_failure() {
     assert!(reader.next().is_none());
     drop(reader);
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+
+    let buffered_token = CancellationToken::new();
+    let mut buffered = ReturningRows::with_budget(64 * 1024, buffered_token.clone());
+    buffered.push(row()).unwrap();
+    buffered.push(row()).unwrap();
+    let mut buffered = buffered.into_rows().unwrap();
+    assert!(buffered.next().unwrap().is_ok());
+    buffered_token.cancel();
+    assert_eq!(
+        buffered.next().unwrap().unwrap_err().sqlstate(),
+        Some("57014")
+    );
+    assert!(buffered.next().is_none());
+    drop(buffered);
 
     let invalid = directory.path().join("not-a-directory");
     std::fs::write(&invalid, b"preserve").unwrap();
