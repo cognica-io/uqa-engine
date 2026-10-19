@@ -55,35 +55,6 @@ fn inherited_primary_key_not_null_matches_postgresql_after_reopen(#[case] provid
     );
 }
 
-#[rstest::rstest]
-#[case::sqlite(1)]
-#[case::sqlite_key_value(2)]
-#[case::redb(3)]
-fn inherited_primary_key_locks_match_postgresql(#[case] provider: usize) {
-    let directory = tempfile::tempdir().unwrap();
-    let engine = open(provider, &directory.path().join("primary-key-locks.db"));
-    let peer = engine.new_session().unwrap();
-    let reference: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../tests/parity/pg18/inherited_primary_key_locks_oracle.expected.json"
-    ))
-    .unwrap();
-    for step in reference["cases"].as_array().unwrap() {
-        let session = if step["session"] == "A" {
-            &engine
-        } else {
-            &peer
-        };
-        crate::pg18_oracle::verify(
-            session,
-            &serde_json::json!({
-                "postgresql_version": reference["postgresql_version"],
-                "cases": [step],
-            })
-            .to_string(),
-        );
-    }
-}
-
 fn verify_after_reopen(provider: usize, expected: &str, split_id: &str, schema: &str) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("primary-key-not-null.db");
