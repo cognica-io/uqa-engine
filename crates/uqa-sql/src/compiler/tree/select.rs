@@ -7,9 +7,9 @@
 //! SELECT clauses, grouping, ordering, set operations, and CTEs.
 
 use super::{
-    compile_expr, compile_from_node, compile_named_windows, extract_strings, right_is_lateral,
-    Expr, FromClause, JoinKind, Node, NodeEnum, OrderBy, Projection, Result, SQLError, SelectStmt,
-    SetOp, SetOpKind, Value, CTE,
+    compile_expr, compile_from_list, compile_named_windows, extract_strings, Expr, FromClause,
+    JoinKind, Node, NodeEnum, OrderBy, Projection, Result, SQLError, SelectStmt, SetOp, SetOpKind,
+    Value, CTE,
 };
 mod cte;
 pub(in crate::compiler) use cte::compile_with_clause;
@@ -441,28 +441,6 @@ pub(in crate::compiler) fn compile_distinct_clause(nodes: &[Node]) -> Result<(bo
         }
     }
     Ok((true, distinct_on))
-}
-
-pub(in crate::compiler) fn compile_from_list(nodes: &[Node]) -> Result<Option<FromClause>> {
-    let Some(first) = nodes.first() else {
-        return Ok(None);
-    };
-    let mut current = compile_from_node(first)?;
-    for node in nodes.iter().skip(1) {
-        let lateral = right_is_lateral(node);
-        current = FromClause::Join {
-            left: Box::new(current),
-            right: Box::new(compile_from_node(node)?),
-            kind: JoinKind::Cross,
-            on: None,
-            using: None,
-            natural: false,
-            alias: None,
-            column_aliases: Vec::new(),
-            lateral,
-        };
-    }
-    Ok(Some(current))
 }
 
 pub(in crate::compiler) fn resolve_group_by_ordinals(

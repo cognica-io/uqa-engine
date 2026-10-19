@@ -7,8 +7,8 @@
 //! UPDATE and DELETE statement lowering.
 
 use super::{
-    compile_expr, compile_from_node, compile_returning_clause, compile_with_clause,
-    range_var_alias, range_var_name, DeleteStmt, NodeEnum, Result, SQLError, UpdateStmt,
+    compile_expr, compile_returning_clause, compile_with_clause, range_var_alias, range_var_name,
+    tree::compile_from_list, DeleteStmt, NodeEnum, Result, SQLError, UpdateStmt,
 };
 
 pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
@@ -30,10 +30,7 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
         .as_ref()
         .map(|w| compile_expr(w))
         .transpose()?;
-    let from = match stmt.from_clause.first() {
-        Some(node) => Some(compile_from_node(node)?),
-        None => None,
-    };
+    let from = compile_from_list(&stmt.from_clause)?;
     let (returning, returning_aliases) = compile_returning_clause(stmt.returning_clause.as_ref())?;
     let with = match stmt.with_clause.as_ref() {
         Some(wc) => compile_with_clause(wc)?,
@@ -218,10 +215,7 @@ pub(super) fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<De
         .as_ref()
         .map(|w| compile_expr(w))
         .transpose()?;
-    let using = match stmt.using_clause.first() {
-        Some(node) => Some(compile_from_node(node)?),
-        None => None,
-    };
+    let using = compile_from_list(&stmt.using_clause)?;
     let (returning, returning_aliases) = compile_returning_clause(stmt.returning_clause.as_ref())?;
     let with = match stmt.with_clause.as_ref() {
         Some(wc) => compile_with_clause(wc)?,

@@ -328,3 +328,69 @@ fn merge_action_syntax_retains_identity_without_binding_ordinary_calls() {
     assert!(!legacy.upgrade_legacy_serialized_dispatches());
     assert_eq!(serde_json::to_value(legacy).unwrap(), serialized);
 }
+
+#[test]
+fn mutation_source_lists_preserve_every_input_and_lateral_marker() {
+    fn canonical_cross_join(source: &mut FromClause) {
+        if let FromClause::Join {
+            left,
+            right,
+            kind,
+            on,
+            using,
+            natural,
+            ..
+        } = source
+        {
+            // The parser represents explicit CROSS JOIN as INNER without qualifications.
+            if *kind == JoinKind::Inner && on.is_none() && using.is_none() && !*natural {
+                *kind = JoinKind::Cross;
+            }
+            canonical_cross_join(left);
+            canonical_cross_join(right);
+        }
+    }
+    for (listed, explicit) in [
+        ("src_one AS a", "src_one AS a"),
+        (
+            "src_one AS a, src_two AS b",
+            "src_one AS a CROSS JOIN src_two AS b",
+        ),
+        (
+            "src_one AS a, src_two AS b, src_three AS c",
+            "src_one AS a CROSS JOIN src_two AS b CROSS JOIN src_three AS c",
+        ),
+        (
+            "src_one AS a, src_two AS b JOIN src_three AS c ON b.y = c.z",
+            "src_one AS a CROSS JOIN (src_two AS b JOIN src_three AS c ON b.y = c.z)",
+        ),
+        (
+            "src_one AS a, LATERAL (SELECT a.x + 1 AS y) AS b",
+            "src_one AS a CROSS JOIN LATERAL (SELECT a.x + 1 AS y) AS b",
+        ),
+    ] {
+        let Statement::Select(mut expected) = first(&format!("SELECT 1 FROM {explicit}")) else {
+            panic!("expected SELECT");
+        };
+        canonical_cross_join(expected.from.as_mut().expect("source"));
+        let Statement::Update(update) =
+            first(&format!("UPDATE target_rows SET value=99 FROM {listed}"))
+        else {
+            panic!("expected UPDATE");
+        };
+        let Statement::Delete(delete) = first(&format!("DELETE FROM target_rows USING {listed}"))
+        else {
+            panic!("expected DELETE");
+        };
+        assert_eq!(update.from, expected.from, "UPDATE {listed}");
+        assert_eq!(delete.using, expected.from, "DELETE {listed}");
+    }
+    let Statement::Update(update) = first("UPDATE target_rows SET value=99") else {
+        panic!("expected UPDATE");
+    };
+    let Statement::Delete(delete) = first("DELETE FROM target_rows") else {
+        panic!("expected DELETE");
+    };
+    assert!(update.from.is_none());
+    assert!(delete.using.is_none());
+}
