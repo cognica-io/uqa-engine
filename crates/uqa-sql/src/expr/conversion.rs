@@ -165,7 +165,7 @@ fn append_array_elements(
                 let mut quoted = value.is_empty() || value.eq_ignore_ascii_case("null");
                 for character in value.chars() {
                     control.check()?;
-                    quoted |= character.is_whitespace()
+                    quoted |= (character.is_ascii() && character.is_whitespace())
                         || matches!(character, ',' | '{' | '}' | '"' | '\\');
                 }
                 append_escaped(text, &value, quoted, false)?;

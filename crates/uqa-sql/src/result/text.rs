@@ -183,7 +183,8 @@ fn format_array(
                 let quoted = rendered.is_empty()
                     || rendered.eq_ignore_ascii_case("null")
                     || rendered.chars().any(|c| {
-                        c.is_ascii_whitespace() || matches!(c, ',' | '{' | '}' | '"' | '\\')
+                        (c.is_ascii() && c.is_whitespace())
+                            || matches!(c, ',' | '{' | '}' | '"' | '\\')
                     });
                 append_quoted(&mut text, &rendered, quoted, false)?;
             }
