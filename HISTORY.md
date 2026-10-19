@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Implement PostgreSQL’s binary `^@` text-prefix operator with native operator resolution, strict NULL and collation diagnostics, and retained CHECK/index/view identities. The shared `starts_with` kernel borrows text inputs and observes cancellation between bounded comparison chunks.
+
 - Compare dates with timestamps using PostgreSQL midnight, timezone and infinity semantics through joins, membership predicates and stored queries. Preserve invoking TimeZone and DateStyle for casts inside filters, finite dates beyond timestamp range, and timestamp years such as 294000 through the integer Gregorian calendar. Node and browser HTTP output preserve the same calendar and temporal precision instead of host Date limits.
 
 - Keep nested scalar-call optimization within ordinary thread stacks while preserving conditional evaluation, inlining, result types and collation metadata.

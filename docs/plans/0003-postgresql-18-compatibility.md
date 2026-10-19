@@ -139,7 +139,7 @@ The following compact ledger is the readable projection of the machine-readable 
 
 <!-- pg18-manifest-status:start -->
 
-Manifest inventory: 155 evidence items — 97 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
+Manifest inventory: 156 evidence items — 98 `verified`, 57 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
 
 | Milestone | Name | Status | Exit gate |
 | --- | --- | --- | --- |
@@ -308,6 +308,7 @@ Manifest inventory: 155 evidence items — 97 `verified`, 57 `partial`, 0 `expli
 | `query.constant-group-output-slots` | `M1` | `verified` |
 | `function.factorial-bigint-numeric` | `M1` | `verified` |
 | `types.date-timestamp-comparison` | `M1` | `verified` |
+| `expressions.text-prefix-operator` | `M1` | `verified` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -1479,3 +1480,5 @@ PR #752 corrects #750/#751 in SQL and Execution: view INSERT VALUES/SELECT prese
 [PR #1127](https://github.com/cognica-io/uqa-engine/pull/1127) addresses #1012 and the reproduced cast-context defect #1128. SQL owns selected cross-type comparisons, equality-key compatibility and invoking TimeZone/DateStyle conversions; Core owns integer Gregorian representation and explicit DATE output formatting; Execution retains SQL operators when positional predicates or posting filters cannot represent them. Declined runtime search lowering uses the existing mixed executor so search leaves never reach unsupported scalar evaluation. Physical Core equality, order and hash remain unchanged, and Engine only forwards scoped context.
 
 Independent PostgreSQL 18.4 references cover 60 operand pairs, nine wide-year timestamp values, 96 DATE output cases and 99 reverse timezone casts. The public comparison/cast fixture has 181 observations, 118 repeated after durable reopen; a separate 39-observation fixture combines temporal predicates with an equivalent one-token search support set. Both fixtures pass memory, native SQLite, SQLite Key/Value and redb, with persistent reopen. Automatic delivery results and the preserved task checklist are recorded in the PR. Broader input/range work remains #289, and row-constructor subquery arity remains #997; scalar record fields preserve PostgreSQL's reached-field type identity errors.
+
+Delivery: [PR #1127](https://github.com/cognica-io/uqa-engine/pull/1127) merged as `d67a7fdd6`, closing #1012/#1128/#1129 and removing its branch. Final-source Linux run [39251719409](https://github.com/cognica-io/uqa-engine/actions/runs/39251719409) passes all 1,131 checks / 1,625 required cases plus eight independent-process correctness cases, without failures or skips. All six FDW configurations pass [39250147690](https://github.com/cognica-io/uqa-engine/actions/runs/39250147690), with the separately tested HTTP-only follow-up preserving effective FDW inputs; final HTTP carrier parity passes [39251719307](https://github.com/cognica-io/uqa-engine/actions/runs/39251719307). The PR retains exact source comparisons and the maintainer-approved macOS performance exception; no wall-clock performance acceptance is claimed.

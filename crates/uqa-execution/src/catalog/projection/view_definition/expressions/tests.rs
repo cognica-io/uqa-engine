@@ -10,6 +10,51 @@ use crate::catalog::{
 };
 
 #[test]
+fn native_operator_index_keys_preserve_postgresql_parentheses() {
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("prefix_indexes.json")).unwrap();
+    let catalog = empty_catalog();
+    let resolution = RelationNameResolution {
+        search_path: vec!["public".into()],
+        temporary_schema: "pg_temp_1".into(),
+        temporary_namespace_allocated: false,
+        current_user: "uqa".into(),
+        lookup_mode: RelationLookupMode::Dynamic,
+    };
+    for case in reference["cases"].as_array().unwrap() {
+        let input = case["input"].as_str().unwrap();
+        let uqa_sql::Statement::CreateIndex(index) =
+            uqa_sql::compile(&format!("CREATE INDEX probe ON items (({input}))"))
+                .unwrap()
+                .remove(0)
+        else {
+            unreachable!()
+        };
+        let uqa_sql::ast::IndexKey::Expression(expression) = &index.columns[0] else {
+            unreachable!()
+        };
+        let mut call = false;
+        let allocations = allocation_counter::measure(|| {
+            call = super::super::stored_expression_prints_as_call(expression);
+        });
+        assert_eq!(
+            call,
+            !case["output"][0].as_str().unwrap().starts_with('('),
+            "{input}"
+        );
+        assert_eq!(allocations.count_total, 0, "classification borrows {input}");
+        for (position, pretty) in [false, true].into_iter().enumerate() {
+            assert_eq!(
+                index_key_definition(None, &catalog, &resolution, &index.columns[0], pretty)
+                    .unwrap(),
+                case["output"][position].as_str().unwrap(),
+                "{input}, pretty={pretty}"
+            );
+        }
+    }
+}
+
+#[test]
 fn generated_distinct_expressions_keep_postgresql_boolean_syntax() {
     use super::super::{Deparser, Scope};
     use uqa_sql::ast::{BinaryOp, FunctionBinding, FunctionDispatch, FunctionOrderSyntax};

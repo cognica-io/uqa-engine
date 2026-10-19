@@ -68,6 +68,7 @@ pub(super) const SIGNATURES: &[(&str, &str, &str, &str, i64, i64)] = &[
     ("!~~*", "bpchar", "text", "bool", 1630, 1661),
     ("~~", "bytea", "bytea", "bool", 2016, 2005),
     ("!~~", "bytea", "bytea", "bool", 2017, 2006),
+    ("^@", "text", "text", "bool", 3877, 3696),
     (
         "||",
         "anycompatiblearray",

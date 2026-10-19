@@ -21,7 +21,7 @@ fn native_pattern_identity_preserves_shared_expression_storage_bounds() {
 fn pattern_overloads_match_independent_postgresql_catalog() {
     let rows: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("tests/overloads.json")).unwrap();
-    assert_eq!(rows.len(), 26);
+    assert_eq!(rows.len(), 27);
     let memory = MemoryBudget::new(16 * 1024);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&memory, &token, &token);
@@ -36,6 +36,41 @@ fn pattern_overloads_match_independent_postgresql_catalog() {
             row["function_oid"].as_i64().unwrap()
         );
         drop(selected);
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
+fn prefix_operator_selects_text_and_rejects_unrelated_operands() {
+    let memory = MemoryBudget::new(16 * 1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    for input in [
+        None,
+        Some(ColumnType::Text),
+        Some(ColumnType::Varchar(None)),
+    ] {
+        let selected = select(
+            PatternOperator::StartsWith,
+            &[input.as_ref(), None],
+            &control,
+        )
+        .unwrap();
+        assert_eq!(selected.argument(0), &ColumnType::Text);
+        assert_eq!(selected.argument(1), &ColumnType::Text);
+        assert_eq!(selected.identity.oid, 3877);
+        drop(selected);
+        assert_eq!(memory.used(), 0);
+    }
+    for ty in [ColumnType::Integer, ColumnType::Boolean, ColumnType::Bytea] {
+        let error = select(
+            PatternOperator::StartsWith,
+            &[Some(&ty), Some(&ty)],
+            &control,
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.sqlstate(), Some("42883"));
         assert_eq!(memory.used(), 0);
     }
 }

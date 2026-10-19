@@ -1,0 +1,47 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "input": "'abc' ^@ 'a'",
+      "output": [
+        "(('abc'::text ^@ 'a'::text))",
+        "('abc'::text ^@ 'a'::text)"
+      ]
+    },
+    {
+      "input": "'abc' LIKE 'a%'",
+      "output": [
+        "(('abc'::text ~~ 'a%'::text))",
+        "('abc'::text ~~ 'a%'::text)"
+      ]
+    },
+    {
+      "input": "'a' || 'b'",
+      "output": [
+        "(('a'::text || 'b'::text))",
+        "('a'::text || 'b'::text)"
+      ]
+    },
+    {
+      "input": "abs(-2)",
+      "output": [
+        "abs('-2'::integer)",
+        "abs('-2'::integer)"
+      ]
+    },
+    {
+      "input": "2::double precision ^ 3::double precision",
+      "output": [
+        "(((2)::double precision ^ (3)::double precision))",
+        "(2::double precision ^ 3::double precision)"
+      ]
+    },
+    {
+      "input": "(ROW(1,2)).f1",
+      "output": [
+        "((ROW(1, 2)).f1)",
+        "((ROW(1, 2)).f1)"
+      ]
+    }
+  ]
+}

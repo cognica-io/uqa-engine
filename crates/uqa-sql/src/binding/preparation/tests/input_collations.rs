@@ -77,6 +77,15 @@ fn calls_record_the_merged_collation_of_their_inputs() {
             vec![("||", Some(0)), ("lower", Some(0))],
         ),
         ("SELECT c ~ p FROM t", vec![("~", Some(0))]),
+        ("SELECT c ^@ p FROM t", vec![("^@", Some(0))]),
+        (
+            "SELECT starts_with(c,p) FROM t",
+            vec![("starts_with", Some(0))],
+        ),
+        (
+            "SELECT c ^@ (p COLLATE \"C\") FROM t",
+            vec![("^@", Some(950))],
+        ),
         (
             "SELECT c ILIKE (p COLLATE \"ucs_basic\") FROM t",
             vec![("ILIKE", Some(962))],

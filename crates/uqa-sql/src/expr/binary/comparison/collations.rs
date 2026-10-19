@@ -7,11 +7,7 @@
 //! A selected collation is observed only when a non-NULL string comparison reaches it.
 
 use super::{EnumKeyOrder, Ordering, ProductionControl, Result, Value};
-use crate::{
-    catalog::collations::{builtin_collation_order, BuiltinCollationOrder},
-    expr::SQLValueCatalog,
-    SQLError,
-};
+use crate::{catalog::collations::BuiltinCollationOrder, expr::SQLValueCatalog};
 
 pub(super) const DEFAULT: u32 = crate::catalog::collations::DEFAULT_COLLATION_OID as u32;
 
@@ -52,17 +48,7 @@ pub(super) fn compare_text(
     control: &ProductionControl<'_>,
 ) -> Result<Ordering> {
     control.check()?;
-    if collation == 0 {
-        return Err(SQLError::Diagnostic {
-            sqlstate: "42P22".into(),
-            message: "could not determine which collation to use for string comparison".into(),
-            detail: None,
-            hint: Some("Use the COLLATE clause to set the collation explicitly.".into()),
-        });
-    }
-    let selected = builtin_collation_order(collation).ok_or_else(|| {
-        SQLError::Internal(format!("cache lookup failed for collation {collation}"))
-    })?;
+    let selected = crate::expr::collation::string_comparison_order(collation)?;
     match (selected, purpose) {
         (BuiltinCollationOrder::Unicode, EnumKeyOrder::Declaration) => {
             crate::expr::compare_unicode_with_control(left, right, control)

@@ -34,11 +34,12 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
     }
 }
 
-/// Whether a built-in call by this name reads its input collation without a registered catalog signature that would bind it: the regular-expression functions. Analysis keeps such a call bound by name, so its selection reaches execution; the case-mapping functions and pattern operators already keep their selected bindings.
+/// Whether a built-in call by this name reads its input collation without a registered catalog signature that would bind it. Analysis keeps such a call bound by name, so its selection reaches execution; the case-mapping functions and pattern operators already keep their selected bindings.
 pub(crate) fn binds_input_collation_by_name(name: &str) -> bool {
     matches!(
         name.strip_prefix("pg_catalog.").unwrap_or(name),
-        "regexp_count"
+        "starts_with"
+            | "regexp_count"
             | "regexp_instr"
             | "regexp_like"
             | "regexp_match"
@@ -50,7 +51,7 @@ pub(crate) fn binds_input_collation_by_name(name: &str) -> bool {
     )
 }
 
-/// Built-ins whose results depend on the call's input collation (`PostgreSQL`'s `inputcollid`): case mapping, LIKE and ILIKE, and the regular-expression family. `collation` is zero when analysis found the input collation indeterminate.
+/// Built-ins whose results or diagnostics depend on the call's input collation (`PostgreSQL`'s `inputcollid`). `collation` is zero when analysis found the input collation indeterminate.
 pub(super) fn eval_collated_functions_with_control(
     name: &str,
     args: &[Value],
@@ -59,7 +60,7 @@ pub(super) fn eval_collated_functions_with_control(
 ) -> Option<Result<Produced<Value>>> {
     if matches!(
         name,
-        "upper" | "lower" | "casefold" | "initcap" | "like" | "ilike"
+        "upper" | "lower" | "casefold" | "initcap" | "like" | "ilike" | "starts_with"
     ) {
         return Some(
             control

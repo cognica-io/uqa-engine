@@ -945,17 +945,19 @@ fn binary_function_operator(binding: Option<&FunctionBinding>) -> Option<(&'stat
 }
 
 /// Whether a function node prints as a call, `name(arguments)`, rather than as subscripts or an operator.
-pub(super) fn prints_as_call(binding: Option<&FunctionBinding>, args: &[ScalarExpr]) -> bool {
+pub(super) fn prints_as_call(binding: Option<&FunctionBinding>, argument_count: usize) -> bool {
     let printed_otherwise = matches!(
         binding.and_then(|binding| binding.dispatch),
         Some(
             FunctionDispatch::ArraySubscripts
                 | FunctionDispatch::ArraySlices
                 | FunctionDispatch::ArraySlicesWithBounds(_)
+                | FunctionDispatch::FieldSelect
                 | FunctionDispatch::NumericOperator(_)
                 | FunctionDispatch::JsonExtract { .. }
                 | FunctionDispatch::Collate { .. }
         )
-    ) || (args.len() == 2 && binary_function_operator(binding).is_some());
+    ) || (argument_count == 2
+        && binary_function_operator(binding).is_some());
     !printed_otherwise
 }

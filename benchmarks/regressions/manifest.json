@@ -15198,6 +15198,87 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "prefix_comparison_borrows_inputs_and_preserves_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/scalar_core/tests.rs",
+      "capability": "PostgreSQL prefix operator and input collations",
+      "workload": "Independent PostgreSQL text-prefix values, NULLs, input types, selected collations, prepared inputs and stored definitions; zero-budget borrowed comparison and both cancellation tokens.",
+      "invariant": "Native operator identity, strict evaluation and selected input collations survive execution and reopening without copying text inputs or admitting unrelated type pairs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "prefix_operator_selects_text_and_rejects_unrelated_operands",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/pattern/tests.rs",
+      "capability": "PostgreSQL prefix operator and input collations",
+      "workload": "Independent PostgreSQL text-prefix values, NULLs, input types, selected collations, prepared inputs and stored definitions; zero-budget borrowed comparison and both cancellation tokens.",
+      "invariant": "Native operator identity, strict evaluation and selected input collations survive execution and reopening without copying text inputs or admitting unrelated type pairs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "an_indeterminate_collation_is_reported_only_for_values_that_need_it",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/scalar_core/tests.rs",
+      "capability": "PostgreSQL prefix operator and input collations",
+      "workload": "Independent PostgreSQL text-prefix values, NULLs, input types, selected collations, prepared inputs and stored definitions; zero-budget borrowed comparison and both cancellation tokens.",
+      "invariant": "Native operator identity, strict evaluation and selected input collations survive execution and reopening without copying text inputs or admitting unrelated type pairs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "calls_record_the_merged_collation_of_their_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/input_collations.rs",
+      "capability": "PostgreSQL prefix operator and input collations",
+      "workload": "Independent PostgreSQL text-prefix values, NULLs, input types, selected collations, prepared inputs and stored definitions; zero-budget borrowed comparison and both cancellation tokens.",
+      "invariant": "Native operator identity, strict evaluation and selected input collations survive execution and reopening without copying text inputs or admitting unrelated type pairs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "prefix_operator_and_stored_definitions_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/pattern_operators.rs",
+      "capability": "PostgreSQL prefix operator and input collations",
+      "workload": "Independent PostgreSQL text-prefix values, NULLs, input types, selected collations, prepared inputs and stored definitions; zero-budget borrowed comparison and both cancellation tokens.",
+      "invariant": "Native operator identity, strict evaluation and selected input collations survive execution and reopening without copying text inputs or admitting unrelated type pairs.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_operator_index_keys_preserve_postgresql_parentheses",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/projection/view_definition/expressions/tests.rs",
+      "capability": "Native SQL index expression identity",
+      "workload": "Six independently captured PostgreSQL prefix, LIKE, concatenation, numeric, field-selection and ordinary-function index expressions in compact and pretty output.",
+      "invariant": "Indexes and partition keys share borrowed, zero-allocation printed-call classification; native operator expressions retain required parentheses while ordinary calls retain their existing form."
     }
   ]
 }

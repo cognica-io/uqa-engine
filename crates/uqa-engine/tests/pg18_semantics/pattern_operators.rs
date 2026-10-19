@@ -43,6 +43,35 @@ fn pattern_operator_identity_and_inputs_match_postgresql(#[case] provider: usize
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn prefix_operator_and_stored_definitions_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("prefix.db");
+    let engine = open(provider, &path);
+    let reference = include_str!("prefix_operator.json");
+    crate::pg18_oracle::verify(&engine, reference);
+    let engine = if provider == 0 {
+        engine
+    } else {
+        drop(engine);
+        open(provider, &path)
+    };
+    engine
+        .sql("SET search_path=prefix_review_1044,pg_catalog", &[])
+        .unwrap();
+    let mut reopened: serde_json::Value = serde_json::from_str(reference).unwrap();
+    reopened["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["reopen"] == true);
+    assert_eq!(reopened["cases"].as_array().unwrap().len(), 16);
+    crate::pg18_oracle::verify(&engine, &reopened.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn pattern_escape_helpers_and_null_evaluation_match_postgresql(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let engine = open(provider, &directory.path().join("pattern-helpers.db"));
@@ -100,20 +129,26 @@ fn native_patterns_and_registered_callbacks_keep_separate_definitions(#[case] pr
     use uqa_core::Value;
     let directory = tempfile::tempdir().unwrap();
     let engine = open(provider, &directory.path().join("pattern-callback.db"));
-    for name in ["like", "ilike", "regex_match_op", "regex_imatch_op"] {
+    for name in [
+        "like",
+        "ilike",
+        "regex_match_op",
+        "regex_imatch_op",
+        "starts_with",
+    ] {
         engine
             .register_scalar_function(name, |_: &[Value]| Ok(Value::Bool(false)))
             .unwrap();
     }
     engine
         .sql(
-            "CREATE VIEW native_patterns AS SELECT 'a' LIKE 'a' AS l, 'a' ILIKE 'A' AS il, 'a' ~ 'a' AS r, 'a' ~* 'A' AS ri",
+            "CREATE VIEW native_patterns AS SELECT 'a' LIKE 'a' AS l, 'a' ILIKE 'A' AS il, 'a' ~ 'a' AS r, 'a' ~* 'A' AS ri, 'abc' ^@ 'a' AS prefix",
             &[],
         )
         .unwrap();
     engine
         .sql(
-            "CREATE VIEW callback_patterns AS SELECT like('a','a') AS l, ilike('a','A') AS il, regex_match_op('a','a') AS r, regex_imatch_op('a','A') AS ri",
+            "CREATE VIEW callback_patterns AS SELECT like('a','a') AS l, ilike('a','A') AS il, regex_match_op('a','a') AS r, regex_imatch_op('a','A') AS ri, starts_with('abc','a') AS prefix",
             &[],
         )
         .unwrap();
@@ -121,7 +156,7 @@ fn native_patterns_and_registered_callbacks_keep_separate_definitions(#[case] pr
     for reader in std::iter::once(&engine).chain(session.as_ref()) {
         for (view, expected) in [("native_patterns", true), ("callback_patterns", false)] {
             let result = reader.sql(&format!("SELECT * FROM {view}"), &[]).unwrap();
-            for column in 0..4 {
+            for column in 0..5 {
                 assert_eq!(result.value_at(0, column), Some(&Value::Bool(expected)));
             }
             for pretty in [false, true] {
@@ -135,7 +170,7 @@ fn native_patterns_and_registered_callbacks_keep_separate_definitions(#[case] pr
                     panic!("view definition")
                 };
                 let result = reader.sql(definition, &[]).unwrap();
-                for column in 0..4 {
+                for column in 0..5 {
                     assert_eq!(result.value_at(0, column), Some(&Value::Bool(expected)));
                 }
             }

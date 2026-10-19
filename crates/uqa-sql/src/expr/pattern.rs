@@ -22,11 +22,14 @@ pub(super) fn evaluate(
     collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    let name = match (operator.is_like(), operator.case_insensitive()) {
-        (true, false) => "like",
-        (true, true) => "ilike",
-        (false, false) => "regex_match_op",
-        (false, true) => "regex_imatch_op",
+    let name = match operator {
+        PatternOperator::Like | PatternOperator::NotLike => "like",
+        PatternOperator::ILike | PatternOperator::NotILike => "ilike",
+        PatternOperator::Regex | PatternOperator::NotRegex => "regex_match_op",
+        PatternOperator::RegexInsensitive | PatternOperator::NotRegexInsensitive => {
+            "regex_imatch_op"
+        }
+        PatternOperator::StartsWith => "starts_with",
     };
     let result = super::scalar_core::eval_collated_functions_with_control(
         name, arguments, collation, control,

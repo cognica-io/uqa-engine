@@ -284,5 +284,16 @@
     "function_name": "byteanlike",
     "volatility": "i",
     "strict": true
+  },
+  {
+    "oid": 3877,
+    "name": "^@",
+    "left_type": "text",
+    "right_type": "text",
+    "result_type": "boolean",
+    "function_oid": 3696,
+    "function_name": "starts_with",
+    "volatility": "i",
+    "strict": true
   }
 ]
