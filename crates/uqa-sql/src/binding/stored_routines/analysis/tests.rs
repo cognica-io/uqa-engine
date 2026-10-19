@@ -92,6 +92,56 @@ fn plan(sql: &str) -> UnifiedPlan {
 }
 
 #[test]
+fn prepared_input_constants_keep_their_original_stored_syntax_sites() {
+    use crate::ScalarExpr;
+    use uqa_core::Value;
+    let scopes = Scopes::default();
+    scopes
+        .context()
+        .with_scope_result(|scope| {
+            let binding = scope.binding_context()?;
+            let context = super::super::CatalogRoutineContext {
+                routines: &scopes,
+                binding: &binding,
+            };
+            let mut syntax = crate::compile("SELECT '7'::integer, 'unchanged'::text")?.remove(0);
+            let original = UnifiedPlan::lower(syntax.clone());
+            let mut prepared = original.clone();
+            prepared.rewrite_scalar_expressions(&mut |node| {
+                if matches!(node, ScalarExpr::Literal(Value::Str(text)) if text == "7") {
+                    *node = ScalarExpr::TypedLiteral {
+                        collation_oid: None,
+                        composite_source: None,
+                        value: Value::Int(7),
+                        ty: "integer".into(),
+                        bound_type: None,
+                        parameter_index: None,
+                    };
+                }
+            });
+            let bound = super::super::bind_prepared_catalog_statement_routines(
+                &context,
+                &original,
+                &prepared,
+                &[],
+            )?;
+            assert!(crate::catalog::stored_ast::bind_stored_statement_sites(
+                &mut syntax,
+                &bound.sites
+            )?);
+            let serialized = serde_json::to_string(&syntax).unwrap();
+            let restored = UnifiedPlan::lower(serde_json::from_str(&serialized).unwrap());
+            let rebound = super::super::bind_catalog_statement_routines(&context, &restored, &[])?;
+            assert!(!crate::catalog::stored_ast::bind_stored_statement_sites(
+                &mut syntax,
+                &rebound.sites
+            )?);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
 fn stored_statement_errors_release_the_scope_without_evaluating_constants() {
     let scopes = Scopes::default();
     let result = scopes
