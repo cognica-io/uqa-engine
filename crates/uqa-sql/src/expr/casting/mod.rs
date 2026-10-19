@@ -133,40 +133,40 @@ pub fn cast_value_from_with_control(
             }),
             _ => None,
         });
-        let parsed;
-        let array = match v {
-            Value::Array(array) => array,
-            Value::LegacyVector(vector) => vector.as_array(),
-            Value::Str(text) => {
-                parsed = array::parse_pg_array_literal_with_control(text, control)?;
-                &parsed
+        let array = if let Value::Str(text) = v {
+            array::parse_pg_array_literal_with_input(text, control, |value| {
+                cast_value_from_with_control(&value, element_type, source_element_type, control)
+            })?
+        } else {
+            let array = match v {
+                Value::Array(array) => array,
+                Value::LegacyVector(vector) => vector.as_array(),
+                other => {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "CAST AS {ty}: expected array, got {other:?}"
+                    )))
+                }
+            };
+            let elements = array::cast_array_elements(
+                array.elements(),
+                element_type,
+                source_element_type,
+                control,
+            )?;
+            let normalize_empty = array.elements().is_empty()
+                && !array::binary_compatible_elements(source_element_type, element_type, control)?;
+            let mut bounds = ProductionVec::new(*control);
+            bounds.reserve(array.lower_bounds().len())?;
+            if !normalize_empty {
+                for lower in array.lower_bounds() {
+                    bounds.push_copy(*lower)?;
+                }
             }
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "CAST AS {ty}: expected array, got {other:?}"
-                )))
-            }
-        };
-        let elements = array::cast_array_elements(
-            array.elements(),
-            element_type,
-            source_element_type,
-            control,
-        )?;
-        let normalize_empty = array.elements().is_empty()
-            && !array::binary_compatible_elements(source_element_type, element_type, control)?;
-        let mut bounds = ProductionVec::new(*control);
-        bounds.reserve(array.lower_bounds().len())?;
-        if !normalize_empty {
-            for lower in array.lower_bounds() {
-                bounds.push_copy(*lower)?;
-            }
-        }
-        let array =
             ArrayValue::with_lower_bounds_with_control(elements, bounds.finish()?, control)?
                 .ok_or_else(|| {
                     SQLError::TypeMismatch("array dimensions changed during cast".into())
-                })?;
+                })?
+        };
         let (array, memory) = array.into_parts();
         let element = crate::ColumnType::from_sql_name_with_control(element_type, control)?;
         let oid = crate::catalog::type_metadata::pg_type_oid(&element) as u32;
@@ -827,6 +827,7 @@ pub(super) fn cast_boolean(v: &Value) -> Result<Value> {
     }
 }
 
+pub(in crate::expr) use array::parse_pg_array_literal_with_input;
 pub use array::{array_dimensions, parse_pg_array_literal, parse_pg_array_literal_with_control};
 use binary_oid::{bytea_to_integer, cast_bytea, cast_named_oid, cast_oid, cast_xid};
 use temporal::{cast_temporal, TemporalCastTarget};

@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Keep persistent IVF and HNSW writers bound to their completed index definitions when another session commits during index creation, preventing canonical vectors from being written without the corresponding index metadata.
 
+- Report malformed array input with PostgreSQL SQLSTATE, primary message and separate DETAIL; preserve dimension declarations, quoted elements, whitespace and empty-array normalization.
+
 - Preserve explicitly requested schemaless document fields in streaming derived tables and CTEs instead of returning NULL after source projection.
 
 - Reject primary keys over existing NO INHERIT or unvalidated NOT NULL constraints with PostgreSQL diagnostics, preserving original column metadata and written-order ALTER COLUMN TYPE analysis.
