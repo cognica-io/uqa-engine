@@ -12,3 +12,6 @@ mod expr_evaluator;
 mod fts_query_coverage;
 #[path = "parser_fuzz.rs"]
 mod parser_fuzz;
+
+#[path = "semantics/privileges.rs"]
+mod privileges;

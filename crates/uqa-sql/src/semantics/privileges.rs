@@ -281,7 +281,7 @@ fn join_lineage(
 
 fn collect_expression_columns(
     expression: &ScalarExpr,
-    scopes: &[SourceLineage],
+    scopes: &[&SourceLineage],
     direct_star: bool,
     required: &mut BTreeSet<BaseColumn>,
 ) -> BTreeSet<usize> {
@@ -343,7 +343,7 @@ fn collect_expression_columns(
 
 fn collect_expression_and_subqueries(
     expression: &ScalarExpr,
-    scopes: &[SourceLineage],
+    scopes: &[&SourceLineage],
     direct_star: bool,
     subqueries: &[QueryPlan],
     ctes: &CteScope<'_>,
@@ -400,7 +400,7 @@ fn function_lineage(
 
 fn analyze_join_source_lineage(
     source: &SourcePlan,
-    outer_scopes: &[SourceLineage],
+    outer_scopes: &[&SourceLineage],
     subqueries: &[QueryPlan],
     ctes: &CteScope<'_>,
     universe: &mut SourceLineage,
@@ -420,13 +420,13 @@ fn analyze_join_source_lineage(
         unreachable!("join lineage helper requires a join source")
     };
     let left = analyze_source_lineage(left, outer_scopes, subqueries, ctes, universe, required)?;
-    let mut right_scopes = vec![left.clone()];
+    let mut right_scopes = vec![&left];
     right_scopes.extend_from_slice(outer_scopes);
     let right = analyze_source_lineage(right, &right_scopes, subqueries, ctes, universe, required)?;
-    let inputs = join_lineage(left.clone(), right.clone(), None, false, None, &[]);
-    let mut condition_scopes = vec![inputs];
-    condition_scopes.extend_from_slice(outer_scopes);
     if let Some(on) = on {
+        let inputs = join_lineage(left.clone(), right.clone(), None, false, None, &[]);
+        let mut condition_scopes = vec![&inputs];
+        condition_scopes.extend_from_slice(outer_scopes);
         collect_expression_and_subqueries(
             on,
             &condition_scopes,
@@ -464,7 +464,7 @@ fn analyze_join_source_lineage(
 
 fn analyze_function_group_lineage(
     source: &SourcePlan,
-    outer_scopes: &[SourceLineage],
+    outer_scopes: &[&SourceLineage],
     subqueries: &[QueryPlan],
     ctes: &CteScope<'_>,
     universe: &mut SourceLineage,
@@ -509,7 +509,7 @@ fn analyze_function_group_lineage(
 
 fn analyze_source_lineage(
     source: &SourcePlan,
-    outer_scopes: &[SourceLineage],
+    outer_scopes: &[&SourceLineage],
     subqueries: &[QueryPlan],
     ctes: &CteScope<'_>,
     universe: &mut SourceLineage,
@@ -599,7 +599,7 @@ fn analyze_query_block(
     block: &QueryBlockPlan,
     source: Option<&SourcePlan>,
     ctes: &CteScope<'_>,
-    outer_scopes: &[SourceLineage],
+    outer_scopes: &[&SourceLineage],
     universe: &mut SourceLineage,
     required: &mut BTreeSet<BaseColumn>,
 ) -> Result<(), SQLError> {
@@ -617,7 +617,7 @@ fn analyze_query_block(
         },
     )?;
     universe.include_tables(&lineage);
-    let mut scopes = vec![lineage];
+    let mut scopes = vec![&lineage];
     scopes.extend_from_slice(outer_scopes);
     for column in block
         .privilege_columns
@@ -668,7 +668,7 @@ fn analyze_query_block(
 fn analyze_query_plan(
     plan: &QueryPlan,
     ctes: &CteScope<'_>,
-    outer_scopes: &[SourceLineage],
+    outer_scopes: &[&SourceLineage],
     universe: &mut SourceLineage,
     required: &mut BTreeSet<BaseColumn>,
 ) -> Result<(), SQLError> {
@@ -716,7 +716,7 @@ fn analyze_query_plan(
                 crate::semantics::projection::query_plan_output_columns(left).unwrap_or_default(),
                 None,
             );
-            let mut scopes = vec![result_scope];
+            let mut scopes = vec![&result_scope];
             scopes.extend_from_slice(outer_scopes);
             for expression in order_by
                 .iter()
@@ -790,7 +790,7 @@ fn source_expression_dependencies(
         &mut required,
     )?;
     universe.include_tables(&lineage);
-    let scopes = [lineage.clone()];
+    let scopes = [&lineage];
     for expression in expressions {
         collect_expression_and_subqueries(
             expression,
@@ -876,7 +876,7 @@ fn table_expression_dependencies(
             column,
         })
         .collect::<BTreeSet<_>>();
-    let scopes = [lineage.clone()];
+    let scopes = [&lineage];
     for expression in expressions {
         collect_expression_and_subqueries(
             expression,

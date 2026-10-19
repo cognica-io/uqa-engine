@@ -26,7 +26,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reuse the result schema produced by ordered statement input analysis, avoiding a second complete binding pass while preserving output types, collations, anonymous-record fields and procedural dependency scopes.
 
-- Reuse the source schema derived while binding executable FROM routines, avoiding another source-binding pass before query-block validation without changing privilege checks or physical source validation.
+- Reuse the source schema derived while binding executable FROM routines, avoiding another source-binding pass before query-block validation without changing privilege checks or physical source validation. Nested privilege analysis borrows outer column lineage instead of copying its maps at each level; authorization subjects and column checks remain unchanged. Correlated schemas retain their completed lookup indexes when attaching hidden virtual-column metadata.
 
 - Preserve every comma-separated input of UPDATE FROM and DELETE USING so empty or missing later sources cannot cause unintended row changes. Retain source order, aliases and LATERAL dependencies through the shared SQL source-list compiler.
 

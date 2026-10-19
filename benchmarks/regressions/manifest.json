@@ -16061,6 +16061,58 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "nested_privilege_analysis_does_not_copy_outer_column_lineage",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/semantics/privileges.rs",
+      "capability": "Borrowed correlated privilege lineage",
+      "workload": "Analyze a 1024-column relation through 24 nested scalar-query scopes, then authorize the selected outer column.",
+      "invariant": "Total allocations stay below 4MiB while the original ordered column privilege check is preserved; outer lineage maps are not copied per nested scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "borrowed_privilege_scopes_preserve_correlated_and_join_requirements",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/semantics/privileges.rs",
+      "capability": "Nested privilege scope correctness",
+      "workload": "Correlated scalar queries, ON/USING joins and LATERAL with column grants and a denied nested column, independently checked on PostgreSQL18.4.",
+      "invariant": "Preserve the invoking role, ordered base-column authorization and nested42501 denial while borrowing immutable scopes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "correlated_scope_builds_lookup_maps_once_with_or_without_virtual_columns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/outer_scope/tests.rs",
+      "capability": "Single construction of correlated lookup maps",
+      "workload": "Overlay 1-, 64- and 1024-column scopes with and without a hidden virtual column and distinct inner/outer collations.",
+      "invariant": "Construct the composite lookup index once, preserving local shadowing, shifted outer slots, hidden-column typing and collations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unchanged_virtual_bindings_share_indexes_and_new_bindings_preserve_the_source",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/outer_scope/tests.rs",
+      "capability": "Immutable virtual-column metadata updates",
+      "workload": "Add empty, already visible and genuinely new virtual bindings to a collated row schema.",
+      "invariant": "No-op additions share the original index; real additions preserve source immutability, physical layout and existing collation without rebuilding lookup maps.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
