@@ -6,7 +6,7 @@
 
 //! Retain selected clause identities and apply unknown-input coercions at their original plan addresses.
 
-use super::{BTreeMap, ColumnType, NonNull, SQLError, ScalarExpr};
+use super::{BTreeMap, ColumnType, ConvertedInput, NonNull, SQLError, ScalarExpr};
 use crate::ast::{FunctionBinding, FunctionDispatch};
 use crate::catalog::collations::expression::{discard_scalar_clause, scalar_clause};
 
@@ -84,19 +84,25 @@ impl CollationInputs {
     pub(super) fn take_literal(
         &self,
         expression: &ScalarExpr,
-        literals: &mut BTreeMap<NonNull<ScalarExpr>, ScalarExpr>,
-    ) -> Option<ScalarExpr> {
+        literals: &mut BTreeMap<NonNull<ScalarExpr>, ConvertedInput>,
+    ) -> Option<ConvertedInput> {
         let mut bare = expression;
         while let Some(clause) = scalar_clause(bare).ok()? {
             bare = clause.argument;
         }
-        let literal = literals.remove(&NonNull::from(bare))?;
+        let ConvertedInput {
+            expression: literal,
+            session_dependent,
+        } = literals.remove(&NonNull::from(bare))?;
         let Some(clause) = self
             .0
             .get(&NonNull::from(expression))
             .filter(|clause| clause.retain)
         else {
-            return Some(literal);
+            return Some(ConvertedInput {
+                expression: literal,
+                session_dependent,
+            });
         };
         let ScalarExpr::Func {
             name,
@@ -110,16 +116,19 @@ impl CollationInputs {
         else {
             return None;
         };
-        Some(ScalarExpr::Func {
-            name: name.clone(),
-            binding: Some(FunctionBinding::dispatched(FunctionDispatch::Collate {
-                oid: Some(clause.oid),
-            })),
-            args: vec![literal, args[1].clone()],
-            distinct: *distinct,
-            order_by: order_by.clone(),
-            order_syntax: *order_syntax,
-            filter: filter.clone(),
+        Some(ConvertedInput {
+            expression: ScalarExpr::Func {
+                name: name.clone(),
+                binding: Some(FunctionBinding::dispatched(FunctionDispatch::Collate {
+                    oid: Some(clause.oid),
+                })),
+                args: vec![literal, args[1].clone()],
+                distinct: *distinct,
+                order_by: order_by.clone(),
+                order_syntax: *order_syntax,
+                filter: filter.clone(),
+            },
+            session_dependent,
         })
     }
 }

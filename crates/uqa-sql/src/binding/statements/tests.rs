@@ -95,6 +95,14 @@ fn ordinary_plan_reuse_retains_only_immutable_input_conversions() {
         ("SELECT 'today'::date", false),
         ("SELECT '{now}'::timestamp[]", false),
         ("SELECT ('now'::text)::timestamp", true),
+        ("SELECT '2020-02-03'::date", true),
+        ("SELECT '02-03-2020'::date", false),
+        ("SELECT '{2020-02-03}'::date[]", true),
+        ("SELECT 'epoch'::timestamp", true),
+        ("SELECT '1 day'::interval", true),
+        ("SELECT '-1 2:03:04'::interval", false),
+        ("SELECT 1 WHERE '2020-02-03'::date IN ('2020-02-03', '2020-02-04')", true),
+        ("SELECT 1 WHERE '2020-02-03'::date IN ('02-03-2020', '2020-02-04')", false),
     ] {
         let scopes = Scopes::default();
         let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));

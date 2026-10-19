@@ -13,7 +13,7 @@ use crate::{ast::BinaryOp, type_resolution::membership::MembershipShape};
 pub(super) struct MembershipAnalysis {
     pub shape: MembershipShape,
     pub array_coercions: Vec<(usize, ColumnType)>,
-    pub left_constants: Vec<Option<ScalarExpr>>,
+    pub left_constants: Vec<Option<super::parameters::ConvertedInput>>,
 }
 
 impl Preparation<'_> {
@@ -233,7 +233,7 @@ impl MembershipAnalysis {
                 _ => unreachable!("analyzed comparison"),
             };
             if let Some(constant) = constant {
-                *left = constant;
+                *left = constant.expression;
             }
             if index < last {
                 crate::plan::subqueries::copy_occurrences(left, arena)?;
