@@ -47,6 +47,12 @@
     {"sql":"SELECT pg_catalog.pg_typeof(type_observer_security_probe.emit())","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["pg_typeof"],"type_oids":[2206],"rows":[["smallint"]]}],"id":"observer_allowed"},
     {"sql":"ROLLBACK TO p","command_tags":["ROLLBACK"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"id":"observer_allowed_rollback"},
     {"sql":"SELECT last_value,is_called FROM type_observer_security_probe.calls","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["last_value","is_called"],"type_oids":[20,16],"rows":[["4","t"]]}],"id":"observer_allowed_calls"},
-    {"sql":"ROLLBACK","command_tags":["ROLLBACK"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"id":"end"}
+    {"sql":"ROLLBACK","command_tags":["ROLLBACK"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"id":"end"},
+    {"sql":"SELECT pg_typeof(1::not_a_real_type)","command_tags":[],"error":{"sqlstate":"42704","message":"type \"not_a_real_type\" does not exist","detail":null,"hint":null},"results":[],"id":"type_boundary_1"},
+    {"sql":"SELECT pg_typeof(NULL::not_a_real_type[])","command_tags":[],"error":{"sqlstate":"42704","message":"type \"not_a_real_type[]\" does not exist","detail":null,"hint":null},"results":[],"id":"type_boundary_2"},
+    {"sql":"SELECT pg_typeof(ROW(1)::not_a_real_type)","command_tags":[],"error":{"sqlstate":"42704","message":"type \"not_a_real_type\" does not exist","detail":null,"hint":null},"results":[],"id":"type_boundary_3"},
+    {"sql":"PREPARE missing_observer(not_a_real_type) AS SELECT pg_typeof($1)","command_tags":[],"error":{"sqlstate":"42704","message":"type \"not_a_real_type\" does not exist","detail":null,"hint":null},"results":[],"id":"type_boundary_4"},
+    {"sql":"SELECT pg_typeof(NULL::pg_catalog.not_a_real_type)","command_tags":[],"error":{"sqlstate":"42704","message":"type \"pg_catalog.not_a_real_type\" does not exist","detail":null,"hint":null},"results":[],"id":"type_boundary_5"},
+    {"sql":"SELECT pg_typeof(NULL::missing_schema.not_a_real_type)","command_tags":[],"error":{"sqlstate":"3F000","message":"schema \"missing_schema\" does not exist","detail":null,"hint":null},"results":[],"id":"type_boundary_6"}
   ]
 }

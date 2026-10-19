@@ -5471,7 +5471,7 @@
       "cases": 4,
       "source": "crates/uqa-engine/tests/queries/sql_type_introspection.rs",
       "capability": "Declared type observation",
-      "workload": "135 independent PostgreSQL observations cover reached/unreached volatile arguments, per-row and aggregate calls, scalar/set subqueries, NULL/domain/record identity, prepared inputs, overloads, stored views, RETURNING and privileges on four providers after persistent reopening.",
+      "workload": "141 independent PostgreSQL observations cover reached/unreached volatile arguments, per-row and aggregate calls, scalar/set subqueries, NULL/domain/record identity, prepared inputs, overloads, stored views, RETURNING and privileges on four providers after persistent reopening.",
       "invariant": "Every reached argument retains its effects and errors exactly once, unreachable calls remain unexecuted, and values, type identities, diagnostics and transaction effects match PostgreSQL.",
       "case_names": [
         "case_1_memory",
@@ -14434,6 +14434,19 @@
       "capability": "Declared type observation",
       "workload": "Observe typed NULL, smallint integer carriers and a 32 KiB text operand under a shared allowance, then cancel a retained input.",
       "invariant": "The result uses the analyzed type identity, typed NULL remains observable, and consumed or cancelled inputs release all their reservations while earlier output remains charged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_type_observation_keeps_regtype_without_rebinding_catalog_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/scalar_input/tests.rs",
+      "capability": "Type observation",
+      "workload": "Read a bound pg_typeof result with enum, domain and composite operands after catalog-free runtime inference; exercise both cancellation owners and retained resolution errors.",
+      "invariant": "The source remains regtype for catalog-aware output, inference does not revisit the analyzed operand, and all temporary reservations are released.",
       "case_names": [
         ""
       ]

@@ -1469,7 +1469,7 @@
     },
     {
       "id": "functions.type-observation-arguments",
-      "postgresql_reference": "135 independently captured PostgreSQL 18.4 observations in type_observation_arguments_oracle.expected.json and type_observation_security_oracle.expected.json.",
+      "postgresql_reference": "141 independently captured PostgreSQL 18.4 observations in type_observation_arguments_oracle.expected.json and type_observation_security_oracle.expected.json.",
       "uqa_test": "cargo test -p uqa-engine --test integration type_observation_arguments_match_postgresql_after_reopen; cargo test -p uqa-sql --lib type_resolution::introspection::tests; cargo test -p uqa-sql --lib type_observation_retains_declared_identity_and_releases_consumed_inputs",
       "supported_version": "PostgreSQL 18 pg_typeof argument effects, liveness, argument errors, declared domain and composite identities, NULL and unknown inputs, prepared values, user overloads, stored views, RETURNING and builtin/sequence privilege diagnostics across memory, native SQLite, SQLite Key/Value and redb reopening.",
       "status": "verified",
