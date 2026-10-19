@@ -8,6 +8,10 @@
 
 use crate::ast::{ColumnType, InternalColumnRef};
 use std::collections::{HashMap, HashSet};
+
+/// Lookup maps keyed by column names and identities. Name binding constructs and probes these maps for every column of every bound schema, so they hash with `ahash` instead of the standard library's `SipHash` default.
+pub(crate) type SchemaMap<K, V> = HashMap<K, V, ahash::RandomState>;
+pub(crate) type SchemaSet<T> = HashSet<T, ahash::RandomState>;
 use std::sync::Arc;
 
 mod collations;
@@ -90,18 +94,18 @@ struct SchemaIndex {
     slots: Box<[usize]>,
     physical_width: usize,
     /// Structural lookup by physical/public label. SQL name binding uses `unqualified` or `qualified`, never this map.
-    exact: HashMap<Box<str>, usize>,
-    unqualified: HashMap<Box<str>, usize>,
-    qualified: HashMap<ColumnIdentity, usize>,
+    exact: SchemaMap<Box<str>, usize>,
+    unqualified: SchemaMap<Box<str>, usize>,
+    qualified: SchemaMap<ColumnIdentity, usize>,
     /// Additional lookup identities that point directly at an existing physical slot without becoming output columns. Correlated table aliases use this to expose `(alias, column)` without duplicating the value.
-    aliases: HashMap<ColumnIdentity, usize>,
+    aliases: SchemaMap<ColumnIdentity, usize>,
     /// Executor-only relation/attribute identities mapped directly to physical
     /// slots. These never participate in SQL name lookup or wildcard output.
-    executor_attributes: HashMap<InternalColumnRef, usize>,
+    executor_attributes: SchemaMap<InternalColumnRef, usize>,
     /// Visible unqualified names with more than one logical owner.
-    ambiguous_unqualified: HashSet<Box<str>>,
+    ambiguous_unqualified: SchemaSet<Box<str>>,
     /// Visible qualified identities with more than one logical owner.
-    ambiguous_qualified: HashSet<ColumnIdentity>,
+    ambiguous_qualified: SchemaSet<ColumnIdentity>,
     /// Static type metadata stays behind a cold pointer so declared SQL identities do not enlarge or displace the cache-hot row lookup fields above.
     cold: Box<SchemaColdMetadata>,
 }
@@ -110,21 +114,21 @@ struct SchemaIndex {
 struct SchemaColdMetadata {
     collations: Collations,
     row_types: relation_types::RelationRowTypes,
-    record_fields: HashMap<usize, RecordMetadata>,
+    record_fields: SchemaMap<usize, RecordMetadata>,
     /// `None` is an as-yet unresolved type, not a runtime NULL value.
     columns: Box<[Option<ColumnType>]>,
-    aliases: HashMap<ColumnIdentity, Option<ColumnType>>,
-    executor_attribute_types: HashMap<InternalColumnRef, Option<ColumnType>>,
+    aliases: SchemaMap<ColumnIdentity, Option<ColumnType>>,
+    executor_attribute_types: SchemaMap<InternalColumnRef, Option<ColumnType>>,
     score_sources: Vec<ScoreSource>,
     /// Logical attributes omitted from unqualified and qualified wildcard
     /// expansion. Explicit references and projections remain ordinary SQL
     /// columns; only the source-owned metadata positions are hidden.
-    wildcard_hidden: HashSet<usize>,
+    wildcard_hidden: SchemaSet<usize>,
     /// Static name-binding identities with no runtime slot. Unlike aliases,
     /// these are never part of qualified wildcard expansion or spill layout.
-    binding_only: HashMap<ColumnIdentity, Option<ColumnType>>,
+    binding_only: SchemaMap<ColumnIdentity, Option<ColumnType>>,
     /// Names supplied only when a document or native-function source opens.
-    open_qualifiers: HashSet<Option<Box<str>>>,
+    open_qualifiers: SchemaSet<Option<Box<str>>>,
     identity_layout: bool,
     /// The physical width of the schema's own columns when [`RowSchema::with_outer_schema`] overlaid an enclosing query's columns after them; `None` when every column is the schema's own.
     local_width: Option<usize>,
@@ -134,18 +138,18 @@ struct SchemaColdMetadata {
 struct SchemaBuildMetadata {
     collations: Collations,
     row_types: relation_types::RelationRowTypes,
-    record_fields: HashMap<usize, RecordMetadata>,
-    aliases: HashMap<ColumnIdentity, usize>,
-    alias_types: HashMap<ColumnIdentity, Option<ColumnType>>,
-    internal: HashMap<InternalColumnRef, usize>,
-    internal_types: HashMap<InternalColumnRef, Option<ColumnType>>,
+    record_fields: SchemaMap<usize, RecordMetadata>,
+    aliases: SchemaMap<ColumnIdentity, usize>,
+    alias_types: SchemaMap<ColumnIdentity, Option<ColumnType>>,
+    internal: SchemaMap<InternalColumnRef, usize>,
+    internal_types: SchemaMap<InternalColumnRef, Option<ColumnType>>,
     score_sources: Vec<ScoreSource>,
-    wildcard_hidden: HashSet<usize>,
-    binding_only: HashMap<ColumnIdentity, Option<ColumnType>>,
-    open_qualifiers: HashSet<Option<Box<str>>>,
+    wildcard_hidden: SchemaSet<usize>,
+    binding_only: SchemaMap<ColumnIdentity, Option<ColumnType>>,
+    open_qualifiers: SchemaSet<Option<Box<str>>>,
     exact_unqualified_precedence: bool,
-    extra_ambiguous_unqualified: HashSet<Box<str>>,
-    extra_ambiguous_qualified: HashSet<ColumnIdentity>,
+    extra_ambiguous_unqualified: SchemaSet<Box<str>>,
+    extra_ambiguous_qualified: SchemaSet<ColumnIdentity>,
     local_width: Option<usize>,
 }
 

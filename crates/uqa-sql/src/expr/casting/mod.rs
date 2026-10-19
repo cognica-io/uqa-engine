@@ -829,8 +829,8 @@ pub(super) fn cast_boolean(v: &Value) -> Result<Value> {
 
 pub(in crate::expr) use array::parse_pg_array_literal_with_input;
 pub use array::{array_dimensions, parse_pg_array_literal, parse_pg_array_literal_with_control};
-pub(crate) use temporal::text_input_is_session_independent;
 use binary_oid::{bytea_to_integer, cast_bytea, cast_named_oid, cast_oid, cast_xid};
+pub(crate) use temporal::text_input_is_session_independent;
 use temporal::{cast_temporal, TemporalCastTarget};
 
 #[cfg(test)]

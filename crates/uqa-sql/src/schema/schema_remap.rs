@@ -6,11 +6,9 @@
 
 //! Logical identity remapping over shared physical row slots.
 
-use std::collections::HashMap;
-
 use crate::ast::ColumnType;
 
-use super::{ColumnIdentity, RowSchema, SchemaBuildMetadata, NULL_SLOT};
+use super::{ColumnIdentity, RowSchema, SchemaBuildMetadata, SchemaMap, NULL_SLOT};
 
 impl RowSchema {
     /// Select explicit physical slots with fresh public identities. This is
@@ -225,13 +223,13 @@ impl RowSchema {
             SchemaBuildMetadata {
                 collations,
                 record_fields: input.index.cold.record_fields.clone(),
-                aliases: HashMap::new(),
-                alias_types: HashMap::new(),
+                aliases: SchemaMap::default(),
+                alias_types: SchemaMap::default(),
                 internal: input.index.executor_attributes.clone(),
                 internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden,
-                binding_only: HashMap::new(),
+                binding_only: SchemaMap::default(),
                 ..SchemaBuildMetadata::default()
             },
         )

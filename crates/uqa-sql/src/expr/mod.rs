@@ -113,12 +113,12 @@ pub use binary::{
     visit_record_image_fields_with_catalog, with_btree_input, BTreeInput, IntegerWidth,
 };
 pub(crate) use binary::{datetime_out_of_range, division_by_zero, out_of_range};
+pub(crate) use casting::text_input_is_session_independent;
 pub use casting::{
     array_dimensions, cast_value, cast_value_from, cast_value_from_with_control,
     invalid_boolean_input, negate_value, negate_value_with_control, parse_boolean_input,
     parse_pg_array_literal, parse_pg_array_literal_with_control,
 };
-pub(crate) use casting::text_input_is_session_independent;
 use conversion::{
     allocation_error, float_to_i64_rounded, float_to_i64_trunc, nonnegative_usize, to_decimal,
     to_i64,
