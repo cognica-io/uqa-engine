@@ -6,6 +6,7 @@
 
 use super::*;
 
+mod array_literals;
 mod node_tree;
 
 #[test]

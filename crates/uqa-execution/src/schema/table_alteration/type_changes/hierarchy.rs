@@ -93,7 +93,7 @@ pub(super) fn validate_parents<S: Clone + 'static>(
                     .addition
                     .state
                     .has_column(parent, name)
-                    .map_err(|error| super::ddl_storage_error("ALTER COLUMN TYPE", error))?
+                    .map_err(|error| super::super::ddl_storage_error("ALTER COLUMN TYPE", error))?
             {
                 return Err(type_target::reject_external_type_parent(table, name));
             }

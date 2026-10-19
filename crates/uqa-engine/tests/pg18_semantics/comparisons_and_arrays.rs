@@ -8,6 +8,16 @@
 
 use super::*;
 
+#[test]
+fn array_literal_diagnostics_match_postgresql() {
+    crate::pg18_oracle::verify(
+        &engine(),
+        include_str!(
+            "../../../../tests/parity/pg18/array_literal_diagnostics_oracle.expected.json"
+        ),
+    );
+}
+
 // ---------------------------------------------------------------------
 // IS DISTINCT FROM / row comparisons / SIMILAR TO / regex operators
 // ---------------------------------------------------------------------

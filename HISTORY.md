@@ -6,15 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Added a released-package TPC-H comparison that validates an installed `usql` and a local PostgreSQL 18 server against the checked-in PostgreSQL 18 results and times both in alternating rounds. The 0.6.0 measurement and the latency regression since the 2026-08-09 snapshot, tracked in #1108, are recorded in the TPC-H benchmark README.
+
 ### Fixed
 
 - Check view and folded CTE routine privileges against the selected executable expressions before row production, including lateral and scalar correlation, `LIMIT 0`, `EXPLAIN`, and preceding sequence effects; retain materialized CTE and set-returning function requirements.
 
 - Reject utility commands in SQL-standard function and procedure definitions with PostgreSQL diagnostics, preserving nested query and CALL analysis, statement error order, quoted bodies and transactional catalog state.
 
+- Bind column dependencies inside SQL-standard `VALUES` bodies so unrelated view deletion and column changes retain their PostgreSQL behavior, including after reopening persistent stores.
+
 - Keep persistent IVF and HNSW writers bound to their completed index definitions when another session commits during index creation, preventing canonical vectors from being written without the corresponding index metadata.
 
+- Report malformed array input with PostgreSQL SQLSTATE, primary message and separate DETAIL; preserve dimension declarations, quoted elements, whitespace and empty-array normalization.
+
 - Preserve explicitly requested schemaless document fields in streaming derived tables and CTEs instead of returning NULL after source projection.
+
+- Reject primary keys over existing NO INHERIT or unvalidated NOT NULL constraints with PostgreSQL diagnostics, preserving original column metadata and written-order ALTER COLUMN TYPE analysis.
 
 ## [0.6.0] - 2026-10-18
 

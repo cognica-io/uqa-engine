@@ -6,7 +6,12 @@
 
 //! Apply all transforms to one retained original row and publish each affected relation once.
 
-use super::{hierarchy, prepare_relation, PreparedTypeChange, TableAlterContext};
+use super::super::{
+    identity,
+    preparation::{prepare_relation, PreparedTypeChange},
+    TableAlterContext,
+};
+use super::hierarchy;
 use crate::schema::columns::{
     addition::deferred::AddedColumnValue,
     alteration, generated,
@@ -142,7 +147,7 @@ impl TypeRewrites {
                     uqa_sql::schema::columns::undefined_relation_column(&relation.table, name)
                 })?;
             type_target::validate_repeated_type_change(name, &prepared.original_type, &current)?;
-            super::identity::retype_identity_sequence(context, &relation.table, name, target)?;
+            identity::retype_identity_sequence(context, &relation.table, name, target)?;
             let generated = alteration::begin_type_change(
                 &context.columns,
                 &relation.table,
