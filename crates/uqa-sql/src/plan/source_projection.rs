@@ -72,6 +72,11 @@ impl SourceProjection {
         (!self.retain_all).then_some(self.columns)
     }
 
+    /// Named field demands remain available when other expressions require the source's complete declared row.
+    pub fn requested_columns(&self) -> impl Iterator<Item = &str> {
+        self.columns.iter().map(String::as_str)
+    }
+
     pub fn metadata(&self) -> RelationMetadataProjection {
         self.metadata
     }

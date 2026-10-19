@@ -25,6 +25,7 @@ fn projection(expression: &ScalarExpr) -> (bool, SourceProjection) {
     let qualifiers = ["items".to_string()];
     let scope = PruneScope {
         qualifiers: &qualifiers,
+        source_schema: None,
         metadata_qualifier: Some("items"),
         legacy_doc_id: true,
         legacy_score: true,
@@ -156,4 +157,63 @@ fn unused_window_definition_keeps_its_required_source_columns() {
         projection.remove("items").unwrap().explicit_columns(),
         Some(BTreeSet::from(["quantity".into()]))
     );
+}
+
+#[test]
+fn conservative_projection_retains_explicit_document_demands() {
+    let catalog = fixture::Fixture::new();
+    for sql in [
+        "SELECT *, price FROM items",
+        "SELECT price + random() FROM items",
+        "SELECT price FROM items WHERE EXISTS (SELECT 1)",
+    ] {
+        let UnifiedPlan::Query(query) =
+            UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query required")
+        };
+        let RelationalPlan::QueryBlock(block) = query.root else {
+            panic!("block required")
+        };
+        let mut projection =
+            column_prune_for_stmt(catalog.context(), &block, block.from.as_ref().unwrap())
+                .unwrap()
+                .unwrap();
+        let wanted = projection.remove("items").unwrap();
+        assert_eq!(
+            wanted.requested_columns().collect::<Vec<_>>(),
+            ["price"],
+            "{sql}"
+        );
+        assert_eq!(wanted.explicit_columns(), None, "{sql}");
+    }
+}
+
+#[test]
+fn bound_columns_do_not_become_competing_open_document_fields() {
+    let catalog = fixture::Fixture::new();
+    let schema = uqa_sql::RowSchema::with_qualified_types(
+        "items",
+        vec!["price".into()],
+        vec![Some(uqa_sql::ColumnType::Integer)],
+    );
+    let schema = uqa_sql::RowSchema::with_open_columns(&schema, Some("d"));
+    let UnifiedPlan::Query(query) = UnifiedPlan::lower(
+        uqa_sql::compile("SELECT price, payload FROM items CROSS JOIN docs d")
+            .unwrap()
+            .remove(0),
+    ) else {
+        panic!("query required")
+    };
+    let RelationalPlan::QueryBlock(block) = query.root else {
+        panic!("block required")
+    };
+    let mut context = catalog.context();
+    context.source_schema = Some(&schema);
+    let projection = column_prune_for_stmt(context, &block, block.from.as_ref().unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(projection["items"].contains("price"));
+    assert!(!projection["d"].contains("price"));
+    assert!(projection["d"].contains("payload"));
 }

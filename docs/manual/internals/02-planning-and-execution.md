@@ -418,6 +418,8 @@ SQL copies analyzed constants and coercions into stored RULE condition syntax th
 
 Schema analysis distinguishes declared zero-column SQL tables from document sources and registered native table functions whose fields become available at execution. Open descriptor metadata defers only names in those source namespaces; closed sources still reject missing or ambiguous columns before evaluation. The declared-column distinction survives transaction rollback, catalog refresh, and durable reopen.
 
+Planner preserves named source-field demands even when other expressions need the complete declared row, and uses the bound SQL row schema to keep resolved fields on their actual source instead of creating competing document fields. Execution uses those demands to project schemaless document fields through ordinary scans, streaming derived tables and CTEs; declared SQL sources still expose only their actual columns. Requested document fields do not expand the source's wildcard descriptor. Engine forwards the retained binding schema through its existing planning adapter.
+
 
 `OperatorTree` runs through `QueryOptimizer`, then `PlanExecutor`, then the engine driver. The driver match is exhaustive; an unknown opaque operator fails explicitly.
 
