@@ -212,6 +212,26 @@ class PerformanceChecksTest(unittest.TestCase):
             "--tests", "-p", "uqa-example", "--archive-file", str(archive),
         ], cwd=self.root, check=True)
 
+    def test_claim_fixture_reuses_archive_feature_selection_and_dependency_profile(self):
+        checks = [
+            {**self.check, "package": "uqa-sql"},
+            {**self.check, "package": "uqa-execution"},
+            {**self.check, "package": "uqa-sql"},
+        ]
+        with (
+            mock.patch.object(runner, "inventory", return_value=checks),
+            mock.patch.object(runner, "capture") as capture,
+            mock.patch.object(runner.subprocess, "run") as run,
+            mock.patch("sys.argv", ["run-performance-checks", "--build-claim-fixture"]),
+        ):
+            self.assertEqual(runner.main(), 0)
+        capture.assert_not_called()
+        run.assert_called_once_with([
+            "cargo", "build", "--locked", "--profile", "test", "--example",
+            "row_claim_contention", "-p", "uqa-execution", "-p", "uqa-sql",
+        ], cwd=self.root, check=True)
+        self.assertEqual(run.call_args.args[0][7:], runner.build_arguments(checks)[3:])
+
     def test_failure_report_retains_diagnostic_and_does_not_claim_timing_acceptance(self):
         output = self.root / "output"
         result = {"status": "failed", "revision": "a" * 40, "checks": [], "timing_acceptance": False, "error": "missing provider case"}

@@ -621,6 +621,34 @@ fn failed_drop_rollback_is_reported_to_the_session() {
 }
 
 #[test]
+fn bundled_page_cache_uses_connection_local_memory_management() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    connection
+        .with(|sqlite| {
+            let enabled: i64 = sqlite.query_row(
+                "SELECT sqlite_compileoption_used('ENABLE_MEMORY_MANAGEMENT')",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(
+                enabled, 0,
+                "bundled page caches must not use the process-wide memory-management mutex"
+            );
+            sqlite.execute_batch(
+                "CREATE TABLE cache_probe(value INTEGER); INSERT INTO cache_probe VALUES (42)",
+            )?;
+            sqlite.release_memory()?;
+            assert_eq!(
+                sqlite.query_row("SELECT value FROM cache_probe", [], |row| row
+                    .get::<_, i64>(0))?,
+                42
+            );
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
 fn sqlcipher_build_reports_cipher_version() {
     let mc = ManagedConnection::open_in_memory().unwrap();
     let version: String = mc
