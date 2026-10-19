@@ -20,7 +20,7 @@ fn regex_predicates(criterion: &mut Criterion) {
         )
         .unwrap();
     let mut group = criterion.benchmark_group("regex_predicates");
-    group.sample_size(20);
+    group.sample_size(10);
     group.sampling_mode(SamplingMode::Linear);
     group.warm_up_time(Duration::from_millis(500));
     group.measurement_time(Duration::from_secs(2));

@@ -7,7 +7,7 @@
   "rows": 20000,
   "expected_matches": 10000,
   "criterion": {
-    "sample_size": 20,
+    "sample_size": 10,
     "warm_up_milliseconds": 500,
     "measurement_seconds": 2,
     "sampling_mode": "linear"
