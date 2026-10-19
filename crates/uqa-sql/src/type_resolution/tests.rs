@@ -889,3 +889,32 @@ fn nested_builtin_type_resolution_visits_each_argument_once() {
     );
     assert_eq!(resolver.0.load(Ordering::Relaxed), 1);
 }
+
+#[test]
+fn nested_collated_call_types_fit_an_ordinary_thread_stack() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let mut expression = ScalarExpr::Literal(Value::Str("a".into()));
+            for _ in 0..32 {
+                expression = ScalarExpr::Collated {
+                    expr: Box::new(dispatched(
+                        FunctionDispatch::Concat { oid: None },
+                        vec![expression, ScalarExpr::Literal(Value::Str("a".into()))],
+                    )),
+                    ty: ColumnType::Text,
+                    collation: crate::ir::ResultCollation::new(
+                        crate::catalog::collations::derivation::Derivation::implicit(100),
+                        100,
+                    ),
+                };
+            }
+            assert_eq!(
+                scalar_type(&expression, &RowSchema::default(), &[]).unwrap(),
+                Some(ColumnType::Text)
+            );
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

@@ -151,3 +151,42 @@ fn stored_window_copies_keep_the_derived_input_collations() {
         );
     }
 }
+
+#[test]
+fn nested_call_observation_preserves_collations_on_an_ordinary_thread_stack() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let concatenation = vec!["chr(65)"; 32].join(" || ");
+            let sql = format!("SELECT lower(({concatenation}) COLLATE \"C\")");
+            let mut plan = UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));
+            read_prepared_inputs(&NoRoutines, &mut plan, &[], &context(), None).unwrap();
+            let mut characters = 0;
+            let mut calls = Vec::new();
+            plan.rewrite_scalar_expressions(&mut |expression| {
+                if let ScalarExpr::Func { name, binding, .. } = expression {
+                    if name == "chr" {
+                        characters += 1;
+                    } else if matches!(name.as_str(), "||" | "lower") {
+                        calls.push((
+                            name.clone(),
+                            binding
+                                .as_ref()
+                                .unwrap()
+                                .input_collation
+                                .map(crate::catalog::collations::CollationSelection::oid),
+                        ));
+                    }
+                }
+            });
+            assert_eq!(characters, 32);
+            assert_eq!(calls.len(), 32);
+            assert_eq!(calls.last(), Some(&("lower".into(), Some(950))));
+            assert!(calls[..31]
+                .iter()
+                .all(|(name, collation)| name == "||" && *collation == Some(100)));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
