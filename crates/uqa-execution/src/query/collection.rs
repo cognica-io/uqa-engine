@@ -18,6 +18,9 @@ use std::rc::Rc;
 use uqa_core::Value;
 use uqa_sql::SQLError;
 
+#[cfg(test)]
+mod tests;
+
 pub fn collect_query_operator<'a>(
     runtime: QueryRuntimeView<'_>,
     columns: Vec<String>,
@@ -61,10 +64,17 @@ pub fn collect_query_operator<'a>(
 fn collect_materialized_rows(
     operator: &mut dyn crate::PhysicalOperator,
 ) -> Result<QueryRows, SQLError> {
-    let batches = crate::physical::run_to_batches(operator).map_err(physical_exec_error)?;
-    Ok(QueryRows::Rows(
-        batches.into_iter().flat_map(|batch| batch.rows).collect(),
-    ))
+    let mut input =
+        crate::physical::OperatorBatchCursor::open(operator).map_err(physical_exec_error)?;
+    let mut rows = input
+        .next()
+        .transpose()
+        .map_err(physical_exec_error)?
+        .map_or_else(Vec::new, |batch| batch.rows);
+    for batch in input {
+        rows.extend(batch.map_err(physical_exec_error)?.rows);
+    }
+    Ok(QueryRows::Rows(rows))
 }
 
 fn collect_spilled_rows(

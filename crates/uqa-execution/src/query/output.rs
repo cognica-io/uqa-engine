@@ -13,6 +13,7 @@ mod exists;
 pub use exists::collect_exists_key_operator;
 mod public_rows;
 pub(crate) use public_rows::PublicQueryRows;
+mod materialized;
 
 #[cfg(test)]
 mod tests;
@@ -44,37 +45,33 @@ impl QueryOutput {
     }
 
     pub fn into_sql_result(self) -> Result<SQLResult, SQLError> {
-        let rows = match self.rows {
-            QueryRows::Rows(rows) => rows,
+        let schema = self.internal_schema.for_result_columns(&self.columns);
+        let mut result = materialized::ResultRows::new(&self.columns);
+        match self.rows {
+            QueryRows::Rows(rows) => {
+                result.append(
+                    &self.columns,
+                    crate::Batch::from_physical_rows(self.internal_schema, rows),
+                );
+            }
             QueryRows::SharedSpill(rows) => {
                 let mut scan = crate::SharedSpillScan::new(rows);
-                crate::physical::run_to_batches(&mut scan)
+                for batch in crate::physical::OperatorBatchCursor::open(&mut scan)
                     .map_err(physical_exec_error)?
-                    .into_iter()
-                    .flat_map(|batch| batch.rows)
-                    .collect()
+                {
+                    result.append(&self.columns, batch.map_err(physical_exec_error)?);
+                }
             }
             QueryRows::ExistsKeySet(_) => {
                 return Err(SQLError::Internal(
                     "EXISTS key-set output cannot become a SQL result".into(),
                 ));
             }
-        };
-        let schema = self.internal_schema.for_result_columns(&self.columns);
-        let batch = crate::Batch::from_physical_rows(self.internal_schema, rows);
-        let mut seen = std::collections::BTreeSet::new();
-        let positional_rows = self
-            .columns
-            .iter()
-            .any(|column| !seen.insert(column))
-            .then(|| {
-                crate::ColumnarBatch::from_batch(&self.columns, batch.clone())
-                    .into_positional_rows()
-            });
+        }
         Ok(SQLResult::from_schema_rows_with_positions(
             schema,
-            batch.into_result_rows(),
-            positional_rows,
+            result.named,
+            result.positional,
         ))
     }
 
