@@ -77,14 +77,16 @@ pub fn defer_updated_key_checks<S: Clone + 'static>(
             )?;
             continue;
         }
-        for (child, _child_doc) in referencing_rows(
+        let referencing = referencing_rows(
             context,
             &ref_table,
             &fk,
             &comparison,
             &expected,
             ForeignKeyAction::NoAction,
-        )? {
+        )?;
+        for child in referencing.read_rows()? {
+            let child = child?;
             context.deferrals.defer_foreign_key_check(
                 &ref_table,
                 firing.relation,
@@ -179,14 +181,16 @@ pub(crate) fn defer_deleted_key_checks_excluding<S: Clone + 'static>(
             )?;
             continue;
         }
-        for (child, _child_document) in referencing_rows(
+        let referencing = referencing_rows(
             context,
             &ref_table,
             &fk,
             &comparison,
             &expected,
             ForeignKeyAction::NoAction,
-        )? {
+        )?;
+        for child in referencing.read_rows()? {
+            let child = child?;
             if root_deletes(&child.table, child.doc_id)? {
                 continue;
             }

@@ -9,6 +9,44 @@ use super::{
     Document, ForeignKey, ForeignKeyAction, ForeignKeyComparison, PhysicalDocumentIdentity,
     PhysicalMutationLockTarget, ReferentialContext, SQLError, Value,
 };
+use crate::mutation::candidate_ids::{CandidateIds, CapturedCandidateIds};
+
+/// Completed selection before row effects; consumers refetch and lock each identity independently.
+pub struct ReferencingRows {
+    tables: Vec<String>,
+    rows: Option<CapturedCandidateIds>,
+}
+
+impl ReferencingRows {
+    pub fn is_empty(&self) -> bool {
+        self.rows
+            .as_ref()
+            .is_none_or(CapturedCandidateIds::is_empty)
+    }
+
+    pub fn read_rows(
+        &self,
+    ) -> Result<impl Iterator<Item = Result<PhysicalDocumentIdentity, SQLError>> + '_, SQLError>
+    {
+        Ok(self
+            .rows
+            .as_ref()
+            .map(CapturedCandidateIds::read_rows)
+            .transpose()?
+            .into_iter()
+            .flatten()
+            .map(|row| {
+                let (table, doc_id) = row?;
+                let table = self.tables.get(table).ok_or_else(|| {
+                    SQLError::Internal("referencing row has an invalid table ordinal".into())
+                })?;
+                Ok(PhysicalDocumentIdentity {
+                    table: table.clone(),
+                    doc_id,
+                })
+            }))
+    }
+}
 
 /// Lock one referencing child row for a referential action and refetch it after the wait. Returns `None` when the child vanished or its foreign-key columns no longer reference the parent key that triggered the action, so the action skips it exactly like `PostgreSQL` after an `EvalPlanQual` recheck of the referencing row.
 pub struct ReferencingChildLock<'a> {
@@ -74,18 +112,25 @@ pub fn referencing_rows<S: Clone + 'static>(
     comparison: &ForeignKeyComparison,
     expected: &[Value],
     action: ForeignKeyAction,
-) -> Result<Vec<(PhysicalDocumentIdentity, Document)>, SQLError> {
+) -> Result<ReferencingRows, SQLError> {
     // Referential actions use SQL equality, so a NULL parent key cannot select a child row.
     if expected.iter().any(|value| matches!(value, Value::Null)) {
-        return Ok(Vec::new());
+        return Ok(ReferencingRows {
+            tables: Vec::new(),
+            rows: None,
+        });
     }
-    let mut out = Vec::new();
+    let mut out = CandidateIds::new(
+        context.constraints.memory.work_mem_bytes()?,
+        context.triggers.runtime.cancellation.clone(),
+    );
     let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
-    for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
+    let tables = uqa_sql::semantics::partition::foreign_key_scan_tables(
         context.constraints.partitions.catalog,
         table,
-    )? {
-        let rows = snapshot.table(&physical_table)?;
+    )?;
+    for (table_index, physical_table) in tables.iter().enumerate() {
+        let rows = snapshot.table(physical_table)?;
         let indexed = if comparison.exact_local_lookup {
             rows.indexed_doc_ids(&fk.local_columns, expected)?
         } else {
@@ -96,14 +141,11 @@ pub fn referencing_rows<S: Clone + 'static>(
             None => rows.doc_ids()?,
         };
         for doc_id in ids {
-            let identity = PhysicalDocumentIdentity {
-                table: physical_table.clone(),
-                doc_id,
-            };
+            context.triggers.runtime.cancellation.check()?;
             let Some(doc) = rows.document(doc_id)? else {
                 return Err(missing_document_error(
                     "foreign-key reference scan",
-                    &physical_table,
+                    physical_table,
                     doc_id,
                 ));
             };
@@ -125,11 +167,14 @@ pub fn referencing_rows<S: Clone + 'static>(
                 ) {
                     rows.check_visible(doc_id)?;
                 }
-                out.push((identity, doc));
+                out.push(table_index, doc_id)?;
             }
         }
     }
-    Ok(out)
+    Ok(ReferencingRows {
+        tables,
+        rows: Some(out.finish()?),
+    })
 }
 
 /// Recheck already-coerced FK columns with their SQL field operators, including nested records and arrays.

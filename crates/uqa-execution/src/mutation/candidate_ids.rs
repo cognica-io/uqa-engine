@@ -121,6 +121,10 @@ pub(super) struct CapturedCandidateIds {
 }
 
 impl CapturedCandidateIds {
+    pub(super) fn is_empty(&self) -> bool {
+        self.rows.rows() == 0
+    }
+
     pub(super) fn read_rows(
         &self,
     ) -> Result<impl Iterator<Item = Result<(usize, DocId), SQLError>> + '_, SQLError> {

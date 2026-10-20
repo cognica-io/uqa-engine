@@ -18061,6 +18061,19 @@
       "capability": "Bounded joined UPDATE publication",
       "workload": "COPY UPDATE FROM RETURNING over 512 rows with 32KiB payloads, 64KiB query work memory and 4MiB session retention.",
       "invariant": "Peak additional Rust allocation stays below 8MiB without retaining complete target, lock or old/new image vectors; all 512 exact output rows and committed changed values match PostgreSQL 18."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_referential_actions_do_not_retain_complete_child_images",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/publication.rs",
+      "capability": "Bounded foreign-key child-image retention",
+      "workload": "Public COPY updates then deletes one parent with 512 cascading children holding 32KiB each, under 64KiB query memory and 4MiB session retention.",
+      "invariant": "Each command stays below the unchanged 8MiB allocation ceiling; returned parent identities, all child payload bytes, updated keys and final deletion match PostgreSQL 18."
     }
   ]
 }
