@@ -256,3 +256,81 @@ fn fallible_expression_keys_compare_only_visible_rows_in_key_order() {
         0
     );
 }
+
+#[test]
+fn expression_match_visitor_preserves_frame_order_masking_and_consumer_errors() {
+    let control = StorageReadControl::with_limit(4 << 20);
+    let mut overlays = [
+        CommandMutationOverlay::default(),
+        CommandMutationOverlay::default(),
+    ];
+    for id in 1..=256 {
+        overlays[0]
+            .stage_evaluated("items", id, Some(row(key(7), &control)), &control)
+            .unwrap();
+    }
+    overlays[0]
+        .tables
+        .as_mut()
+        .unwrap()
+        .get_mut("items")
+        .unwrap()
+        .spill(&control)
+        .unwrap();
+    overlays[1]
+        .stage_evaluated("items", 7, Some(row(key(8), &control)), &control)
+        .unwrap();
+    overlays[1]
+        .stage_evaluated("items", 9, None, &control)
+        .unwrap();
+    overlays[1]
+        .stage_evaluated("items", 257, Some(row(key(7), &control)), &control)
+        .unwrap();
+    let values = [Value::Int(7), Value::Str("tail".into())];
+    let mut actual = Vec::new();
+    let changes = CommandMutationOverlay::visit_expression_matches_with_catalog(
+        &mut overlays,
+        "items",
+        "physical",
+        &values,
+        &control,
+        None,
+        &mut |id| {
+            actual.push(id);
+            Ok(())
+        },
+    )
+    .unwrap();
+    let expected: Vec<_> = std::iter::once(257)
+        .chain((1..=256).filter(|id| ![7, 9].contains(id)))
+        .collect();
+    assert_eq!(actual, expected);
+    assert_eq!(
+        actual,
+        candidates(&mut overlays, &values, &control).unwrap()
+    );
+    for id in [1, 7, 9, 257] {
+        assert!(changes.contains_change(id).unwrap());
+    }
+    assert!(!changes.contains_change(258).unwrap());
+    let mut visits = 0;
+    let error = CommandMutationOverlay::visit_expression_matches_with_catalog(
+        &mut overlays,
+        "items",
+        "physical",
+        &values,
+        &control,
+        None,
+        &mut |_| {
+            visits += 1;
+            Err(SQLError::Routine {
+                sqlstate: "22012".into(),
+                message: "capture failed".into(),
+            })
+        },
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.sqlstate(), Some("22012"));
+    assert_eq!(visits, 1);
+}

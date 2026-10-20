@@ -117,6 +117,29 @@ impl MutationIndexRead for Source {
         }
         Ok(())
     }
+    fn visit_staged_expression_matches(
+        &self,
+        _: &str,
+        _: &str,
+        _: &[Value],
+        _: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<DocumentChanges, SQLError> {
+        unreachable!()
+    }
+    fn visit_value_index_key(
+        &self,
+        table: &str,
+        key: &ValueIndexKey,
+        predicate: &Predicate,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        match predicate {
+            Predicate::Equals(value) => {
+                MutationIndexRead::visit_value_index_equal(self, table, key, value, visit)
+            }
+            _ => Ok(false),
+        }
+    }
     fn staged_expression_matches(
         &self,
         _: &str,

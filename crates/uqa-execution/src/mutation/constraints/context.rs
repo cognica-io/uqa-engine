@@ -5,6 +5,7 @@
 //
 
 //! Services for row validation, key reservations, and referenced-row checks.
+use crate::query::document_changes::DocumentChanges;
 use crate::row_locks::{session::RowLockSession, LockAcquire};
 use uqa_core::{DocId, PostingList, Predicate, Value};
 use uqa_sql::catalog::roles::RoleReference;
@@ -74,6 +75,20 @@ pub trait MutationIndexRead {
         physical_key: &str,
         values: &[Value],
     ) -> Result<crate::mutation::overlay::CommandIndexProbe, SQLError>;
+    fn visit_staged_expression_matches(
+        &self,
+        table: &str,
+        physical_key: &str,
+        values: &[Value],
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<DocumentChanges, SQLError>;
+    fn visit_value_index_key(
+        &self,
+        table: &str,
+        key: &ValueIndexKey,
+        predicate: &Predicate,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError>;
     fn value_index_scan_key(
         &self,
         table: &str,

@@ -104,6 +104,16 @@ impl crate::Engine {
         value: &Value,
         visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
     ) -> Result<bool, SQLError> {
+        self.visit_value_index_key(table, field, &Predicate::Equals(value.clone()), visit)
+    }
+
+    pub(crate) fn visit_value_index_key(
+        &self,
+        table: &str,
+        field: &ValueIndexKey,
+        predicate: &Predicate,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
         let state = self.require_table(table)?;
         if !state.value_indexes.read().contains_key(field) {
             let selected = self
@@ -116,11 +126,7 @@ impl crate::Engine {
                 })?;
             if let Some((name, backend)) = selected {
                 if uqa_execution::catalog::index::value::visit_durable_equality(
-                    backend,
-                    &name,
-                    field,
-                    &Predicate::Equals(value.clone()),
-                    visit,
+                    backend, &name, field, predicate, visit,
                 )? {
                     return Ok(true);
                 }
@@ -129,7 +135,7 @@ impl crate::Engine {
         Ok(self
             .read_value_index_state(table, &state, field, |index| {
                 Ok(index
-                    .visit_equal_with_catalog(value, Some(self), visit)?
+                    .visit_key_candidates_with_catalog(predicate, Some(self), visit)?
                     .then_some(()))
             })?
             .is_some())

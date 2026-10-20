@@ -129,22 +129,39 @@ impl ColumnValueIndex {
         catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
         visit: &mut dyn FnMut(DocId) -> Result<(), uqa_sql::SQLError>,
     ) -> Result<bool, uqa_sql::SQLError> {
+        self.visit_key_candidates_with_catalog(&Predicate::Equals(value.clone()), catalog, visit)
+    }
+
+    /// Equality and scalar NULL candidates retain the same eligibility, comparison order and null semantics as their posting-producing probes.
+    pub fn visit_key_candidates_with_catalog(
+        &self,
+        predicate: &Predicate,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+        visit: &mut dyn FnMut(DocId) -> Result<(), uqa_sql::SQLError>,
+    ) -> Result<bool, uqa_sql::SQLError> {
+        if !matches!(predicate, Predicate::Equals(_) | Predicate::IsNull) {
+            return Ok(false);
+        }
         let Some(index) = &self.index else {
             return Ok(false);
         };
-        let predicate = Predicate::Equals(value.clone());
-        if comparison::needs_sql_comparison(&predicate, self.comparison.can_fail()) {
+        if comparison::needs_sql_comparison(predicate, self.comparison.can_fail()) {
             for (&id, value) in &self.values {
-                if comparison::matches(value, &predicate, catalog)? {
+                if comparison::matches(value, predicate, catalog)? {
                     visit(id)?;
                 }
             }
             return Ok(true);
         }
-        if !self.supports(&predicate) {
+        if !self.supports(predicate) {
             return Ok(false);
         }
-        for &id in index.equality_ids(value) {
+        let ids = match predicate {
+            Predicate::Equals(value) => index.equality_ids(value),
+            Predicate::IsNull => self.nulls.as_slice(),
+            _ => unreachable!("candidate predicate checked above"),
+        };
+        for &id in ids {
             visit(id)?;
         }
         Ok(true)

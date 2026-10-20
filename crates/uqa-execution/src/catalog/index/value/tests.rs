@@ -363,3 +363,75 @@ fn typed_field_probes_preserve_btree_operator_errors() {
         }
     }
 }
+
+#[test]
+fn scalar_null_candidates_visit_without_posting_materialization_or_equality_conflation() {
+    let count = 16_384;
+    let index = ColumnValueIndex::build(
+        "key",
+        (0..count).map(|id| {
+            (
+                id,
+                if id % 2 == 0 {
+                    Value::Null
+                } else {
+                    Value::Int(7)
+                },
+            )
+        }),
+    );
+    let mut expected = 0;
+    let allocated = allocation_counter::measure(|| {
+        assert!(index
+            .visit_key_candidates_with_catalog(&Predicate::IsNull, None, &mut |id| {
+                assert_eq!(id, expected);
+                expected += 2;
+                Ok(())
+            })
+            .unwrap());
+    });
+    assert_eq!(expected, count);
+    assert!(allocated.bytes_max < 4096, "{allocated:?}");
+    assert!(index
+        .visit_key_candidates_with_catalog(&Predicate::Equals(Value::Null), None, &mut |_| panic!(
+            "NULL equality is not IS NULL"
+        ))
+        .unwrap());
+    let mut visits = 0;
+    let error = index
+        .visit_key_candidates_with_catalog(&Predicate::IsNull, None, &mut |_| {
+            visits += 1;
+            Err(uqa_sql::SQLError::Routine {
+                sqlstate: "22012".into(),
+                message: "consumer failure".into(),
+            })
+        })
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22012"));
+    assert_eq!(visits, 1);
+}
+
+#[test]
+fn null_candidate_eligibility_preserves_row_and_carried_index_fallbacks() {
+    for index in [
+        ColumnValueIndex::build(
+            "key",
+            [(1, Value::Row(vec![Value::Null].into()))].into_iter(),
+        ),
+        ColumnValueIndex::build_carried([(1, Value::Null)].into_iter()),
+    ] {
+        assert!(!index
+            .visit_key_candidates_with_catalog(&Predicate::IsNull, None, &mut |_| panic!(
+                "declined null probe emitted candidates"
+            ))
+            .unwrap());
+    }
+    let index = ColumnValueIndex::build("key", [(1, Value::Int(7))].into_iter());
+    assert!(!index
+        .visit_key_candidates_with_catalog(
+            &Predicate::GreaterThan(Value::Int(0)),
+            None,
+            &mut |_| panic!("unsupported candidate predicate")
+        )
+        .unwrap());
+}

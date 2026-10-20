@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound partial and expression unique-index candidate capture, preserving equality, NULL distinction, staged masking and original failure order.
+
 - Bound MERGE target identities and locked successor images while preserving target lock order, exact refreshed-row actions and original failure precedence.
 
 - Bound initial constraint-validation identity capture before row evaluation, preserving selected/live visibility and original failure order without a whole-table identity vector.

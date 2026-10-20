@@ -194,6 +194,34 @@ impl MutationIndexRead for Engine {
             Some(self),
         )
     }
+    fn visit_staged_expression_matches(
+        &self,
+        table: &str,
+        physical_key: &str,
+        values: &[Value],
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<uqa_execution::query::document_changes::DocumentChanges, SQLError> {
+        let table = self.command_overlay_table_name(table)?;
+        let control = self.query_retention_control()?;
+        uqa_execution::mutation::overlay::CommandMutationOverlay::visit_expression_matches_with_catalog(
+            &mut self.session.command_mutation_overlays.lock(),
+            &table,
+            physical_key,
+            values,
+            &control,
+            Some(self),
+            visit,
+        )
+    }
+    fn visit_value_index_key(
+        &self,
+        table: &str,
+        key: &ValueIndexKey,
+        predicate: &Predicate,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        Engine::visit_value_index_key(self, table, key, predicate, visit)
+    }
     fn value_index_scan_key(
         &self,
         table: &str,
