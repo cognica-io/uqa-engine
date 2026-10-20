@@ -17004,8 +17004,8 @@
       "kind": "lib",
       "test": "insert_source_input_preserves_positions_nulls_and_zero_column_multiplicity",
       "source": "crates/uqa-execution/src/mutation/insert/source/inputs/tests.rs",
-      "workload": "Duplicate public labels, a NULL value, a hidden physical column and 4,097 zero-column rows.",
-      "invariant": "Public positions preserve duplicate names and NULLs, hidden columns are excluded and nullary multiplicity is exact.",
+      "workload": "Duplicate public labels, reordered logical-to-physical slots, hidden source columns, logical NULL slots and 4,097 zero-column rows.",
+      "invariant": "Public selection reuses the result layout rather than a physical prefix, preserving duplicate positions, NULLs, hidden-column exclusion and nullary multiplicity.",
       "cases": 1,
       "case_names": [
         ""
