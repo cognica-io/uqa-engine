@@ -26,7 +26,7 @@ use crate::physical::{
 };
 use crate::relational::SortComparison;
 use crate::relational::{SharedExpressionEvaluator, SortKey};
-use crate::spill::{EncodedBatchSizer, SpillBuffer, SpillDrain, SpillFileArena};
+use crate::spill::{EncodedBatchSizer, SpillBatchWriter, SpillBuffer, SpillDrain, SpillFileArena};
 
 mod comparison;
 mod top_k;
@@ -254,7 +254,7 @@ impl<'a> ExternalSort<'a> {
         }
 
         let mut buffer = self.create_run_buffer(arena);
-        let mut writer = RunBatchWriter::new(self.run_schema.clone())?;
+        let mut writer = SpillBatchWriter::new(self.run_schema.clone())?;
         for record in records {
             writer.push(&mut buffer, record.row)?;
         }
@@ -416,56 +416,6 @@ fn validate_run_batch(batch: &Batch, expected: &RowSchema) -> ExecResult<()> {
     }
 }
 
-struct RunBatchWriter {
-    schema: RowSchema,
-    pending: Vec<PhysicalRow>,
-    pending_size: EncodedBatchSizer,
-}
-
-impl RunBatchWriter {
-    fn new(schema: RowSchema) -> ExecResult<Self> {
-        let pending_size = EncodedBatchSizer::new(&schema)?;
-        Ok(Self {
-            schema,
-            pending: Vec::new(),
-            pending_size,
-        })
-    }
-
-    fn push(&mut self, output: &mut SpillBuffer, record: PhysicalRow) -> ExecResult<()> {
-        let mut candidate_size = self.pending_size;
-        candidate_size.append(&record)?;
-        let exceeds_budget = candidate_size.bytes() > output.budget_bytes();
-        if exceeds_budget && !self.pending.is_empty() {
-            self.flush(output)?;
-            candidate_size = self.pending_size;
-            candidate_size.append(&record)?;
-        }
-        self.pending.push(record);
-        self.pending_size = candidate_size;
-        if self.pending_size.bytes() > output.budget_bytes() {
-            self.flush(output)?;
-        }
-        Ok(())
-    }
-
-    fn finish(mut self, output: &mut SpillBuffer) -> ExecResult<()> {
-        self.flush(output)
-    }
-
-    fn flush(&mut self, output: &mut SpillBuffer) -> ExecResult<()> {
-        if self.pending.is_empty() {
-            return Ok(());
-        }
-        output.push(Batch::from_physical_rows(
-            self.schema.clone(),
-            std::mem::take(&mut self.pending),
-        ))?;
-        self.pending_size = EncodedBatchSizer::new(&self.schema)?;
-        Ok(())
-    }
-}
-
 struct MergeCursor {
     batches: SpillDrain,
     rows: std::vec::IntoIter<PhysicalRow>,
@@ -536,7 +486,7 @@ fn merge_group(
         }
     }
 
-    let mut writer = RunBatchWriter::new(run_schema.clone())?;
+    let mut writer = SpillBatchWriter::new(run_schema.clone())?;
     let mut emitted = 0_usize;
     while !heap.is_empty() && keep.is_none_or(|keep| emitted < keep) {
         let item = heap_pop(&mut heap, keys, source_width)?

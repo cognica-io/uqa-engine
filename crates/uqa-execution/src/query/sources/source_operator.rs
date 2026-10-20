@@ -83,7 +83,7 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync +
 
     match from {
         SourcePlan::RetainedRows(source) => Ok(Box::new(
-            super::retained_source::build_retained_source(source)?,
+            super::retained_source::build_retained_source_operator(context, source, ctes)?,
         )),
         SourcePlan::Table { .. } => {
             build_table_source_operator(context, from, params, ctes, prune, filters)
