@@ -143,9 +143,10 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                 context.mutation.rules.rules.memory.work_mem_bytes()?,
                 cancel.clone(),
             );
-            let mut root_deletes = crate::mutation::deleted_rows::DeletedRowBuffer::new(
+            let mut root_deletes = crate::mutation::row_membership::PhysicalRowBuffer::new(
                 context.mutation.rules.rules.memory.work_mem_bytes()?,
                 cancel.clone(),
+                "deleted-row membership",
             );
             let mut returning_rows = crate::mutation::returning::ReturningRows::new(
                 context.query.source.relational.runtime,
@@ -299,9 +300,10 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
             let candidates = candidates.finish()?;
             let snapshot_ctes = ctes.returning_statement_snapshot_scope();
             let qualification_overlay = MutationOverlayScope::new(context.mutation.state);
-            let mut qualified_ids = crate::mutation::deleted_rows::DeletedRowBuffer::new(
+            let mut qualified_ids = crate::mutation::row_membership::PhysicalRowBuffer::new(
                 context.mutation.rules.rules.memory.work_mem_bytes()?,
                 cancel.clone(),
+                "deleted-row membership",
             );
             for candidate_id in candidates.read_rows()? {
                 let (table_index, doc_id) = candidate_id?;

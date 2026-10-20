@@ -166,4 +166,6 @@ pub fn prepare_update_row<S: Clone + 'static>(
 
 pub mod from;
 
+mod locked_rows;
+
 pub mod table;

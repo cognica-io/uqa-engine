@@ -11,7 +11,11 @@ fn deleted_row_membership_bounds_retention_and_preserves_exact_physical_keys() {
     const COUNT: u64 = 16_384;
     const TABLE: &str = "public.deleted_rows_with_a_reused_partition_key";
     let allocated = allocation_counter::measure(|| {
-        let mut rows = DeletedRowBuffer::new(64 * 1024, CancellationToken::new());
+        let mut rows = PhysicalRowBuffer::new(
+            64 * 1024,
+            CancellationToken::new(),
+            "deleted-row membership",
+        );
         for id in (0..COUNT).rev() {
             assert!(rows.insert_if_absent(TABLE, id * 2).unwrap());
         }
@@ -39,10 +43,11 @@ fn deleted_row_membership_bounds_retention_and_preserves_exact_physical_keys() {
 #[test]
 fn deleted_row_membership_propagates_cancellation_before_write_and_read() {
     let cancel = CancellationToken::new();
-    let mut buffer = DeletedRowBuffer::new(64 * 1024, cancel.clone());
+    let mut buffer = PhysicalRowBuffer::new(64 * 1024, cancel.clone(), "deleted-row membership");
     buffer.insert("t", 1).unwrap();
     let rows = buffer.finish().unwrap();
-    let mut unfinished = DeletedRowBuffer::new(64 * 1024, cancel.clone());
+    let mut unfinished =
+        PhysicalRowBuffer::new(64 * 1024, cancel.clone(), "deleted-row membership");
     cancel.cancel();
     assert_eq!(rows.contains("t", 1).unwrap_err().sqlstate(), Some("57014"));
     assert_eq!(
@@ -59,9 +64,10 @@ fn deleted_row_membership_propagates_cancellation_before_write_and_read() {
 #[test]
 fn deleted_row_membership_preserves_typed_memory_exhaustion() {
     let memory = MemoryBudget::new(0);
-    let mut rows = DeletedRowBuffer {
+    let mut rows = PhysicalRowBuffer {
         records: PrivateRecordChanges::new(&memory),
         control: StorageReadControl::new(&memory, &CancellationToken::new()),
+        operation: "deleted-row membership",
     };
     let error = rows.insert("t", 1).unwrap_err();
     assert_eq!(error.sqlstate(), Some("53200"), "{error:?}");
@@ -73,7 +79,8 @@ fn deleted_row_membership_preserves_typed_memory_exhaustion() {
 fn physical_row_membership_spills_below_one_key_without_losing_exact_keys() {
     for bytes in [0, 1, 80] {
         let allocated = allocation_counter::measure(|| {
-            let mut rows = DeletedRowBuffer::new(bytes, CancellationToken::new());
+            let mut rows =
+                PhysicalRowBuffer::new(bytes, CancellationToken::new(), "row membership");
             for id in (0..256).rev() {
                 assert!(rows.insert_if_absent("partition", id).unwrap());
             }

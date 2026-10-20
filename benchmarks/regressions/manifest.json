@@ -17558,7 +17558,7 @@
       "package": "uqa-execution",
       "kind": "lib",
       "test": "deleted_row_membership_bounds_retention_and_preserves_exact_physical_keys",
-      "source": "crates/uqa-execution/src/mutation/deleted_rows/tests.rs",
+      "source": "crates/uqa-execution/src/mutation/row_membership/tests.rs",
       "cases": 1,
       "case_names": [
         ""
@@ -17571,7 +17571,7 @@
       "package": "uqa-execution",
       "kind": "lib",
       "test": "deleted_row_membership_propagates_cancellation_before_write_and_read",
-      "source": "crates/uqa-execution/src/mutation/deleted_rows/tests.rs",
+      "source": "crates/uqa-execution/src/mutation/row_membership/tests.rs",
       "cases": 1,
       "case_names": [
         ""
@@ -17694,7 +17694,7 @@
       "package": "uqa-execution",
       "kind": "lib",
       "test": "deleted_row_membership_preserves_typed_memory_exhaustion",
-      "source": "crates/uqa-execution/src/mutation/deleted_rows/tests.rs",
+      "source": "crates/uqa-execution/src/mutation/row_membership/tests.rs",
       "workload": "DELETE membership append and insert-if-absent under an exhausted storage allowance.",
       "invariant": "Resource exhaustion preserves SQLSTATE 53200 through the existing typed storage error adapter instead of becoming XX000.",
       "cases": 1,
@@ -17720,7 +17720,7 @@
       "package": "uqa-execution",
       "kind": "lib",
       "test": "physical_row_membership_spills_below_one_key_without_losing_exact_keys",
-      "source": "crates/uqa-execution/src/mutation/deleted_rows/tests.rs",
+      "source": "crates/uqa-execution/src/mutation/row_membership/tests.rs",
       "cases": 1,
       "case_names": [
         ""
@@ -17798,6 +17798,32 @@
         "case_2_delete"
       ],
       "capability": "Bounded scalar mutation qualification"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "update_locked_rows_bound_retention_and_preserve_first_target_selection",
+      "source": "crates/uqa-execution/src/mutation/update/locked_rows/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "16,384 descending UPDATE physical targets, duplicate tuple rechecks, distinct partitions and full-width identities under a 64KiB allowance.",
+      "invariant": "Peak additional allocation stays below 512KiB; each exact physical target is accepted once, without merging distinct partition identities.",
+      "capability": "Bounded UPDATE physical identity ownership"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "update_locked_rows_keep_cancellation_and_typed_memory_errors",
+      "source": "crates/uqa-execution/src/mutation/update/locked_rows/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "UPDATE membership after cancellation and with an exhausted storage allowance.",
+      "invariant": "Cancelled duplicate lookups return 57014 and memory exhaustion returns 53200 before publishing a partial selection.",
+      "capability": "Bounded UPDATE physical identity ownership"
     }
   ]
 }
