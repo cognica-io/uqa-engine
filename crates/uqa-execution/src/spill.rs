@@ -33,7 +33,10 @@ use format::{
     append_batches, decode_batch, encoded_batch_overhead_size, encoded_batch_size,
     encoded_physical_row_record_size, open_spill_reader, read_bounded_spill_record, spill_error,
 };
-pub(crate) use format::{decode_document, encode_document, encoded_document_size};
+pub(crate) use format::{
+    decode_document, decode_physical_row_record, encode_document, encode_physical_row_record,
+    encoded_document_size,
+};
 mod batch_writer;
 pub(crate) use batch_writer::SpillBatchWriter;
 pub(crate) use indexed::BufferedIndexedSpill;

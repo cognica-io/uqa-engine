@@ -32,28 +32,26 @@ pub fn bind_insert_values_action(
     columns: &BTreeMap<String, RuleColumnMetadata>,
     bind_action: &BindRuleAction<'_>,
 ) -> Result<Statement, SQLError> {
-    if matching_rows.is_empty() {
-        let mut bound = bind_action(&mut RuntimeRuleResolver {
-            old: None,
-            new: None,
-            old_doc_id: None,
-            new_doc_id: None,
-            columns,
-        })?;
-        let Statement::Insert(insert) = &mut bound else {
-            return Err(SQLError::Internal(
-                "rewrite rule INSERT VALUES action changed statement kind".into(),
-            ));
-        };
-        insert.rows.clear();
-        return Ok(bound);
-    }
+    bind_insert_values_action_from_rows(
+        matching_rows.iter().map(|index| {
+            rows.get(*index).ok_or_else(|| {
+                SQLError::Internal("rewrite rule lost its qualified row image".into())
+            })
+        }),
+        columns,
+        bind_action,
+    )
+}
+
+pub fn bind_insert_values_action_from_rows<R: RuleRowValues>(
+    rows: impl IntoIterator<Item = Result<R, SQLError>>,
+    columns: &BTreeMap<String, RuleColumnMetadata>,
+    bind_action: &BindRuleAction<'_>,
+) -> Result<Statement, SQLError> {
     let mut combined = None;
-    for row_index in matching_rows {
-        let row = rows.get(*row_index).ok_or_else(|| {
-            SQLError::Internal("rewrite rule lost its qualified row image".into())
-        })?;
-        let bound = bind_action(&mut runtime_rule_resolver(row, columns))?;
+    for row in rows {
+        let row = row?;
+        let bound = bind_action(&mut runtime_rule_resolver(&row, columns))?;
         let Statement::Insert(mut insert) = bound else {
             return Err(SQLError::Internal(
                 "rewrite rule INSERT VALUES action changed statement kind".into(),
@@ -71,7 +69,24 @@ pub fn bind_insert_values_action(
             combined = Some(Statement::Insert(insert));
         }
     }
-    combined.ok_or_else(|| SQLError::Internal("rewrite rule action lost its row source".into()))
+    if let Some(bound) = combined {
+        Ok(bound)
+    } else {
+        let mut bound = bind_action(&mut RuntimeRuleResolver {
+            old: None,
+            new: None,
+            old_doc_id: None,
+            new_doc_id: None,
+            columns,
+        })?;
+        let Statement::Insert(insert) = &mut bound else {
+            return Err(SQLError::Internal(
+                "rewrite rule INSERT VALUES action changed statement kind".into(),
+            ));
+        };
+        insert.rows.clear();
+        Ok(bound)
+    }
 }
 
 #[derive(PartialEq)]

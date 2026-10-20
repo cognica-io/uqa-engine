@@ -14863,7 +14863,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -16584,6 +16584,45 @@
       "capability": "Bounded set-oriented rule inputs",
       "workload": "Set-oriented INSERT SELECT rule over eight 4KiB events, two action rows per event, added composite fields and one-kilobyte work memory.",
       "invariant": "Outputs match independent PostgreSQL 18.4; empty inputs add nothing, transaction rollback restores both relations and persistent providers reopen identically."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_events_spill_original_images_and_replay_selected_ordinals_with_bounded_memory",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/rows/tests.rs",
+      "capability": "Bounded original rewrite-rule events",
+      "workload": "2,048 original OLD/NEW events totaling 32MiB, 64KiB work memory, repeated out-of-order reads after sharing and dropping the initial owner.",
+      "invariant": "Construction and replay remain below 2MiB live allocation; exact full-width document identities and payloads survive, and event allocations are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_events_preserve_complete_context_schema_lock_lineage_and_absent_images",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/rows/tests.rs",
+      "capability": "Bounded original rewrite-rule events",
+      "workload": "Memory and forced disk retention with absent/empty OLD/NEW images, qualified text, collation and a maximum-width row-lock identity.",
+      "invariant": "The complete immutable source schema and physical lock lineage survive positional replay; empty documents remain distinct from missing images.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_event_failure_and_cancellation_preserve_the_published_owner",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/rows/tests.rs",
+      "capability": "Bounded original rewrite-rule events",
+      "workload": "A partially constructed replacement fails and the current shared owner is subsequently cancelled.",
+      "invariant": "Failed replacement leaves the original image readable; cancellation rejects every owner and admission without publishing another event.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -8,10 +8,11 @@
 
 mod returning;
 mod row_source;
+mod rows;
+pub use rows::{RuleRowBuffer, RuleRows};
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 use uqa_core::Value;
 use uqa_sql::ast::{RuleEvent, Statement};
@@ -29,7 +30,7 @@ pub use inputs::RuleInputProjection;
 pub use crate::mutation::row_images::RuleRowImage;
 use returning::capture_rule_returning_result;
 pub use returning::RuleReturningResult;
-use uqa_sql::semantics::rules::binding::bind_insert_values_action;
+use uqa_sql::semantics::rules::binding::bind_insert_values_action_from_rows;
 pub use uqa_sql::semantics::rules::returning::RuleReturningRequest;
 pub use uqa_sql::semantics::rules::validate_rule_returning_contract;
 use uqa_sql::semantics::rules::{
@@ -57,10 +58,12 @@ use uqa_sql::semantics::rules::binding::RuleColumnMetadata;
 pub struct PreparedRuleBatch {
     table: String,
     event: RuleEvent,
-    rows: Arc<[RuleRowImage]>,
+    rows: RuleRows,
     rules: Vec<PreparedRule>,
     suppress_original: Vec<bool>,
     action_qualification_count: Option<usize>,
+    work_mem: usize,
+    cancellation: uqa_core::CancellationToken,
 }
 
 pub struct RuleExecutionOutcome {
@@ -74,6 +77,9 @@ pub enum RuleRowSide {
     Old,
     New,
 }
+
+/// Required OLD and NEW columns, respectively, that qualification has not yet projected.
+pub type MissingRuleRowColumns = (BTreeSet<String>, BTreeSet<String>);
 
 impl PreparedRuleBatch {
     pub fn event_row_count(&self) -> usize {
@@ -103,11 +109,12 @@ impl PreparedRuleBatch {
         rows
     }
 
-    pub fn missing_action_row_columns(&self) -> Vec<(BTreeSet<String>, BTreeSet<String>)> {
+    pub fn missing_action_row_columns(&self) -> Result<Vec<MissingRuleRowColumns>, SQLError> {
         self.matched_action_row_columns()
             .into_iter()
             .zip(self.rows.iter())
             .map(|(columns, row)| {
+                let row = row?;
                 let missing = |record: &Option<Document>| {
                     if let Some(record) = record {
                         columns
@@ -119,7 +126,7 @@ impl PreparedRuleBatch {
                         BTreeSet::new()
                     }
                 };
-                (missing(&row.old), missing(&row.new))
+                Ok((missing(&row.old), missing(&row.new)))
             })
             .collect()
     }
@@ -130,9 +137,13 @@ impl PreparedRuleBatch {
                 "rewrite-rule supplemental row count changed after qualification".into(),
             ));
         }
-        for (target, supplemental) in Arc::make_mut(&mut self.rows).iter_mut().zip(rows) {
+        let mut output = RuleRowBuffer::new(self.work_mem, self.cancellation.clone());
+        for (target, supplemental) in self.rows.iter().zip(rows) {
+            let mut target = target?;
             target.supplement_documents(supplemental);
+            output.push(target)?;
         }
+        self.rows = output.finish();
         Ok(())
     }
 
@@ -190,43 +201,46 @@ impl PreparedRuleBatch {
                             "rewrite rule lost its prepared action column contract".into(),
                         )
                     })?;
-                let mut reevaluated_rows;
+                let reevaluated_rows;
                 let reevaluated_matching_rows;
                 let (action_matching_rows, action_rows) = if self.event == RuleEvent::Insert
                     && prepared.rule.bound_condition_plan().is_some()
                 {
-                    reevaluated_rows = self.rows.to_vec();
+                    let mut output = RuleRowBuffer::new(self.work_mem, self.cancellation.clone());
                     let mut matched = Vec::new();
-                    for (row_index, row) in reevaluated_rows.iter_mut().enumerate() {
+                    for (row_index, row) in self.rows.iter().enumerate() {
+                        let mut row = row?;
                         if rule_condition_matches(
                             context,
                             &prepared.rule,
                             &privilege_subject,
                             row_index,
-                            row,
+                            &mut row,
                             &columns,
                             &mut |_, _, _| Ok(RuleInputProjection::default()),
                         )? {
                             matched.push(row_index);
                         }
+                        output.push(row)?;
                     }
+                    reevaluated_rows = output.finish();
                     reevaluated_matching_rows = matched;
-                    (
-                        reevaluated_matching_rows.as_slice(),
-                        reevaluated_rows.as_slice(),
-                    )
+                    (reevaluated_matching_rows.as_slice(), &reevaluated_rows)
                 } else {
-                    (prepared.matching_rows.as_slice(), self.rows.as_ref())
+                    (prepared.matching_rows.as_slice(), &self.rows)
                 };
                 let action_returns = statement_has_returning(action);
                 let captures_action = request.captures() && action_returns;
-                let captures_source_context = captures_action
-                    && matches!(action, Statement::Update(_) | Statement::Delete(_))
-                    && action_matching_rows.iter().any(|row_index| {
-                        action_rows
-                            .get(*row_index)
-                            .is_some_and(|row| row.context.is_some())
-                    });
+                let mut captures_source_context = false;
+                if captures_action && matches!(action, Statement::Update(_) | Statement::Delete(_))
+                {
+                    for index in action_matching_rows {
+                        if action_rows.get(*index)?.context.is_some() {
+                            captures_source_context = true;
+                            break;
+                        }
+                    }
+                }
                 let action_references_row = prepared
                     .action_references_row
                     .get(action_index)
@@ -242,7 +256,8 @@ impl PreparedRuleBatch {
                 let qualification_indices;
                 let (matching_rows, rows) = if uses_action_qualification {
                     let count = self.action_qualification_count.unwrap_or_default();
-                    let mut matched = Vec::with_capacity(count);
+                    let mut matched = RuleRowBuffer::new(self.work_mem, self.cancellation.clone());
+                    let mut matched_count = 0;
                     for qualification_index in 0..count {
                         let mut row = RuleRowImage::empty();
                         if rule_condition_matches(
@@ -254,15 +269,13 @@ impl PreparedRuleBatch {
                             &columns,
                             &mut |_, _, _| Ok(RuleInputProjection::default()),
                         )? {
-                            matched.push(row);
+                            matched.push(row)?;
+                            matched_count += 1;
                         }
                     }
-                    qualification_rows = matched;
-                    qualification_indices = (0..qualification_rows.len()).collect::<Vec<_>>();
-                    (
-                        qualification_indices.as_slice(),
-                        qualification_rows.as_slice(),
-                    )
+                    qualification_rows = matched.finish();
+                    qualification_indices = (0..matched_count).collect::<Vec<_>>();
+                    (qualification_indices.as_slice(), &qualification_rows)
                 } else {
                     (action_matching_rows, action_rows)
                 };
@@ -297,14 +310,19 @@ impl PreparedRuleBatch {
                     && matches!(action, Statement::Insert(insert) if !insert.rows.is_empty())
                 {
                     (
-                        bind_insert_values_action(matching_rows, rows, &columns, &bind_action)?,
+                        bind_insert_values_action_from_rows(
+                            matching_rows.iter().map(|index| rows.get(*index)),
+                            &columns,
+                            &bind_action,
+                        )?,
                         None,
                         None,
                     )
                 } else if needs_row_source {
-                    let (bound, scope) = row_source::bind_retained_action(
-                        matching_rows,
-                        rows,
+                    let (bound, scope) = row_source::bind_retained_action_from_rows(
+                        matching_rows
+                            .iter()
+                            .map(|index| rows.get(*index).map(|row| (*index, row))),
                         &columns,
                         context.memory.work_mem_bytes()?,
                         context.cancellation,
@@ -391,7 +409,7 @@ impl PreparedRuleBatch {
                         context.assignment,
                         result,
                         definitions,
-                        captures_source_context.then(|| Arc::clone(&self.rows)),
+                        captures_source_context.then(|| self.rows.clone()),
                     )?;
                     returning = Some(captured);
                 }
@@ -420,7 +438,7 @@ pub fn prepare_rule_batch_with_projection<F>(
     context: RuleContext<'_>,
     table: &str,
     event: RuleEvent,
-    mut rows: Vec<RuleRowImage>,
+    rows: Vec<RuleRowImage>,
     mut project: F,
 ) -> Result<PreparedRuleBatch, SQLError>
 where
@@ -432,30 +450,47 @@ where
         .resolve_rule_relation(table)?
         .qualified_name();
     let rules = context.analysis.rules.rules_for(&table, event)?;
+    if !rules.is_empty() {
+        ensure_not_recursive(&table, event)?;
+    }
+    let work_mem = context.memory.work_mem_bytes()?;
+    let cancellation = context.cancellation.clone();
+    let mut rows = RuleRows::from_rows(rows.into_iter().map(Ok), work_mem, cancellation.clone())?;
     if rules.is_empty() {
         return Ok(PreparedRuleBatch {
             table,
             event,
             suppress_original: vec![false; rows.len()],
-            rows: rows.into(),
+            rows,
             rules: Vec::new(),
             action_qualification_count: None,
+            work_mem,
+            cancellation,
         });
     }
-    ensure_not_recursive(&table, event)?;
     let columns = rule_columns(context.analysis, &table)?;
     let privilege_subject = context.security.privilege_subject(&table)?;
     let mut suppress_original = vec![false; rows.len()];
     let mut prepared_rules = Vec::with_capacity(rules.len());
     for rule in rules {
         let mut prepared = prepare_rule_actions(context, rule, &columns)?;
-        for (index, row) in rows.iter_mut().enumerate() {
+        if prepared.rule.definition.condition.is_none() {
+            prepared.matching_rows.extend(0..rows.len());
+            if prepared.rule.definition.instead {
+                suppress_original.fill(true);
+            }
+            prepared_rules.push(prepared);
+            continue;
+        }
+        let mut projected = RuleRowBuffer::new(work_mem, cancellation.clone());
+        for (index, row) in rows.iter().enumerate() {
+            let mut row = row?;
             if rule_condition_matches(
                 context,
                 &prepared.rule,
                 &privilege_subject,
                 index,
-                row,
+                &mut row,
                 &columns,
                 &mut project,
             )? {
@@ -464,16 +499,20 @@ where
                     suppress_original[index] = true;
                 }
             }
+            projected.push(row)?;
         }
+        rows = projected.finish();
         prepared_rules.push(prepared);
     }
     Ok(PreparedRuleBatch {
         table,
         event,
-        rows: rows.into(),
+        rows,
         rules: prepared_rules,
         suppress_original,
         action_qualification_count: None,
+        work_mem,
+        cancellation,
     })
 }
 

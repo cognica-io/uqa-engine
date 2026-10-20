@@ -22,9 +22,25 @@ pub trait RuleRowValues {
     fn new_doc_id(&self) -> Option<DocId>;
 }
 
+impl<T: RuleRowValues + ?Sized> RuleRowValues for &T {
+    fn old_row(&self) -> Option<&Document> {
+        (**self).old_row()
+    }
+    fn new_row(&self) -> Option<&Document> {
+        (**self).new_row()
+    }
+    fn old_doc_id(&self) -> Option<DocId> {
+        (**self).old_doc_id()
+    }
+    fn new_doc_id(&self) -> Option<DocId> {
+        (**self).new_doc_id()
+    }
+}
+
 mod actions;
 pub use actions::{
-    bind_insert_values_action, bind_set_oriented_action, BoundSetOrientedAction, RetainedRuleInput,
+    bind_insert_values_action, bind_insert_values_action_from_rows, bind_set_oriented_action,
+    BoundSetOrientedAction, RetainedRuleInput,
 };
 
 pub struct RuleColumnMetadata {

@@ -487,7 +487,7 @@ pub fn prepare_view_rule_batches<S: Clone + 'static>(
                 Ok(projected)
             },
         )?;
-        let action_columns = batch.missing_action_row_columns();
+        let action_columns = batch.missing_action_row_columns()?;
         if action_columns
             .iter()
             .any(|(old, new)| !old.is_empty() || !new.is_empty())

@@ -23,9 +23,30 @@ use crate::{PhysicalRow, SpillBuffer};
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
 pub(super) fn bind_retained_action(
     matching_rows: &[usize],
     rows: &[impl RuleRowValues],
+    columns: &BTreeMap<String, RuleColumnMetadata>,
+    work_mem: usize,
+    cancellation: &CancellationToken,
+    bind_action: &dyn Fn(&mut dyn VariableResolver) -> Result<Statement, SQLError>,
+) -> Result<(BoundSetOrientedAction, RetainedRowScope), SQLError> {
+    bind_retained_action_from_rows(
+        matching_rows.iter().map(|index| {
+            rows.get(*index).map(|row| (*index, row)).ok_or_else(|| {
+                SQLError::Internal("rewrite rule lost its qualified row image".into())
+            })
+        }),
+        columns,
+        work_mem,
+        cancellation,
+        bind_action,
+    )
+}
+
+pub(super) fn bind_retained_action_from_rows<R: RuleRowValues>(
+    rows: impl IntoIterator<Item = Result<(usize, R), SQLError>>,
     columns: &BTreeMap<String, RuleColumnMetadata>,
     work_mem: usize,
     cancellation: &CancellationToken,
@@ -35,12 +56,10 @@ pub(super) fn bind_retained_action(
     let mut spill = SpillBuffer::new(work_mem / 2);
     let mut writer = SpillBatchWriter::new(input.schema().clone()).map_err(physical_exec_error)?;
     let mut has_admitted_records = false;
-    for index in matching_rows {
+    for row in rows {
         cancellation.check()?;
-        let row = rows.get(*index).ok_or_else(|| {
-            SQLError::Internal("rewrite rule lost its qualified row image".into())
-        })?;
-        let values = input.row_values(row, *index)?;
+        let (index, row) = row?;
+        let values = input.row_values(&row, index)?;
         has_admitted_records |= values[..columns.len() * 2]
             .iter()
             .any(uqa_sql::expr::composites::literal::contains_records);
