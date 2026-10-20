@@ -17,8 +17,31 @@ use crate::expr::{
         escape_encode_with_control, hex_decode_with_control, hex_encode_with_control,
         md5_hex_with_control,
     },
-    nonnegative_usize,
+    nonnegative_usize, out_of_range,
 };
+
+#[cfg(test)]
+mod limits;
+
+/// `PostgreSQL` text producers include the four-byte varlena header in `MaxAllocSize`.
+fn check_text_size(bytes: Option<usize>) -> Result<()> {
+    if bytes
+        .and_then(|bytes| bytes.checked_add(4))
+        .is_none_or(|bytes| bytes > 0x3fff_ffff)
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "54000".into(),
+            message: "requested length too large".into(),
+        });
+    }
+    Ok(())
+}
+
+fn text_count(value: &Value, control: &ProductionControl<'_>) -> Result<usize> {
+    let value =
+        i32::try_from(to_i64_with_control(value, control)?).map_err(|_| out_of_range("integer"))?;
+    Ok(value.max(0) as usize)
+}
 
 fn string(value: Produced<String>, control: &ProductionControl<'_>) -> Result<Produced<Value>> {
     let (value, memory) = value.into_parts();
@@ -53,15 +76,19 @@ pub(super) fn eval(
                 return Err(SQLError::TypeMismatch("[lr]pad takes 2-3 args".into()));
             }
             let s = value_to_string_with_control(&args[0], control)?;
-            let n = nonnegative_usize(
-                to_i64_with_control(&args[1], control)?.max(0),
-                "lpad/rpad length",
-            )?;
+            let n = text_count(&args[1], control)?;
             let fill = match args.get(2) {
                 Some(value) => value_to_string_with_control(value, control)?,
                 None => control.copy_text(" ")?,
             };
             let chars = characters(&s, control)?;
+            // PostgreSQL checks the UTF-8 worst case, including when truncating. An empty fill limits the result to the input's character count.
+            let result_chars = if fill.is_empty() {
+                n.min(chars.len())
+            } else {
+                n
+            };
+            check_text_size(result_chars.checked_mul(4))?;
             let mut out = ProductionString::new(*control);
             if chars.len() >= n {
                 for character in &chars[..n] {
@@ -103,10 +130,8 @@ pub(super) fn eval(
                 return Err(SQLError::TypeMismatch("repeat takes 2 args".into()));
             }
             let s = value_to_string_with_control(&args[0], control)?;
-            let n = nonnegative_usize(
-                to_i64_with_control(&args[1], control)?.max(0),
-                "repeat count",
-            )?;
+            let n = text_count(&args[1], control)?;
+            check_text_size(s.len().checked_mul(n))?;
             let mut out = ProductionString::new(*control);
             if n != 0 && !s.is_empty() {
                 let capacity = s

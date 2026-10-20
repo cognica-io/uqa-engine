@@ -496,3 +496,4 @@ fn search_path_or_failing_literal_casts_convert_at_every_evaluation() {
 }
 
 mod numeric_casts;
+mod numeric_operators;
