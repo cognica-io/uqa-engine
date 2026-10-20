@@ -335,7 +335,7 @@ fn immutable_literal_casts_convert_once_per_prepared_execution() {
         rhs: Box::new(literal_cast(Value::Int(10), "pg_catalog.\"numeric\"")),
     });
     assert_eq!(prepared.calls().constant_casts.len(), 1);
-    CONSTANT_CAST_CONVERSIONS.with(|count| count.set(0));
+    CAST_TYPE_RESOLUTIONS.with(|count| count.set(0));
     let results = evaluate_rows(&prepared, 1_000);
     for (quantity, result) in results.into_iter().enumerate() {
         assert_eq!(
@@ -344,15 +344,15 @@ fn immutable_literal_casts_convert_once_per_prepared_execution() {
             "row {quantity}"
         );
     }
-    assert_eq!(CONSTANT_CAST_CONVERSIONS.with(std::cell::Cell::get), 1);
+    assert_eq!(CAST_TYPE_RESOLUTIONS.with(std::cell::Cell::get), 1);
 
     // A clone prepares independent state, which converts its literal again once.
     let cloned = prepared.clone();
-    CONSTANT_CAST_CONVERSIONS.with(|count| count.set(0));
+    CAST_TYPE_RESOLUTIONS.with(|count| count.set(0));
     assert!(evaluate_rows(&cloned, 100)
         .into_iter()
         .all(|result| result.is_ok()));
-    assert_eq!(CONSTANT_CAST_CONVERSIONS.with(std::cell::Cell::get), 1);
+    assert_eq!(CAST_TYPE_RESOLUTIONS.with(std::cell::Cell::get), 1);
 }
 
 #[test]
@@ -466,7 +466,7 @@ fn search_path_or_failing_literal_casts_convert_at_every_evaluation() {
             lhs: Box::new(ScalarExpr::Column("quantity".into())),
             rhs: Box::new(literal_cast(Value::Int(10), target)),
         });
-        CONSTANT_CAST_CONVERSIONS.with(|count| count.set(0));
+        CAST_TYPE_RESOLUTIONS.with(|count| count.set(0));
         let results = evaluate_rows(&prepared, 50);
         for (quantity, result) in results.into_iter().enumerate() {
             assert_eq!(
@@ -476,7 +476,7 @@ fn search_path_or_failing_literal_casts_convert_at_every_evaluation() {
             );
         }
         assert_eq!(
-            CONSTANT_CAST_CONVERSIONS.with(std::cell::Cell::get),
+            CAST_TYPE_RESOLUTIONS.with(std::cell::Cell::get),
             conversions,
             "{target}"
         );
@@ -487,10 +487,12 @@ fn search_path_or_failing_literal_casts_convert_at_every_evaluation() {
         Value::Str("not a number".into()),
         "pg_catalog.\"numeric\"",
     ));
-    CONSTANT_CAST_CONVERSIONS.with(|count| count.set(0));
+    CAST_TYPE_RESOLUTIONS.with(|count| count.set(0));
     let results = evaluate_rows(&failing, 3);
     assert!(results.iter().all(|result| result
         .as_ref()
         .is_err_and(|error| error.sqlstate() == Some("22P02"))));
-    assert_eq!(CONSTANT_CAST_CONVERSIONS.with(std::cell::Cell::get), 3);
+    assert_eq!(CAST_TYPE_RESOLUTIONS.with(std::cell::Cell::get), 3);
 }
+
+mod numeric_casts;

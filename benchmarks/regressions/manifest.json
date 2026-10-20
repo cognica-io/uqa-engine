@@ -15702,6 +15702,123 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "resolved_integer_conversion_needs_no_type_name_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/casting/numeric/tests.rs",
+      "capability": "Resolved numeric cast execution",
+      "workload": "10,000 integer conversions through one resolved descriptor, NULL and both cancellation tokens under a zero-byte allowance.",
+      "invariant": "Exact integer results use no type-name workspace; each current cancellation token remains effective.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_numeric_casts_keep_postgresql_rounding_and_typmods",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/casting/numeric/tests.rs",
+      "capability": "Resolved numeric cast execution",
+      "workload": "PostgreSQL 18.4 numeric/float tie rounding, real precision, numeric precision and negative scales.",
+      "invariant": "Existing arithmetic kernels preserve the independent PostgreSQL results and release all admitted output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_numeric_casts_keep_range_errors_and_allocation_refusals",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/casting/numeric/tests.rs",
+      "capability": "Resolved numeric cast execution",
+      "workload": "Smallint/integer/bigint/numeric overflow and numeric output with a zero-byte allowance.",
+      "invariant": "Original SQLSTATEs and complete release of failed construction remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "numeric_dispatch_never_erases_non_numeric_type_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/casting/numeric/tests.rs",
+      "capability": "Resolved numeric cast execution",
+      "workload": "Domains, OID aliases, booleans, text and array types at either cast boundary.",
+      "invariant": "Only actual builtin numeric identities select the retained numeric conversion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "numeric_row_casts_resolve_types_once_and_retain_only_the_source_name",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/numeric_casts.rs",
+      "capability": "Resolved numeric cast execution",
+      "workload": "10,000 physical input rows and a cloned prepared expression with counting catalog callbacks.",
+      "invariant": "Exactly one cast resolution and two catalog name lookups per execution; per-row callbacks remain live and retained source-name memory is released with its owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_numeric_casts_keep_current_callbacks_limits_cancellation_and_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/numeric_casts.rs",
+      "capability": "Resolved numeric cast execution",
+      "workload": "Cached physical casts with NULL, zero current scratch, overflow, callback errors and current cancellation.",
+      "invariant": "Reused descriptors retain the current invocation errors and cancellation; integer evaluation uses zero scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "numeric_cast_descriptors_do_not_cross_input_schema_identity",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/numeric_casts.rs",
+      "capability": "Resolved numeric cast execution",
+      "workload": "One prepared expression invoked with integer, floating-point and original integer schemas.",
+      "invariant": "A changed schema resolves again; the original schema resumes its own retained descriptor with exact values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "row_cast_state_preserves_unqualified_targets_and_parameter_type_changes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/numeric_casts.rs",
+      "capability": "Resolved numeric cast execution",
+      "workload": "Unqualified targets and parameter carriers changing between integer and float.",
+      "invariant": "Live name and parameter resolution remains outside numeric row-cast retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "numeric_descriptors_are_lazy_and_do_not_retain_failed_conversions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/numeric_casts.rs",
+      "capability": "Resolved numeric cast execution",
+      "workload": "A conditional smallint conversion is skipped, fails with overflow, succeeds and is skipped again.",
+      "invariant": "Only an evaluated successful conversion can publish retained metadata; skipped branches keep zero conversion effects.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "executable_analysis_derives_each_query_result_once",
       "cases": 1,
       "case_names": [

@@ -11,13 +11,13 @@ use super::{
     ordinary_output, plain, real_type_name, scalar_source_type, Produced, ProductionControl,
     ProductionVec, SQLError, ScalarEvalContext, ScalarExpr, Value,
 };
-use crate::scalar::state::{ColumnSlot, ConstantCast, ContextSchema};
+use crate::scalar::state::{ColumnSlot, ConstantCast, ContextSchema, RowCast};
 use std::sync::OnceLock;
 use uqa_core::ArrayValue;
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::expr::{
-    cast_value_with_type_resolution_with_control, eval_binary_values_with_engine,
+    cast_value_with_numeric_resolution_with_control, eval_binary_values_with_engine,
     negate_value_with_control, truthy,
 };
 
@@ -217,16 +217,23 @@ pub(super) fn cast(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    if let Some(slot) = context.row_cast(expr) {
+        return row_cast(expr, ty, context, control, slot);
+    }
     let Some(constant) = context.constant_cast(expr) else {
-        return convert(expr, ty, context, control).map(|(_, converted)| converted);
+        return convert(expr, ty, context, control).map(|converted| converted.value);
     };
     match constant.get() {
         Some(ConstantCast::Retained(value)) => control.copy_value(value).map_err(Into::into),
         Some(ConstantCast::PerEvaluation) => {
-            convert(expr, ty, context, control).map(|(_, converted)| converted)
+            convert(expr, ty, context, control).map(|converted| converted.value)
         }
         None => {
-            let (source, converted) = convert(expr, ty, context, control)?;
+            let CastEvaluation {
+                source,
+                value: converted,
+                ..
+            } = convert(expr, ty, context, control)?;
             // A concurrent first evaluation sets the same conversion of the same literal.
             let _ = constant.set(
                 if immutable_constant_cast(expr, source.as_deref().map(String::as_str), ty) {
@@ -240,14 +247,73 @@ pub(super) fn cast(
     }
 }
 
+fn row_cast(
+    expr: &ScalarExpr,
+    ty: &str,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+    slot: &OnceLock<RowCast>,
+) -> Result<Produced<Value>, SQLError> {
+    if let Some(RowCast::Numeric {
+        conversion,
+        source,
+        schema,
+    }) = slot.get()
+    {
+        let same_schema = match (schema, context.row_schema()) {
+            (None, None) => true,
+            (Some(retained), Some(current)) => current.shares_index(retained),
+            _ => false,
+        };
+        if same_schema {
+            let value = eval_scalar_inner(expr, context, control)?;
+            return conversion.evaluate_with_catalog(
+                &value,
+                source,
+                context.function_hook(),
+                control,
+            );
+        }
+    }
+    let CastEvaluation {
+        source,
+        value: converted,
+        numeric,
+    } = convert(expr, ty, context, control)?;
+    if slot.get().is_none() {
+        // An unqualified source or target can resolve differently after a session search_path change. Only explicit builtin identities are reusable.
+        let state = match (source, numeric) {
+            (Some(source), Some(conversion))
+                if uqa_sql::type_resolution::pg_catalog_builtin_type(ty).is_some()
+                    && uqa_sql::type_resolution::pg_catalog_builtin_type(&source).is_some() =>
+            {
+                RowCast::Numeric {
+                    conversion,
+                    source,
+                    schema: context.row_schema().cloned(),
+                }
+            }
+            _ => RowCast::PerEvaluation,
+        };
+        let _ = slot.set(state);
+    }
+    Ok(converted)
+}
+
+struct CastEvaluation {
+    source: Option<Produced<String>>,
+    value: Produced<Value>,
+    numeric: Option<uqa_sql::expr::NumericCast>,
+}
+
 fn convert(
     expr: &ScalarExpr,
     ty: &str,
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
-) -> Result<(Option<Produced<String>>, Produced<Value>), SQLError> {
+) -> Result<CastEvaluation, SQLError> {
     #[cfg(test)]
-    crate::scalar::state::CONSTANT_CAST_CONVERSIONS.with(|count| count.set(count.get() + 1));
+    crate::scalar::state::CAST_TYPE_RESOLUTIONS.with(|count| count.set(count.get() + 1));
     let source_ty = context.with_type_schema(|schema| {
         uqa_sql::type_resolution::scalar_cast_source_type_name_with_control(
             expr,
@@ -257,14 +323,18 @@ fn convert(
         )
     })?;
     let value = eval_scalar_inner(expr, context, control)?;
-    let converted = cast_value_with_type_resolution_with_control(
+    let (converted, numeric) = cast_value_with_numeric_resolution_with_control(
         &value,
         source_ty.as_deref().map(String::as_str),
         ty,
         context.function_hook(),
         control,
     )?;
-    Ok((source_ty, converted))
+    Ok(CastEvaluation {
+        source: source_ty,
+        value: converted,
+        numeric,
+    })
 }
 
 /// A literal's conversion can be retained for the rest of the execution only when no evaluation could convert it differently: the target is spelled in `pg_catalog`, which `search_path` cannot redirect, both types are builtin scalars, and the cast reads neither a catalog descriptor nor a session setting.

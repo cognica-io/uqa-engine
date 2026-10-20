@@ -19,8 +19,9 @@ use crate::result::ResultRow;
 mod casting;
 mod regtype;
 pub use casting::{
-    cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,
-    coercion_type_name, read_catalog_array_input, read_catalog_input, CatalogInputFunctions,
+    cast_value_with_numeric_resolution_with_control, cast_value_with_type_resolution,
+    cast_value_with_type_resolution_with_control, coercion_type_name, read_catalog_array_input,
+    read_catalog_input, CatalogInputFunctions,
 };
 pub(crate) use casting::{requires_catalog_constant_input, requires_domain_array_input};
 pub(crate) use regtype::format_regtype_value_with_catalog_and_control;
