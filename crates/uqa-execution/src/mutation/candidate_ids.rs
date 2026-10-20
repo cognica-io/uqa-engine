@@ -19,7 +19,7 @@ const ID_PAGE_SIZE: usize = 128;
 // Provider decode scratch and the visible-page merge have a fixed bound independent of relation size.
 const ID_PAGE_MEMORY: usize = 64 * 1024;
 
-pub(super) struct CandidateIds {
+pub(crate) struct CandidateIds {
     rows: SpillBuffer,
     schema: RowSchema,
     pending: Vec<PhysicalRow>,
@@ -62,23 +62,49 @@ impl CandidateIds {
         source: &dyn DocumentStore,
         changes: &DocumentChanges,
     ) -> Result<(), SQLError> {
+        self.capture_pages(table, |after, limit, control| {
+            VisibleDocumentIds {
+                source,
+                changes,
+                control,
+            }
+            .page(after, limit, control, true)
+            .map_err(|error| {
+                crate::storage_errors::storage_error("capture mutation target identities", &error)
+            })
+        })
+    }
+
+    /// Freeze the complete identity sequence before any caller reads or evaluates a row.
+    pub(crate) fn from_pages(
+        bytes: usize,
+        cancellation: &CancellationToken,
+        page: impl FnMut(
+            Option<DocId>,
+            usize,
+            &StorageReadControl,
+        ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError>,
+    ) -> Result<CapturedCandidateIds, SQLError> {
+        let mut ids = Self::new(bytes, cancellation.clone());
+        ids.capture_pages(0, page)?;
+        ids.finish()
+    }
+
+    fn capture_pages(
+        &mut self,
+        table: usize,
+        mut page: impl FnMut(
+            Option<DocId>,
+            usize,
+            &StorageReadControl,
+        ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError>,
+    ) -> Result<(), SQLError> {
         let control =
             StorageReadControl::new(&MemoryBudget::new(ID_PAGE_MEMORY), &self.cancellation);
-        let visible = VisibleDocumentIds {
-            source,
-            changes,
-            control: &control,
-        };
         let mut after = None;
         loop {
-            let page = visible
-                .page(after, ID_PAGE_SIZE, &control, true)
-                .map_err(|error| {
-                    crate::storage_errors::storage_error(
-                        "capture mutation target identities",
-                        &error,
-                    )
-                })?;
+            self.cancellation.check()?;
+            let page = page(after, ID_PAGE_SIZE, &control)?;
             let Some(last) = page.last().copied() else {
                 break;
             };
@@ -115,7 +141,7 @@ impl CandidateIds {
     }
 }
 
-pub(super) struct CapturedCandidateIds {
+pub(crate) struct CapturedCandidateIds {
     rows: SharedSpill,
     cancellation: CancellationToken,
 }
@@ -125,7 +151,7 @@ impl CapturedCandidateIds {
         self.rows.rows() == 0
     }
 
-    pub(super) fn read_rows(
+    pub(crate) fn read_rows(
         &self,
     ) -> Result<impl Iterator<Item = Result<(usize, DocId), SQLError>> + '_, SQLError> {
         self.cancellation.check()?;

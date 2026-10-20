@@ -5,18 +5,28 @@
 //
 
 //! Validate newly declared constraints against existing physical rows.
-use crate::mutation::constraints::context::{ConstraintContext, MutationRead};
-use uqa_core::Value;
+use crate::mutation::{
+    candidate_ids::CandidateIds,
+    constraints::context::{ConstraintContext, MutationRead},
+};
+use crate::query::runtime::QueryMemorySettings;
+use uqa_core::{CancellationToken, Value};
 use uqa_sql::{
     assignment::columns::{AssignmentColumnCatalog, ColumnCatalogError},
     semantics::partition::PartitionExpressions,
     SQLError,
 };
+
+#[cfg(test)]
+mod tests;
+
 pub struct CheckValidationContext<'a> {
     pub columns: &'a dyn AssignmentColumnCatalog,
     pub reads: &'a dyn MutationRead,
     pub expressions: &'a dyn PartitionExpressions,
     pub types: &'a dyn uqa_sql::FunctionTypeResolver,
+    pub memory: &'a dyn QueryMemorySettings,
+    pub cancellation: &'a CancellationToken,
 }
 fn ddl_storage_error(action: &str, error: ColumnCatalogError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, error.as_ref())
@@ -33,7 +43,17 @@ pub fn validate_foreign_key_rows(
     name: &str,
     foreign_key: &uqa_sql::ast::ForeignKey,
 ) -> Result<(), SQLError> {
-    for doc_id in context.reads.live_table_doc_ids(table)? {
+    let ids = CandidateIds::from_pages(
+        context.memory.work_mem_bytes()?,
+        context.cancellation,
+        |after, limit, control| {
+            context
+                .reads
+                .live_table_doc_id_page(table, after, limit, control)
+        },
+    )?;
+    for row in ids.read_rows()? {
+        let (_, doc_id) = row?;
         let Some(document) = context.reads.get_document(table, doc_id)? else {
             continue;
         };
@@ -132,21 +152,31 @@ pub fn validate_rewritten_foreign_keys(
 
 pub fn validate_not_null_rows(
     reads: &dyn MutationRead,
+    memory: &dyn QueryMemorySettings,
+    cancellation: &CancellationToken,
     table: &str,
     column: &str,
 ) -> Result<(), SQLError> {
-    validate_not_null_columns(reads, table, &[column])
+    validate_not_null_columns(reads, memory, cancellation, table, &[column])
 }
 
 /// Validate retained NOT NULL requirements in physical column order with one row traversal.
 pub fn validate_not_null_columns(
     reads: &dyn MutationRead,
+    memory: &dyn QueryMemorySettings,
+    cancellation: &CancellationToken,
     table: &str,
     columns: &[&str],
 ) -> Result<(), SQLError> {
     let relation = uqa_core::RelationIdentity::from_legacy_name(table)
         .map_err(|error| SQLError::Internal(format!("resolve NOT NULL relation: {error}")))?;
-    for doc_id in reads.live_table_doc_ids(table)? {
+    let ids = CandidateIds::from_pages(
+        memory.work_mem_bytes()?,
+        cancellation,
+        |after, limit, control| reads.live_table_doc_id_page(table, after, limit, control),
+    )?;
+    for row in ids.read_rows()? {
+        let (_, doc_id) = row?;
         let Some(document) = reads.get_document(table, doc_id)? else {
             continue;
         };
@@ -179,7 +209,17 @@ pub fn validate_check_rows(
         .map_err(|error| ddl_storage_error("VALIDATE CHECK", error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     let scope = super::check_rows::CheckRowScope::new(context.types, table, &definitions)?;
-    for doc_id in context.reads.live_table_doc_ids(table)? {
+    let ids = CandidateIds::from_pages(
+        context.memory.work_mem_bytes()?,
+        context.cancellation,
+        |after, limit, control| {
+            context
+                .reads
+                .live_table_doc_id_page(table, after, limit, control)
+        },
+    )?;
+    for row in ids.read_rows()? {
+        let (_, doc_id) = row?;
         let Some(mut document) = context.reads.get_document(table, doc_id)? else {
             continue;
         };
