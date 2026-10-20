@@ -30,6 +30,9 @@ fn copy_engine(provider: usize, path: &std::path::Path) -> Engine {
     }
 }
 
+#[path = "copy_io/publication.rs"]
+mod publication;
+
 #[path = "copy_io/rules.rs"]
 mod rules;
 

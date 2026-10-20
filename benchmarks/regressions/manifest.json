@@ -16701,6 +16701,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_delete_publication_does_not_retain_complete_prepared_documents",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/publication.rs",
+      "capability": "Bounded DELETE publication before COPY delivery",
+      "workload": "Native SQLite exports DELETE RETURNING for 512 rows of 32KiB each, with 64KiB query work memory and the established 4MiB large-transaction session allowance.",
+      "invariant": "Complete preparation, publication and COPY delivery stay below 8MiB peak Rust allocation, including the session allowance; every emitted byte and row is checked and the table is empty after success.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

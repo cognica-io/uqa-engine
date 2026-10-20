@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Spill evaluated DELETE publication actions before writing and COPY delivery, sharing the existing MERGE codec while preserving original order, cancellation and statement rollback.
+
 - Set-oriented rewrite-rule action inputs, UPDATE/DELETE candidates and prepared original event images use bounded encrypted spill storage, preserving original event ordinals, composite reads, complete source schemas, lock lineage, collations and transaction behavior.
 
 - Borrow immutable scalar-query and CTE plans during nested privilege analysis instead of copying complete plan payloads, preserving lexical visibility, authorization subjects and error order.

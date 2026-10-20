@@ -13,6 +13,12 @@ use uqa_core::{DocId, Value};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
+mod rows;
+pub use rows::{
+    decode_prepared_mutation_action_row, prepared_mutation_action_schema,
+    push_prepared_mutation_action,
+};
+
 const PREPARED_MUTATION_CODEC_VERSION: i64 = 4;
 
 #[derive(Debug, Clone, PartialEq)]

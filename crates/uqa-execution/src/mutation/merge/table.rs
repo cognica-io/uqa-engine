@@ -10,9 +10,8 @@ use super::{
         ensure_merge_target_is_modified_once, ensure_merge_target_is_unwritten, select_merge_action,
     },
     codec::{
-        decode_merge_pair, decode_prepared_mutation_action_row, encode_merge_pair,
-        merge_pair_schema, merge_source_index_value, prepared_mutation_action_schema,
-        push_prepared_mutation_action, MergePairKind,
+        decode_merge_pair, encode_merge_pair, merge_pair_schema, merge_source_index_value,
+        MergePairKind,
     },
     model::SelectedMergeAction,
     returning::{build_merge_returning_row, MergeReturningRow},
@@ -35,7 +34,10 @@ use crate::{
             prepare_auto_increment_identity, prepare_insert_identity,
             refresh_insert_identity_after_trigger, IdentityAllocationContext,
         },
-        prepared::{PreparedDocumentInsert, PreparedMutationAction},
+        prepared::{
+            decode_prepared_mutation_action_row, prepared_mutation_action_schema,
+            push_prepared_mutation_action, PreparedDocumentInsert, PreparedMutationAction,
+        },
         publication::{finish_mutation_publication, publish_prepared_mutation_action},
         referential::{
             prepare_document_delete, prepare_partition_update_route,
