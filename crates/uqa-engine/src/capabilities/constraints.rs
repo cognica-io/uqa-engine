@@ -91,7 +91,9 @@ impl MutationRead for Engine {
             control,
         }
         .page(after, limit, control, true)
-        .map_err(|error| uqa_sql::catalog::errors::storage_error("mutation identity page", &error))
+        .map_err(|error| {
+            uqa_execution::storage_errors::storage_error("mutation identity page", &error)
+        })
     }
     fn live_table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         Engine::live_table_doc_ids(self, table)
@@ -113,7 +115,7 @@ impl MutationRead for Engine {
         }
         .page(after, limit, control, true)
         .map_err(|error| {
-            uqa_sql::catalog::errors::storage_error("column rewrite identity page", &error)
+            uqa_execution::storage_errors::storage_error("column rewrite identity page", &error)
         })
     }
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {

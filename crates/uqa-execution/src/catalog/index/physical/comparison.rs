@@ -7,11 +7,11 @@
 //! Validate B-tree key comparisons before publishing a candidate row.
 
 use super::{index_key_values, index_predicate_accepts, PhysicalIndexDefinitions};
+use crate::mutation::candidate_ids::{CandidateIds, CapturedCandidateIds};
 use crate::mutation::constraints::{
-    index_keys::{changes_error, key_values_equal},
+    index_keys::{capture_index_candidates, changes_error, key_values_equal},
     ConstraintContext,
 };
-use std::collections::BTreeSet;
 use uqa_core::{DocId, Predicate, Value};
 use uqa_sql::{ast::IndexKey, SQLError};
 use uqa_storage::{document_store::Document, ValueIndexKey};
@@ -56,29 +56,13 @@ impl PhysicalIndexDefinitions {
                 };
                 (ValueIndexKey::Column(first.clone()), probe)
             };
-            // Schema validation compares an existing row only with other rows. An index probe would compare the row with its own entry before that identity could be excluded.
-            let candidates: BTreeSet<DocId> = if ignored_doc_id.is_some() {
-                context
-                    .reads
-                    .live_table_doc_ids(table)?
-                    .into_iter()
-                    .collect()
-            } else {
-                match context.indexes.value_index_scan_key(table, &key, &probe)? {
-                    Some(list) => list.entries().iter().map(|entry| entry.doc_id).collect(),
-                    None => context
-                        .reads
-                        .live_table_doc_ids(table)?
-                        .into_iter()
-                        .collect(),
-                }
-            };
+            let candidates = comparison_candidates(context, table, &key, &probe, ignored_doc_id)?;
             let changes = context
                 .reads
                 .command_overlay_changes(table)?
                 .unwrap_or_default();
             let mut changed = changes.changes().peekable();
-            let mut candidates = candidates.into_iter().peekable();
+            let mut candidates = candidates.read_rows()?.peekable();
             // The candidates and the changed rows in identity order, each identity once.
             loop {
                 let next_changed = match changed.peek() {
@@ -91,7 +75,14 @@ impl PhysicalIndexDefinitions {
                     }
                     None => None,
                 };
-                let id = match (candidates.peek().copied(), next_changed) {
+                let next_candidate = match candidates.peek() {
+                    Some(Ok((_, id))) => Some(*id),
+                    Some(Err(_)) => {
+                        return Err(candidates.next().expect("peeked candidate").unwrap_err());
+                    }
+                    None => None,
+                };
+                let id = match (next_candidate, next_changed) {
                     (None, None) => break,
                     (Some(candidate), Some(changed_id)) if changed_id < candidate => {
                         changed.next();
@@ -126,4 +117,28 @@ impl PhysicalIndexDefinitions {
         }
         Ok(())
     }
+}
+
+fn comparison_candidates(
+    context: ConstraintContext<'_>,
+    table: &str,
+    key: &ValueIndexKey,
+    probe: &Predicate,
+    ignored: Option<DocId>,
+) -> Result<CapturedCandidateIds, SQLError> {
+    // Schema validation compares an existing row only with other rows. An index probe would compare the row with its own entry before that identity could be excluded.
+    if ignored.is_none() {
+        if let Some(candidates) = capture_index_candidates(context, table, key, probe)? {
+            return Ok(candidates);
+        }
+    }
+    CandidateIds::from_pages(
+        context.memory.work_mem_bytes()?,
+        context.cancellation,
+        |after, limit, control| {
+            context
+                .reads
+                .live_table_doc_id_page(table, after, limit, control)
+        },
+    )
 }
