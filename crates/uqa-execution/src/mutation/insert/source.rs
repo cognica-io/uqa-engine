@@ -6,9 +6,7 @@
 
 //! Streaming INSERT SELECT row preparation, with scopes bound by the statement owner.
 use super::{
-    codec::{
-        encode_prepared_insert_spill_row, prepared_insert_spill_schema, PreparedInsertSpillRow,
-    },
+    codec::{prepared_insert_spill_schema, push_prepared_insert_spill_row, PreparedInsertSpillRow},
     rows::{attach_prepared_insert_identity, stage_prepared_insert_row, PreparedInsertRowContext},
 };
 use crate::mutation::{
@@ -461,20 +459,17 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
         }
         events.append_after_rows(row_after_events);
         supplied_identities.note(&target_table, &prepared_conflict);
-        prepared_buffer
-            .as_mut()
-            .ok_or_else(|| {
+        push_prepared_insert_spill_row(
+            prepared_buffer.as_mut().ok_or_else(|| {
                 SQLError::Internal("INSERT SELECT prepared buffer is unavailable".into())
-            })?
-            .push(crate::Batch::from_physical_rows(
-                prepared_schema.clone(),
-                vec![encode_prepared_insert_spill_row(PreparedInsertSpillRow {
-                    target_table,
-                    document,
-                    conflict: prepared_conflict,
-                })],
-            ))
-            .map_err(crate::query::projection::physical_exec_error)?;
+            })?,
+            prepared_schema,
+            PreparedInsertSpillRow {
+                target_table,
+                document,
+                conflict: prepared_conflict,
+            },
+        )?;
         if prepared_effect {
             *affected += 1;
             *has_prepared_effect = true;

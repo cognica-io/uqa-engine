@@ -39,7 +39,7 @@ pub(super) fn optimize_boolean(
             _ => {}
         }
         let item = optimize_scalar(item, config)?;
-        match literal_value(&item) {
+        match literal_value(&item)?.as_deref() {
             Some(Value::Bool(value)) if *value != and => {
                 if config.enable_boolean_simplify {
                     return Ok(ScalarExpr::Literal(Value::Bool(*value)));
@@ -88,10 +88,11 @@ pub(super) fn optimize_case(
     let mut remaining = when.into_iter();
     while let Some((condition, result)) = remaining.next() {
         let condition = optimize_scalar(condition, config)?;
-        let matched = match (base.as_deref(), literal_value(&condition)) {
+        let matched = match (base.as_deref(), literal_value(&condition)?.as_deref()) {
             (None, Some(Value::Bool(value))) => Some(*value),
             (None, Some(Value::Null)) => Some(false),
-            (Some(base), Some(condition)) => literal_value(base)
+            (Some(base), Some(condition)) => literal_value(base)?
+                .as_deref()
                 .map(|base| {
                     eval_value_comparison_truth_with_engine(
                         BinaryOp::Equal,
@@ -161,7 +162,9 @@ pub(super) fn optimize_coalesce(
     let mut remaining = args.into_iter();
     while let Some(argument) = remaining.next() {
         let argument = optimize_scalar(argument, config)?;
-        let stops = literal_value(&argument).is_some_and(|value| !matches!(value, Value::Null));
+        let stops = literal_value(&argument)?
+            .as_deref()
+            .is_some_and(|value| !matches!(value, Value::Null));
         kept.push(argument);
         if stops {
             if !config.coerced_conditionals {

@@ -558,7 +558,10 @@ fn collect_resolved_aliases(
             output.insert(qualifier.clone());
             true
         }
-        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => true,
+        ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
+        | ScalarExpr::Param(_) => true,
         ScalarExpr::Func {
             args,
             order_by,
@@ -827,7 +830,7 @@ fn source_qualifiers(source: &SourcePlan) -> BTreeSet<String> {
 
 fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<String>) {
     match expression {
-        ScalarExpr::QualifiedColumn { qualifier, .. } => {
+        ScalarExpr::QualifiedColumn { qualifier, .. } | ScalarExpr::QualifiedStar(qualifier) => {
             output.insert(qualifier.clone());
         }
         ScalarExpr::Func {
@@ -912,9 +915,6 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
             }
         }
         ScalarExpr::InSubquery { expr, .. } => collect_scalar_qualifiers(expr, output),
-        ScalarExpr::QualifiedStar(qualifier) => {
-            output.insert(qualifier.clone());
-        }
         ScalarExpr::Default
         | ScalarExpr::Star
         | ScalarExpr::Column(_)
@@ -922,6 +922,7 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => {}

@@ -362,6 +362,7 @@ fn collect_pushdown_outer_columns(expression: &ScalarExpr, output: &mut BTreeSet
         }
         ScalarExpr::Literal(_)
         | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => true,
@@ -689,9 +690,10 @@ pub fn rewrite_output_filter(
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
         | ScalarExpr::InSubquery { .. } => return None,
-        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => {
-            expression.clone()
-        }
+        ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
+        | ScalarExpr::Param(_) => expression.clone(),
         ScalarExpr::Array(items) => ScalarExpr::Array(
             items
                 .iter()

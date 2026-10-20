@@ -123,6 +123,35 @@ fn copy_update_publication_does_not_retain_complete_prepared_documents() {
     );
 }
 
+#[test]
+fn copy_values_insert_publication_does_not_retain_complete_prepared_documents() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = allocation_engine(&directory.path().join("insert.db"));
+    exec(
+        &engine,
+        "CREATE TABLE insert_output(id INTEGER PRIMARY KEY, body TEXT)",
+    );
+    // Each scalar result is 128KiB; the source contains compact expressions, not 16MiB of literal payloads.
+    engine.set_query_memory_limit(Some(256 * 1024));
+    let values = (1..=128)
+        .map(|id| format!("({id},repeat('x',131072))"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("COPY (INSERT INTO insert_output VALUES {values} RETURNING body) TO STDOUT");
+    let mut output = CheckedOutput {
+        width: 131_072,
+        column: 0,
+        rows: 0,
+    };
+    let allocated = allocation_counter::measure(|| {
+        assert_eq!(engine.copy_to(&sql, &mut output).unwrap(), 128);
+    });
+    // Same 4MiB session allowance plus 4MiB bounded query/spill overhead; a complete 16MiB prepared queue cannot fit.
+    assert!(allocated.bytes_max < 8 * 1024 * 1024, "{allocated:?}");
+    assert_eq!((output.column, output.rows), (0, 128));
+    assert_eq!(copy_to_string(&engine, "COPY (SELECT count(*), min(length(body)), max(length(body)) FROM insert_output) TO STDOUT"), "128\t131072\t131072\n");
+}
+
 #[rstest::rstest]
 #[case::values(false)]
 #[case::select(true)]

@@ -96,6 +96,28 @@ fn normalize_expression(
     params: &[SQLParam],
 ) -> Result<ScalarExpr, SQLError> {
     Ok(match expression {
+        ScalarExpr::RetainedLiteral(mut literal) => {
+            let normalized = normalize_expression(engine, literal.materialize()?, schema, params)?;
+            match normalized {
+                ScalarExpr::TypedLiteral {
+                    bound_type: Some(ty),
+                    ty: declaration,
+                    collation_oid,
+                    ..
+                } => {
+                    literal.ty = ty;
+                    literal.collation_oid = collation_oid;
+                    literal.declaration = Some(declaration);
+                    ScalarExpr::RetainedLiteral(literal)
+                }
+                ScalarExpr::Literal(_) => {
+                    literal.collation_oid = None;
+                    literal.declaration = None;
+                    ScalarExpr::RetainedLiteral(literal)
+                }
+                other => other,
+            }
+        }
         ScalarExpr::Column(column) => schema
             .unqualified_position(&column)
             .map_or(ScalarExpr::Column(column), ScalarExpr::Position),

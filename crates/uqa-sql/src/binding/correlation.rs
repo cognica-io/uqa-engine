@@ -793,6 +793,7 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
         | ScalarExpr::Position(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => false,

@@ -48,6 +48,9 @@ pub(super) fn eval_scalar_inner(
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
     match expression {
+        ScalarExpr::RetainedLiteral(literal) => {
+            super::retained::evaluate(literal, context, control)
+        }
         ScalarExpr::Default => Err(SQLError::Internal(
             "DEFAULT reached scalar expression evaluation without a mutation target".into(),
         )),

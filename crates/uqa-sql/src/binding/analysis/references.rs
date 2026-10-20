@@ -261,6 +261,7 @@ pub(super) fn validate_expression(
         | ScalarExpr::Default
         | ScalarExpr::Literal(_)
         | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::Param(_) => Ok(()),
     }
 }

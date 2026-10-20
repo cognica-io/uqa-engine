@@ -15,6 +15,11 @@ mod tests;
 
 pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
     match (lhs, rhs) {
+        (ScalarExpr::RetainedLiteral(left), ScalarExpr::RetainedLiteral(right)) => left == right,
+        (ScalarExpr::RetainedLiteral(literal), other)
+        | (other, ScalarExpr::RetainedLiteral(literal)) => literal
+            .materialize()
+            .is_ok_and(|literal| exprs_match(&literal, other)),
         (ScalarExpr::Collated { .. }, ScalarExpr::Collated { .. }) => {
             collated_exprs_match(lhs, rhs)
         }
@@ -42,44 +47,7 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         (ScalarExpr::Param(a), ScalarExpr::Param(b)) => a == b,
         (ScalarExpr::Position(a), ScalarExpr::Position(b)) => a == b,
         (ScalarExpr::InternalColumn(a), ScalarExpr::InternalColumn(b)) => a == b,
-        (
-            ScalarExpr::Func {
-                order_syntax: aos,
-                name: an,
-                binding: ab,
-                args: aa,
-                distinct: ad,
-                order_by: ao,
-                filter: af,
-            },
-            ScalarExpr::Func {
-                order_syntax: bos,
-                name: bn,
-                binding: bb,
-                args: ba,
-                distinct: bd,
-                order_by: bo,
-                filter: bf,
-            },
-        ) => {
-            an.eq_ignore_ascii_case(bn)
-                && ab == bb
-                && ad == bd
-                && aos == bos
-                && aa.len() == ba.len()
-                && aa.iter().zip(ba.iter()).all(|(x, y)| exprs_match(x, y))
-                && ao.len() == bo.len()
-                && ao.iter().zip(bo.iter()).all(|(x, y)| {
-                    x.descending == y.descending
-                        && x.nulls == y.nulls
-                        && exprs_match(&x.expr, &y.expr)
-                })
-                && match (af.as_deref(), bf.as_deref()) {
-                    (None, None) => true,
-                    (Some(x), Some(y)) => exprs_match(x, y),
-                    _ => false,
-                }
-        }
+        (ScalarExpr::Func { .. }, ScalarExpr::Func { .. }) => function_exprs_match(lhs, rhs),
         (
             ScalarExpr::Binary {
                 op: ao,
@@ -113,6 +81,47 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         ) => at == bt && exprs_match(a, b),
         _ => false,
     }
+}
+
+fn function_exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
+    let (
+        ScalarExpr::Func {
+            order_syntax: aos,
+            name: an,
+            binding: ab,
+            args: aa,
+            distinct: ad,
+            order_by: ao,
+            filter: af,
+        },
+        ScalarExpr::Func {
+            order_syntax: bos,
+            name: bn,
+            binding: bb,
+            args: ba,
+            distinct: bd,
+            order_by: bo,
+            filter: bf,
+        },
+    ) = (lhs, rhs)
+    else {
+        return false;
+    };
+    an.eq_ignore_ascii_case(bn)
+        && ab == bb
+        && ad == bd
+        && aos == bos
+        && aa.len() == ba.len()
+        && aa.iter().zip(ba.iter()).all(|(x, y)| exprs_match(x, y))
+        && ao.len() == bo.len()
+        && ao.iter().zip(bo.iter()).all(|(x, y)| {
+            x.descending == y.descending && x.nulls == y.nulls && exprs_match(&x.expr, &y.expr)
+        })
+        && match (af.as_deref(), bf.as_deref()) {
+            (None, None) => true,
+            (Some(x), Some(y)) => exprs_match(x, y),
+            _ => false,
+        }
 }
 
 fn collated_exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
@@ -307,6 +316,7 @@ pub fn collect_aggregate_exprs<'a>(
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::WindowCall { .. }
         | ScalarExpr::ScalarSubquery(_)
@@ -377,6 +387,7 @@ pub fn expr_references_columns(expr: &ScalarExpr) -> bool {
         ScalarExpr::Default
         | ScalarExpr::Literal(_)
         | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::Param(_) => false,
     }
 }

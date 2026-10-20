@@ -6,7 +6,10 @@
 
 //! Table INSERT scheduling, snapshot reads, row staging, and publication.
 use super::{
-    codec::{decode_prepared_insert_spill_row, PreparedInsertSpillRow},
+    codec::{
+        decode_prepared_insert_spill_row, prepared_insert_spill_schema,
+        push_prepared_insert_spill_row, PreparedInsertSpillRow,
+    },
     known_new::KnownNewInserts,
     rows::prepare_values_insert_row,
     source::{
@@ -478,9 +481,14 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             let overlay = MutationOverlayScope::new(mutation.state);
             let mut conflict_locks = InsertConflictLocks::new(&preparation.referential);
             let input_rows = rule_source_rows.as_deref().unwrap_or(&stmt.rows);
-            let mut documents = Vec::with_capacity(input_rows.len());
-            let mut target_tables = Vec::with_capacity(input_rows.len());
-            let mut prepared_conflicts = Vec::with_capacity(input_rows.len());
+            let prepared_schema = prepared_insert_spill_schema();
+            let mut prepared_rows = crate::SpillBuffer::new(
+                crate::query::projection::physical_work_mem_bytes(
+                    context.query.source.relational.runtime,
+                )?
+                .max(1),
+            );
+            let mut supplied_identities = SuppliedIdentities::default();
             let mut events = crate::mutation::events::MutationEventQueue::default();
             let mut has_prepared_effect = false;
             let mut has_prepared_auto_identity = false;
@@ -627,9 +635,16 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         affected += 1;
                         has_prepared_effect = true;
                     }
-                    documents.push(staged.document);
-                    target_tables.push(staged.target_table);
-                    prepared_conflicts.push(staged.prepared);
+                    supplied_identities.note(&staged.target_table, &staged.prepared);
+                    push_prepared_insert_spill_row(
+                        &mut prepared_rows,
+                        &prepared_schema,
+                        PreparedInsertSpillRow {
+                            target_table: staged.target_table,
+                            document: Arc::unwrap_or_clone(staged.document),
+                            conflict: staged.prepared,
+                        },
+                    )?;
                 }
             }
             let mut view_rule_rows = Vec::with_capacity(pending_rule_rows.len());
@@ -776,9 +791,16 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         affected += 1;
                         has_prepared_effect = true;
                     }
-                    documents.push(staged.document);
-                    target_tables.push(staged.target_table);
-                    prepared_conflicts.push(staged.prepared);
+                    supplied_identities.note(&staged.target_table, &staged.prepared);
+                    push_prepared_insert_spill_row(
+                        &mut prepared_rows,
+                        &prepared_schema,
+                        PreparedInsertSpillRow {
+                            target_table: staged.target_table,
+                            document: Arc::unwrap_or_clone(staged.document),
+                            conflict: staged.prepared,
+                        },
+                    )?;
                 }
             }
             let published = overlay.finish();
@@ -792,10 +814,6 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 )?;
             }
             drop(conflict_locks);
-            let mut supplied_identities = SuppliedIdentities::default();
-            for (target_table, prepared) in target_tables.iter().zip(&prepared_conflicts) {
-                supplied_identities.note(target_table, prepared);
-            }
             let observed = supplied_identities.observe(mutation.publication.storage)?;
             let mut publication =
                 statement_end::publication_batch(&statement_commands).with_published(published);
@@ -804,19 +822,24 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 &id_column,
                 stmt.on_conflict.is_some(),
             );
-            for ((target_table, document), prepared) in target_tables
-                .into_iter()
-                .zip(documents)
-                .zip(prepared_conflicts)
+            for row in prepared_rows
+                .drain_rows()
+                .map_err(crate::physical::physical_exec_error)?
             {
                 cancel.check()?;
+                let PreparedInsertSpillRow {
+                    target_table,
+                    document,
+                    conflict: prepared,
+                } = decode_prepared_insert_spill_row(
+                    row.map_err(crate::physical::physical_exec_error)?,
+                )?;
                 let inserted = known_new.identity(
                     &target_table,
                     &prepared,
                     &observed,
                     mutation.publication.identifiers,
                 )?;
-                let document = Arc::unwrap_or_clone(document);
                 apply_validated_prepared_insert(
                     mutation.publication,
                     &target_table,

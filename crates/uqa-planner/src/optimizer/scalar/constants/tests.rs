@@ -8,6 +8,7 @@ use super::*;
 
 mod catalog_types;
 mod collations;
+mod retained;
 mod similar_substring;
 
 #[test]
@@ -112,7 +113,7 @@ fn session_dependent_temporal_operators_remain_executable_after_parameter_bindin
     let folded =
         fold_literal_expression(immutable, uqa_execution::scalar::eval_constant_scalar).unwrap();
     assert_eq!(
-        literal_value(&folded),
+        literal_value(&folded).unwrap().as_deref(),
         Some(&Value::Temporal(TemporalValue::Timestamp {
             micros: 86_400_000_000,
         }))
@@ -246,7 +247,10 @@ fn folds_value_builtins_after_binding_without_evaluating_stateful_or_set_calls()
     }
     let folded =
         fold_literal_expression(repeated, uqa_execution::scalar::eval_constant_scalar).unwrap();
-    assert_eq!(literal_value(&folded), Some(&Value::Str("xxx".into())));
+    assert_eq!(
+        literal_value(&folded).unwrap().as_deref(),
+        Some(&Value::Str("xxx".into()))
+    );
 
     for name in [
         "nextval",
@@ -354,7 +358,11 @@ fn constant_numeric_comparisons_match_postgresql_before_replacing_the_expression
                 let expected = case["values"][index]
                     .as_bool()
                     .map_or(Value::Null, Value::Bool);
-                assert_eq!(literal_value(&folded), Some(&expected), "{sql}");
+                assert_eq!(
+                    literal_value(&folded).unwrap().as_deref(),
+                    Some(&expected),
+                    "{sql}"
+                );
                 assert_eq!(
                     scalar_type(&folded, &RowSchema::default(), &[]).unwrap(),
                     Some(ColumnType::Boolean)
@@ -409,7 +417,10 @@ fn constant_evaluation_checks_selected_permission_after_strict_null_simplificati
         None,
     )
     .unwrap();
-    assert_eq!(literal_value(&output), Some(&Value::Null));
+    assert_eq!(
+        literal_value(&output).unwrap().as_deref(),
+        Some(&Value::Null)
+    );
 }
 
 #[test]
@@ -428,7 +439,10 @@ fn eliminated_conditional_calls_do_not_require_execute_permission() {
     let mut config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
     config.builtin_permissions = Some(std::sync::Arc::new(DeniedBuiltin));
     crate::optimizer::optimize_scalar_expression(&mut expression, &config).unwrap();
-    assert_eq!(literal_value(&expression), Some(&Value::Str("ok".into())));
+    assert_eq!(
+        literal_value(&expression).unwrap().as_deref(),
+        Some(&Value::Str("ok".into()))
+    );
 }
 
 #[test]
@@ -463,7 +477,10 @@ fn strict_null_simplification_does_not_evaluate_nonconstant_siblings() {
         None,
     )
     .unwrap();
-    assert_eq!(literal_value(&folded), Some(&Value::Null));
+    assert_eq!(
+        literal_value(&folded).unwrap().as_deref(),
+        Some(&Value::Null)
+    );
     assert_eq!(
         scalar_type(&folded, &RowSchema::default(), &[]).unwrap(),
         Some(ColumnType::Text)
@@ -498,7 +515,10 @@ fn strict_null_simplification_keeps_set_returning_calls() {
         panic!("strict NULL simplification evaluated a sibling")
     })
     .unwrap();
-    assert_eq!(literal_value(&folded), Some(&Value::Null));
+    assert_eq!(
+        literal_value(&folded).unwrap().as_deref(),
+        Some(&Value::Null)
+    );
 }
 
 #[test]
@@ -596,7 +616,10 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
     };
     let folded =
         fold_literal_expression(integer, uqa_execution::scalar::eval_constant_scalar).unwrap();
-    assert_eq!(literal_value(&folded), Some(&Value::Str("7".into())));
+    assert_eq!(
+        literal_value(&folded).unwrap().as_deref(),
+        Some(&Value::Str("7".into()))
+    );
 }
 
 #[test]
@@ -640,7 +663,10 @@ fn null_casts_to_temporal_types_fold_without_calling_input_functions() {
             None,
         )
         .unwrap();
-        assert_eq!(literal_value(&result), Some(&Value::Null));
+        assert_eq!(
+            literal_value(&result).unwrap().as_deref(),
+            Some(&Value::Null)
+        );
         assert_eq!(
             uqa_sql::scalar_type(&result, &RowSchema::default(), &[]).unwrap(),
             Some(ColumnType::from_sql_name(ty).unwrap())
@@ -756,7 +782,10 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
     );
     let folded =
         fold_literal_expression(call.clone(), |_| panic!("already-read constant")).unwrap();
-    assert_eq!(literal_value(&folded), Some(&Value::Str("x".into())));
+    assert_eq!(
+        literal_value(&folded).unwrap().as_deref(),
+        Some(&Value::Str("x".into()))
+    );
     assert_eq!(
         fold_literal_expression(literal.clone(), |_| panic!("whole record")).unwrap(),
         literal
@@ -892,7 +921,10 @@ fn strict_comparison_null_folding_skips_volatile_operands() {
                 |_| panic!("strict NULL comparison evaluated a volatile operand"),
             )
             .unwrap();
-            assert_eq!(literal_value(&result), Some(&Value::Null));
+            assert_eq!(
+                literal_value(&result).unwrap().as_deref(),
+                Some(&Value::Null)
+            );
             assert_eq!(
                 scalar_type(&result, &RowSchema::default(), &[]).unwrap(),
                 Some(ColumnType::Boolean)
@@ -913,7 +945,10 @@ fn strict_comparison_null_folding_does_not_resolve_discarded_catalog_types() {
         rhs: Box::new(ScalarExpr::Literal(Value::Null)),
     };
     let result = fold_literal_expression(expression, |_| panic!("discarded catalog read")).unwrap();
-    assert_eq!(literal_value(&result), Some(&Value::Null));
+    assert_eq!(
+        literal_value(&result).unwrap().as_deref(),
+        Some(&Value::Null)
+    );
     assert_eq!(
         scalar_type(&result, &RowSchema::default(), &[]).unwrap(),
         Some(ColumnType::Boolean)

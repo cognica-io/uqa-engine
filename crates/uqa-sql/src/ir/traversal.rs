@@ -130,6 +130,7 @@ impl ScalarExpr {
             | Self::QualifiedColumn { .. }
             | Self::Literal(_)
             | Self::TypedLiteral { .. }
+            | Self::RetainedLiteral(_)
             | Self::Param(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => {}
@@ -243,6 +244,7 @@ impl ScalarExpr {
             | Self::QualifiedColumn { .. }
             | Self::Literal(_)
             | Self::TypedLiteral { .. }
+            | Self::RetainedLiteral(_)
             | Self::Param(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => {}
@@ -272,6 +274,7 @@ impl ScalarExpr {
             }
             Self::Literal(_)
             | Self::TypedLiteral { .. }
+            | Self::RetainedLiteral(_)
             | Self::Param(_)
             | Self::InternalColumn(_) => Ok(true),
             Self::Func {
@@ -405,6 +408,7 @@ impl ScalarExpr {
             | Self::InternalColumn(_)
             | Self::Literal(_)
             | Self::TypedLiteral { .. }
+            | Self::RetainedLiteral(_)
             | Self::Param(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => false,
@@ -477,6 +481,7 @@ impl ScalarExpr {
             | Self::InternalColumn(_)
             | Self::Literal(_)
             | Self::TypedLiteral { .. }
+            | Self::RetainedLiteral(_)
             | Self::Param(_) => false,
         }
     }
@@ -548,6 +553,7 @@ impl ScalarExpr {
             | Self::InternalColumn(_)
             | Self::Literal(_)
             | Self::TypedLiteral { .. }
+            | Self::RetainedLiteral(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => false,
         }
@@ -625,6 +631,7 @@ impl ScalarExpr {
             | Self::InternalColumn(_)
             | Self::Literal(_)
             | Self::TypedLiteral { .. }
+            | Self::RetainedLiteral(_)
             | Self::Param(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. }

@@ -72,6 +72,7 @@ pub fn qualify_unqualified_columns(expr: &ScalarExpr, qualifier: &str) -> Scalar
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::Star => expr.clone(),
         ScalarExpr::Array(items) => ScalarExpr::Array(

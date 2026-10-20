@@ -36,6 +36,7 @@ mod subqueries;
 mod traversal;
 
 pub use access_path::contains_retrieval;
+pub(crate) use api::ConstantStorageFactory;
 pub use api::{
     optimize, optimize_scalar_expression, optimize_with_aggregates,
     optimize_with_aggregates_and_statistics, optimize_with_statistics, ConstantEvaluator,
