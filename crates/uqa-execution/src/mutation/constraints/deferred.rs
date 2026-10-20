@@ -17,7 +17,7 @@ struct DeferredForeignKeyValidation {
     /// The current name of the deferred constraint: the foreign key's, or the derived constraint's whose partition fired the check.
     constraint_name: String,
     comparison: Option<ForeignKeyComparison>,
-    cross_type_parent_keys: Option<std::collections::BTreeSet<Vec<Value>>>,
+    cross_type_parent_keys: Option<super::parent_keys::ParentKeys>,
 }
 
 pub fn validate_deferred_foreign_key_checks(
@@ -94,7 +94,9 @@ pub fn validate_deferred_foreign_key_checks(
                 validation
                     .cross_type_parent_keys
                     .as_ref()
-                    .is_some_and(|keys| keys.contains(&values))
+                    .map(|keys| keys.contains(&values))
+                    .transpose()?
+                    .unwrap_or(false)
             };
             if parent_exists {
                 continue;

@@ -11,6 +11,7 @@ mod diagnostics;
 pub(crate) use diagnostics::foreign_key_key;
 pub mod index_keys;
 mod keys;
+mod parent_keys;
 pub mod period;
 mod routing;
 mod statement;
@@ -28,6 +29,7 @@ pub use keys::{
     lock_document_key_dependencies, validate_key_constraints,
     validate_key_constraints_with_previous, without_overlaps_conflict,
 };
+use parent_keys::foreign_key_parent_index;
 use period::{period_foreign_key_is_covered, PeriodParentIds};
 pub use routing::{partition_insert_target, validate_partition_constraint};
 pub use statement::{statement_relation, ConstraintStatement};
@@ -420,23 +422,6 @@ pub(crate) fn find_exact_foreign_key_parent(
         }
     }
     Ok(None)
-}
-
-fn foreign_key_parent_index(
-    context: ConstraintContext<'_>,
-    fk: &ForeignKey,
-    comparison: &ForeignKeyComparison,
-) -> Result<std::collections::BTreeSet<Vec<Value>>, SQLError> {
-    let mut keys = std::collections::BTreeSet::new();
-    for physical_table in foreign_key_scan_tables(context.partitions.catalog, &fk.ref_table)? {
-        for doc_id in context.reads.table_doc_ids(&physical_table)? {
-            let Some(document) = context.reads.get_document(&physical_table, doc_id)? else {
-                continue;
-            };
-            keys.insert(foreign_key_parent_values(fk, &document, comparison)?);
-        }
-    }
-    Ok(keys)
 }
 
 /// `PostgreSQL` checks the NOT NULL columns in column order, those of virtual generated columns after the others (`ExecConstraints`).

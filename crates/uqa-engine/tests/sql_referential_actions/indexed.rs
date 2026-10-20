@@ -119,3 +119,58 @@ fn deferred_root_deletes_preserve_trigger_selection_and_period_exclusions(#[case
         }
     }
 }
+
+/// Independent `PostgreSQL` 18.4 returns 64/2080 before repair, 65/2145 afterwards, and 23503 for both deferred missing-parent observations.
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn deferred_cross_type_parent_keys_preserve_errors_repair_and_reopen(#[case] provider: u8) {
+    use uqa_core::Value;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("deferred-parent-keys.db");
+    let engine = open(provider, &path);
+    let exec = |sql: &str| engine.sql(sql, &[]).unwrap();
+    exec("SET work_mem = '64kB'");
+    exec("CREATE TABLE parents(id integer, body text, PRIMARY KEY(id,body))");
+    exec("CREATE TABLE children(id bigint, body text, CONSTRAINT child_parent FOREIGN KEY(id,body) REFERENCES parents(id,body) DEFERRABLE INITIALLY DEFERRED)");
+    exec("BEGIN");
+    exec("INSERT INTO parents SELECT n, repeat('κ',512) FROM generate_series(1,64) n");
+    exec("INSERT INTO children SELECT n::bigint, repeat('κ',512) FROM generate_series(1,64) n");
+    exec("SET CONSTRAINTS ALL IMMEDIATE");
+    let read = "SELECT count(*) AS n, sum(id)::bigint AS total, min(octet_length(body)) AS width FROM children";
+    let rows = exec(read);
+    assert_eq!(rows.rows[0]["n"], Value::Int(64));
+    assert_eq!(rows.rows[0]["total"], Value::Int(2080));
+    assert_eq!(rows.rows[0]["width"], Value::Int(1024));
+    exec("SET CONSTRAINTS ALL DEFERRED; SAVEPOINT before_delete");
+    exec("DELETE FROM parents WHERE id=64");
+    let error = engine
+        .sql("SET CONSTRAINTS ALL IMMEDIATE", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("23503"), "{error}");
+    exec("ROLLBACK TO before_delete; SAVEPOINT before_insert");
+    exec("INSERT INTO children VALUES (65,repeat('κ',512))");
+    let error = engine
+        .sql("SET CONSTRAINTS ALL IMMEDIATE", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("23503"), "{error}");
+    exec("ROLLBACK TO before_insert");
+    exec("INSERT INTO children VALUES (65,repeat('κ',512))");
+    exec("INSERT INTO parents VALUES (65,repeat('κ',512))");
+    exec("SET CONSTRAINTS ALL IMMEDIATE; COMMIT");
+    let rows = exec(read);
+    assert_eq!(rows.rows[0]["n"], Value::Int(65));
+    assert_eq!(rows.rows[0]["total"], Value::Int(2145));
+    assert_eq!(rows.rows[0]["width"], Value::Int(1024));
+    drop(engine);
+    if provider != 0 {
+        let reopened = open(provider, &path);
+        let rows = reopened.sql(read, &[]).unwrap();
+        assert_eq!(rows.rows[0]["n"], Value::Int(65));
+        assert_eq!(rows.rows[0]["total"], Value::Int(2145));
+        assert_eq!(rows.rows[0]["width"], Value::Int(1024));
+    }
+}

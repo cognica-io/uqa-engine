@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound deferred foreign-key parent keys with exact spill-backed membership while preserving cross-type comparison, validation order, cancellation and rollback.
+
 - Bound PERIOD foreign-key parent ranges and lock identities with the existing spill owners while preserving range coverage, parent lock order and transaction results.
 
 - Spill external-sort run descriptors sequentially instead of retaining one buffer and file owner per run, preserving comparison order and stable merge results.
