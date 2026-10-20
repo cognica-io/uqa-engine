@@ -63,20 +63,24 @@ impl NumericCast {
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Value>, SQLError> {
         control.check()?;
-        let target = match self {
-            Self::SmallInteger => ColumnType::SmallInteger,
-            Self::Integer => ColumnType::Integer,
-            Self::BigInteger => ColumnType::BigInteger,
-            Self::Real => ColumnType::Real,
-            Self::DoublePrecision => ColumnType::DoublePrecision,
-            Self::Numeric { precision, scale } => ColumnType::Numeric { precision, scale },
-        };
+        let target = self.target_type();
         if let Some(engine) = engine {
             if let Some(output) = engine.cast_domain(value, Some(source_name), &target)? {
                 return Ok(control.retain_external_value(output)?);
             }
         }
         self.evaluate(value, control)
+    }
+
+    pub(crate) fn target_type(self) -> ColumnType {
+        match self {
+            Self::SmallInteger => ColumnType::SmallInteger,
+            Self::Integer => ColumnType::Integer,
+            Self::BigInteger => ColumnType::BigInteger,
+            Self::Real => ColumnType::Real,
+            Self::DoublePrecision => ColumnType::DoublePrecision,
+            Self::Numeric { precision, scale } => ColumnType::Numeric { precision, scale },
+        }
     }
 
     /// Execute after the caller's catalog/domain checks, using the existing numeric conversion kernels and the current invocation's resource control.
