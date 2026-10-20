@@ -17447,6 +17447,112 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unsuppressed_rule_ordinals_bound_full_selection_memory",
+      "source": "crates/uqa-execution/src/mutation/rules/views/indices_tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "262,144 original event ordinals with no suppressed rows.",
+      "invariant": "Peak additional allocation stays below the unchanged 512KiB ceiling and every local ordinal maps to the same original row.",
+      "capability": "Bounded original-event ordinal mapping"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unsuppressed_rule_ordinals_bound_fragmented_selection_memory",
+      "source": "crates/uqa-execution/src/mutation/rules/views/indices_tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "262,144 original events, alternating suppressed rows, a 16KiB ordinal allowance.",
+      "invariant": "Peak additional allocation stays below the unchanged 512KiB ceiling; the surviving 131,072 ordinals retain their exact order.",
+      "capability": "Bounded original-event ordinal mapping"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_ordinal_lookup_bounds_memory_and_page_io_for_repeated_projection",
+      "source": "crates/uqa-execution/src/mutation/rules/indices/lookup/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "131,073 fragmented ordinals, repeated OLD/NEW positional reads and a reverse pass after dropping the source owner.",
+      "invariant": "Allocation stays below 512KiB; exactly 65 page writes and 129 page reads serve all positions, preserving every mapped ordinal.",
+      "capability": "Bounded original-event ordinal mapping"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_ordinal_lookup_keeps_contiguous_ranges_implicit",
+      "source": "crates/uqa-execution/src/mutation/rules/indices/lookup/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Empty, singleton and 131,072-row contiguous selections beginning at a nonzero original ordinal.",
+      "invariant": "No positional spill is created; reverse reads preserve offsets and reject out-of-range positions.",
+      "capability": "Bounded original-event ordinal mapping"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_ordinal_lookup_preserves_duplicates_full_width_and_nonmonotonic_reads",
+      "source": "crates/uqa-execution/src/mutation/rules/indices/lookup/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Fragmented ranges containing duplicates and near-usize::MAX ordinals, probed in nonmonotonic order.",
+      "invariant": "Positional reads retain exact original identities and multiplicity across range boundaries.",
+      "capability": "Bounded original-event ordinal mapping"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_ordinal_lookup_propagates_cancellation_counts_and_truncated_pages",
+      "source": "crates/uqa-execution/src/mutation/rules/indices/lookup/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Cancelled selections, malformed counts and a short final authenticated page following a cached complete page.",
+      "invariant": "Cancellation reports 57014, inconsistent counts fail, and failed reads invalidate the partial page without losing earlier valid records.",
+      "capability": "Bounded original-event ordinal mapping"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_event_selection_shares_full_ownership_and_replays_fragmented_indices",
+      "source": "crates/uqa-execution/src/mutation/rules/rows/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "A full original event selection and a fragmented selection with repeated and reversed ordinals, under a zero-byte row allowance.",
+      "invariant": "Full selection shares the original owner; fragmented replay retains ordering and duplicates, while bounds and cancellation propagate.",
+      "capability": "Bounded original-event ordinal mapping"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "nested_rule_ordinals_preserve_actions_and_base_suppression",
+      "source": "crates/uqa-engine/tests/catalog/sql_rules/selection.rs",
+      "cases": 3,
+      "case_names": [
+        "case_1_update",
+        "case_2_update_from",
+        "case_3_delete"
+      ],
+      "workload": "UPDATE, UPDATE FROM and DELETE through nested automatic views with sparse view audit rules and conditional base suppression under 16KiB work memory.",
+      "invariant": "PostgreSQL18.4 independently verifies seven affected rows, fourteen ordered rule actions, exact OLD/NEW values and the suppressed original row.",
+      "capability": "Original-event mapping through nested rewrite rules"
     }
   ]
 }

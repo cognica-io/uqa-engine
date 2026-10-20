@@ -94,6 +94,21 @@ impl PreparedViewRuleBatches {
         self.suppress_original.suppresses(index)
     }
 
+    pub(crate) fn unsuppressed_indices(
+        &self,
+        count: usize,
+        bytes: usize,
+        cancellation: uqa_core::CancellationToken,
+    ) -> Result<super::RuleIndices, SQLError> {
+        let mut indices = super::RuleIndexBuffer::new(bytes, cancellation)?;
+        for index in 0..count {
+            if !self.suppresses(index)? {
+                indices.push(index)?;
+            }
+        }
+        indices.finish()
+    }
+
     pub fn configure_action_qualification(&mut self, row_independent_count: Option<usize>) {
         debug_assert!(matches!(
             self.event,
@@ -434,29 +449,33 @@ pub fn prepare_view_rule_batches<S: Clone + 'static, R: super::RuleEventSource +
             params,
             scope,
         };
-        let mut row_indices = Vec::new();
-        for index in 0..rows.event_count() {
-            if !prepared.suppresses(index)? {
-                row_indices.push(index);
-            }
-        }
+        let row_indices = prepared.unsuppressed_indices(
+            rows.event_count(),
+            context.rules.memory.work_mem_bytes()?,
+            context.rules.cancellation.clone(),
+        )?;
         let view_rows = super::RuleRows::from_rows(
-            row_indices.iter().map(|index| {
-                let row = rows.event_row(*index)?;
+            row_indices.reader()?.map(|index| {
+                let row = rows.event_row(index?)?;
                 project_view_rule_row(&projection, &row)
             }),
             context.rules.memory.work_mem_bytes()?,
             context.rules.cancellation.clone(),
         )?;
+        let mut row_lookup = None;
         let mut batch = crate::mutation::rules::prepare_retained_rule_batch_with_projection(
             context.rules,
             relation,
             event,
             view_rows,
             |local_index, side, required| {
-                let row_index = row_indices.get(local_index).copied().ok_or_else(|| {
-                    SQLError::Internal("automatic-view rule lost its event row".into())
-                })?;
+                if row_lookup.is_none() {
+                    row_lookup = Some(row_indices.lookup()?);
+                }
+                let row_index = row_lookup
+                    .as_mut()
+                    .expect("the positional owner was initialized above")
+                    .get(local_index)?;
                 let row = rows.event_row(row_index)?;
                 let (storage_table, doc_id, document, input_document) = match side {
                     crate::mutation::rules::RuleRowSide::Old => (
@@ -507,16 +526,17 @@ pub fn prepare_view_rule_batches<S: Clone + 'static, R: super::RuleEventSource +
         if action_columns.has_required_columns() {
             let supplemental_rows =
                 row_indices
-                    .iter()
+                    .reader()?
                     .zip(action_columns.reader()?)
                     .map(|(index, columns)| {
                         let [old_columns, new_columns] = columns?;
-                        let row = rows.event_row(*index)?;
+                        let row = rows.event_row(index?)?;
                         project_view_rule_row_sides(&projection, &row, &old_columns, &new_columns)
                     });
             batch.supplement_rows_from_iter(supplemental_rows)?;
         }
-        for (local_index, row_index) in row_indices.iter().copied().enumerate() {
+        for (local_index, row_index) in row_indices.reader()?.enumerate() {
+            let row_index = row_index?;
             if batch.suppresses(local_index)? {
                 prepared.suppress_original.suppress(row_index)?;
             }
@@ -537,3 +557,6 @@ pub fn prepare_view_rule_batches<S: Clone + 'static, R: super::RuleEventSource +
 }
 
 impl<S: Clone + 'static> Copy for ViewRuleDocumentProjection<'_, S> {}
+
+#[cfg(test)]
+mod indices_tests;

@@ -100,3 +100,76 @@ fn nested_view_rule_columns_preserve_sparse_old_new_and_lazy_unused_fields() {
         Some(&Value::Int(5))
     );
 }
+
+#[rstest::rstest]
+#[case::update("update")]
+#[case::update_from("update_from")]
+#[case::delete("delete")]
+fn nested_rule_ordinals_preserve_actions_and_base_suppression(#[case] shape: &str) {
+    let engine = Engine::new();
+    let deleting = shape == "delete";
+    let event = if deleting { "DELETE" } else { "UPDATE" };
+    let value = if deleting { "OLD.value" } else { "NEW.value" };
+    exec(
+        &engine,
+        &format!(
+            "CREATE TABLE mapping_base(id INTEGER PRIMARY KEY, value INTEGER);
+             CREATE TABLE mapping_log(seq BIGSERIAL PRIMARY KEY, layer TEXT, id INTEGER, value INTEGER);
+             INSERT INTO mapping_base SELECT n,n*10 FROM generate_series(1,8) AS s(n);
+             CREATE VIEW mapping_inner AS SELECT id,value FROM mapping_base;
+             CREATE VIEW mapping_outer AS SELECT id,value FROM mapping_inner;
+             CREATE RULE outer_audit AS ON {event} TO mapping_outer WHERE OLD.id % 2=0
+               DO ALSO INSERT INTO mapping_log(layer,id,value) VALUES ('outer',OLD.id,{value});
+             CREATE RULE inner_audit AS ON {event} TO mapping_inner WHERE OLD.id % 3=0
+               DO ALSO INSERT INTO mapping_log(layer,id,value) VALUES ('inner',OLD.id,OLD.value);
+             CREATE RULE base_skip AS ON {event} TO mapping_base WHERE OLD.id % 5=0 DO INSTEAD NOTHING;
+             CREATE RULE base_audit AS ON {event} TO mapping_base
+               DO ALSO INSERT INTO mapping_log(layer,id,value) VALUES ('base',OLD.id,{value})"
+        ),
+    );
+    engine.set_query_memory_limit(Some(16 * 1024));
+    let command = match shape {
+        "update" => "UPDATE mapping_outer SET value=value+100",
+        "update_from" => {
+            "UPDATE mapping_outer SET value=value+100 FROM (SELECT 1 AS marker) AS source"
+        }
+        "delete" => "DELETE FROM mapping_outer",
+        _ => unreachable!(),
+    };
+    assert_eq!(exec(&engine, command).affected_rows, 7);
+    let audit = exec(
+        &engine,
+        "SELECT layer,id,value FROM mapping_log ORDER BY seq",
+    );
+    assert_eq!(audit.rows.len(), 14);
+    let mut row = 0;
+    for (layer, ids) in [
+        ("outer", vec![2, 4, 6, 8]),
+        ("inner", vec![3, 6]),
+        ("base", (1..=8).collect()),
+    ] {
+        for id in ids {
+            let value = id * 10 + if deleting || layer == "inner" { 0 } else { 100 };
+            assert_eq!(audit.value_at(row, 0), Some(&Value::Str(layer.into())));
+            assert_eq!(audit.value_at(row, 1), Some(&Value::Int(id)));
+            assert_eq!(audit.value_at(row, 2), Some(&Value::Int(value)));
+            row += 1;
+        }
+    }
+    let rows = exec(&engine, "SELECT id,value FROM mapping_base ORDER BY id");
+    if deleting {
+        assert_eq!(rows.rows.len(), 1);
+        assert_eq!(rows.value_at(0, 0), Some(&Value::Int(5)));
+        assert_eq!(rows.value_at(0, 1), Some(&Value::Int(50)));
+    } else {
+        assert_eq!(rows.rows.len(), 8);
+        for index in 0..8 {
+            let id = index as i64 + 1;
+            assert_eq!(rows.value_at(index, 0), Some(&Value::Int(id)));
+            assert_eq!(
+                rows.value_at(index, 1),
+                Some(&Value::Int(id * 10 + if id == 5 { 0 } else { 100 }))
+            );
+        }
+    }
+}
