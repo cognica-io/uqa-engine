@@ -113,6 +113,7 @@ pub struct RowIteratorScan<'a> {
 pub struct PhysicalRowIteratorScan<'a> {
     schema: RowSchema,
     rows: Box<dyn Iterator<Item = ExecResult<PhysicalRow>> + Send + 'a>,
+    batch_size: std::num::NonZeroUsize,
     exhausted: bool,
 }
 
@@ -198,8 +199,16 @@ impl<'a> PhysicalRowIteratorScan<'a> {
         Self {
             schema,
             rows,
+            batch_size: std::num::NonZeroUsize::new(DEFAULT_BATCH_SIZE)
+                .expect("default scan batch is nonempty"),
             exhausted: false,
         }
+    }
+
+    /// Limit retained producer values when individual rows may exceed the consumer's work allowance.
+    pub fn with_batch_size(mut self, size: std::num::NonZeroUsize) -> Self {
+        self.batch_size = size;
+        self
     }
 }
 
@@ -221,8 +230,8 @@ impl PhysicalOperator for PhysicalRowIteratorScan<'_> {
         if self.exhausted {
             return Ok(None);
         }
-        let mut batch = Vec::with_capacity(DEFAULT_BATCH_SIZE);
-        while batch.len() < DEFAULT_BATCH_SIZE {
+        let mut batch = Vec::with_capacity(self.batch_size.get());
+        while batch.len() < self.batch_size.get() {
             match self.rows.next() {
                 Some(Ok(row)) => batch.push(row),
                 Some(Err(error)) => return Err(error),

@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Stream scalar UPDATE and DELETE filter candidates through bounded identity pages and per-row projection, preserving indexed access, command snapshots and late-error rollback.
+
 - Capture UPDATE and DELETE candidate identities through bounded snapshot pages before row effects; preserve frozen visibility, hierarchy order, tuple rechecks and typed resource errors.
 
 - Share bounded MVCC blocks across frozen snapshot point reads, avoiding repeated file reads during DELETE identity membership checks while preserving visibility, cancellation and cache admission.

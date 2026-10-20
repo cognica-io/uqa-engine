@@ -47,6 +47,32 @@ fn allocation_engine(path: &std::path::Path) -> Engine {
     .unwrap()
 }
 
+#[rstest::rstest]
+#[case::update("UPDATE where_output SET body='changed' WHERE length(body)<0")]
+#[case::delete("DELETE FROM where_output WHERE length(body)<0")]
+fn mutation_where_does_not_retain_complete_filter_payloads(#[case] sql: &str) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = allocation_engine(&directory.path().join("where.db"));
+    exec(
+        &engine,
+        "CREATE TABLE where_output(id INTEGER PRIMARY KEY, body TEXT);
+        INSERT INTO where_output SELECT n, repeat('x',32768) FROM generate_series(1,512) AS s(n)",
+    );
+    engine.set_query_memory_limit(Some(64 * 1024));
+    let allocated = allocation_counter::measure(|| {
+        assert_eq!(engine.sql(sql, &[]).unwrap().affected_rows, 0);
+    });
+    // The selected fields total 16MiB. The command may retain its 4MiB session allowance plus bounded scan and filter state.
+    assert!(allocated.bytes_max < 8 * 1024 * 1024, "{allocated:?}");
+    assert_eq!(
+        copy_to_string(
+            &engine,
+            "COPY (SELECT count(*), min(length(body)), max(length(body)) FROM where_output) TO STDOUT"
+        ),
+        "512\t32768\t32768\n"
+    );
+}
+
 #[test]
 fn copy_delete_publication_does_not_retain_complete_prepared_documents() {
     let directory = tempfile::tempdir().unwrap();
