@@ -17106,6 +17106,97 @@
       "workload": "128 rows of 128KiB pass through an INSTEAD OF trigger and a DO ALSO rewrite rule using VALUES or SELECT, under 512KiB query and 4MiB native SQLite retention allowances.",
       "invariant": "Peak additional allocation stays below the unchanged 8MiB ceiling; all 16MiB COPY bytes and all 128 rule-action identities with sum 8,256 are exact.",
       "capability": "Bounded rewrite-rule view input ownership"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "all_rule_indices_bound_metadata_and_preserve_repeatable_order",
+      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "131,072 unconditional rule-event ordinals, constructed and replayed twice.",
+      "invariant": "Additional peak allocation is below the fixed 512KiB ceiling and every original ordinal is retained in order.",
+      "capability": "Bounded rewrite-rule selection metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sparse_rule_indices_bound_metadata_and_preserve_repeatable_order",
+      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "131,072 alternating rule-event ordinals under a 16KiB spill allowance, constructed and replayed twice.",
+      "invariant": "Additional peak allocation stays below the fixed 512KiB ceiling and both passes preserve the entire sparse selection.",
+      "capability": "Bounded rewrite-rule selection metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_indices_preserve_duplicates_reverse_order_and_full_width_ordinals",
+      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Adjacent, duplicated, reversed and full-width ordinals under a one-byte spill allowance.",
+      "invariant": "The spill reader preserves ordinal identity, ordering and multiplicity on repeated reads.",
+      "capability": "Bounded rewrite-rule selection metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "empty_and_contiguous_rule_indices_do_not_create_spill_records",
+      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Empty, single-row and 131,072-row contiguous selections with a one-byte allowance.",
+      "invariant": "Range ownership retains exact counts without producing spill records.",
+      "capability": "Bounded rewrite-rule selection metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_indices_propagate_cancellation_and_stop_failed_readers",
+      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Cancellation between ordinal reads and before append/finalization.",
+      "invariant": "All consumers report SQLSTATE 57014; an errored iterator stops without returning subsequent rows.",
+      "capability": "Bounded rewrite-rule selection metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_indices_reject_malformed_ranges_counts_and_unaddressable_ordinals",
+      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Invalid encoded ranges, truncated/excess selection counts and ordinal/count overflow.",
+      "invariant": "Malformed selections fail explicitly rather than dropping, adding or wrapping event ordinals.",
+      "capability": "Bounded rewrite-rule selection metadata"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "rule_selection_preserves_sparse_actions_and_conditional_suppression",
+      "source": "crates/uqa-engine/tests/catalog/sql_rules/selection.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Four UPDATE rules combine sparse and all-row actions, a never-matching action and conditional INSTEAD suppression with 16KiB query memory.",
+      "invariant": "Final values, action order and zero-row behavior match independent PostgreSQL 18.4.",
+      "capability": "Bounded rewrite-rule selection metadata"
     }
   ]
 }

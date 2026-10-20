@@ -36,6 +36,8 @@ mod routine_dependencies;
 mod row_composites;
 #[path = "sql_rules/row_expansion.rs"]
 mod row_expansion;
+#[path = "sql_rules/selection.rs"]
+mod selection;
 
 fn exec(engine: &Engine, sql: &str) -> uqa_engine::SQLResult {
     engine
