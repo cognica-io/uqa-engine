@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse the types selected during GROUP BY, GROUPING SETS, DISTINCT ON and ORDER BY validation when checking comparison support, preserving expression-error precedence without resolving the same clause twice.
+
 - Keep rewrite-rule action output and captured current/OLD/NEW images in bounded spill storage, sharing the original source context without per-output copies while preserving assignment order, owner privileges, COPY failure rollback and durable results.
 
 - Accumulate mutation RETURNING values in bounded spill batches, detach unselected OLD/NEW payloads and pass ordinary mutation output directly to COPY and modifying CTE consumers. Preserve output positions and statement rollback; public SQL results still materialize their requested rows.

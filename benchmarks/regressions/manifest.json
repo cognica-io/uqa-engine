@@ -14863,7 +14863,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -16152,6 +16152,45 @@
       "capability": "SQLite connection-local page cache",
       "workload": "A managed connection checks the compiled memory-management option, releases its own cache and reads its unchanged row.",
       "invariant": "The bundled global memory-management option is disabled while ordinary values and connection-local cache reclamation remain available."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "comparison_clauses_resolve_each_expression_type_once",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/projection/tests.rs",
+      "capability": "Retained clause type selections",
+      "workload": "GROUP BY with ORDER BY, grouping sets and DISTINCT ON over declared numeric-returning routines.",
+      "invariant": "Resolve each logical expression exactly once; the ordinary grouping/ordering case requires three selections instead of five."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "later_expression_type_errors_precede_comparison_capability_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/projection/tests.rs",
+      "capability": "Retained clause type selections",
+      "workload": "A JSON-typed grouping key followed by a later invalid HAVING expression.",
+      "invariant": "The later expression type error occurs before equality capability checks; a valid tail still rejects the unsupported JSON equality type."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "clause_type_reuse_preserves_postgresql_error_order_and_operator_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/projection/tests.rs",
+      "capability": "Retained clause type selections",
+      "workload": "Independent PostgreSQL 18.4 HAVING type errors and JSON grouping/ordering capability errors.",
+      "invariant": "Preserve SQLSTATE and primary diagnostic while retaining types only within one validation invocation."
     }
   ]
 }
