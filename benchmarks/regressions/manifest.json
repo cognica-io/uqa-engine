@@ -18191,6 +18191,75 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_parent_keys_bound_wide_retention_and_keep_exact_membership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/constraints/parent_keys/tests.rs",
+      "capability": "Bounded deferred foreign-key parents",
+      "workload": "2,048 reverse-order wide normalized keys and one duplicate under 64KiB work memory; the former BTreeSet remains a negative control.",
+      "invariant": "Exact hits and misses retain the original 512KiB peak ceiling; binary search uses at most twelve descriptor probes before full-key collision verification.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_parent_key_spill_preserves_core_normalized_equality",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/constraints/parent_keys/tests.rs",
+      "capability": "Bounded deferred foreign-key parents",
+      "workload": "Numeric widths, decimal/Boolean/float equality, NaNs, signed zero, fixed characters, JSONB and record field labels under zero, one-byte and 64KiB allowances.",
+      "invariant": "Membership agrees with the former Core-equality set after SQL coercion, including null/arity differences.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_parent_keys_retain_cancellation_and_spill_oversized_keys",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/constraints/parent_keys/tests.rs",
+      "capability": "Bounded deferred foreign-key parents",
+      "workload": "Cancellation at insertion and lookup; a 1MiB indivisible key under zero work memory.",
+      "invariant": "Cancelled work retains SQLSTATE 57014; oversized keys spill and retain complete equality without a new key-size rejection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_parent_key_digest_collisions_require_exact_owned_keys",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/constraints/parent_keys/tests.rs",
+      "capability": "Bounded deferred foreign-key parents",
+      "workload": "Two distinct keys and a duplicate deliberately share the same digest under resident and spilled configurations.",
+      "invariant": "Digest equality never establishes key equality; full owned bytes accept exact members and reject misses.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "deferred_cross_type_parent_keys_preserve_errors_repair_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_referential_actions/indexed.rs",
+      "capability": "Bounded deferred foreign-key parents",
+      "workload": "Independent PostgreSQL 18.4 integer-parent/bigint-child deferred FK lifecycle with wide text keys on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "64/2080 initial count/sum, two 23503 failures and rollback, repaired 65/2145 final count/sum and persistent reopen all match the reference.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }
