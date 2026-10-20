@@ -18022,6 +18022,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "ordered_document_batches_bound_wide_projection_and_resume_exactly",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/scored_input/tests/memory.rs",
+      "capability": "Bounded ordered scan projections",
+      "workload": "Both local and scored sources read 128 ordered 24KiB Unicode rows and an absent NULL field through shared and borrowed provider cursors under 64KiB work memory.",
+      "invariant": "Every row resumes exactly once in order, returned batches contain at most three wide rows, provider visits stay at most 129 without point reads or full identity enumeration, and peak additional allocation stays below 512KiB."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "suppressed_view_update_delete_bound_original_rows_and_pending_rule_images",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_rules/bounded_events.rs",
+      "capability": "Bounded pending view mutation images",
+      "workload": "UPDATE then DELETE on a UNION ALL view of 512 32KiB rows with ALSO audits and INSTEAD NOTHING under 64KiB query memory.",
+      "invariant": "Both operations retain below the unchanged 8MiB ceiling, leave the original base unchanged and produce exact PostgreSQL audit counts, identity sums and OLD/NEW lengths without repeating assignments."
     }
   ]
 }

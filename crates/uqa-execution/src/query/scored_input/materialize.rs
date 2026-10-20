@@ -136,7 +136,7 @@ impl ScoredDocumentSource {
             let shared_rows = self
                 .table
                 .read_documents()
-                .next_shared_fields(after, max_rows, &fields)
+                .next_shared_fields(after, max_rows.min(self.shared_page_rows), &fields)
                 .map_err(|error| -> crate::ExecError {
                     SQLError::Internal(format!(
                         "scan `{}` shared projected documents: {error}",
@@ -147,22 +147,33 @@ impl ScoredDocumentSource {
             let Some(shared_rows) = shared_rows else {
                 return Ok(None);
             };
-            let Some(last) = shared_rows.last().map(|(doc_id, _)| *doc_id) else {
+            if shared_rows.is_empty() {
                 return Ok(Some(Vec::new()));
-            };
-            after = Some(last);
-            let super::ScoredInputCursor::All { after: cursor } = &mut self.input else {
-                unreachable!("shared scan input changed variants")
-            };
-            *cursor = after;
+            }
             let mut rows = Vec::with_capacity(shared_rows.len());
+            let mut size = crate::spill::EncodedBatchSizer::new(&self.schema)?;
             for (doc_id, shared) in shared_rows {
+                after = Some(doc_id);
+                let super::ScoredInputCursor::All { after: cursor } = &mut self.input else {
+                    unreachable!("shared scan input changed variants")
+                };
+                *cursor = after;
                 let (values, projection) = shared.indexed_values();
                 let keep = self.predicate.as_ref().map_or(Ok(true), |predicate| {
                     predicate.keep_indexed(values, projection)
                 })?;
                 if keep {
-                    rows.push(self.physical_row_from_shared(doc_id, 0.0, shared)?);
+                    let row = self.physical_row_from_shared(doc_id, 0.0, shared)?;
+                    let before = size.bytes();
+                    size.append(&row)?;
+                    self.shared_page_rows = self
+                        .scan_batch_bytes
+                        .div_ceil((size.bytes() - before).max(1))
+                        .clamp(1, crate::DEFAULT_BATCH_SIZE);
+                    rows.push(row);
+                    if size.bytes() >= self.scan_batch_bytes {
+                        break;
+                    }
                 }
             }
             if !rows.is_empty() {

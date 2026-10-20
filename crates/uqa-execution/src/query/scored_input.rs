@@ -214,6 +214,8 @@ impl ScoredInput {
 
 pub struct ScoredDocumentSource {
     serializable: crate::serializable::SerializableScan,
+    scan_batch_bytes: usize,
+    shared_page_rows: usize,
     table_name: String,
     table: Arc<dyn TableRead>,
     column_definitions: Vec<uqa_sql::ast::ColumnDef>,
@@ -522,6 +524,8 @@ impl ScoredDocumentSource {
         schema =
             expose_metadata_namespace(&schema, metadata_doc_id_attribute, metadata_score_attribute);
         Self {
+            scan_batch_bytes: 64 * 1024 * 1024,
+            shared_page_rows: 1,
             table_name: table_name.to_string(),
             table,
             column_definitions,
@@ -559,6 +563,12 @@ impl ScoredDocumentSource {
         read: Option<crate::serializable::SerializableRelationRead>,
     ) -> Self {
         self.serializable = crate::serializable::SerializableScan::new(read);
+        self
+    }
+
+    /// Bound the bytes retained by an ordered shared or borrowed document cursor. The current row may exceed the allowance; the next row belongs to the next batch.
+    pub fn with_scan_batch_bytes(mut self, bytes: usize) -> Self {
+        self.scan_batch_bytes = bytes;
         self
     }
 

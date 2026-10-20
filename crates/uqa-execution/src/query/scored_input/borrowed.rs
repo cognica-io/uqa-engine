@@ -41,6 +41,7 @@ impl ScoredDocumentSource {
             .map(String::as_str)
             .collect::<Vec<_>>();
         let mut rows = Vec::with_capacity(max_rows);
+        let mut size = crate::spill::EncodedBatchSizer::new(&self.schema)?;
         while rows.len() < max_rows {
             let remaining = max_rows - rows.len();
             let mut last = None;
@@ -62,14 +63,16 @@ impl ScoredDocumentSource {
                         let row =
                             ProjectedRow::new(&self.schema, &self.projected_slots, values, &extras);
                         let row = PhysicalRow::from_values(row.into_values());
-                        rows.push(self.append_metadata_attributes(row, id, 0.0)?);
+                        let row = self.append_metadata_attributes(row, id, 0.0)?;
+                        size.append(&row)?;
+                        rows.push(row);
                         Ok(())
                     })();
                     if let Err(error) = result {
                         failure = Some(error);
                         return false;
                     }
-                    true
+                    rows.is_empty() || size.bytes() < self.scan_batch_bytes
                 })
                 .map_err(|error| {
                     SQLError::Internal(format!(
@@ -87,7 +90,7 @@ impl ScoredDocumentSource {
                 after = Some(last);
                 self.input = ScoredInputCursor::All { after };
             }
-            if visited == 0 {
+            if visited == 0 || (!rows.is_empty() && size.bytes() >= self.scan_batch_bytes) {
                 break;
             }
         }
