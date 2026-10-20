@@ -151,6 +151,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         context.mutation.rules.rules.cancellation.clone(),
     );
     let mut prepared_updates = Vec::new();
+    let mut events = crate::mutation::events::MutationEventQueue::default();
     let mut locked_ids = std::collections::BTreeSet::new();
     for (storage_table, doc_id) in target_rows {
         cancel.check()?;
@@ -347,10 +348,11 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                 returning_rows.push(returning)?;
             }
             affected += u64::from(prepared.affected);
-            prepared_updates.push((
-                PreparedMutationAction::Rewrite(prepared.rewrite),
+            events.append_after_rows(
                 prepared.after_row_events,
-            ));
+                &context.mutation.preparation.referential.triggers,
+            )?;
+            prepared_updates.push(PreparedMutationAction::Rewrite(prepared.rewrite));
         }
     }
     let qualified_published = overlay.finish();
@@ -447,7 +449,6 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         )?;
     }
     let overlay = MutationOverlayScope::new(context.mutation.state);
-    let mut events = crate::mutation::events::MutationEventQueue::default();
     for index in 0..rule_rows.len() {
         let base_suppressed = base_rule_suppressed.suppresses(index)?;
         if view_rule_batches.suppresses(index)? || base_suppressed {
@@ -470,10 +471,11 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                 returning_rows.push(returning)?;
             }
             affected += u64::from(prepared.affected);
-            prepared_updates.push((
-                PreparedMutationAction::Rewrite(prepared.rewrite),
+            events.append_after_rows(
                 prepared.after_row_events,
-            ));
+                &context.mutation.preparation.referential.triggers,
+            )?;
+            prepared_updates.push(PreparedMutationAction::Rewrite(prepared.rewrite));
         }
     }
     let published = overlay.finish();
@@ -482,14 +484,13 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         let mut publication = statement_end::publication_batch(statement_commands)
             .with_published(qualified_published)
             .with_published(published);
-        for (action, after_rows) in prepared_updates {
+        for action in prepared_updates {
             crate::mutation::publication::publish_prepared_mutation_action(
                 context.mutation.publication,
                 action,
                 crate::mutation::publication::InsertedIdentity::Unknown,
                 &mut publication,
             )?;
-            events.append_after_rows(after_rows);
         }
         crate::mutation::publication::finish_mutation_publication(
             context.mutation.publication,

@@ -5,6 +5,7 @@
 //
 
 //! Stage candidate row images and capture trigger events before durable publication.
+use super::triggers::events::AfterRowEventSink;
 use super::{
     constraints::{
         context::ConstraintContext, validate_document_non_key_constraints,
@@ -44,7 +45,7 @@ pub fn stage_prepared_document_rewrite(
     params: &[SQLParam],
     statement: ConstraintStatement<'_>,
     root_updated_columns: Option<&[String]>,
-    after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
+    after_row_events: &mut dyn AfterRowEventSink,
 ) -> Result<DocId, SQLError> {
     let trigger_updated_columns = root_updated_columns
         .or_else(|| prepared.referential_columns())
@@ -77,7 +78,7 @@ pub fn stage_prepared_document_rewrite(
                         },
                     )?
                 {
-                    after_row_events.push(event);
+                    after_row_events.push_event(event, &context.triggers)?;
                 }
             }
         }
@@ -149,7 +150,7 @@ pub fn stage_prepared_document_rewrite(
                 )?,
             },
         )? {
-            after_row_events.push(event);
+            after_row_events.push_event(event, &context.triggers)?;
         }
         if let Some(event) = crate::mutation::triggers::AfterRowTriggerEvent::prepare(
             &context.triggers,
@@ -170,7 +171,7 @@ pub fn stage_prepared_document_rewrite(
                 )?,
             },
         )? {
-            after_row_events.push(event);
+            after_row_events.push_event(event, &context.triggers)?;
         }
         if prepared.capture_partition_move_update_transition {
             if let Some(updated_columns) = trigger_updated_columns.as_deref() {
@@ -189,7 +190,7 @@ pub fn stage_prepared_document_rewrite(
                         },
                     )?
                 {
-                    after_row_events.push(event);
+                    after_row_events.push_event(event, &context.triggers)?;
                 }
             }
         }
@@ -205,7 +206,7 @@ pub fn stage_prepared_document_rewrite(
                 prepared.moved_through.as_deref(),
             )?,
         ) {
-            after_row_events.push(event);
+            after_row_events.push_event(event, &context.triggers)?;
         }
     } else {
         let mut foreign_key_checks = crate::mutation::referential::checks::referenced_checks(
@@ -243,7 +244,7 @@ pub fn stage_prepared_document_rewrite(
             ),
         };
         if let Some(event) = event {
-            after_row_events.push(event);
+            after_row_events.push_event(event, &context.triggers)?;
         }
     }
     Ok(rewritten_doc_id)
@@ -254,7 +255,7 @@ pub fn stage_referential_rewrite(
     context: MutationStagingContext<'_>,
     action: &mut PreparedDocumentRewrite,
     params: &[SQLParam],
-    after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
+    after_row_events: &mut dyn AfterRowEventSink,
 ) -> Result<DocId, SQLError> {
     let referential = action.referential_action.clone().ok_or_else(|| {
         SQLError::Internal("a referential action rewrite does not name its foreign key".into())
@@ -273,7 +274,7 @@ pub fn stage_referential_rewrite(
 pub fn stage_prepared_document_delete(
     context: MutationStagingContext<'_>,
     prepared: &PreparedDocumentDelete,
-    after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
+    after_row_events: &mut dyn AfterRowEventSink,
 ) -> Result<(), SQLError> {
     let foreign_key_checks = crate::mutation::referential::checks::referenced_checks(
         context.constraints,
@@ -289,7 +290,7 @@ fn stage_document_delete(
     context: &MutationStagingContext<'_>,
     prepared: &PreparedDocumentDelete,
     foreign_key_checks: Vec<crate::mutation::referential::checks::ForeignKeyCheck>,
-    after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
+    after_row_events: &mut dyn AfterRowEventSink,
 ) -> Result<(), SQLError> {
     context
         .commands
@@ -307,7 +308,7 @@ fn stage_document_delete(
             foreign_key_checks,
         },
     )? {
-        after_row_events.push(event);
+        after_row_events.push_event(event, &context.triggers)?;
     }
     Ok(())
 }

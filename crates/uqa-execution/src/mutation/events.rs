@@ -6,32 +6,36 @@
 
 //! The AFTER row events a command queues as it stages its rows.
 
+use super::triggers::{
+    context::TriggerContext,
+    events::{AfterRowEventSink, AfterRowEvents},
+};
 use uqa_core::DocId;
 use uqa_storage::document_store::Document;
 
 /// The AFTER row events of one command, in the order it staged its rows.
 #[derive(Default)]
 pub struct MutationEventQueue {
-    after_rows: Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
+    after_rows: AfterRowEvents,
 }
 
 impl MutationEventQueue {
-    pub fn after_rows(&self) -> &[crate::mutation::triggers::AfterRowTriggerEvent] {
-        &self.after_rows
-    }
-
-    pub fn after_rows_mut(&mut self) -> &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent> {
+    pub fn after_rows_mut(&mut self) -> &mut AfterRowEvents {
         &mut self.after_rows
     }
 
     pub fn append_after_rows(
         &mut self,
         events: Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
-    ) {
-        self.after_rows.extend(events);
+        context: &TriggerContext<'_>,
+    ) -> Result<(), uqa_sql::SQLError> {
+        for event in events {
+            self.after_rows.push_event(event, context)?;
+        }
+        Ok(())
     }
 
-    pub fn into_after_rows(self) -> Vec<crate::mutation::triggers::AfterRowTriggerEvent> {
+    pub fn into_after_rows(self) -> AfterRowEvents {
         self.after_rows
     }
 }

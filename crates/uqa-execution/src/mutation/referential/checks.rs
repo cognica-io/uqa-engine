@@ -25,14 +25,14 @@ use super::ReferentialContext;
 use crate::mutation::constraints::{period::period_foreign_key_coverage, ConstraintContext};
 
 /// A foreign key check or referential action queued with the AFTER ROW triggers of a written row.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForeignKeyCheck {
     /// The position of the foreign key among the foreign keys the check is drawn from, which orders the internal triggers of one row as their object identifiers do.
     ordinal: usize,
     kind: CheckKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum CheckKind {
     Referencing(ReferencingRow),
     Referenced(Box<ReferencedKey>),
@@ -40,7 +40,7 @@ enum CheckKind {
 }
 
 /// The row that `table` holds at `doc_id` references a row through `foreign_key`, unless a later change of the statement removed it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ReferencingRow {
     table: String,
     doc_id: DocId,
@@ -48,7 +48,7 @@ struct ReferencingRow {
 }
 
 /// A delete or an update of a row of `relation` removed the referenced key `key`, which no row of `constraint_table` may still reference: under `NO ACTION` unless another row holds the key again, under `RESTRICT` whatever row holds it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ReferencedKey {
     constraint_table: String,
     /// The relation whose internal trigger fires: the partition that held the row, or the table an `UPDATE` named for a row it moved to another partition.
@@ -56,6 +56,7 @@ struct ReferencedKey {
     /// The constraint the check reports: the foreign key's, or the one it derives on `relation`.
     constraint_name: String,
     foreign_key: Arc<ForeignKey>,
+    #[serde(with = "crate::mutation::triggers::events::values::list")]
     key: Vec<Value>,
     restrict: bool,
 }

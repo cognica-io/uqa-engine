@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound command and statement AFTER-trigger event retention with ordered spill replay, preserving transition-table visibility and reentrant cascades.
+
 - Resolve scalar-subquery correlation against retained CTE and trigger transition relation descriptors, preserving local aliases and genuine outer dependencies.
 
 - Bound UPDATE tuple-lock deduplication with exact spill-backed physical identities while preserving first-target selection, partition distinctions, cancellation and typed memory errors.

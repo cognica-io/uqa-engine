@@ -853,7 +853,11 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 },
                             )?
                         {
-                            events.after_rows_mut().push(event);
+                            crate::mutation::triggers::events::AfterRowEventSink::push_event(
+                                events.after_rows_mut(),
+                                event,
+                                &triggers,
+                            )?;
                         }
                         if !stmt.returning.is_empty() {
                             returning_rows.push(build_merge_returning_row(

@@ -124,6 +124,7 @@ impl Drop for TriggerStatementScope {
     }
 }
 
+pub mod events;
 pub mod queue;
 mod transitions;
 pub use transitions::{transition_capture_required, TransitionTables};
@@ -574,10 +575,13 @@ pub fn fire_deferred_constraint_trigger_event(
     Ok(())
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct AfterRowTriggerEvent {
     table: String,
     event: TriggerEvent,
+    #[serde(with = "events::values")]
     old: Value,
+    #[serde(with = "events::values")]
     new: Value,
     /// Whether `old` and `new` hold the row's images, which a row with no user trigger to fire and no transition to capture leaves out.
     captured: bool,
@@ -645,7 +649,10 @@ impl AfterRowTriggerEvent {
                     &columns,
                 )?
             {
-                matching.push(trigger.clone());
+                let mut captured = trigger.clone();
+                // WHEN has already selected this event; firing must not retain or evaluate it again.
+                captured.definition.when = None;
+                matching.push(captured);
             }
         }
         if matching.is_empty() && !capture_transition {

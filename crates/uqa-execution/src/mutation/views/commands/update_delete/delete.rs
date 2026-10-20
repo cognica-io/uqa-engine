@@ -375,7 +375,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                     &statement_commands,
                     &context.mutation.preparation.referential.triggers,
                     std::slice::from_ref(&view_statement),
-                    Vec::new(),
+                    crate::mutation::triggers::events::AfterRowEvents::default(),
                 )?;
             }
             let mut result = finish_view_dml(

@@ -641,7 +641,7 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
                 &statement_commands,
                 triggers,
                 &events.after_statements(&target.canonical_name),
-                Vec::new(),
+                crate::mutation::triggers::events::AfterRowEvents::default(),
             )?;
             super::returning::finish_view_merge_returning(
                 returning,

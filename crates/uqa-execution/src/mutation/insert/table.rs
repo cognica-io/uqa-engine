@@ -635,7 +635,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     if let Some(returning) = staged.returning {
                         returning_rows.push(returning)?;
                     }
-                    events.append_after_rows(staged.after_row_events);
+                    events.append_after_rows(staged.after_row_events, &triggers)?;
                     if staged.prepared_effect {
                         affected += 1;
                         has_prepared_effect = true;
@@ -800,7 +800,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     if let Some(returning) = staged.returning {
                         returning_rows.push(returning)?;
                     }
-                    events.append_after_rows(staged.after_row_events);
+                    events.append_after_rows(staged.after_row_events, &triggers)?;
                     if staged.prepared_effect {
                         affected += 1;
                         has_prepared_effect = true;

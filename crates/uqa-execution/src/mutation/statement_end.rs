@@ -10,8 +10,8 @@ use crate::mutation::candidate::PhysicalDocumentIdentity;
 use crate::mutation::publication::MutationPublicationBatch;
 use crate::mutation::statement::context::MutationStatementContext;
 use crate::mutation::triggers::context::TriggerContext;
+use crate::mutation::triggers::events::AfterRowEvents;
 use crate::mutation::triggers::queue::StatementEvent;
-use crate::mutation::triggers::AfterRowTriggerEvent;
 use crate::query::scope::StatementCommands;
 use crate::query::CteScope;
 use std::cell::RefCell;
@@ -87,7 +87,7 @@ pub fn end_command(
     statement: &StatementCommands,
     context: &TriggerContext<'_>,
     statements: &[StatementEvent],
-    rows: Vec<AfterRowTriggerEvent>,
+    rows: AfterRowEvents,
 ) -> Result<(), SQLError> {
     statement
         .after_triggers()

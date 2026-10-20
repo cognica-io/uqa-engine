@@ -27,14 +27,16 @@ use std::sync::Arc;
 use uqa_sql::ast::TriggerEvent;
 
 /// A referential action that a delete or an update of a referenced row queued.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ReferentialAction {
     /// The foreign key's table, whose rows the action writes.
     pub(super) constraint_table: String,
     pub(super) foreign_key: Arc<ForeignKey>,
     /// The key the referenced row held.
+    #[serde(with = "crate::mutation::triggers::events::values::list")]
     pub(super) key: Vec<Value>,
     /// The key an update gave the referenced row, which `ON UPDATE CASCADE` writes into the referencing rows; `None` for a delete.
+    #[serde(with = "crate::mutation::triggers::events::values::optional_list")]
     pub(super) new_key: Option<Vec<Value>>,
 }
 
@@ -122,7 +124,7 @@ pub(super) fn run_referential_action<S: Clone + 'static>(
         BTreeSet::new()
     };
     let mut prepared = Vec::new();
-    let mut events = Vec::new();
+    let mut events = crate::mutation::triggers::events::AfterRowEvents::default();
     let overlay = MutationOverlayScope::new(context.state);
     for (child, _) in &referencing {
         if deleting {

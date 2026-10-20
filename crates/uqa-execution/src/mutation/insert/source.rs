@@ -457,7 +457,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
         if let Some(row) = returning {
             returning_rows.push(row)?;
         }
-        events.append_after_rows(row_after_events);
+        events.append_after_rows(row_after_events, &services.rows.referential.triggers)?;
         supplied_identities.note(&target_table, &prepared_conflict);
         push_prepared_insert_spill_row(
             prepared_buffer.as_mut().ok_or_else(|| {
