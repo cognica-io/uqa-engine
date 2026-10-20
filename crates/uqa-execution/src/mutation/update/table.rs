@@ -380,7 +380,11 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             let mut prepared_updates =
                 crate::SpillBuffer::new(context.mutation.rules.rules.memory.work_mem_bytes()?);
             let mut events = crate::mutation::events::MutationEventQueue::default();
-            let mut locked_ids = BTreeSet::new();
+            let mut locked_ids = super::locked_rows::LockedRows::new(
+                context.mutation.rules.rules.memory.work_mem_bytes()?,
+                cancel.clone(),
+                "UPDATE locked rows",
+            );
             for candidate_id in candidates.read_rows()? {
                 let (table_index, doc_id) = candidate_id?;
                 let storage_table = target_tables
@@ -453,7 +457,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 }
                 let storage_table = identity.table;
                 let doc_id = identity.doc_id;
-                if !locked_ids.insert((storage_table.clone(), doc_id)) {
+                if !locked_ids.insert_if_absent(&storage_table, doc_id)? {
                     continue;
                 }
                 if recheck {

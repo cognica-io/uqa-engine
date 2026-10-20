@@ -9,7 +9,7 @@ use super::{
     dml_storage_error, missing_document_error, ConstraintContext, Document, ForeignKey,
     PhysicalDocumentIdentity, SQLError, Value,
 };
-use crate::mutation::deleted_rows::DeletedRowLookup;
+use crate::mutation::row_membership::PhysicalRowLookup as DeletedRowLookup;
 use uqa_sql::{expr::multirange_from_ranges, semantics::period::period_ranges};
 
 /// The child's period ranges, the periods of the referenced rows whose ordinary key matches the child's, and the identities of those rows.
