@@ -154,7 +154,7 @@ pub fn prepare_correlated_exists_predicate<'a, S: Clone + Send + Sync + 'static>
         )));
     };
     if query_contains_volatile_function(services.volatility, plan)?
-        || !analysis::query_depends_on_outer_row(services, plan)?
+        || !analysis::query_depends_on_outer_row(services, ctes, plan)?
     {
         return Ok(None);
     }

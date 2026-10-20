@@ -53,6 +53,7 @@ impl Fixture {
             correlation: uqa_sql::binding::correlation::CorrelationContext {
                 catalog: self,
                 resolution: &self.resolution,
+                scoped_relations: None,
             },
             optimizer: &Ok,
         }

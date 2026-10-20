@@ -55,7 +55,7 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
             }
         }
 
-        if analysis::query_depends_on_outer_row(&self.services, plan)? {
+        if analysis::query_depends_on_outer_row(&self.services, self.ctes, plan)? {
             self.ctes
                 .cache_subquery(subquery, ScalarSubqueryCacheEntry::Correlated);
             return self.execute_correlated_subquery(plan, outer_row, params);
@@ -90,7 +90,7 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
                 )),
             };
         }
-        if analysis::query_depends_on_outer_row(&self.services, plan)? {
+        if analysis::query_depends_on_outer_row(&self.services, self.ctes, plan)? {
             self.ctes
                 .cache_subquery(subquery, ScalarSubqueryCacheEntry::Correlated);
             return self.execute_correlated_single_row(plan, outer_row, params);
@@ -127,7 +127,7 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
                 )),
             };
         }
-        if analysis::query_depends_on_outer_row(&self.services, plan)? {
+        if analysis::query_depends_on_outer_row(&self.services, self.ctes, plan)? {
             self.ctes
                 .cache_subquery(subquery, ScalarSubqueryCacheEntry::Correlated);
             return self
@@ -170,7 +170,7 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
                 )),
             };
         }
-        if analysis::query_depends_on_outer_row(&self.services, plan)? {
+        if analysis::query_depends_on_outer_row(&self.services, self.ctes, plan)? {
             if outer_row.is_some()
                 && !query_contains_volatile_function(self.services.volatility, plan)?
             {
@@ -262,7 +262,7 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
                 )),
             };
         }
-        if analysis::query_depends_on_outer_row(&self.services, plan)? {
+        if analysis::query_depends_on_outer_row(&self.services, self.ctes, plan)? {
             self.ctes
                 .cache_subquery(subquery, ScalarSubqueryCacheEntry::Correlated);
             return self

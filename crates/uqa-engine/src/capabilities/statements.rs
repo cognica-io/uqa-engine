@@ -92,6 +92,7 @@ impl context::PhysicalExplainPlanning for Engine {
                     correlation: uqa_sql::binding::correlation::CorrelationContext {
                         catalog: &catalog,
                         resolution: &resolution,
+                        scoped_relations: None,
                     },
                     optimizer: &|plan| super::statement_planning::optimize_engine_plan(self, plan),
                 },
