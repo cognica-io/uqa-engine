@@ -7,7 +7,7 @@
 //! CTE lifetime, visibility, and scalar-subquery arena scopes.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::Ordering;
+use std::sync::{atomic::Ordering, Arc};
 use uqa_sql::catalog::roles::RoleReference;
 
 use uqa_sql::plan::{CtePlan, QueryPlan};
@@ -119,12 +119,12 @@ impl<S: Clone> CteScope<S> {
         } else {
             self.non_returning_ctes.insert(plan.name.clone());
         }
-        self.deferred_ctes.insert(plan.name.clone(), plan);
+        self.deferred_ctes.insert(plan.name.clone(), Arc::new(plan));
     }
 
     pub fn remove_deferred(&mut self, name: &str) -> Option<CtePlan> {
         self.non_returning_ctes.remove(name);
-        self.deferred_ctes.remove(name)
+        self.deferred_ctes.remove(name).map(Arc::unwrap_or_clone)
     }
 
     /// Return one deferred CTE for a scan. `NOT MATERIALIZED` definitions remain available so every syntactic reference is independently folded, while the default single-reference fast path is consumed exactly once.
@@ -133,11 +133,12 @@ impl<S: Clone> CteScope<S> {
         let persistent = self.deferred_ctes.get(&name).is_some_and(|plan| {
             plan.materialization == uqa_sql::ast::CteMaterialization::NotMaterialized
         });
-        if persistent {
+        let plan = if persistent {
             self.deferred_ctes.get(&name).cloned()
         } else {
             self.deferred_ctes.remove(&name)
-        }
+        };
+        plan.map(Arc::unwrap_or_clone)
     }
 
     pub fn materialized_for_scan(&self, reference: &str) -> Option<crate::SharedSpill> {
@@ -149,9 +150,10 @@ impl<S: Clone> CteScope<S> {
     pub fn deferred_reference(&self, reference: &str) -> Option<&CtePlan> {
         self.deferred_ctes
             .get(&uqa_sql::semantics::cte_reference_name(reference)?)
+            .map(Arc::as_ref)
     }
 
-    pub fn deferred_ctes(&self) -> &BTreeMap<String, CtePlan> {
+    pub fn deferred_ctes(&self) -> &BTreeMap<String, Arc<CtePlan>> {
         &self.deferred_ctes
     }
 
@@ -185,7 +187,7 @@ impl<S: Clone> CteScope<S> {
         &mut self,
         subqueries: &[QueryPlan],
     ) -> ScalarSubqueryScope<'_, S> {
-        let previous = std::mem::replace(&mut self.scalar_subqueries, subqueries.to_vec());
+        let previous = std::mem::replace(&mut self.scalar_subqueries, subqueries.into());
         let next_arena = self
             .next_scalar_subquery_arena
             .fetch_add(1, Ordering::Relaxed);
@@ -306,7 +308,7 @@ impl<S: Clone> Drop for RelationLookupScope<'_, S> {
 
 pub struct ScalarSubqueryScope<'a, S: Clone> {
     ctes: &'a mut CteScope<S>,
-    previous: Option<Vec<QueryPlan>>,
+    previous: Option<Arc<[QueryPlan]>>,
     previous_arena: u64,
     previous_lock_identities: LockIdentityOptions,
 }

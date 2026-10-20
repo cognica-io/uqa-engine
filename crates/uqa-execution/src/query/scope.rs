@@ -18,6 +18,8 @@ use uqa_sql::plan::{CtePlan, QueryPlan};
 use uqa_sql::SQLError;
 
 mod cte;
+#[cfg(test)]
+mod retained_plans;
 mod row_locks;
 mod statement_commands;
 pub mod subqueries;
@@ -29,9 +31,9 @@ use subqueries::ScalarSubqueryCacheEntry;
 #[derive(Clone)]
 pub struct CteScope<S: Clone = ()> {
     pub rows: BTreeMap<String, crate::SharedSpill>,
-    deferred_ctes: BTreeMap<String, CtePlan>,
+    deferred_ctes: BTreeMap<String, Arc<CtePlan>>,
     pub non_returning_ctes: BTreeSet<String>,
-    pub scalar_subqueries: Vec<QueryPlan>,
+    pub scalar_subqueries: Arc<[QueryPlan]>,
     pub lock_identities: LockIdentityOptions,
     row_lock: Option<Box<RowLockScopeState>>,
     visible_cte_names: BTreeSet<String>,
@@ -58,7 +60,7 @@ impl<S: Clone> Default for CteScope<S> {
             rows: BTreeMap::new(),
             deferred_ctes: BTreeMap::new(),
             non_returning_ctes: BTreeSet::new(),
-            scalar_subqueries: Vec::new(),
+            scalar_subqueries: Arc::default(),
             lock_identities: LockIdentityOptions::default(),
             row_lock: None,
             visible_cte_names: BTreeSet::new(),
@@ -223,7 +225,7 @@ mod tests {
         };
         let query = *query;
         let mut scope = CteScope::<()>::new();
-        scope.scalar_subqueries.push(query.clone());
+        scope.scalar_subqueries = vec![query.clone()].into();
 
         let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = scope.enter_scalar_subqueries(&[query.clone(), query]);

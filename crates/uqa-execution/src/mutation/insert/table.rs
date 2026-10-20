@@ -285,7 +285,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 params,
                 scope,
             )?;
-            scope.scalar_subqueries.clone_from(&stmt.subqueries);
+            scope.scalar_subqueries = stmt.subqueries.as_slice().into();
             // Resolve the column that names an inserted row: the table's single PRIMARY KEY column, whether a sequence generates its values or not, and otherwise the conventional legacy `id` slot of a table without declared columns. Both VALUES and SELECT sources must derive the internal doc id from this same column or later primary-key rewrites can address a different row than the one that was inserted.
             let (auto_id_col, id_column, identity_source) =
                 insert_identity_columns(mutation.identities, &stmt.table, "INSERT")?;

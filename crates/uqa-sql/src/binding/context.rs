@@ -12,13 +12,17 @@ use crate::{
     RowSchema,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct BindingContext<'a> {
     pub catalog: CatalogReadView,
     pub resolution: RelationNameResolution,
     pub ctes: BTreeMap<String, RowSchema>,
-    pub deferred_ctes: BTreeMap<String, CtePlan>,
+    pub deferred_ctes: BTreeMap<String, Arc<CtePlan>>,
     pub non_returning_ctes: BTreeSet<String>,
     pub scalar_subqueries: &'a [QueryPlan],
 }
+
+#[cfg(test)]
+mod tests;

@@ -103,7 +103,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
             )?;
-            ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+            ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
             let row_independent_delete_qualification = if stmt.source.is_none()
                 && !context
                     .mutation

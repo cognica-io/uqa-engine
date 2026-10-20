@@ -11,6 +11,7 @@ mod arguments;
 mod operators;
 mod properties;
 mod table;
+use std::sync::Arc;
 pub use table::InlineRoutineQuery;
 #[cfg(test)]
 mod tests;
@@ -272,7 +273,7 @@ impl RoutineInliningContext<'_> {
             .retain(|name, _| namespace.transition_relations.contains(name));
         snapshot.deferred_ctes.clear();
         snapshot.non_returning_ctes.clear();
-        snapshot.scalar_subqueries.clear();
+        snapshot.scalar_subqueries = Arc::default();
         let result = {
             // A SQL-standard body is inlined as it was stored; a body compiled from source text places its set-returning calls as a new statement does.
             let _placement = if matches!(definition.body, FunctionBody::Statements(_)) {

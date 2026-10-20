@@ -13,15 +13,16 @@ use crate::{
     RowSchema,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct BindingSnapshot {
     pub catalog: CatalogReadView,
     pub resolution: RelationNameResolution,
     pub ctes: BTreeMap<String, RowSchema>,
-    pub deferred_ctes: BTreeMap<String, CtePlan>,
+    pub deferred_ctes: BTreeMap<String, Arc<CtePlan>>,
     pub non_returning_ctes: BTreeSet<String>,
-    pub scalar_subqueries: Vec<QueryPlan>,
+    pub scalar_subqueries: Arc<[QueryPlan]>,
 }
 impl From<BindingContext<'_>> for BindingSnapshot {
     fn from(context: BindingContext<'_>) -> Self {
@@ -31,7 +32,7 @@ impl From<BindingContext<'_>> for BindingSnapshot {
             ctes: context.ctes,
             deferred_ctes: context.deferred_ctes,
             non_returning_ctes: context.non_returning_ctes,
-            scalar_subqueries: context.scalar_subqueries.to_vec(),
+            scalar_subqueries: context.scalar_subqueries.into(),
         }
     }
 }
@@ -59,6 +60,6 @@ impl BindingSnapshot {
         } else {
             self.non_returning_ctes.insert(plan.name.clone());
         }
-        self.deferred_ctes.insert(plan.name.clone(), plan);
+        self.deferred_ctes.insert(plan.name.clone(), Arc::new(plan));
     }
 }

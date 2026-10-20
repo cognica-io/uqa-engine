@@ -26,7 +26,7 @@ pub(super) fn dml_analysis_scope(
     for cte in ctes {
         scope.insert_deferred(cte.clone());
     }
-    scope.scalar_subqueries = subqueries.to_vec();
+    scope.scalar_subqueries = subqueries.into();
     Ok(scope)
 }
 

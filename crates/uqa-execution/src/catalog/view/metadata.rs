@@ -127,7 +127,7 @@ impl ViewRewriteCatalog for RetainedViewCatalog<'_> {
             ctes: BTreeMap::new(),
             deferred_ctes: BTreeMap::new(),
             non_returning_ctes: BTreeSet::new(),
-            scalar_subqueries: Vec::new(),
+            scalar_subqueries: Arc::default(),
         })
     }
     fn restored_view_catalog(

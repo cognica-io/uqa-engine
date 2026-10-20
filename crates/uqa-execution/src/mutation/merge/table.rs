@@ -146,7 +146,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     {
         ctes.set_command_cte_snapshot(Some(std::sync::Arc::new(context.snapshots.capture()?)));
     }
-    ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+    ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
     uqa_sql::semantics::merge::validate_merge_target_columns(assignment.columns, stmt)?;
     let statement_snapshot = ctes.command_cte_snapshot();
     let mut execute_read =

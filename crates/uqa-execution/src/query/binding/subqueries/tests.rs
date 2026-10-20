@@ -29,10 +29,7 @@ fn missing_scalar_slot_is_reported_before_missing_binding_metadata() {
 #[test]
 fn scalar_subquery_type_retains_outer_qualifiers_and_declared_parameter_types() {
     let mut scope = empty_scope();
-    scope
-        .scalar_subqueries
-        .push(query("SELECT outer_row.label"));
-    scope.scalar_subqueries.push(query("SELECT $1"));
+    scope.scalar_subqueries = vec![query("SELECT outer_row.label"), query("SELECT $1")].into();
     let outer = RowSchema::with_qualified_types(
         "outer_row",
         vec!["label".into()],

@@ -161,7 +161,7 @@ fn initialize<'a, S: Clone + Send + Sync + 'static>(
     for cte in inputs.ctes {
         scope.insert_deferred(cte.clone());
     }
-    scope.scalar_subqueries = inputs.subqueries.to_vec();
+    scope.scalar_subqueries = inputs.subqueries.into();
     let mut visible = scope.enter_visible_ctes(inputs.ctes.iter().map(|cte| cte.name.as_str()));
     let scope = &mut *visible;
     if let Some(source) = inputs.source {

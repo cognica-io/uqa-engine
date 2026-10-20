@@ -68,7 +68,7 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
                 },
             )?;
             let schema = uqa_sql::binding::overlay_outer_schema(&schema, outer);
-            scope.scalar_subqueries.clone_from(&block.subqueries);
+            scope.scalar_subqueries = block.subqueries.as_slice().into();
             if let Some(from) = &block.from {
                 super::ensure_select_privileges_for_query_block(block, from, scope)?;
             }
