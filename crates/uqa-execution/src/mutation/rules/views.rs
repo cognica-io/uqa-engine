@@ -504,16 +504,16 @@ pub fn prepare_view_rule_batches<S: Clone + 'static, R: super::RuleEventSource +
             },
         )?;
         let action_columns = batch.missing_action_row_columns()?;
-        if action_columns
-            .iter()
-            .any(|(old, new)| !old.is_empty() || !new.is_empty())
-        {
-            let supplemental_rows = row_indices.iter().zip(action_columns).map(
-                |(index, (old_columns, new_columns))| {
-                    let row = rows.event_row(*index)?;
-                    project_view_rule_row_sides(&projection, &row, &old_columns, &new_columns)
-                },
-            );
+        if action_columns.has_required_columns() {
+            let supplemental_rows =
+                row_indices
+                    .iter()
+                    .zip(action_columns.reader()?)
+                    .map(|(index, columns)| {
+                        let [old_columns, new_columns] = columns?;
+                        let row = rows.event_row(*index)?;
+                        project_view_rule_row_sides(&projection, &row, &old_columns, &new_columns)
+                    });
             batch.supplement_rows_from_iter(supplemental_rows)?;
         }
         for (local_index, row_index) in row_indices.iter().copied().enumerate() {

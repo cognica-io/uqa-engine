@@ -14,7 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Bound trigger transition-image capture and materialization by row bytes, preserving raw OLD/NEW values, late relation-type lookup, row order, named-column projection, absent images and repeatable reads.
 
-- Bound rewrite-rule matching and original-row suppression metadata with compact uniform states and spill-backed selections, preserving event order, duplicate ordinals, suppression unions and cancellation.
+- Bound rewrite-rule matching, original-row suppression and required-column metadata with compact uniform states and spill-backed selections, preserving event order, duplicate ordinals, suppression unions, lazy OLD/NEW projection and cancellation.
 
 - Rewrite-rule view INSERT retains completed input values and their assignment types, plus proposed row images, in bounded spill owners instead of complete payload vectors.
 

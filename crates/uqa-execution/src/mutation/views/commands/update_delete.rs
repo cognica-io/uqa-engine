@@ -525,12 +525,13 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
             rule_batch.set_action_qualification_count(update_qualification_count);
             if !original_query_survives {
                 let action_columns = rule_batch.matched_action_row_columns()?;
-                for (row, required) in pending.iter_mut().zip(&action_columns) {
+                for (row, required) in pending.iter_mut().zip(action_columns.reader()?) {
+                    let [required] = required?;
                     evaluate_view_update_assignments(
                         &read_context.mutation.preparation.referential.assignment,
                         &target,
                         stmt,
-                        Some(required),
+                        Some(&required),
                         row,
                         params,
                         &snapshot,
