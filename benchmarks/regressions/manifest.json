@@ -17983,6 +17983,45 @@
       "capability": "Bounded set-operation output",
       "workload": "512 left and 256 right 32KiB rows through UNION ALL, UNION DISTINCT, INTERSECT ALL and EXCEPT ALL under 64KiB work memory.",
       "invariant": "Exact output and bag multiplicities survive byte-sized batch boundaries, no batch exceeds two wide rows, and peak additional allocation remains below the fixed 2MiB ceiling."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_collection_retains_one_output_vector_and_one_input_batch",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/collection/tests.rs",
+      "capability": "Materialized query output retention",
+      "workload": "8,192 physical rows sharing a 16KiB value, arriving in 128-row batches.",
+      "invariant": "Peak retained allocation fits the output vector, its transient geometric-growth predecessor, one input batch and fixed metadata; every value and row survives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_collection_preserves_empty_and_late_error_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/collection/tests.rs",
+      "capability": "Materialized query output retention",
+      "workload": "Empty input and a 22012 failure after one successful input batch.",
+      "invariant": "The operator closes exactly once; a later error discards partial rows and preserves SQLSTATE.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_spill_batches_preserve_duplicate_positions_and_collations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/output/tests.rs",
+      "capability": "Materialized query output retention",
+      "workload": "256 single-row spill batches alternate the independently captured PostgreSQL duplicate-label/C/POSIX fixture.",
+      "invariant": "Complete positional values, both collations and existing x/x_1 compatibility labels survive incremental public conversion.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

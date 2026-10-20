@@ -136,3 +136,41 @@ fn materialized_query_outputs_preserve_postgresql_slots_and_collations() {
         assert_eq!(result.positional_rows.as_ref(), Some(&expected));
     }
 }
+
+#[test]
+fn materialized_spill_batches_preserve_duplicate_positions_and_collations() {
+    let mut cases: Vec<Reference> =
+        serde_json::from_str(include_str!("tests/materialized.json")).unwrap();
+    let reference = cases.remove(0);
+    let original = materialize(&reference, false);
+    let schema = original.internal_schema;
+    let expected: Vec<_> = expected_rows(&reference)
+        .into_iter()
+        .cycle()
+        .take(256)
+        .collect();
+    let mut buffer = crate::SpillBuffer::new(0);
+    for row in &expected {
+        buffer
+            .push(crate::Batch::from_physical_rows(
+                schema.clone(),
+                vec![PhysicalRow::from_values(row.clone())],
+            ))
+            .unwrap();
+    }
+    let result = QueryOutput {
+        columns: original.columns,
+        column_types: original.column_types,
+        internal_schema: schema.clone(),
+        rows: QueryRows::SharedSpill(buffer.into_shared(schema).unwrap()),
+    }
+    .into_sql_result()
+    .unwrap();
+    assert_eq!(result.positional_rows.as_ref(), Some(&expected));
+    assert_eq!(result.rows.len(), expected.len());
+    for (named, positional) in result.rows.iter().zip(&expected) {
+        assert_eq!(named.get("x"), Some(&positional[0]));
+        assert_eq!(named.get("x_1"), Some(&positional[1]));
+    }
+    check_schema(&result.row_schema(), &reference);
+}

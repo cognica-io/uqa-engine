@@ -63,6 +63,10 @@ impl ColumnarBatch {
     /// logical schema positions in order, so differently-valued duplicate
     /// columns remain distinct for wire and cursor consumers.
     pub fn from_batch(schema: &[String], batch: Batch) -> Self {
+        Self::from_borrowed_batch(schema, &batch)
+    }
+
+    pub(crate) fn from_borrowed_batch(schema: &[String], batch: &Batch) -> Self {
         let row_count = batch.rows.len();
         let positions = result_column_positions(&batch.schema, schema);
         let mut columns = schema
