@@ -26,6 +26,25 @@ pub(super) fn probe_equal(
     snapshot.probe_index_equal(table, owner, field.as_value_ref(), probe)
 }
 
+pub(super) fn visit_equal(
+    snapshot: &NativeSnapshot,
+    table: &str,
+    field: &ValueIndexKey,
+    probe: &super::probe::EqualityProbe,
+    visit: &mut dyn FnMut(DocId) -> bool,
+) -> Result<bool> {
+    let Some(owner) = snapshot.table_owner(table)? else {
+        return Ok(false);
+    };
+    let field = SQLiteValueIndexKey(field);
+    if !snapshot.contains_row(Family::BtreeIndexes, owner, &[field.as_value_ref()])?
+        || snapshot.contains_row(Family::BtreeIndexRepairs, owner, &[field.as_value_ref()])?
+    {
+        return Ok(false);
+    }
+    snapshot.visit_index_equal(table, owner, field.as_value_ref(), probe, visit)
+}
+
 use rusqlite::types::{FromSql, ValueRef};
 use uqa_storage::{document_store::identifiers::DocumentIdNamespace, KeyValueBatch, ValueIndexKey};
 

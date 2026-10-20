@@ -541,6 +541,17 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(None)
     }
 
+    /// Visit complete equality candidates in increasing identity order without retaining the result population. Returns false, without calling `visit`, for the same unsupported cases as `probe_btree_index_equal`. Returning false from `visit` stops a supported probe. The callback runs inside the provider read and must not reenter that provider.
+    fn visit_btree_index_equal(
+        &self,
+        _table: &str,
+        _field: &crate::ValueIndexKey,
+        _value: &Value,
+        _visit: &mut dyn FnMut(DocId) -> bool,
+    ) -> StorageBackendResult<bool> {
+        Ok(false)
+    }
+
     /// Read one previously evaluated key on the caller's retained transaction boundary, without loading the posting collection. An unbuilt index is distinct from an absent row and a stored NULL.
     fn read_btree_index_entry(
         &self,

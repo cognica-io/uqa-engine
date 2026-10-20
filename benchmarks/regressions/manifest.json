@@ -18074,6 +18074,32 @@
       "capability": "Bounded foreign-key child-image retention",
       "workload": "Public COPY updates then deletes one parent with 512 cascading children holding 32KiB each, under 64KiB query memory and 4MiB session retention.",
       "invariant": "Each command stays below the unchanged 8MiB allocation ceiling; returned parent identities, all child payload bytes, updated keys and final deletion match PostgreSQL 18."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "equality_candidate_visitors_keep_fixed_memory_and_stop_at_the_consumer",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/btree_index/probe/tests.rs",
+      "capability": "Bounded durable equality candidates",
+      "workload": "8,192 identical indexed keys under a fixed 256-byte storage-read allowance, followed by early consumer stop and cancellation.",
+      "invariant": "Every ID is visited once in order without retaining the complete population; the seven-row prefix uses fewer than 400 SQLite VM steps and cancellation emits no row."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_equality_visitors_merge_private_keys_and_decline_before_delivery",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/btree_index/probe/tests.rs",
+      "capability": "Native equality snapshot preservation",
+      "workload": "Committed equality hits combined with private insertions, key replacements, unsupported comparison domains, early stop and savepoint undo.",
+      "invariant": "Exact sorted identities match the selected private view, the first consumer stop is final, unsupported private domains emit no partial results, and rollback restores the original keys."
     }
   ]
 }

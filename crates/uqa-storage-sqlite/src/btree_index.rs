@@ -34,7 +34,7 @@ fn encode_doc_id(doc_id: DocId) -> Result<i64> {
     })
 }
 
-fn decode_doc_id(doc_id: i64) -> Result<DocId> {
+pub(crate) fn decode_doc_id(doc_id: i64) -> Result<DocId> {
     DocId::try_from(doc_id).map_err(|_| {
         SQLiteError::StorageBackend(format!(
             "invalid negative document id {doc_id} in persisted B-tree index"
@@ -187,6 +187,23 @@ impl SQLiteBTreeIndexStore {
         }
         // Unmanaged legacy writers cannot certify population maintenance. Their original hydration and sparse-repair path remains authoritative.
         Ok(None)
+    }
+
+    /// Visit ordered equality candidates without retaining their population. Unsupported snapshots or domains decline before invoking the callback.
+    pub fn visit_equal(
+        &self,
+        table: &str,
+        field: &uqa_storage::ValueIndexKey,
+        value: &Value,
+        visit: &mut dyn FnMut(DocId) -> bool,
+    ) -> Result<bool> {
+        let Some(snapshot) = self.conn.native_snapshot()? else {
+            return Ok(false);
+        };
+        let Some(probe) = probe::EqualityProbe::new(value, &snapshot.control)? else {
+            return Ok(false);
+        };
+        native::visit_equal(&snapshot, table, field, &probe, visit)
     }
 
     pub fn fields(&self, table: &str) -> Result<Vec<uqa_storage::ValueIndexKey>> {

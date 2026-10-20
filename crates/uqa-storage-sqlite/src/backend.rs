@@ -447,6 +447,19 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(SQLiteBTreeIndexStore::new(self.conn.clone()).probe_equal(table, field, value)?)
     }
 
+    fn visit_btree_index_equal(
+        &self,
+        table: &str,
+        field: &uqa_storage::ValueIndexKey,
+        value: &Value,
+        visit: &mut dyn FnMut(DocId) -> bool,
+    ) -> StorageBackendResult<bool> {
+        Ok(
+            SQLiteBTreeIndexStore::new(self.conn.clone())
+                .visit_equal(table, field, value, visit)?,
+        )
+    }
+
     fn read_btree_index_entry(
         &self,
         table: &str,

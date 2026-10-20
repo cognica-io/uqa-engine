@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Stream native equality candidates under the original snapshot and read allowance without collecting all matching identities.
+
 - Spill referential target identities and prepared cascade images while preserving selection, lock rechecks and writer admission.
 
 - Bound joined UPDATE identity capture, physical lock membership and prepared publication without moving snapshot or trigger boundaries.
