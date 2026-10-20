@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound joined UPDATE identity capture, physical lock membership and prepared publication without moving snapshot or trigger boundaries.
+
 - Retain complete view mutation inputs and pending OLD/NEW images in bounded spill owners without changing rule, trigger or assignment evaluation order.
 
 - Bound projected ordered scan batches by work memory while preserving source order, metadata and NULL slots.

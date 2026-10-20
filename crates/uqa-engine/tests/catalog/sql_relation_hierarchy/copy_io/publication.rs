@@ -113,6 +113,19 @@ fn copy_delete_publication_does_not_retain_complete_prepared_documents() {
 
 #[test]
 fn copy_update_publication_does_not_retain_complete_prepared_documents() {
+    check_update_publication(
+        "COPY (UPDATE update_output SET changed = 1 RETURNING body) TO STDOUT",
+    );
+}
+
+#[test]
+fn copy_joined_update_publication_does_not_retain_complete_prepared_documents() {
+    check_update_publication(
+        "COPY (UPDATE update_output SET changed = src.amount FROM (VALUES(1)) AS src(amount) RETURNING body) TO STDOUT",
+    );
+}
+
+fn check_update_publication(sql: &str) {
     let directory = tempfile::tempdir().unwrap();
     let engine = allocation_engine(&directory.path().join("update.db"));
     exec(
@@ -127,15 +140,7 @@ fn copy_update_publication_does_not_retain_complete_prepared_documents() {
         rows: 0,
     };
     let allocated = allocation_counter::measure(|| {
-        assert_eq!(
-            engine
-                .copy_to(
-                    "COPY (UPDATE update_output SET changed = 1 RETURNING body) TO STDOUT",
-                    &mut output,
-                )
-                .unwrap(),
-            512
-        );
+        assert_eq!(engine.copy_to(sql, &mut output).unwrap(), 512);
     });
     // Includes the 4MiB session allowance plus bounded query/spill overhead; excludes the complete old/new action images.
     assert!(allocated.bytes_max < 8 * 1024 * 1024, "{allocated:?}");
