@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Capture UPDATE and DELETE candidate identities through bounded snapshot pages before row effects; preserve frozen visibility, hierarchy order, tuple rechecks and typed resource errors.
+
 - Share bounded MVCC blocks across frozen snapshot point reads, avoiding repeated file reads during DELETE identity membership checks while preserving visibility, cancellation and cache admission.
 
 - Preserve spill-backed physical row membership when query work memory is smaller than one key, keeping mandatory run metadata and I/O scratch separately admitted instead of rejecting ordinary DELETE work.

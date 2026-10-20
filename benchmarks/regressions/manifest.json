@@ -17623,6 +17623,87 @@
       "invariant": "Failed admission preserves active readers and releases partial ownership; the frozen view still returns its original bytes, cancellation propagates and final ownership releases every charged byte."
     },
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "mutation_candidate_capture_bounds_borrowed_identity_pages_and_retention",
+      "source": "crates/uqa-execution/src/mutation/candidate_ids/tests.rs",
+      "workload": "Two 16,384-row target partitions, command insert/delete replacements, bounded borrowed pages and two sequential replays.",
+      "invariant": "At most 128 identities per source page, no whole-table enumeration or row payload reads, exact captured order and peak allocation below 512KiB with 64KiB work memory.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded mutation candidate identities"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "mutation_candidate_capture_bounds_controlled_identity_pages_and_retention",
+      "source": "crates/uqa-execution/src/mutation/candidate_ids/tests.rs",
+      "workload": "The same fixed source and command changes through controlled provider identity pages.",
+      "invariant": "Exact original targets survive later source changes; page count is linear, full-width IDs survive and additional peak allocation remains below 512KiB.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded mutation candidate identities"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "mutation_candidate_replay_preserves_repeated_and_full_width_identities",
+      "source": "crates/uqa-execution/src/mutation/candidate_ids/tests.rs",
+      "workload": "Zero, 64-byte and 64KiB work allowances, repeated targets, full-width table and document identities, and an empty command.",
+      "invariant": "Sequential replay preserves multiplicity, unsigned identity width and order, spilling at small allowances without an unbounded offset vector.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded mutation candidate identities"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "mutation_candidate_capture_and_replay_stop_on_cancellation",
+      "source": "crates/uqa-execution/src/mutation/candidate_ids/tests.rs",
+      "workload": "Cancellation before page capture, append, finalization and replay of already captured candidates.",
+      "invariant": "Cancellation keeps SQLSTATE 57014, does not enumerate the provider and cannot yield another target.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded mutation candidate identities"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "mutation_identity_pages_preserve_fixed_changes_and_partition_targets",
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/candidates.rs",
+      "workload": "257 partitioned rows in repeatable read with private insertion, deletion, identity relocation, whole-table UPDATE/DELETE, savepoint rollback and persistent reopen on all four providers.",
+      "invariant": "Frozen candidate pages preserve the independently checked PostgreSQL counts, sums and partition ownership through changes, rollback and reopen.",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Bounded mutation candidate identities"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deleted_row_membership_preserves_typed_memory_exhaustion",
+      "source": "crates/uqa-execution/src/mutation/deleted_rows/tests.rs",
+      "workload": "DELETE membership append and insert-if-absent under an exhausted storage allowance.",
+      "invariant": "Resource exhaustion preserves SQLSTATE 53200 through the existing typed storage error adapter instead of becoming XX000.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded mutation candidate identities"
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "explicit_memory_tier_limit_spills_with_admitted_metadata_and_survives_fork",

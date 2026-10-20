@@ -119,7 +119,7 @@ fn physical_key(table: &str, doc_id: DocId) -> Vec<u8> {
 }
 
 fn storage_error(error: VersionError) -> SQLError {
-    super::errors::dml_storage_error("deleted-row membership", error.into_storage_error())
+    crate::storage_errors::storage_error("deleted-row membership", &error.into_storage_error())
 }
 
 #[cfg(test)]

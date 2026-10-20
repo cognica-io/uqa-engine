@@ -7,6 +7,7 @@
 //! Physical mutation identities, row images, command overlays, and prepared action transport.
 
 pub mod candidate;
+mod candidate_ids;
 pub mod deferred;
 pub mod merge;
 pub mod overlay;
