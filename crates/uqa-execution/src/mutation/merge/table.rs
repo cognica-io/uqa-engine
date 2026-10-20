@@ -18,6 +18,7 @@ use super::{
     returning::{build_merge_returning_row, MergeReturningRow},
     targets::{lock_merge_targets, LockedMergeTargets},
 };
+use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::{
     mutation::{
@@ -62,7 +63,7 @@ use uqa_sql::{
         },
         returning::validate_returning_alias_relations,
     },
-    SQLError, SQLParam, SQLResult,
+    SQLError, SQLParam,
 };
 
 #[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
@@ -71,7 +72,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     stmt: &MergePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     use uqa_sql::expr::truthy;
     let mutation = &context.mutation;
     let preparation = mutation.preparation;
@@ -147,7 +148,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     uqa_sql::semantics::merge::validate_merge_target_columns(assignment.columns, stmt)?;
     let statement_snapshot = ctes.command_cte_snapshot();
     let mut execute_read =
-        |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
+        |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
             let read_referential = &read_context.mutation.preparation.referential;
             let read_assignment = read_referential.assignment;
             let analysis_scope =
@@ -208,7 +209,9 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 &mut ctes,
             )?;
             let mut affected = 0_u64;
-            let mut returning_rows = Vec::new();
+            let mut returning_rows = crate::mutation::returning::ReturningRows::new(
+                context.query.source.relational.runtime,
+            )?;
 
             let pair_schema = merge_pair_schema(source_rows.row_schema());
             let work_mem = crate::query::projection::physical_work_mem_bytes(
@@ -610,7 +613,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 &stmt.returning,
                                 params,
                                 &snapshot_ctes,
-                            )?);
+                            )?)?;
                         }
                         affected += u64::from(row_affected);
                         has_mutation = true;
@@ -694,7 +697,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 &stmt.returning,
                                 params,
                                 &snapshot_ctes,
-                            )?);
+                            )?)?;
                         }
                         affected += 1;
                         has_mutation = true;
@@ -874,7 +877,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 &stmt.returning,
                                 params,
                                 &snapshot_ctes,
-                            )?);
+                            )?)?;
                         }
                         affected += 1;
                         has_mutation = true;
@@ -961,7 +964,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                     affected,
                 );
             }
-            Ok(SQLResult::from_affected(affected))
+            Ok(MutationOutput::from_affected(affected))
         };
     let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),

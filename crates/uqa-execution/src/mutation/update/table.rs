@@ -5,6 +5,7 @@
 //
 
 //! Table UPDATE execution, with read snapshots selected after statement trigger dispatch.
+use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::mutation::{
     assignment::MutationAssignmentTarget,
@@ -23,7 +24,7 @@ use uqa_sql::{
         mutation_qualifiers::validate_dml_expression_qualifiers,
         returning::validate_returning_alias_relations,
     },
-    SQLError, SQLParam, SQLResult,
+    SQLError, SQLParam,
 };
 #[expect(
     clippy::too_many_lines,
@@ -34,7 +35,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
     stmt: &UpdatePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let (statement_commands, _running_statement) =
         statement_end::statement_commands(inherited_ctes);
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
@@ -174,7 +175,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
     }
     let mut statement_scope = None;
     let mut execute_read =
-        |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
+        |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
             let ctes = statement_scope.insert(read_context.mutation.scopes.command_scope(
                 stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,
@@ -308,7 +309,9 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 }
             }
             let mut affected = 0u64;
-            let mut returning_rows = Vec::new();
+            let mut returning_rows = crate::mutation::returning::ReturningRows::new(
+                context.query.source.relational.runtime,
+            )?;
             let cancel = context.query.source.relational.runtime.cancellation_token();
             // A non-volatile predicate can still use the accelerated candidate set. A VOLATILE predicate must stay in the row loop because PostgreSQL exposes each preceding logical rewrite before qualifying the next candidate.
             let predicate_is_volatile = stmt.predicate.as_ref().is_some_and(|predicate| {
@@ -593,7 +596,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     None,
                 )? {
                     if let Some(returning) = prepared.returning {
-                        returning_rows.push(returning);
+                        returning_rows.push(returning)?;
                     }
                     affected += u64::from(prepared.affected);
                     prepared_updates.push((
@@ -719,7 +722,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                         None,
                     )? {
                         if let Some(returning) = prepared.returning {
-                            returning_rows.push(returning);
+                            returning_rows.push(returning)?;
                         }
                         affected += u64::from(prepared.affected);
                         prepared_updates.push((
@@ -788,7 +791,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     affected,
                 );
             }
-            Ok(SQLResult::from_affected(affected))
+            Ok(MutationOutput::from_affected(affected))
         };
     let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),

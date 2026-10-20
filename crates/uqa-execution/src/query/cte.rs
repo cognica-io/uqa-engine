@@ -13,7 +13,6 @@ use super::{
     CteScope,
 };
 use std::collections::BTreeMap;
-use uqa_core::Value;
 use uqa_sql::{
     plan::{CtePlan, CtePlanBody},
     semantics::{cte_references_own_name, order_cte_plans},
@@ -145,19 +144,11 @@ fn execute_command_cte<S: Clone>(
     scope: &CteScope<S>,
 ) -> Result<QueryOutput, SQLError> {
     let result = context.queries.execute_command(command, params, scope)?;
-    let schema = crate::RowSchema::with_types(result.columns.clone(), result.column_types.clone());
-    let rows = (0..result.rows.len())
-        .map(|row| {
-            let values = (0..result.columns.len())
-                .map(|column| result.value_at(row, column).cloned().unwrap_or(Value::Null))
-                .collect();
-            crate::PhysicalRow::from_values(values)
-        })
-        .collect();
+    let columns = result.schema.columns().to_vec();
     collect_query_operator(
         context.runtime,
-        result.columns,
-        Box::new(crate::TableScan::from_physical_rows(schema, rows)),
+        columns,
+        result.into_operator(),
         QueryOutputMode::SharedSpill,
     )
 }

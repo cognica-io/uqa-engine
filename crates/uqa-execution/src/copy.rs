@@ -201,7 +201,7 @@ pub fn copy_to(
     Ok(row_count)
 }
 
-fn write_statement_output(
+pub(crate) fn write_statement_output(
     result: StatementOutput,
     options: &uqa_sql::copy::CopyOptions,
     output: &mut impl Write,
@@ -214,6 +214,20 @@ fn write_statement_output(
             write_copy_result(&result, options, output, engine, control)?;
             Ok(count)
         }
+        StatementOutput::Mutation(result) => {
+            let count = copy_row_count(result.row_count())?;
+            let schema = result.schema.clone();
+            write_copy_batches(
+                schema.columns(),
+                schema.column_types(),
+                result.into_batches(),
+                options,
+                output,
+                engine,
+                control,
+            )?;
+            Ok(count)
+        }
         StatementOutput::Query(result) => {
             let QueryRows::SharedSpill(rows) = result.rows else {
                 return Err(SQLError::Internal(
@@ -221,30 +235,51 @@ fn write_statement_output(
                 ));
             };
             let count = copy_row_count(rows.rows())?;
-            let mut encoder = CopyEncoder::new(options, output, engine, *control)?;
-            encoder.write_header(&result.columns)?;
-            let mut rows = rows
+            let rows = rows
                 .into_reader()
                 .map_err(crate::physical::physical_exec_error)?;
-            loop {
-                control.check()?;
-                let Some(batch) = rows.next() else { break };
-                let batch = batch.map_err(crate::physical::physical_exec_error)?;
-                for row in batch.rows {
-                    let row = crate::OwnedPhysicalRow::new(batch.schema.clone(), row);
-                    let view = row.view();
-                    encoder.write_row((0..result.columns.len()).map(|column| {
-                        (
-                            view.value_at(column),
-                            result.column_types.get(column).and_then(Option::as_ref),
-                        )
-                    }))?;
-                }
-            }
-            encoder.finish()?;
+            write_copy_batches(
+                &result.columns,
+                &result.column_types,
+                rows.map(|batch| batch.map_err(crate::physical::physical_exec_error)),
+                options,
+                output,
+                engine,
+                control,
+            )?;
             Ok(count)
         }
     }
+}
+
+fn write_copy_batches(
+    columns: &[String],
+    column_types: &[Option<uqa_sql::ast::ColumnType>],
+    mut batches: impl Iterator<Item = Result<crate::Batch, SQLError>>,
+    options: &uqa_sql::copy::CopyOptions,
+    output: &mut impl Write,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let mut encoder = CopyEncoder::new(options, output, engine, *control)?;
+    encoder.write_header(columns)?;
+    loop {
+        control.check()?;
+        let Some(batch) = batches.next() else { break };
+        let batch = batch?;
+        for row in batch.rows {
+            let row = crate::OwnedPhysicalRow::new(batch.schema.clone(), row);
+            let view = row.view();
+            encoder.write_row((0..columns.len()).map(|column| {
+                (
+                    view.value_at(column),
+                    column_types.get(column).and_then(Option::as_ref),
+                )
+            }))?;
+        }
+    }
+    encoder.finish()?;
+    Ok(())
 }
 
 fn copy_row_count(rows: usize) -> Result<u64, SQLError> {

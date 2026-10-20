@@ -11,9 +11,10 @@ use super::{
     validate_dml_expression_qualifiers, validate_returning_alias_relations, view_document,
     view_qualification_references_target, with_mutation_snapshot, BTreeSet, CteScope, DeletePlan,
     DmlReturningShape, MutationStatementContext, OwnedPhysicalRow, ReturningValueProjectionRow,
-    SQLError, SQLParam, SQLResult, ScalarExpr, SourceOutputPruning, TriggerViewChecks, UpdatePlan,
-    Value, ViewDmlTarget,
+    SQLError, SQLParam, ScalarExpr, SourceOutputPruning, TriggerViewChecks, UpdatePlan, Value,
+    ViewDmlTarget,
 };
+use crate::mutation::output::MutationOutput;
 use crate::mutation::{
     assignment::MutationAssignmentContext, rows::context::MutationExpressionContext,
 };
@@ -192,7 +193,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
     stmt: &UpdatePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let target = resolve_view_target(context.mutation.rules.views.rewrite, &stmt.table)?;
     let assigned_columns = stmt
         .assignments
@@ -265,7 +266,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
     }
     let mut statement_scope = None;
     let mut execute_read =
-        |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
+        |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
             let ctes = statement_scope.insert(read_context.mutation.scopes.command_scope(
                 stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,
@@ -365,7 +366,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                         ctes,
                         supplemental_schema: None,
                     },
-                    Vec::new(),
+                    crate::mutation::returning::ReturningRows::default(),
                     0,
                 );
             }
@@ -640,7 +641,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                             .as_ref()
                             .map(crate::SharedSpill::row_schema),
                     },
-                    Vec::new(),
+                    crate::mutation::returning::ReturningRows::default(),
                     affected,
                 );
             }
@@ -668,7 +669,9 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 scope: ctes,
             };
             let mut affected = 0_u64;
-            let mut returning_rows = Vec::new();
+            let mut returning_rows = crate::mutation::returning::ReturningRows::new(
+                context.query.source.relational.runtime,
+            )?;
             for (index, row) in pending.into_iter().enumerate() {
                 if rule_batch.suppresses(index) {
                     continue;
@@ -701,7 +704,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                         &stmt.returning,
                         params,
                         ctes,
-                    )?);
+                    )?)?;
                 }
             }
             crate::mutation::statement_end::end_command(

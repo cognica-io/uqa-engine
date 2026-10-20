@@ -45,6 +45,22 @@ The first transaction-publication commit also passes all 508 selected local tran
 
 Final SQL/Execution/Engine library-and-test Clippy with denied warnings passes for the SELECT-spool change, as do formatting, dependency/ownership and harness checks. The unrelated session-index fixture failure in integrated-source performance CI is tracked in #1143 and is being corrected without weakening its assertions.
 
+## Bounded mutation RETURNING accumulation
+
+Execution now retains projected mutation outputs in its existing spill format instead of a complete physical-row vector. Each selected value detaches from unselected OLD/NEW fragments, duplicate column positions remain distinct, and output order is unchanged. Pending and buffered batches split the work-memory encoded-byte budget; one indivisible row and encoding scratch can coexist. INSERT, INSERT SELECT, UPDATE, UPDATE FROM, DELETE, MERGE, writable views and rule output projection use the same owner. The existing final binder still supplies the public descriptor, including empty results.
+
+Three local owner checks pass: a 32MiB output remains below 1MiB peak allocation with a 64KiB producer budget and exact hash/order/count; projecting integer IDs releases sixty-four 1.05MiB source fragments; cancellation and spill creation errors clean up owned files without altering unrelated files. Six public COPY mutation statements have independently verified bytes from Docker PostgreSQL 18.4, covering large text, duplicate labels, OLD/NEW values, MERGE actions and empty headers. All 205 selected local public mutation, rule, view, row-lock and COPY cases pass, including the new four-provider spill cases and durable reopen. Strict Execution/Engine library-and-test Clippy passes, together with ownership/dependency, single-harness and inventory checks (1,191 checks / 1,700 required cases).
+
+This unit removes producer accumulation only. Final command `SQLResult` vectors, data-modifying CTE handoff and rule-event capture still require bounded internal delivery before #714 can close. No complete-export memory or new timing acceptance is claimed; automatic Linux/macOS checks remain required for the delivered source.
+
+## Completed mutation output and modifying CTE handoff
+
+The completed mutation now carries its bound descriptor, affected count and sealed batch reader. Execution passes that owner directly to COPY and to the existing modifying-CTE collector, eliminating the final command-result vector and the CTE's second full physical-row vector for ordinary DML. The public SQL API alone requests named/positional result materialization. Engine's command boundary and CTE capability forward this native output type; they do not implement row delivery. Query and command COPY use the same incremental batch encoder. Virtual-relation validation, privilege subjects, completed snapshots and the enclosing transaction boundary remain in their original order.
+
+The 32MiB owner regression now includes both production and actual COPY delivery under its unchanged 1MiB allocation ceiling, with exact bytes/hash/order/count, one flush and full cleanup. Cancellation is checked both between batches and within an already decoded row batch. Seven mutation/CTE outputs independently match Docker PostgreSQL 18.4. All 216 selected local Execution/Engine mutation, COPY, modifying-CTE, rule, view and row-lock cases pass, including all four providers and durable reopening. Strict Execution/Engine library-and-test Clippy, workspace formatting, dependency/ownership, single-harness and inventory checks pass (1,191 checks / 1,700 required cases). Actual automatic Linux/macOS regression results remain required for this source.
+
+Rewrite-rule action SQL results and captured rule row images remain separate materialized intermediates. They are explicitly outside this delivered bound and remain required work for #714; the issue is not closed by ordinary mutation/CTE handoff.
+
 ## Upstream schema integration
 
 The COPY publication branch incorporates the completed lexical-lineage and correlated-schema changes from `6ebc2289b`, including the regression fixture dependency-reuse correction. The only overlapping paths were HISTORY and the regression inventory; every independent source file remains byte-identical to its originating unit. The three-way inventory merge preserves both sets of assertions (1,191 checks / 1,697 required cases), and all 33 regression-runner tests pass with process inspection enabled. Automatic combined-source results remain required before merge.

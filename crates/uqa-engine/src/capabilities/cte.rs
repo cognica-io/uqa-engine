@@ -12,7 +12,7 @@ use uqa_execution::query::{
     output::QueryOutput,
     statement::consumer::QueryOutputMode,
 };
-use uqa_sql::{plan::QueryPlan, SQLError, SQLParam, SQLResult, ScalarExpr};
+use uqa_sql::{plan::QueryPlan, SQLError, SQLParam, ScalarExpr};
 
 impl Engine {
     pub(crate) fn cte_execution_context(&self) -> CteExecutionContext<'_, StatementReadSnapshot> {
@@ -60,7 +60,7 @@ impl CteBodyExecutor<StatementReadSnapshot> for Engine {
         command: &uqa_planner::CommandPlan,
         params: &[SQLParam],
         ctes: &CteScope,
-    ) -> Result<SQLResult, SQLError> {
+    ) -> Result<uqa_execution::mutation::output::MutationOutput, SQLError> {
         uqa_execution::mutation::entry::execute_cte_command(
             &self.mutation_entry_context(),
             command,

@@ -5,6 +5,7 @@
 //
 
 //! Execute view mutation rows, rewrite rules, and INSTEAD OF triggers.
+use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::mutation::{
     assignment::MutationAssignmentContext,
@@ -264,7 +265,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
     implicit_columns: bool,
     params: &[SQLParam],
     ctes: &CteScope<S>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let snapshot = ctes.returning_statement_snapshot_scope();
     let mut cached_rows = Vec::with_capacity(stmt.rows.len());
     for expressions in &stmt.rows {
@@ -404,7 +405,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
             ctes,
             supplemental_schema: None,
         },
-        Vec::new(),
+        crate::mutation::returning::ReturningRows::default(),
         outcome.affected_rows,
     )
 }
@@ -412,11 +413,11 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
 fn finish_view_dml<S: Clone + 'static>(
     returning: &crate::mutation::returning::ReturningExecutionContext<'_, S>,
     shape: DmlReturningShape<'_, S>,
-    returning_rows: Vec<OwnedPhysicalRow>,
+    returning_rows: crate::mutation::returning::ReturningRows,
     affected: u64,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     if shape.returning.is_empty() {
-        return Ok(SQLResult::from_affected(affected));
+        return Ok(MutationOutput::from_affected(affected));
     }
     dml_returning_result(*returning, shape, returning_rows, affected)
 }

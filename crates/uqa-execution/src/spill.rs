@@ -858,7 +858,7 @@ pub struct SpillRows<I> {
 }
 
 impl<I> SpillRows<I> {
-    fn new(batches: I) -> Self {
+    pub(crate) fn new(batches: I) -> Self {
         Self {
             batches,
             current_schema: None,

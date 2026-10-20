@@ -5,6 +5,7 @@
 //
 
 //! Physical capture and outer projection of a rule action's RETURNING rows.
+use crate::mutation::output::MutationOutput;
 use crate::{
     mutation::{
         returning::{
@@ -40,7 +41,7 @@ impl RuleReturningResult {
         self,
         context: ReturningExecutionContext<'_, S>,
         shape: DmlReturningShape<'_, S>,
-    ) -> Result<SQLResult, SQLError> {
+    ) -> Result<MutationOutput, SQLError> {
         if self.current.len() != self.old.len()
             || self.current.len() != self.new.len()
             || self.current.len() != self.contexts.len()
@@ -50,7 +51,7 @@ impl RuleReturningResult {
                     .into(),
             ));
         }
-        let mut rows = Vec::with_capacity(self.current.len());
+        let mut rows = crate::mutation::returning::ReturningRows::new(context.relational.runtime)?;
         for index in 0..self.current.len() {
             rows.push(build_returning_value_row(
                 context,
@@ -66,7 +67,7 @@ impl RuleReturningResult {
                 shape.returning,
                 shape.params,
                 shape.ctes,
-            )?);
+            )?)?;
         }
         dml_returning_result(context, shape, rows, self.affected_rows)
     }

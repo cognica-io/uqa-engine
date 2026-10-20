@@ -5,6 +5,7 @@
 //
 
 //! DELETE execution with snapshot qualification, tuple rechecks, and deferred publication.
+use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::mutation::{
     candidate::{MutationCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
@@ -24,7 +25,7 @@ use uqa_sql::{
         mutation_qualifiers::validate_dml_expression_qualifiers,
         returning::validate_returning_alias_relations,
     },
-    SQLError, SQLParam, SQLResult,
+    SQLError, SQLParam,
 };
 mod qualification;
 use qualification::{
@@ -40,7 +41,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
     stmt: &DeletePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let privilege_expressions =
         uqa_sql::semantics::mutation_privileges::ensure_delete_target_privileges(
             context.mutation.privileges,
@@ -133,12 +134,14 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
     }
     let mut statement_scope = None;
     let mut execute_read =
-        |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
+        |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
             let mut affected = 0u64;
             let cancel = context.query.source.relational.runtime.cancellation_token();
             let mut qualified_targets: Vec<MutationCandidate<Option<crate::OwnedPhysicalRow>>> =
                 Vec::new();
-            let mut returning_rows = Vec::new();
+            let mut returning_rows = crate::mutation::returning::ReturningRows::new(
+                context.query.source.relational.runtime,
+            )?;
             let ctes = statement_scope.insert(read_context.mutation.scopes.command_scope(
                 stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,
@@ -645,7 +648,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                             &stmt.returning,
                             params,
                             &snapshot_ctes,
-                        )?);
+                        )?)?;
                     }
                     prepared_deletes.push(PreparedMutationAction::Delete(prepared));
                 }
@@ -706,7 +709,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                     affected,
                 );
             }
-            Ok(SQLResult::from_affected(affected))
+            Ok(MutationOutput::from_affected(affected))
         };
     let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),

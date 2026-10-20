@@ -6,6 +6,7 @@
 
 //! MERGE pairing and INSTEAD OF trigger execution for view targets.
 use super::codec::{merge_source_index_value, MergePairKind};
+use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::mutation::{
     assignment::MutationAssignmentContext,
@@ -24,7 +25,7 @@ use uqa_sql::{
     semantics::view_mutation::{
         resolve_view_target, target_columns, ViewMutationTarget as ViewDmlTarget,
     },
-    SQLError, SQLParam, SQLResult, ScalarExpr,
+    SQLError, SQLParam, ScalarExpr,
 };
 mod codec;
 use codec::{decode_view_merge_pair, push_view_merge_pair, view_merge_pair_schema, ViewMergePair};
@@ -523,14 +524,15 @@ fn build_action_returning<S: Clone + 'static>(
 fn execute_view_merge_pairs<S: Clone + 'static>(
     context: &ViewMergeActionContext<'_, S>,
     pairings: &crate::SharedSpill,
-) -> Result<(u64, Vec<OwnedPhysicalRow>), SQLError> {
+) -> Result<(u64, crate::mutation::returning::ReturningRows), SQLError> {
     let null_target = target_row(
         context.target,
         &context.plan.target_qualifier,
         &vec![Value::Null; context.target.columns.len()],
     )?;
     let mut affected = 0_u64;
-    let mut returning = Vec::new();
+    let mut returning =
+        crate::mutation::returning::ReturningRows::new(context.returning.relational.runtime)?;
     for pair in pairings
         .read_rows()
         .map_err(crate::physical::physical_exec_error)?
@@ -560,7 +562,7 @@ fn execute_view_merge_pairs<S: Clone + 'static>(
         let result = execute_selected_action(context, &pair, action)?;
         affected += u64::from(result.affected);
         if let Some(row) = result.returning {
-            returning.push(row);
+            returning.push(row)?;
         }
     }
     Ok((affected, returning))
@@ -572,7 +574,7 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
     plan: &MergePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let mutation = &context.mutation;
     let assignment = mutation.preparation.referential.assignment;
     let triggers = &mutation.preparation.referential.triggers;
@@ -595,7 +597,7 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
         begin_view_merge_statement(inherited_ctes, triggers, &events, &target)?;
     let mut statement_scope = None;
     let mut execute_read =
-        |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
+        |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
             let ctes = statement_scope.insert(view_merge_scope(
                 context,
                 read_context,

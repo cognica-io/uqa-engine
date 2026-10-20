@@ -35,6 +35,67 @@ fn copy_engine(provider: usize, path: &std::path::Path) -> Engine {
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn copy_spilled_returning_preserves_values_and_row_images(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("returning-spill.db");
+    let engine = copy_engine(provider, &path);
+    exec(
+        &engine,
+        "CREATE TABLE returning_spill (id INTEGER PRIMARY KEY, body TEXT)",
+    );
+    engine.set_query_memory_limit(Some(1024));
+    let body = "x".repeat(4096);
+    let inserted = copy_to_string(&engine, "COPY (INSERT INTO returning_spill SELECT n, repeat('x', 4096) FROM generate_series(1, 8) AS s(n) RETURNING id AS item, body AS item) TO STDOUT WITH (FORMAT csv, HEADER)");
+    let mut expected = String::from("item,item\n");
+    for id in 1..=8 {
+        use std::fmt::Write;
+        writeln!(expected, "{id},{body}").unwrap();
+    }
+    assert_eq!(inserted, expected);
+    assert_eq!(copy_to_string(&engine, "COPY (WITH changed AS (UPDATE returning_spill SET body = body RETURNING id AS item, body AS item) SELECT * FROM changed ORDER BY 1) TO STDOUT WITH (FORMAT csv, HEADER)"), expected);
+    let updated = copy_to_string(&engine, "COPY (UPDATE returning_spill SET body = body || '!' RETURNING old.body AS item, new.body AS item) TO STDOUT WITH (FORMAT csv)");
+    assert_eq!(updated, format!("{body},{body}!\n").repeat(8));
+    let from = copy_to_string(&engine, "COPY (UPDATE returning_spill AS t SET body = body || '?' FROM (VALUES (1)) AS s(id) WHERE t.id = s.id RETURNING old.body, new.body) TO STDOUT WITH (FORMAT csv)");
+    assert_eq!(from, format!("{body}!,{body}!?\n"));
+    let merged = copy_to_string(&engine, "COPY (MERGE INTO returning_spill AS t USING (VALUES (1), (9)) AS s(id) ON t.id = s.id WHEN MATCHED THEN UPDATE SET body = 'merged' WHEN NOT MATCHED THEN INSERT VALUES (s.id, repeat('y', 4096)) RETURNING merge_action(), old.body, new.body) TO STDOUT WITH (FORMAT csv)");
+    let mut actual = merged.lines().collect::<Vec<_>>();
+    actual.sort_unstable();
+    assert_eq!(
+        actual,
+        [
+            format!("INSERT,,{}", "y".repeat(4096)),
+            format!("UPDATE,{body}!?,merged")
+        ]
+    );
+    let deleted = copy_to_string(&engine, "COPY (DELETE FROM returning_spill AS t USING (VALUES (9)) AS s(id) WHERE t.id = s.id RETURNING old.body, new.body) TO STDOUT WITH (FORMAT csv)");
+    assert_eq!(deleted, format!("{},\n", "y".repeat(4096)));
+    assert_eq!(copy_to_string(&engine, "COPY (DELETE FROM returning_spill WHERE id < 0 RETURNING id AS item, body AS item) TO STDOUT WITH (FORMAT csv, HEADER)"), "item,item\n");
+    drop(engine);
+    if provider != 0 {
+        let reopened = copy_engine(provider, &path);
+        assert_eq!(
+            reopened
+                .sql("SELECT body FROM returning_spill WHERE id = 1", &[])
+                .unwrap()
+                .rows[0]["body"],
+            Value::Str("merged".into())
+        );
+        assert_eq!(
+            reopened
+                .sql("SELECT * FROM returning_spill", &[])
+                .unwrap()
+                .rows
+                .len(),
+            8
+        );
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn copy_output_failure_rolls_back_the_implicit_mutation(#[case] provider: usize) {
     struct Sink {
         mode: &'static str,
