@@ -113,6 +113,19 @@ fn copy_delete_publication_does_not_retain_complete_prepared_documents() {
 
 #[test]
 fn copy_update_publication_does_not_retain_complete_prepared_documents() {
+    check_update_publication(
+        "COPY (UPDATE update_output SET changed = 1 RETURNING body) TO STDOUT",
+    );
+}
+
+#[test]
+fn copy_joined_update_publication_does_not_retain_complete_prepared_documents() {
+    check_update_publication(
+        "COPY (UPDATE update_output SET changed = src.amount FROM (VALUES(1)) AS src(amount) RETURNING body) TO STDOUT",
+    );
+}
+
+fn check_update_publication(sql: &str) {
     let directory = tempfile::tempdir().unwrap();
     let engine = allocation_engine(&directory.path().join("update.db"));
     exec(
@@ -127,15 +140,7 @@ fn copy_update_publication_does_not_retain_complete_prepared_documents() {
         rows: 0,
     };
     let allocated = allocation_counter::measure(|| {
-        assert_eq!(
-            engine
-                .copy_to(
-                    "COPY (UPDATE update_output SET changed = 1 RETURNING body) TO STDOUT",
-                    &mut output,
-                )
-                .unwrap(),
-            512
-        );
+        assert_eq!(engine.copy_to(sql, &mut output).unwrap(), 512);
     });
     // Includes the 4MiB session allowance plus bounded query/spill overhead; excludes the complete old/new action images.
     assert!(allocated.bytes_max < 8 * 1024 * 1024, "{allocated:?}");
@@ -146,6 +151,59 @@ fn copy_update_publication_does_not_retain_complete_prepared_documents() {
             "COPY (SELECT count(*), min(changed), max(changed) FROM update_output) TO STDOUT"
         ),
         "512\t1\t1\n"
+    );
+}
+
+#[test]
+fn copy_referential_actions_do_not_retain_complete_child_images() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = allocation_engine(&directory.path().join("cascade.db"));
+    exec(
+        &engine,
+        "CREATE TABLE cascade_parent(id INTEGER PRIMARY KEY);
+        CREATE TABLE cascade_child(parent_id INTEGER REFERENCES cascade_parent(id)
+          ON UPDATE CASCADE ON DELETE CASCADE, id INTEGER, body TEXT,
+          PRIMARY KEY(parent_id,id));
+        INSERT INTO cascade_parent VALUES(1);
+        INSERT INTO cascade_child SELECT 1,n,repeat('x',32768) FROM generate_series(1,512) AS s(n)",
+    );
+    engine.set_query_memory_limit(Some(64 * 1024));
+    let updated = allocation_counter::measure(|| {
+        assert_eq!(
+            copy_to_string(
+                &engine,
+                "COPY (UPDATE cascade_parent SET id=2 RETURNING id) TO STDOUT",
+            ),
+            "2\n"
+        );
+    });
+    // The same 8MiB ceiling includes session retention and bounded query state, never complete child images.
+    assert!(updated.bytes_max < 8 * 1024 * 1024, "{updated:?}");
+    assert_eq!(
+        copy_to_string(
+            &engine,
+            "COPY (SELECT count(*),sum(id),min(parent_id),max(parent_id),
+             min(length(body)),max(length(body)),bool_and(body=repeat('x',32768))
+             FROM cascade_child) TO STDOUT",
+        ),
+        "512\t131328\t2\t2\t32768\t32768\tt\n"
+    );
+    let deleted = allocation_counter::measure(|| {
+        assert_eq!(
+            copy_to_string(
+                &engine,
+                "COPY (DELETE FROM cascade_parent RETURNING id) TO STDOUT",
+            ),
+            "2\n"
+        );
+    });
+    assert!(deleted.bytes_max < 8 * 1024 * 1024, "{deleted:?}");
+    assert_eq!(
+        copy_to_string(
+            &engine,
+            "COPY (SELECT count(*) FROM cascade_child) TO STDOUT"
+        ),
+        "0\n"
     );
 }
 

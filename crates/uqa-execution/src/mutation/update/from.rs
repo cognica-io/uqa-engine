@@ -12,7 +12,10 @@ use crate::mutation::{
     candidate::{MutationRewriteCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     command_scope::MutationOverlayScope,
     expressions::MutationPredicate,
-    prepared::PreparedMutationAction,
+    prepared::{
+        decode_prepared_mutation_action_row, prepared_mutation_action_schema,
+        push_prepared_mutation_action, PreparedMutationAction,
+    },
     returning::DmlReturningShape,
     rows::join_rows as dml_join_rows,
     statement_end,
@@ -106,20 +109,16 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         .constraints
         .catalog
         .hierarchy_scan_tables(&target, stmt.include_descendants)?;
-    let mut target_rows = Vec::new();
-    for table in target_tables {
-        target_rows.extend(
-            read_context
-                .mutation
-                .preparation
-                .referential
-                .constraints
-                .reads
-                .table_doc_ids(&table)?
-                .into_iter()
-                .map(|doc_id| (table.clone(), doc_id)),
-        );
+    let work_mem = context.mutation.rules.rules.memory.work_mem_bytes()?;
+    let mut target_rows =
+        crate::mutation::candidate_ids::CandidateIds::new(work_mem, cancel.clone());
+    for (table_index, table) in target_tables.iter().enumerate() {
+        let tables = read_context.query.source.scans.tables;
+        let source = tables.table(table)?;
+        let changes = tables.command_overlay_changes(table)?.unwrap_or_default();
+        target_rows.capture_table(table_index, source.read_documents().as_ref(), &changes)?;
     }
+    let target_rows = target_rows.finish()?;
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
     let qualification_references_target =
         uqa_sql::semantics::mutation_qualifiers::qualification_references_target(
@@ -150,10 +149,19 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         context.mutation.rules.rules.memory.work_mem_bytes()?,
         context.mutation.rules.rules.cancellation.clone(),
     );
-    let mut prepared_updates = Vec::new();
+    let action_schema = prepared_mutation_action_schema();
+    let mut prepared_updates = crate::SpillBuffer::new(work_mem);
     let mut events = crate::mutation::events::MutationEventQueue::default();
-    let mut locked_ids = std::collections::BTreeSet::new();
-    for (storage_table, doc_id) in target_rows {
+    let mut locked_ids =
+        super::locked_rows::LockedRows::new(work_mem, cancel.clone(), "UPDATE locked rows");
+    for candidate_id in target_rows.read_rows()? {
+        let (table_index, doc_id) = candidate_id?;
+        let storage_table = target_tables
+            .get(table_index)
+            .ok_or_else(|| {
+                SQLError::Internal("mutation candidate has an invalid table ordinal".into())
+            })?
+            .clone();
         cancel.check()?;
         let Some(candidate) = read_context
             .mutation
@@ -213,7 +221,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         }
         let storage_table = identity.table;
         let doc_id = identity.doc_id;
-        if !locked_ids.insert((storage_table.clone(), doc_id)) {
+        if !locked_ids.insert_if_absent(&storage_table, doc_id)? {
             continue;
         }
         if recheck {
@@ -352,7 +360,11 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                 prepared.after_row_events,
                 &context.mutation.preparation.referential.triggers,
             )?;
-            prepared_updates.push(PreparedMutationAction::Rewrite(prepared.rewrite));
+            push_prepared_mutation_action(
+                &mut prepared_updates,
+                &action_schema,
+                PreparedMutationAction::Rewrite(prepared.rewrite),
+            )?;
         }
     }
     let qualified_published = overlay.finish();
@@ -475,16 +487,27 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                 prepared.after_row_events,
                 &context.mutation.preparation.referential.triggers,
             )?;
-            prepared_updates.push(PreparedMutationAction::Rewrite(prepared.rewrite));
+            push_prepared_mutation_action(
+                &mut prepared_updates,
+                &action_schema,
+                PreparedMutationAction::Rewrite(prepared.rewrite),
+            )?;
         }
     }
     let published = overlay.finish();
-    if !prepared_updates.is_empty() {
+    if prepared_updates.rows() != 0 {
         context.mutation.state.prepare_writer()?;
         let mut publication = statement_end::publication_batch(statement_commands)
             .with_published(qualified_published)
             .with_published(published);
-        for action in prepared_updates {
+        for row in prepared_updates
+            .drain_rows()
+            .map_err(crate::physical::physical_exec_error)?
+        {
+            cancel.check()?;
+            let action = decode_prepared_mutation_action_row(
+                row.map_err(crate::physical::physical_exec_error)?,
+            )?;
             crate::mutation::publication::publish_prepared_mutation_action(
                 context.mutation.publication,
                 action,

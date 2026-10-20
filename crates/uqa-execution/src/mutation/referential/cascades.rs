@@ -8,14 +8,17 @@
 
 use super::{
     apply_set_action_to_child, foreign_key_comparison_types, lock_referencing_child,
-    prepare_document_delete, prepare_referential_document_rewrite, referencing_rows, BTreeSet,
+    prepare_document_delete_excluding, prepare_referential_document_rewrite, referencing_rows,
     ForeignKey, ForeignKeyAction, ForeignKeyComparison, PhysicalDocumentIdentity,
     PreparedDocumentRewrite, ReferencingChildLock, ReferentialContext,
     ReferentialRewritePreparation, SQLError, Value,
 };
 use crate::mutation::{
     command_scope::MutationOverlayScope,
-    prepared::PreparedMutationAction,
+    prepared::{
+        decode_prepared_mutation_action_row, prepared_mutation_action_schema,
+        push_prepared_mutation_action, PreparedMutationAction,
+    },
     publication::{
         finish_mutation_publication, publish_prepared_mutation_action, InsertedIdentity,
     },
@@ -115,24 +118,29 @@ pub(super) fn run_referential_action<S: Clone + 'static>(
         kind,
     )?;
     let deleting = statement.event == TriggerEvent::Delete;
-    let deleted = if deleting {
-        referencing
-            .iter()
-            .map(|(child, _)| (child.table.clone(), child.doc_id))
-            .collect::<BTreeSet<_>>()
-    } else {
-        BTreeSet::new()
-    };
-    let mut prepared = Vec::new();
+    let work_mem = referential.constraints.memory.work_mem_bytes()?;
+    let cancellation = referential.triggers.runtime.cancellation;
+    let deleted = collect_deleted_children(&referencing, deleting, work_mem, cancellation)?;
+    let action_schema = prepared_mutation_action_schema();
+    let mut prepared = crate::SpillBuffer::new(work_mem);
     let mut events = crate::mutation::triggers::events::AfterRowEvents::default();
     let overlay = MutationOverlayScope::new(context.state);
-    for (child, _) in &referencing {
+    for child in referencing.read_rows()? {
+        let child = child?;
         if deleting {
-            if let Some(delete) =
-                prepare_document_delete(referential, &child.table, child.doc_id, &deleted, true)?
-            {
+            if let Some(delete) = prepare_document_delete_excluding(
+                referential,
+                &child.table,
+                child.doc_id,
+                &|table, id| deleted.contains(table, id),
+                true,
+            )? {
                 stage_prepared_document_delete(context.preparation.staging, &delete, &mut events)?;
-                prepared.push(PreparedMutationAction::Delete(delete));
+                push_prepared_mutation_action(
+                    &mut prepared,
+                    &action_schema,
+                    PreparedMutationAction::Delete(delete),
+                )?;
             }
             continue;
         }
@@ -140,7 +148,7 @@ pub(super) fn run_referential_action<S: Clone + 'static>(
             referential,
             action,
             &statement,
-            child,
+            &child,
             &comparison,
             &expected,
         )?
@@ -148,14 +156,25 @@ pub(super) fn run_referential_action<S: Clone + 'static>(
             continue;
         };
         stage_referential_rewrite(context.preparation.staging, &mut rewrite, &[], &mut events)?;
-        prepared.push(PreparedMutationAction::Rewrite(rewrite));
+        push_prepared_mutation_action(
+            &mut prepared,
+            &action_schema,
+            PreparedMutationAction::Rewrite(rewrite),
+        )?;
     }
     let published = overlay.finish();
-    if !prepared.is_empty() {
+    if prepared.rows() != 0 {
         context.state.prepare_writer()?;
         let mut publication =
             crate::mutation::statement_end::action_publication_batch().with_published(published);
-        for action in prepared {
+        for row in prepared
+            .drain_rows()
+            .map_err(crate::physical::physical_exec_error)?
+        {
+            cancellation.check()?;
+            let action = decode_prepared_mutation_action_row(
+                row.map_err(crate::physical::physical_exec_error)?,
+            )?;
             publish_prepared_mutation_action(
                 context.publication,
                 action,
@@ -167,6 +186,26 @@ pub(super) fn run_referential_action<S: Clone + 'static>(
         crate::mutation::statement_end::note_action_rows(&mut publication);
     }
     queue.queue_command(&referential.triggers, &[statement], events)
+}
+
+fn collect_deleted_children(
+    referencing: &super::references::ReferencingRows,
+    deleting: bool,
+    work_mem: usize,
+    cancellation: &uqa_core::CancellationToken,
+) -> Result<crate::mutation::row_membership::PhysicalRows, SQLError> {
+    let mut deleted = crate::mutation::row_membership::PhysicalRowBuffer::new(
+        work_mem,
+        cancellation.clone(),
+        "referential deleted rows",
+    );
+    if deleting {
+        for child in referencing.read_rows()? {
+            let child = child?;
+            deleted.insert(&child.table, child.doc_id)?;
+        }
+    }
+    deleted.finish()
 }
 
 /// Lock one row that references the key and prepare its rewrite: `ON UPDATE CASCADE` writes the referenced row's new key into it, and `SET NULL` or `SET DEFAULT` sets the action's columns. `None` when the row no longer references the key or a BEFORE ROW trigger skipped it.

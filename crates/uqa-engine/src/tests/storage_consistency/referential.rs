@@ -134,7 +134,10 @@ fn indexed_references_read_only_matching_child_payloads(#[case] open: fn(&Path) 
                         action,
                     )
                     .unwrap();
-                    assert_eq!(found.len(), matches);
+                    assert_eq!(
+                        found.read_rows().unwrap().map(Result::unwrap).count(),
+                        matches
+                    );
                     if reads.enumerations.get() != 0 || reads.documents.get() != matches {
                         failures.push(format!(
                             "{action:?}, unrelated={unrelated}, payload={payload}, key={key}: enumerations={}, documents={}, payload_bytes={}, matches={matches}",
