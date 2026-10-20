@@ -165,6 +165,8 @@ SELECT format_type(1043, 12) AS bounded_text,
 | Arrays and tables | `string_to_array`, `array_to_string`, `string_to_table`, `regexp_split_to_array`, `regexp_split_to_table` |
 | Hash and encoding | `md5`, `crc32`, `crc32c`, `encode`, `decode` |
 
+`lpad`, `rpad` and `repeat` use integer counts, treating negative counts as zero. Padding counts characters and repeats a nonempty fill; an empty fill only truncates the input. Before allocating output, PostgreSQL's text-size check includes its four-byte header within the 1,073,741,823-byte allocation limit. Padding checks the UTF-8 worst case of four bytes per result character; `repeat` checks the input byte length times the count. A result beyond that limit reports `54000` (`requested length too large`); a valid result can still exceed the current memory allowance and report `53200`. NULL arguments retain the functions' strict behavior.
+
 `text ^@ text` tests whether the left operand begins with the right operand, returning `boolean`; it shares the `starts_with(text, text)` kernel. Matching is case-sensitive and literal, so `%` and `_` have no wildcard meaning. An empty prefix matches every non-NULL text, and either NULL operand returns NULL. Character-family inputs use PostgreSQL's implicit `text` conversion; unrelated operand types report `42883`. A non-NULL comparison with indeterminate input collation reports `42P22` even for an empty or longer prefix, while conflicting explicit collations report `42P21`. The operator is immutable, changes no database state and retains its native identity in stored definitions independently of routines named `starts_with`. Its [comparison and composition argument](../../design/sql-prefix-comparison.md) describes the scalar boundary.
 
 ```sql execute
