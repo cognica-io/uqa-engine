@@ -10,6 +10,8 @@ use super::{CteScope, SQLError, SQLParam, ScalarExpr, ScoredEntry, SourceContext
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::DocId;
 
+mod scalar;
+
 struct DocumentFilterInput {
     schema: crate::RowSchema,
     document_id: uqa_sql::ast::InternalColumnRef,
@@ -219,12 +221,12 @@ fn whole_rows<S: Clone + Send + Sync + 'static>(
     Ok((doc_ids, documents))
 }
 
-fn table_filter_schema<S: Clone + Send + Sync + 'static>(
+fn table_filter_columns<S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     table: &str,
     qualifier: &str,
     columns: Vec<String>,
-) -> Result<(crate::RowSchema, uqa_sql::ast::InternalColumnRef), SQLError> {
+) -> Result<(crate::RowSchema, Vec<uqa_sql::ast::ColumnDef>), SQLError> {
     let definitions = context
         .documents
         .column_definitions(table)
@@ -246,8 +248,18 @@ fn table_filter_schema<S: Clone + Send + Sync + 'static>(
         .iter()
         .map(|column| crate::ColumnIdentity::qualified(qualifier, column))
         .collect::<Vec<_>>();
-    let document_id = uqa_sql::ast::InternalRelationId::allocate().column(0);
     let schema = crate::RowSchema::with_identities(columns, identities, types);
+    Ok((schema, definitions))
+}
+
+fn table_filter_schema<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    table: &str,
+    qualifier: &str,
+    columns: Vec<String>,
+) -> Result<(crate::RowSchema, uqa_sql::ast::InternalColumnRef), SQLError> {
+    let (schema, definitions) = table_filter_columns(context, table, qualifier, columns)?;
+    let document_id = uqa_sql::ast::InternalRelationId::allocate().column(0);
     let schema = crate::RowSchema::append_internal_typed(
         &schema,
         &[(document_id, Some(uqa_sql::ast::ColumnType::BigInteger))],
@@ -358,19 +370,16 @@ fn execute_bound_mixed_where<S: Clone + Send + Sync + 'static>(
     Ok(rows)
 }
 
-/// Resolve a WHERE clause to the matching doc ids with the same
-/// machinery single-table SELECT uses: the operator-tree pipeline
-/// (value indexes, posting lists) first, then registered row
-/// functions, then the evaluated scan. UPDATE / DELETE call this so
-/// point writes stop paying a full table materialisation.
-pub fn collect_where_doc_ids<S: Clone + Send + Sync + 'static>(
+/// Deliver matching identities to the command's retained candidate owner. Scalar predicates use the local table cursor and a residual filter, retaining indexed probes; retrieval expressions keep their scored carrier semantics.
+pub fn visit_where_doc_ids<S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     table: &str,
     qualifier: &str,
     filter: &ScalarExpr,
     params: &[SQLParam],
     ctes: &CteScope<S>,
-) -> Result<Vec<DocId>, SQLError> {
+    visitor: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
     let filter = bind_table_filter(context, table, qualifier, filter, params, ctes)?;
     let filter = &filter;
     let references_tableoid = expression_references_tableoid(filter);
@@ -381,6 +390,9 @@ pub fn collect_where_doc_ids<S: Clone + Send + Sync + 'static>(
             .relation_retrieval
             .optimized(table, Some(filter), params)?
     };
+    if optimized.is_none() && !uqa_sql::semantics::contains_retrieval(filter) {
+        return scalar::visit(context, table, qualifier, filter, params, ctes, visitor);
+    }
     let scored = if is_jsonpath_fts_match_filter(filter) {
         execute_mixed_where_expr(context, table, table, qualifier, filter, params, ctes)?
     } else if let Some(entries) = optimized {
@@ -397,7 +409,11 @@ pub fn collect_where_doc_ids<S: Clone + Send + Sync + 'static>(
             }
         }
     };
-    Ok(scored.into_iter().map(|entry| entry.doc_id).collect())
+    for entry in scored {
+        context.scans.runtime.check_cancelled()?;
+        visitor(entry.doc_id)?;
+    }
+    Ok(())
 }
 
 fn bind_table_filter<S: Clone + Send + Sync + 'static>(

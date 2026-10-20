@@ -276,16 +276,15 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                     let filter = stmt.predicate.as_ref().ok_or_else(|| {
                         SQLError::Internal("DELETE preselection is missing its predicate".into())
                     })?;
-                    for doc_id in crate::query::block::where_filter::collect_where_doc_ids(
+                    crate::query::block::where_filter::visit_where_doc_ids(
                         &read_context.query.source,
                         table,
                         &stmt.target_qualifier,
                         filter,
                         params,
                         ctes,
-                    )? {
-                        candidates.push(table_index, doc_id)?;
-                    }
+                        &mut |doc_id| candidates.push(table_index, doc_id),
+                    )?;
                 } else {
                     let tables = read_context.query.source.scans.tables;
                     let source = tables.table(table)?;

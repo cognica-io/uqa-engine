@@ -136,6 +136,49 @@ fn scalar_index_candidates_do_not_scan_unrelated_rows(#[case] sql: &str) {
     }
 }
 
+#[rstest::rstest]
+#[case::update("UPDATE probe SET qty=qty+1000 WHERE qty=4 OR qty=7 RETURNING id")]
+#[case::delete("DELETE FROM probe WHERE qty=4 OR qty=7 RETURNING id")]
+fn scalar_mutation_index_unions_do_not_scan_unrelated_rows(#[case] sql: &str) {
+    for count in [32, 128] {
+        let engine = Engine::new();
+        engine.sql("CREATE TABLE probe(id integer, qty integer, body text); CREATE INDEX probe_qty ON probe(qty)", &[]).unwrap();
+        engine.sql(&format!("INSERT INTO probe SELECT i*10,i,repeat('x',20000) FROM generate_series(1,{count}) g(i)"), &[]).unwrap();
+        engine.sql("SELECT id FROM probe WHERE qty=4", &[]).unwrap();
+        let probe = PortalSnapshotProbeStore::from_table(&engine, "probe");
+        let enumerations = Arc::clone(&probe.doc_id_calls);
+        let fields = Arc::clone(&probe.field_reads);
+        let rows = Arc::clone(&probe.row_reads);
+        *engine
+            .table("probe")
+            .unwrap()
+            .unwrap()
+            .document_store
+            .write() = Box::new(probe);
+        let result = engine.sql(sql, &[]).unwrap();
+        let mut ids = result
+            .rows
+            .iter()
+            .map(|row| match row["id"] {
+                Value::Int(id) => id,
+                ref value => panic!("unexpected id: {value:?}"),
+            })
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        assert_eq!(ids, [40, 70]);
+        assert_eq!(
+            enumerations.load(Ordering::Relaxed),
+            0,
+            "{sql}: enumerated {count} rows"
+        );
+        // Candidate, recheck and publication point reads stay bounded by the two targets as unrelated payload grows.
+        assert!(
+            fields.load(Ordering::Relaxed) + rows.load(Ordering::Relaxed) <= 32,
+            "{sql}: read unrelated rows"
+        );
+    }
+}
+
 #[test]
 fn point_patch_uses_the_command_version_and_does_not_revive_tombstones() {
     let engine = Engine::new();

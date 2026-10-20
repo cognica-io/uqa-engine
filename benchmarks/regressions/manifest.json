@@ -17728,6 +17728,76 @@
       "workload": "256 descending physical keys at work_mem 0, 1 and 80, duplicate keys, distinct partitions and u64::MAX.",
       "invariant": "Spill occurs without enlarging the resident threshold; exact membership passes the unchanged 512KiB peak ceiling with admitted fixed metadata/I/O workspace.",
       "capability": "Bounded physical membership spill"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_where_visits_wide_rows_without_retaining_filter_payloads",
+      "source": "crates/uqa-execution/src/query/block/where_filter/scalar/tests.rs",
+      "workload": "256 lazily produced 64KiB rows, including the full unsigned identity range.",
+      "invariant": "One live payload row, complete ordered identity delivery and less than 512KiB additional peak allocation for 16MiB input.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded scalar mutation qualification"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_where_closes_on_consumer_and_predicate_errors",
+      "source": "crates/uqa-execution/src/query/block/where_filter/scalar/tests.rs",
+      "workload": "A consumer fails after eight rows, and a separate predicate fails at its first row.",
+      "invariant": "Preserve 53200/22012, stop before reading later rows and release the producer.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded scalar mutation qualification"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "mutation_where_does_not_retain_complete_filter_payloads",
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/publication.rs",
+      "workload": "Native SQLite UPDATE and DELETE examine 512 rows of 32KiB TEXT with no matches, 64KiB query allowance and 4MiB session retention.",
+      "invariant": "No row changes and additional peak allocation below the unchanged 8MiB ceiling for 16MiB selected payload.",
+      "cases": 2,
+      "case_names": [
+        "case_1_update",
+        "case_2_delete"
+      ],
+      "capability": "Bounded scalar mutation qualification"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "mutation_where_stream_keeps_snapshot_projection_and_error_atomicity",
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/candidates.rs",
+      "workload": "Four-provider repeatable-read private changes, NULL/AND/OR, alias/tableoid, virtual generated fields, missing indexed identities, later division error, savepoint rollback and reopen.",
+      "invariant": "Match independent PostgreSQL affected counts, 22012 error and final rows without publishing a partial mutation.",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Bounded scalar mutation qualification"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "scalar_mutation_index_unions_do_not_scan_unrelated_rows",
+      "source": "crates/uqa-engine/src/tests/storage_consistency/indexed_queries.rs",
+      "workload": "UPDATE and DELETE with a two-key indexed OR over 32 and 128 rows carrying 20KiB unrelated payloads.",
+      "invariant": "The original index union retains both target identities, performs zero whole-table enumerations and at most 32 point payload reads independent of relation size.",
+      "cases": 2,
+      "case_names": [
+        "case_1_update",
+        "case_2_delete"
+      ],
+      "capability": "Bounded scalar mutation qualification"
     }
   ]
 }
