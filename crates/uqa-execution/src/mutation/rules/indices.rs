@@ -6,6 +6,8 @@
 
 //! Ordered event ordinals coalesce adjacent matches and spill fragmented selections.
 
+mod lookup;
+
 use std::ops::Range;
 
 use uqa_core::CancellationToken;
@@ -16,7 +18,7 @@ use crate::physical::physical_exec_error;
 use crate::spill::{SharedSpill, SharedSpillReader, SpillBatchWriter, SpillBuffer, SpillRows};
 use crate::{PhysicalRow, RowSchema};
 
-pub(super) struct RuleIndices {
+pub(crate) struct RuleIndices {
     storage: IndexStorage,
     count: usize,
     cancellation: CancellationToken,
@@ -36,11 +38,16 @@ impl RuleIndices {
         }
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.count
     }
 
-    pub(super) fn reader(&self) -> Result<RuleIndexIter, SQLError> {
+    pub(crate) fn is_all(&self, count: usize) -> bool {
+        self.count == count
+            && matches!(&self.storage, IndexStorage::Range(range) if *range == (0..count))
+    }
+
+    pub(crate) fn reader(&self) -> Result<RuleIndexIter, SQLError> {
         self.cancellation.check()?;
         let (pending, rows) = match &self.storage {
             IndexStorage::Range(range) => (range.clone(), None),
@@ -141,7 +148,7 @@ impl RuleIndexBuffer {
     }
 }
 
-pub(super) struct RuleIndexIter {
+pub(crate) struct RuleIndexIter {
     pending: Range<usize>,
     rows: Option<Box<SpillRows<SharedSpillReader>>>,
     remaining: usize,

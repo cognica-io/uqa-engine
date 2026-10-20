@@ -112,3 +112,50 @@ fn rule_event_failure_and_cancellation_preserve_the_published_owner() {
     let bad = PhysicalRow::from_values(vec![Value::Null; WIDTH]);
     assert!(decode(bad, None).is_err());
 }
+
+#[test]
+fn rule_event_selection_shares_full_ownership_and_replays_fragmented_indices() {
+    use crate::mutation::rules::{RuleIndexBuffer, RuleIndices};
+
+    let cancellation = CancellationToken::new();
+    let rows = RuleRows::from_rows(
+        (0..7).map(|index| {
+            let mut row = RuleRowImage::empty();
+            row.old_doc_id = Some(index);
+            Ok(row)
+        }),
+        0,
+        cancellation.clone(),
+    )
+    .unwrap();
+    let all = RuleIndices::all(rows.len(), cancellation.clone());
+    let selected = rows.select_indices(&all, 0, cancellation.clone()).unwrap();
+    assert!(Arc::ptr_eq(&rows.0, &selected.0));
+    let mut selection = RuleIndexBuffer::new(1, cancellation.clone()).unwrap();
+    for index in [6, 2, 2, 0] {
+        selection.push(index).unwrap();
+    }
+    let selected = rows
+        .select_indices(&selection.finish().unwrap(), 0, cancellation.clone())
+        .unwrap();
+    assert_eq!(
+        selected
+            .iter()
+            .map(|row| row.unwrap().old_doc_id.unwrap())
+            .collect::<Vec<_>>(),
+        [6, 2, 2, 0]
+    );
+    let mut invalid = RuleIndexBuffer::new(1, cancellation.clone()).unwrap();
+    invalid.push(rows.len()).unwrap();
+    assert!(rows
+        .select_indices(&invalid.finish().unwrap(), 0, cancellation.clone())
+        .is_err());
+    cancellation.cancel();
+    assert_eq!(
+        rows.select_indices(&all, 0, cancellation)
+            .err()
+            .unwrap()
+            .sqlstate(),
+        Some("57014")
+    );
+}

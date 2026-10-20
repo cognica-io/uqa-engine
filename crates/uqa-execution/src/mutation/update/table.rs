@@ -639,19 +639,18 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     )?;
                 view_rule_batches
                     .configure_action_qualification(row_independent_update_qualification);
-                let mut base_rule_indices = Vec::new();
-                for index in 0..rule_rows.len() {
-                    if !view_rule_batches.suppresses(index)? {
-                        base_rule_indices.push(index);
-                    }
-                }
+                let base_rule_indices = view_rule_batches.unsuppressed_indices(
+                    rule_rows.len(),
+                    context.mutation.rules.rules.memory.work_mem_bytes()?,
+                    cancel.clone(),
+                )?;
                 let mut rule_batch = (has_update_rules && view_original_query)
                     .then(|| {
                         crate::mutation::rules::prepare_retained_rule_batch(
                             context.mutation.rules.rules,
                             &stmt.table,
                             uqa_sql::ast::RuleEvent::Update,
-                            rule_rows.select(
+                            rule_rows.select_indices(
                                 &base_rule_indices,
                                 context.mutation.rules.rules.memory.work_mem_bytes()?,
                                 context.mutation.rules.rules.cancellation.clone(),
@@ -667,8 +666,8 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 let mut base_rule_suppressed =
                     crate::mutation::rules::RuleSuppression::new(rule_rows.len(), cancel.clone());
                 if let Some(rule_batch) = rule_batch.as_ref() {
-                    for (local_index, global_index) in base_rule_indices.iter().copied().enumerate()
-                    {
+                    for (local_index, global_index) in base_rule_indices.reader()?.enumerate() {
+                        let global_index = global_index?;
                         if rule_batch.suppresses(local_index)? {
                             base_rule_suppressed.suppress(global_index)?;
                         }

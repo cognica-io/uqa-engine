@@ -181,6 +181,23 @@ impl RuleRows {
         (0..self.len()).map(|index| self.get(index))
     }
 
+    pub(crate) fn select_indices(
+        &self,
+        indices: &super::RuleIndices,
+        bytes: usize,
+        cancellation: CancellationToken,
+    ) -> Result<Self, SQLError> {
+        cancellation.check()?;
+        if indices.is_all(self.len()) {
+            return Ok(self.clone());
+        }
+        Self::from_rows(
+            indices.reader()?.map(|index| self.get(index?)),
+            bytes,
+            cancellation,
+        )
+    }
+
     pub fn select(
         &self,
         indices: &[usize],
