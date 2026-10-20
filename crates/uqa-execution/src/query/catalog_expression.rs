@@ -41,7 +41,7 @@ pub fn eval_lowered_expression_with_type<S: Clone + 'static>(
     params: &[SQLParam],
 ) -> Result<(Value, Option<uqa_sql::ast::ColumnType>), SQLError> {
     let mut expression = ExpressionPlan::lower(expression.clone());
-    scope.scalar_subqueries.clone_from(&expression.subqueries);
+    scope.scalar_subqueries = expression.subqueries.as_slice().into();
     let hook = factory.bind_scope(scope);
     let declared_type = crate::scalar_type_with_resolver(
         &expression.scalar,
@@ -148,7 +148,7 @@ impl<'a> PreparedCatalogExpression<'a> {
         params: &'a [SQLParam],
         optimize: bool,
     ) -> Result<Self, SQLError> {
-        scope.scalar_subqueries.clone_from(&expression.subqueries);
+        scope.scalar_subqueries = expression.subqueries.as_slice().into();
         let hook = factory.bind_scope(scope);
         let source =
             crate::scalar_type_with_resolver(&expression.scalar, schema, params, hook.as_ref())?;
@@ -276,7 +276,7 @@ pub fn eval_stored_expression_plan_with_row<S: Clone + 'static>(
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
     let mut expression = expression.clone();
-    scope.scalar_subqueries.clone_from(&expression.subqueries);
+    scope.scalar_subqueries = expression.subqueries.as_slice().into();
     let hook = factory.bind_scope(scope);
     crate::scalar_type_with_resolver(&expression.scalar, schema, params, hook.as_ref())?;
     expression.scalar = crate::bind_type_introspection_with_resolver(

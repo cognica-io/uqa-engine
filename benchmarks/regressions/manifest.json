@@ -18416,6 +18416,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "binding_scope_copies_do_not_duplicate_immutable_plan_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/context/tests.rs",
+      "capability": "Immutable binding and execution plans",
+      "workload": "Sixteen retained binding snapshots with 128KiB CTE and scalar-subquery literals, including context and schema-scope capture.",
+      "invariant": "Total copied-scope allocation stays below 256KiB and peak below 128KiB, with independently mutable lexical maps.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "execution_scope_copies_do_not_duplicate_immutable_plan_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/retained_plans.rs",
+      "capability": "Immutable binding and execution plans",
+      "workload": "Sixteen execution scope clones with 128KiB CTE and scalar-subquery literals.",
+      "invariant": "Total allocation stays below 256KiB and peak below 128KiB; consuming a child deferred definition preserves the parent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "not_materialized_definition_survives_repeated_scans_and_shadow_restoration",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/retained_plans.rs",
+      "capability": "Immutable binding and execution plans",
+      "workload": "Repeated NOT MATERIALIZED references across lexical save/remove/restore.",
+      "invariant": "Repeated references remain available and temporary shadow removal does not consume the restored definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_scalar_plans_preserve_arena_cache_separation_and_restoration",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/retained_plans.rs",
+      "capability": "Immutable binding and execution plans",
+      "workload": "A shared parent scalar arena, nested arena and sibling arena each use slot zero.",
+      "invariant": "Clones share only their original arena cache; nested and sibling arenas have fresh identities, and guard exit restores the original cached value.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

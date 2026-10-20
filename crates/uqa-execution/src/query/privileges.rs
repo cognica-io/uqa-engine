@@ -109,7 +109,7 @@ pub fn ensure_target_table_select_for_expressions<S: Clone>(
         returning_aliases.old.clone(),
         returning_aliases.new.clone(),
     ]);
-    ctes.scalar_subqueries = subqueries.to_vec();
+    ctes.scalar_subqueries = subqueries.into();
     if let Some(subject) = privilege_subject {
         let scope = ctes.enter_privilege_subject(subject.clone());
         ensure_select_privileges_for_table_expressions(

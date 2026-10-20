@@ -247,7 +247,7 @@ pub fn validate_insert_returning(
     for cte in &plan.ctes {
         scope.insert_deferred(cte.clone());
     }
-    scope.scalar_subqueries.clone_from(&plan.subqueries);
+    scope.scalar_subqueries = plan.subqueries.as_slice().into();
     let expressions = returning_expression_schema(
         &target,
         &plan.target_qualifier,
@@ -295,7 +295,7 @@ pub fn analyze_dml_returning_plan(
     for plan in cte_plans {
         ctes.insert_deferred(plan.clone());
     }
-    ctes.scalar_subqueries = subqueries.to_vec();
+    ctes.scalar_subqueries = subqueries.into();
     let supplemental = source
         .map(|source| {
             crate::binding::analyze_source_plan_schema(

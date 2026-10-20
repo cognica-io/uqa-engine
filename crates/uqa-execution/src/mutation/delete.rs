@@ -173,7 +173,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
             )?;
-            ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+            ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
             if let Some(source) = stmt.source.as_deref() {
                 crate::query::privileges::ensure_select_privileges_for_source_expressions(
                     source,

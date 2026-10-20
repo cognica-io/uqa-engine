@@ -255,7 +255,7 @@ fn evaluated_exists_keys_use_scoped_function_and_subquery_callbacks() {
     let services = Services::default();
     let mut scope = CteScope::new();
     let query = plan("SELECT 1");
-    scope.scalar_subqueries.push(query.clone());
+    scope.scalar_subqueries = vec![query.clone()].into();
     let schema = RowSchema::new(vec![]);
     let row = PhysicalRow::from_values(vec![]);
     let outer = PhysicalOuterRow::Physical {
@@ -346,9 +346,7 @@ fn predicate_preparation_checks_shape_slot_and_volatility_before_catalog_capture
         matches!(error, SQLError::Internal(message) if message == "physical scalar subquery slot 0 is out of bounds")
     );
     assert!(services.events.lock().is_empty());
-    scope
-        .scalar_subqueries
-        .push(plan("SELECT volatile_value()"));
+    scope.scalar_subqueries = vec![plan("SELECT volatile_value()")].into();
     assert!(
         prepare_correlated_exists_predicate(&services.services(), &expression, &[], &scope)
             .unwrap()

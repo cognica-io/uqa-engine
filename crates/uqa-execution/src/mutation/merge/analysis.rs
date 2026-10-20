@@ -33,7 +33,7 @@ pub fn merge_analysis_scope<S: Clone>(
     for cte in &stmt.ctes {
         scope.insert_deferred(cte.clone());
     }
-    scope.scalar_subqueries.clone_from(&stmt.subqueries);
+    scope.scalar_subqueries = stmt.subqueries.as_slice().into();
     Ok(scope)
 }
 

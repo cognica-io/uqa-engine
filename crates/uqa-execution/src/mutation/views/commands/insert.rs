@@ -120,7 +120,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
             )?;
-            ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+            ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
             let suppressed_source_is_unused = stmt.source.is_some()
                 && !uqa_sql::semantics::rules::analysis::relation_rules_require_event_rows(
                     context.mutation.rules.rules.analysis,

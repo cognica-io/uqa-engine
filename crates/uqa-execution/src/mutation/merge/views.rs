@@ -795,7 +795,7 @@ fn view_merge_scope<S: Clone + Send + Sync + 'static>(
         params,
         &mut ctes,
     )?;
-    ctes.scalar_subqueries.clone_from(&plan.subqueries);
+    ctes.scalar_subqueries = plan.subqueries.as_slice().into();
     Ok(ctes)
 }
 

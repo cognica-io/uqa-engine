@@ -37,7 +37,7 @@ impl<'a> PreparedCheck<'a> {
             inputs.catalog.session.relation_name_resolution(),
             None,
         );
-        scope.scalar_subqueries.clone_from(&expression.subqueries);
+        scope.scalar_subqueries = expression.subqueries.as_slice().into();
         let hook = inputs.expressions.bind_scope(scope);
         let schema = RowSchema::with_types(
             vec!["value".into()],

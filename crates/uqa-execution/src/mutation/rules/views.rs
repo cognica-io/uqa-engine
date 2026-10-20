@@ -59,9 +59,7 @@ impl ViewRuleReturningCapture {
         supplemental_schema: Option<&RowSchema>,
     ) -> Result<MutationOutput, SQLError> {
         let mut returning_scope = ctes.clone();
-        returning_scope
-            .scalar_subqueries
-            .clone_from(&self.plan.subqueries);
+        returning_scope.scalar_subqueries = self.plan.subqueries.as_slice().into();
         self.result.project(
             context,
             DmlReturningShape {

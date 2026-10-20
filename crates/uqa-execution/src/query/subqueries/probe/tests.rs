@@ -12,7 +12,7 @@ use crate::{CanonicalRowHashSet, PhysicalRow, RowPredicate, RowSchema};
 fn prepared_predicate_retains_its_scope_and_borrows_hooks_for_each_row() {
     let services = Services::default();
     let mut scope = CteScope::new();
-    scope.scalar_subqueries.push(plan("SELECT 7"));
+    scope.scalar_subqueries = vec![plan("SELECT 7")].into();
     let mut keys = CanonicalRowHashSet::new();
     keys.insert_values(&[Value::Int(7)]).unwrap();
     let lookup = Arc::new(CachedCorrelatedExists {
@@ -26,7 +26,7 @@ fn prepared_predicate_retains_its_scope_and_borrows_hooks_for_each_row() {
         lookup,
         negated: false,
     };
-    scope.scalar_subqueries.clear();
+    scope.scalar_subqueries = Arc::default();
     let schema = RowSchema::new(vec![]);
     let row = PhysicalRow::from_values(vec![]);
     assert!(predicate.keep_physical(&schema, &row).unwrap());

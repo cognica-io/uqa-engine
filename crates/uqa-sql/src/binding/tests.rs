@@ -5,6 +5,7 @@
 //
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::ast::{ColumnDef, ColumnType};
 use crate::plan::{
@@ -99,7 +100,7 @@ fn deferred_recursive_ctes_keep_the_complete_query_descriptor() {
             super::bind_query_plan_schema(&EmptyRoutineResolution, &query, &[], &context, None)
                 .unwrap();
         for cte in std::mem::take(&mut query.ctes) {
-            context.deferred_ctes.insert(cte.name.clone(), cte);
+            context.deferred_ctes.insert(cte.name.clone(), cte.into());
         }
         for _ in 0..2 {
             let actual =
@@ -397,7 +398,7 @@ fn deferred_cte_shadowing_uses_the_replacement_row_type() {
             } else {
                 BTreeSet::new()
             },
-            scalar_subqueries: Vec::new(),
+            scalar_subqueries: Arc::default(),
         };
         scope.insert_deferred(plan.ctes.remove(0));
         let schema = super::analyze_query_plan_schema(

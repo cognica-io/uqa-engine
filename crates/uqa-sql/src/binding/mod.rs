@@ -102,6 +102,7 @@ use crate::semantics::{
 };
 use crate::RowSchema;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 #[derive(Clone, Copy)]
 enum ScalarBindingMode {
@@ -115,7 +116,7 @@ struct SchemaScope {
     catalog: CatalogReadView,
     resolution: RelationNameResolution,
     ctes: BTreeMap<String, RowSchema>,
-    deferred_ctes: BTreeMap<String, crate::plan::CtePlan>,
+    deferred_ctes: BTreeMap<String, Arc<crate::plan::CtePlan>>,
     non_returning_ctes: BTreeSet<String>,
     visiting_views: BTreeSet<String>,
     validate_references: bool,
@@ -389,7 +390,12 @@ impl SchemaScope {
                 }
                 if let Some(plan) = cte_name.and_then(|name| self.deferred_ctes.remove(&name)) {
                     let result = self
-                        .bind_cte_schemas(routines, std::slice::from_ref(&plan), params, outer)
+                        .bind_cte_schemas(
+                            routines,
+                            std::slice::from_ref(plan.as_ref()),
+                            params,
+                            outer,
+                        )
                         .and_then(|previous| {
                             let schema = self.ctes.get(&plan.name).expect("CTE schema was bound");
                             let result = alias_table_schema(schema, qualifier, column_aliases);
