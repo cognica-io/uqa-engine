@@ -199,7 +199,7 @@ fn collect_consumed_rows(
             "open row consumer input",
         ));
     }
-    'consume: loop {
+    loop {
         let batch = match operator.next() {
             Ok(batch) => batch,
             Err(error) => {
@@ -213,28 +213,22 @@ fn collect_consumed_rows(
         let Some(batch) = batch else {
             break;
         };
-        let crate::Batch { schema, rows } = batch;
-        for row in rows {
-            let row = crate::OwnedPhysicalRow::new(schema.clone(), row);
-            match consumer.consume(row) {
-                Ok(QueryConsumerControl::Continue) => {}
-                Ok(QueryConsumerControl::Stop) => break 'consume,
-                Ok(QueryConsumerControl::Rewind) => {
-                    return Err(close_after_physical_failure(
-                        operator.as_mut(),
-                        crate::ExecError::Other(
-                            "forward-only row consumer requested rewind".into(),
-                        ),
-                        "consume query row",
-                    ));
-                }
-                Err(error) => {
-                    return Err(close_after_physical_failure(
-                        operator.as_mut(),
-                        crate::ExecError::SQL(error),
-                        "consume query row",
-                    ));
-                }
+        match consumer.consume_batch(batch) {
+            Ok(QueryConsumerControl::Continue) => {}
+            Ok(QueryConsumerControl::Stop) => break,
+            Ok(QueryConsumerControl::Rewind) => {
+                return Err(close_after_physical_failure(
+                    operator.as_mut(),
+                    crate::ExecError::Other("forward-only row consumer requested rewind".into()),
+                    "consume query row",
+                ));
+            }
+            Err(error) => {
+                return Err(close_after_physical_failure(
+                    operator.as_mut(),
+                    crate::ExecError::SQL(error),
+                    "consume query row",
+                ));
             }
         }
     }
