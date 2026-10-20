@@ -18315,7 +18315,7 @@
     },
     {
       "package": "uqa-execution",
-      "kind": "test",
+      "kind": "lib",
       "test": "expanded_projection_spills_before_retaining_a_complete_input_batch",
       "cases": 1,
       "source": "crates/uqa-execution/src/relational/project/tests.rs",
@@ -18328,7 +18328,7 @@
     },
     {
       "package": "uqa-execution",
-      "kind": "test",
+      "kind": "lib",
       "test": "expanded_projection_reports_late_input_error_before_any_output",
       "cases": 1,
       "source": "crates/uqa-execution/src/relational/project/tests.rs",
@@ -18341,7 +18341,7 @@
     },
     {
       "package": "uqa-execution",
-      "kind": "test",
+      "kind": "lib",
       "test": "expanded_projection_close_discards_its_unread_spill",
       "cases": 1,
       "source": "crates/uqa-execution/src/relational/project/tests.rs",
@@ -18354,7 +18354,7 @@
     },
     {
       "package": "uqa-execution",
-      "kind": "test",
+      "kind": "lib",
       "test": "expanded_projection_cancel_discards_its_unread_spill",
       "cases": 1,
       "source": "crates/uqa-execution/src/relational/project/tests.rs",
@@ -18367,7 +18367,7 @@
     },
     {
       "package": "uqa-execution",
-      "kind": "test",
+      "kind": "lib",
       "test": "single_row_projection_retains_its_original_unsplit_layout",
       "cases": 1,
       "source": "crates/uqa-execution/src/relational/project/tests.rs",
