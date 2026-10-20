@@ -25,6 +25,7 @@ fn with_context<T>(engine: &Engine, action: impl FnOnce(FilterPushdownContext<'_
         correlation: uqa_sql::binding::correlation::CorrelationContext {
             catalog: &catalog,
             resolution: &resolution,
+            scoped_relations: None,
         },
         optimizer: &|plan| {
             crate::capabilities::statement_planning::optimize_engine_plan(engine, plan)

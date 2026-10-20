@@ -26,7 +26,7 @@ pub(super) fn build_correlated_exists<S: Clone + Send + Sync + 'static>(
     plan: &QueryPlan,
     params: &[SQLParam],
 ) -> Result<Option<Arc<CachedCorrelatedExists>>, SQLError> {
-    let Some(decorrelated) = analysis::decorrelate_exists(services, plan)? else {
+    let Some(decorrelated) = analysis::decorrelate_exists(services, ctes, plan)? else {
         return Ok(None);
     };
     let mut scoped_ctes = ctes.clone();

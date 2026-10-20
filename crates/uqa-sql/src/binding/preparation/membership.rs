@@ -174,6 +174,7 @@ impl Preparation<'_> {
                     crate::binding::correlation::CorrelationContext {
                         catalog: self.scope.catalog.as_ref(),
                         resolution: &self.scope.resolution,
+                        scoped_relations: None,
                     },
                     query,
                     input,

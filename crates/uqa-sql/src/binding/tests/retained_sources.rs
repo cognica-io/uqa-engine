@@ -81,6 +81,7 @@ fn retained_sources_bind_complete_types_without_sampling_or_exposing_names() {
             crate::binding::correlation::CorrelationContext {
                 catalog: context.catalog.as_ref(),
                 resolution: &context.resolution,
+                scoped_relations: None,
             },
             &query,
         )

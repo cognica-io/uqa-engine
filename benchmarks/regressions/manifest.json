@@ -6758,7 +6758,7 @@
       "case_names": [
         ""
       ],
-      "source": "crates/uqa-sql/src/binding/correlation.rs",
+      "source": "crates/uqa-sql/src/binding/correlation/tests.rs",
       "capability": "MERGE action clause and row identity",
       "workload": "Ordered SQL input errors, failed statement rollback, nested scalar/EXISTS outputs and repeated prepared MERGE actions.",
       "invariant": "Only MERGE RETURNING ancestry admits native action syntax; each nested result retains its owned outer-row input, while ordinary routines, earlier diagnostics and output-only metadata retain their existing contracts."
@@ -17824,6 +17824,35 @@
       "workload": "UPDATE membership after cancellation and with an exhausted storage allowance.",
       "invariant": "Cancelled duplicate lookups return 57014 and memory exhaustion returns 53200 before publishing a partial selection.",
       "capability": "Bounded UPDATE physical identity ownership"
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "correlation_uses_scoped_relation_descriptors_without_hiding_outer_columns",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/correlation/tests.rs",
+      "capability": "Scoped relation subquery correlation",
+      "workload": "Retained relation descriptors with aggregate locals, aliases, actual outer columns, qualified physical names and local CTE shadowing.",
+      "invariant": "Local relation columns stay uncorrelated; genuine outer references remain correlated and local CTE declarations take precedence."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "spilled_after_events_preserve_cascade_row_images_statement_replacement_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_triggers/transition/capture.rs",
+      "capability": "Scoped relation subquery correlation",
+      "workload": "Four providers with two cascading foreign keys, 32KiB rows, inline scalar transition-table aggregates and 64KiB query memory, rollback and reopen.",
+      "invariant": "All six original row events and the final coalesced statement event match independent PostgreSQL18.4 values; rollback and reopen preserve committed results."
     }
   ]
 }

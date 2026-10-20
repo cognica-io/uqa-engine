@@ -7,11 +7,13 @@
 //! Capture catalog and name resolution for SQL-owned correlation analysis.
 
 use super::SubqueryServices;
+use crate::query::CteScope;
 use uqa_sql::binding::correlation::{CorrelationContext, DecorrelatedExistsPlan};
 use uqa_sql::{plan::QueryPlan, SQLError};
 
 pub(super) fn decorrelate_exists<S: Clone + 'static>(
     services: &SubqueryServices<'_, S>,
+    scope: &CteScope<S>,
     plan: &QueryPlan,
 ) -> Result<Option<DecorrelatedExistsPlan>, SQLError> {
     let catalog = services.catalog.catalog_snapshot();
@@ -20,6 +22,7 @@ pub(super) fn decorrelate_exists<S: Clone + 'static>(
         CorrelationContext {
             catalog: &catalog,
             resolution: &resolution,
+            scoped_relations: Some(scope),
         },
         plan,
     )
@@ -27,6 +30,7 @@ pub(super) fn decorrelate_exists<S: Clone + 'static>(
 
 pub(super) fn query_depends_on_outer_row<S: Clone + 'static>(
     services: &SubqueryServices<'_, S>,
+    scope: &CteScope<S>,
     plan: &QueryPlan,
 ) -> Result<bool, SQLError> {
     let catalog = services.catalog.catalog_snapshot();
@@ -35,7 +39,16 @@ pub(super) fn query_depends_on_outer_row<S: Clone + 'static>(
         CorrelationContext {
             catalog: &catalog,
             resolution: &resolution,
+            scoped_relations: Some(scope),
         },
         plan,
     )
+}
+
+impl<S: Clone> uqa_sql::binding::correlation::CorrelationRelations for CteScope<S> {
+    fn columns(&self, relation: &str) -> Option<&[String]> {
+        self.rows
+            .get(relation)
+            .map(|rows| rows.row_schema().columns())
+    }
 }

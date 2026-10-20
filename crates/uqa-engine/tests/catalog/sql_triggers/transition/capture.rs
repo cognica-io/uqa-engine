@@ -95,3 +95,49 @@ fn captured_transition_images_preserve_repeated_reads_empty_events_and_rollback(
         );
     }
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn spilled_after_events_preserve_cascade_row_images_statement_replacement_and_reopen(
+    #[case] provider: usize,
+) {
+    let directory = TempDir::new().unwrap();
+    let engine = open(provider, &directory);
+    exec(&engine, include_str!("after_events.sql"));
+    engine.set_query_memory_limit(Some(64 * 1024));
+    exec(&engine, "UPDATE parents SET a=a+10,b=b+100");
+    // Independently observed on PostgreSQL 18.4; each cascade queues its original row image.
+    let expected = [
+        "R:1:1:1>11:1:32768:6",
+        "R:2:1:1>11:1:32768:6",
+        "R:1:11:1>11:101:32768:6",
+        "R:2:11:1>11:101:32768:6",
+        "R:3:2:2>12:2:32768:6",
+        "R:3:12:2>12:102:32768:6",
+        "S:6:38:8>68:308",
+    ];
+    let audit = "SELECT message FROM audit ORDER BY seq";
+    assert_eq!(strings(&engine, audit, "message"), expected);
+    exec(&engine, "BEGIN; UPDATE parents SET a=a+100; ROLLBACK");
+    assert_eq!(strings(&engine, audit, "message"), expected);
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT id||':'||a||':'||b||':'||length(body) AS message FROM children ORDER BY id",
+            "message"
+        ),
+        ["1:11:101:32768", "2:11:101:32768", "3:12:102:32768"],
+    );
+    drop(engine);
+    if provider != 0 {
+        let engine = open(provider, &directory);
+        assert_eq!(strings(&engine, audit, "message"), expected);
+        assert_eq!(
+            exec(&engine, "SELECT count(*) FROM children").value_at(0, 0),
+            Some(&Value::Int(3))
+        );
+    }
+}

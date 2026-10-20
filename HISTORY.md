@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Resolve scalar-subquery correlation against retained CTE and trigger transition relation descriptors, preserving local aliases and genuine outer dependencies.
+
 - Bound UPDATE tuple-lock deduplication with exact spill-backed physical identities while preserving first-target selection, partition distinctions, cancellation and typed memory errors.
 
 - Stream scalar UPDATE and DELETE filter candidates through bounded identity pages and per-row projection, preserving indexed access, command snapshots and late-error rollback.
