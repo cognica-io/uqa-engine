@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Evaluate unrewritten view INSERT inputs and INSTEAD OF row triggers in PostgreSQL order, preserving prior sequence effects on source errors and bounding input and RETURNING retention.
+
 - Share already folded builtin INSERT VALUES payloads through bounded storage so plan copies do not retain the complete payload set, preserving original types, collations, lazy evaluation and planning-time errors.
 
 - Spill evaluated INSERT VALUES publication rows through the existing INSERT SELECT codec, preserving conflict handling, identity observations, RETURNING values and COPY rollback without retaining the complete prepared document set.

@@ -16896,6 +16896,56 @@
       "capability": "Bounded folded VALUES retention",
       "workload": "Optimize SELECT, INSERT SELECT, DEFAULT VALUES, multirow VALUES and a modifying VALUES CTE with a counted storage factory.",
       "invariant": "Plans without VALUES never initialize a constant spool; each VALUES command initializes it once for all its rows, including nested modifying CTEs."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "trigger_view_insert_interleaves_input_and_row_trigger_calls",
+      "source": "crates/uqa-engine/tests/catalog/sql_triggers/instead_of/insert_order.rs",
+      "cases": 8,
+      "case_names": [
+        "case_1_memory_values",
+        "case_2_memory_select",
+        "case_3_sqlite_values",
+        "case_4_sqlite_select",
+        "case_5_sqlite_key_value_values",
+        "case_6_sqlite_key_value_select",
+        "case_7_redb_values",
+        "case_8_redb_select"
+      ],
+      "workload": "VALUES and SELECT source expressions and an INSTEAD OF trigger alternate calls to the same sequence on four providers.",
+      "invariant": "Rows match PostgreSQL 18.4 (1,2),(3,4),(5,6), and sequence state remains 6 after durable reopen.",
+      "capability": "Trigger-view INSERT order and bounded input"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "trigger_view_insert_keeps_prior_sequence_effects_before_source_error",
+      "source": "crates/uqa-engine/tests/catalog/sql_triggers/instead_of/insert_order.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "workload": "The third SELECT input divides by zero after two INSTEAD OF row triggers, with savepoint and outer rollback.",
+      "invariant": "SQLSTATE 22012 and sequence state 5 match PostgreSQL 18.4, including durable reopen after rollback.",
+      "capability": "Trigger-view INSERT order and bounded input"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_trigger_view_insert_keeps_bounded_input_and_proposed_rows",
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/publication.rs",
+      "cases": 2,
+      "case_names": [
+        "case_1_values",
+        "case_2_select"
+      ],
+      "workload": "128 rows of 128KiB pass through an INSTEAD OF trigger and COPY RETURNING with 512KiB query memory and 4MiB native SQLite session retention.",
+      "invariant": "Both source forms keep additional peak allocation below the fixed 8MiB ceiling, emit all exact 16MiB bytes and preserve the trigger-only empty base table.",
+      "capability": "Trigger-view INSERT order and bounded input"
     }
   ]
 }

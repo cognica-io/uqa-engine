@@ -7,13 +7,17 @@
 //! INSERT execution for views with `INSTEAD OF` triggers.
 
 use super::{
-    build_returning_value_row, eval_mutation_expr, finish_view_dml, resolve_view_target,
-    run_suppressed_view_insert_rules, target_columns, validate_returning_alias_relations,
-    values_from_result, view_document, with_mutation_snapshot, BTreeSet, CteScope,
-    DmlReturningShape, InsertPlan, MutationStatementContext, ReturningValueProjectionRow, SQLError,
-    SQLParam, ScalarExpr, SourceOutputPruning, TriggerViewChecks, Value,
+    eval_mutation_expr, resolve_view_target, run_suppressed_view_insert_rules, target_columns,
+    validate_returning_alias_relations, values_from_result, view_document, with_mutation_snapshot,
+    BTreeSet, CteScope, DmlReturningShape, InsertPlan, MutationStatementContext, SQLError,
+    SQLParam, ScalarExpr, SourceOutputPruning, Value,
 };
 use crate::mutation::output::MutationOutput;
+use crate::query::statement::consumer::QueryOutputMode;
+use std::{cell::Cell, rc::Rc};
+
+mod rows;
+use rows::{ViewInsertRows, ViewInsertSource};
 
 #[expect(
     clippy::too_many_lines,
@@ -138,6 +142,57 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     ctes,
                 );
             }
+            let row_output = Rc::new(ViewInsertRows::new(
+                context,
+                read_context,
+                &target,
+                stmt,
+                params,
+                ctes,
+            )?);
+            let mut has_rules = false;
+            for relation in std::iter::once(&target.canonical_name).chain(&stmt.view_rule_relations)
+            {
+                if !context
+                    .mutation
+                    .rules
+                    .rules
+                    .analysis
+                    .rules
+                    .rules_for(relation, uqa_sql::ast::RuleEvent::Insert)?
+                    .is_empty()
+                {
+                    has_rules = true;
+                    break;
+                }
+            }
+            if !has_rules {
+                if let Some(source) = stmt.source.as_deref() {
+                    let mut source_scope = ctes.returning_statement_snapshot_scope();
+                    source_scope.enable_command_progress_streaming();
+                    crate::query::statement::execute_query_plan_output(
+                        &read_context.query,
+                        source,
+                        params,
+                        &mut source_scope,
+                        QueryOutputMode::physical_consumer(Rc::new(ViewInsertSource {
+                            rows: Rc::clone(&row_output),
+                            columns: &columns,
+                            positions: &positions,
+                            width: Cell::new(0),
+                        })),
+                    )?;
+                } else {
+                    row_output.values(&columns, &positions, &stmt.rows)?;
+                }
+                crate::mutation::statement_end::end_command(
+                    &statement_commands,
+                    &context.mutation.preparation.referential.triggers,
+                    std::slice::from_ref(&view_statement),
+                    Vec::new(),
+                )?;
+                return row_output.finish();
+            }
             let input_rows = if let Some(source) = stmt.source.as_deref() {
                 let mut source = source.clone();
                 if !original_query_survives {
@@ -219,38 +274,13 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
             };
             let mut proposed_rows = Vec::with_capacity(input_rows.len());
             for input in input_rows {
-                if input.len() > columns.len()
-                    || (!implicit_columns && input.len() != columns.len())
-                {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "row width {} != column count {}",
-                        input.len(),
-                        columns.len()
-                    )));
-                }
-                let mut new = vec![Value::Null; target.columns.len()];
-                for (input_position, target_position) in positions.iter().copied().enumerate() {
-                    if let Some((value, source)) = input.get(input_position) {
-                        new[target_position] =
-                            crate::mutation::assignment::coerce_typed_assignment(
-                                read_context.mutation.preparation.referential.assignment,
-                                ctes,
-                                crate::mutation::assignment::TypedAssignmentTarget {
-                                    target: &columns[input_position],
-                                    ty: target.schema.column_type(target_position),
-                                    current: Some(&new[target_position]),
-                                    final_column_write: !columns[input_position + 1..]
-                                        .iter()
-                                        .any(|next| next.column == columns[input_position].column),
-                                },
-                                value.clone(),
-                                source.as_ref(),
-                                None,
-                                params,
-                            )?;
-                    }
-                }
-                proposed_rows.push(new);
+                let width = input.len();
+                proposed_rows.push(row_output.project(
+                    &columns,
+                    &positions,
+                    width,
+                    input.into_iter().map(Ok),
+                )?);
             }
             let rule_rows = proposed_rows
                 .iter()
@@ -285,62 +315,9 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 uqa_sql::ast::RuleEvent::Insert,
                 rule_rows,
             )?;
-            let supplied_columns =
-                uqa_sql::semantics::mutation_privileges::insert_supplied_columns(stmt, || {
-                    Ok(target.columns.clone())
-                })?;
-            let checks = TriggerViewChecks {
-                expressions: read_context
-                    .mutation
-                    .preparation
-                    .referential
-                    .assignment
-                    .expressions,
-                constraints: read_context.mutation.preparation.referential.constraints,
-                target: &target,
-                target_qualifier: &stmt.target_qualifier,
-                checks: &stmt.view_checks,
-                supplied: &supplied_columns,
-                params,
-                scope: ctes,
-            };
-            let mut affected = 0_u64;
-            let mut returning_rows = crate::mutation::returning::ReturningRows::new(
-                context.query.source.relational.runtime,
-            )?;
             for (index, new) in proposed_rows.into_iter().enumerate() {
-                if rule_batch.suppresses(index) {
-                    continue;
-                }
-                let Some(final_new) = crate::mutation::triggers::fire_instead_of_row_triggers(
-                    &context.mutation.preparation.referential.triggers,
-                    &target.canonical_name,
-                    uqa_sql::ast::TriggerEvent::Insert,
-                    None,
-                    Some(&new),
-                    &[],
-                )?
-                else {
-                    continue;
-                };
-                checks.validate(&final_new)?;
-                affected += 1;
-                if !stmt.returning.is_empty() {
-                    returning_rows.push(build_returning_value_row(
-                        context.mutation.preparation.returning,
-                        ReturningValueProjectionRow {
-                            table: &target.canonical_name,
-                            target_qualifier: &stmt.target_qualifier,
-                            current: &final_new,
-                            old: None,
-                            new: Some(&final_new),
-                            aliases: &stmt.returning_aliases,
-                            context: None,
-                        },
-                        &stmt.returning,
-                        params,
-                        ctes,
-                    )?)?;
+                if !rule_batch.suppresses(index) {
+                    row_output.apply(&new)?;
                 }
             }
             if original_query_survives {
@@ -351,20 +328,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     Vec::new(),
                 )?;
             }
-            let mut result = finish_view_dml(
-                &context.mutation.preparation.returning,
-                DmlReturningShape {
-                    table: &target.canonical_name,
-                    target_qualifier: &stmt.target_qualifier,
-                    aliases: &stmt.returning_aliases,
-                    returning: &stmt.returning,
-                    params,
-                    ctes,
-                    supplemental_schema: None,
-                },
-                returning_rows,
-                affected,
-            )?;
+            let mut result = row_output.finish()?;
             let rule_outcome = rule_batch.execute_actions_with_affected(
                 context.mutation.rules.rules,
                 crate::mutation::rules::RuleReturningRequest::from_plan(

@@ -151,3 +151,49 @@ fn copy_values_insert_publication_does_not_retain_complete_prepared_documents() 
     assert_eq!((output.column, output.rows), (0, 128));
     assert_eq!(copy_to_string(&engine, "COPY (SELECT count(*), min(length(body)), max(length(body)) FROM insert_output) TO STDOUT"), "128\t131072\t131072\n");
 }
+
+#[rstest::rstest]
+#[case::values(false)]
+#[case::select(true)]
+fn copy_trigger_view_insert_keeps_bounded_input_and_proposed_rows(#[case] select: bool) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = allocation_engine(&directory.path().join("view-insert.db"));
+    exec(
+        &engine,
+        "CREATE TABLE view_input_base(id INTEGER, body TEXT);
+        CREATE VIEW view_input_target AS SELECT * FROM view_input_base;
+        CREATE FUNCTION retain_view_row() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+        BEGIN RETURN NEW; END $$;
+        CREATE TRIGGER retain_view_row INSTEAD OF INSERT ON view_input_target
+        FOR EACH ROW EXECUTE FUNCTION retain_view_row()",
+    );
+    engine.set_query_memory_limit(Some(512 * 1024));
+    let source = if select {
+        "SELECT n, repeat('x',131072) FROM generate_series(1,128) AS s(n)".to_owned()
+    } else {
+        let values = (1..=128)
+            .map(|id| format!("({id},repeat('x',131072))"))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("VALUES {values}")
+    };
+    let sql = format!("COPY (INSERT INTO view_input_target {source} RETURNING body) TO STDOUT");
+    let mut output = CheckedOutput {
+        width: 131_072,
+        column: 0,
+        rows: 0,
+    };
+    let allocated = allocation_counter::measure(|| {
+        assert_eq!(engine.copy_to(&sql, &mut output).unwrap(), 128);
+    });
+    // A complete 16MiB source or proposed-row set cannot fit in this fixed allowance.
+    assert!(allocated.bytes_max < 8 * 1024 * 1024, "{allocated:?}");
+    assert_eq!((output.column, output.rows), (0, 128));
+    assert_eq!(
+        copy_to_string(
+            &engine,
+            "COPY (SELECT count(*) FROM view_input_base) TO STDOUT"
+        ),
+        "0\n"
+    );
+}
