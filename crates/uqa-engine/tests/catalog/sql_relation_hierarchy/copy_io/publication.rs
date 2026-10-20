@@ -197,3 +197,33 @@ fn copy_trigger_view_insert_keeps_bounded_input_and_proposed_rows(#[case] select
         "0\n"
     );
 }
+
+#[test]
+fn rule_values_insert_does_not_retain_complete_candidate_images() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = allocation_engine(&directory.path().join("rule-insert.db"));
+    exec(
+        &engine,
+        "CREATE TABLE rule_insert_output(id INTEGER PRIMARY KEY, body TEXT);
+         CREATE TABLE rule_insert_log(id INTEGER);
+         CREATE RULE capture AS ON INSERT TO rule_insert_output
+         DO ALSO INSERT INTO rule_insert_log VALUES (NEW.id)",
+    );
+    engine.set_query_memory_limit(Some(256 * 1024));
+    let values = (1..=128)
+        .map(|id| format!("({id},repeat('x',131072))"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("INSERT INTO rule_insert_output VALUES {values}");
+    let allocated = allocation_counter::measure(|| exec(&engine, &sql));
+    // The 4MiB session allowance plus bounded spill overhead cannot retain all 16MiB of candidates.
+    assert!(allocated.bytes_max < 8 * 1024 * 1024, "{allocated:?}");
+    assert_eq!(copy_to_string(&engine, "COPY (SELECT count(*), min(length(body)), max(length(body)) FROM rule_insert_output) TO STDOUT"), "128\t131072\t131072\n");
+    assert_eq!(
+        copy_to_string(
+            &engine,
+            "COPY (SELECT count(*), sum(id) FROM rule_insert_log) TO STDOUT"
+        ),
+        "128\t8256\n"
+    );
+}
