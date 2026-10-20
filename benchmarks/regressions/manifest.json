@@ -17053,6 +17053,59 @@
         "case_4_redb"
       ],
       "capability": "Bounded INSERT SELECT rule inputs"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "view_rule_inputs_bound_live_payload_and_retain_row_specific_types",
+      "source": "crates/uqa-execution/src/mutation/views/commands/insert/inputs/tests.rs",
+      "cases": 1,
+      "workload": "512 rows of 32KiB with row-specific VARCHAR typmods and NULLs use a 16KiB retained input allowance.",
+      "invariant": "Creation and replay preserve each typed slot below an unchanged 2MiB peak allowance.",
+      "capability": "Bounded rewrite-rule view input ownership",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "view_rule_query_input_preserves_duplicate_positions_and_excludes_hidden_slots",
+      "source": "crates/uqa-execution/src/mutation/views/commands/insert/inputs/tests.rs",
+      "cases": 1,
+      "workload": "Duplicate public labels, declared assignment types, reordered physical slots, hidden prefixes and logical NULL slots in completed SELECT output.",
+      "invariant": "Replay follows the shared public logical layout, retains each positional assignment type and never reads the physical prefix as the selected output.",
+      "capability": "Bounded rewrite-rule view input ownership",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "view_rule_inputs_preserve_empty_rows_and_reject_cancelled_or_invalid_input",
+      "source": "crates/uqa-execution/src/mutation/views/commands/insert/inputs/tests.rs",
+      "cases": 1,
+      "workload": "Thirty-three zero-width rows cross a one-byte spill allowance, followed by cancellation with one row unread and invalid type metadata.",
+      "invariant": "Empty-row multiplicity is retained, cancellation raises 57014 and malformed or unbounded inputs are rejected.",
+      "capability": "Bounded rewrite-rule view input ownership",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_rule_trigger_view_insert_keeps_bounded_input_and_proposed_rows",
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/publication.rs",
+      "cases": 2,
+      "case_names": [
+        "case_1_values",
+        "case_2_select"
+      ],
+      "workload": "128 rows of 128KiB pass through an INSTEAD OF trigger and a DO ALSO rewrite rule using VALUES or SELECT, under 512KiB query and 4MiB native SQLite retention allowances.",
+      "invariant": "Peak additional allocation stays below the unchanged 8MiB ceiling; all 16MiB COPY bytes and all 128 rule-action identities with sum 8,256 are exact.",
+      "capability": "Bounded rewrite-rule view input ownership"
     }
   ]
 }
