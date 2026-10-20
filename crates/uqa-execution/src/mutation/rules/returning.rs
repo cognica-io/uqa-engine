@@ -5,25 +5,22 @@
 //
 
 //! Physical capture and outer projection of a rule action's RETURNING rows.
+use super::RuleRows;
 use crate::mutation::output::MutationOutput;
 use crate::{
-    mutation::{
-        returning::{
-            build_returning_value_row, dml_returning_result, DmlReturningShape,
-            ReturningExecutionContext, ReturningRows, ReturningValueProjectionRow,
-        },
-        row_images::RuleRowImage,
+    mutation::returning::{
+        build_returning_value_row, dml_returning_result, DmlReturningShape,
+        ReturningExecutionContext, ReturningRows, ReturningValueProjectionRow,
     },
     OwnedPhysicalRow, PhysicalRow, RowSchema,
 };
-use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::SQLError;
 
 pub struct RuleReturningResult {
     images: ReturningRows,
     width: usize,
-    source_rows: Option<Arc<[RuleRowImage]>>,
+    source_rows: Option<RuleRows>,
     affected_rows: u64,
 }
 
@@ -46,7 +43,14 @@ impl RuleReturningResult {
         for image in self.images.into_rows()? {
             let image = image?;
             let values = image.row.into_physical_values();
-            let source = source_row(&values, self.width * 3, self.source_rows.as_deref())?;
+            let source = source_index(&values, self.width * 3, self.source_rows.as_ref())?
+                .map(|index| {
+                    self.source_rows
+                        .as_ref()
+                        .expect("validated source owner")
+                        .get(index)
+                })
+                .transpose()?;
             rows.push(build_returning_value_row(
                 context,
                 ReturningValueProjectionRow {
@@ -56,7 +60,7 @@ impl RuleReturningResult {
                     old: Some(&values[self.width..self.width * 2]),
                     new: Some(&values[self.width * 2..self.width * 3]),
                     aliases: shape.aliases,
-                    context: source.and_then(|source| source.context.as_ref()),
+                    context: source.as_ref().and_then(|source| source.context.as_ref()),
                 },
                 shape.returning,
                 shape.params,
@@ -72,7 +76,7 @@ pub fn capture_rule_returning_result(
     assignment: &dyn uqa_sql::assignment::AssignmentContext,
     result: MutationOutput,
     columns: &[uqa_sql::ast::ColumnDef],
-    source_rows: Option<Arc<[RuleRowImage]>>,
+    source_rows: Option<RuleRows>,
 ) -> Result<RuleReturningResult, SQLError> {
     let width = columns.len();
     let image_width = width.saturating_mul(3);
@@ -114,7 +118,7 @@ pub fn capture_rule_returning_result(
                     )
                 })?);
             }
-            source_row(&values, image_width, source_rows.as_deref())?;
+            source_index(&values, image_width, source_rows.as_ref())?;
             images.push(OwnedPhysicalRow::new(
                 schema.clone(),
                 PhysicalRow::from_values(values),
@@ -129,11 +133,11 @@ pub fn capture_rule_returning_result(
     })
 }
 
-fn source_row<'a>(
+fn source_index(
     values: &[Value],
     image_width: usize,
-    source_rows: Option<&'a [RuleRowImage]>,
-) -> Result<Option<&'a RuleRowImage>, SQLError> {
+    source_rows: Option<&RuleRows>,
+) -> Result<Option<usize>, SQLError> {
     let Some(source_rows) = source_rows else {
         return Ok(None);
     };
@@ -152,11 +156,13 @@ fn source_row<'a>(
             ))
         }
     };
-    source_rows.get(source_index).map(Some).ok_or_else(|| {
-        SQLError::Internal(
-            "rewrite-rule RETURNING source index is outside the event row set".into(),
-        )
-    })
+    (source_index < source_rows.len())
+        .then_some(Some(source_index))
+        .ok_or_else(|| {
+            SQLError::Internal(
+                "rewrite-rule RETURNING source index is outside the event row set".into(),
+            )
+        })
 }
 
 #[cfg(test)]

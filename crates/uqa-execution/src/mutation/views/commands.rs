@@ -340,7 +340,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
             ))
         },
     )?;
-    let action_columns = rule_batch.missing_action_row_columns();
+    let action_columns = rule_batch.missing_action_row_columns()?;
     for ((expressions, values), (_, required)) in
         stmt.rows.iter().zip(&mut cached_rows).zip(&action_columns)
     {

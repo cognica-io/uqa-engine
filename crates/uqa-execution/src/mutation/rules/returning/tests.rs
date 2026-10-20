@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::mutation::rules::RuleRowImage;
 use crate::query::runtime::{QueryMemorySettings, QueryRuntimeView};
 use parking_lot::RwLock;
 use uqa_core::CancellationToken;
@@ -104,7 +105,7 @@ fn captured_rule_images_spill_and_share_original_contexts_without_complete_outpu
         context_schema.clone(),
         PhysicalRow::from_values(vec![Value::Str("source".repeat(350_000))]),
     ));
-    let sources: Arc<[RuleRowImage]> = vec![source].into();
+    let sources = RuleRows::from_rows([Ok(source)], 64 * 1024, CancellationToken::new()).unwrap();
     with_runtime(64 * 1024, |runtime| {
         let allocated = allocation_counter::measure(|| {
             let output = action_output(
@@ -129,15 +130,12 @@ fn captured_rule_images_spill_and_share_original_contexts_without_complete_outpu
                 &Assignment,
                 output,
                 &definitions,
-                Some(Arc::clone(&sources)),
+                Some(sources.clone()),
             )
             .unwrap();
             assert_eq!(captured.affected_rows, 2048);
             assert_eq!(captured.images.len(), 2048);
-            assert!(Arc::ptr_eq(
-                captured.source_rows.as_ref().unwrap(),
-                &sources
-            ));
+            assert_eq!(captured.source_rows.as_ref().unwrap().len(), 1);
             let mut count = 0;
             for image in captured.images.into_rows().unwrap() {
                 let values = image.unwrap().row.into_physical_values();
@@ -148,15 +146,10 @@ fn captured_rule_images_spill_and_share_original_contexts_without_complete_outpu
                     assert_eq!(text.len(), 8192);
                     assert!(text.bytes().all(|actual| actual == byte));
                 }
-                let source = source_row(&values, 3, captured.source_rows.as_deref())
-                    .unwrap()
-                    .unwrap();
-                assert!(source
-                    .context
-                    .as_ref()
-                    .unwrap()
-                    .schema
-                    .shares_index(&context_schema));
+                assert_eq!(
+                    source_index(&values, 3, captured.source_rows.as_ref()).unwrap(),
+                    Some(0)
+                );
                 count += 1;
             }
             assert_eq!(count, 2048);
@@ -164,13 +157,23 @@ fn captured_rule_images_spill_and_share_original_contexts_without_complete_outpu
         // The 48 MiB image set and 2.1 MiB source context are never copied into complete output vectors.
         assert!(allocated.bytes_max < 2 * 1024 * 1024, "{allocated:?}");
     });
-    assert_eq!(Arc::strong_count(&sources), 1);
+    let source = sources.get(0).unwrap().context.unwrap();
+    assert!(source.schema.shares_index(&context_schema));
+    assert_eq!(
+        source.row.value(0),
+        Some(&Value::Str("source".repeat(350_000)))
+    );
 }
 
 #[test]
 fn captured_rule_images_keep_positional_assignment_nulls_and_original_source_indices() {
     let definitions = columns("numeric(5,1)");
-    let sources: Arc<[RuleRowImage]> = vec![RuleRowImage::empty(), RuleRowImage::empty()].into();
+    let sources = RuleRows::from_rows(
+        [Ok(RuleRowImage::empty()), Ok(RuleRowImage::empty())],
+        1,
+        CancellationToken::new(),
+    )
+    .unwrap();
     with_runtime(1, |runtime| {
         let output = action_output(
             runtime,
@@ -185,7 +188,7 @@ fn captured_rule_images_keep_positional_assignment_nulls_and_original_source_ind
             &Assignment,
             output,
             &definitions,
-            Some(Arc::clone(&sources)),
+            Some(sources.clone()),
         )
         .unwrap();
         let rows = captured
@@ -211,21 +214,16 @@ fn captured_rule_images_keep_positional_assignment_nulls_and_original_source_ind
                 }
             }
         }
-        assert!(std::ptr::eq(
-            source_row(&rows[0], 3, Some(&sources)).unwrap().unwrap(),
-            std::ptr::from_ref(&sources[1])
-        ));
-        assert!(std::ptr::eq(
-            source_row(&rows[1], 3, Some(&sources)).unwrap().unwrap(),
-            std::ptr::from_ref(&sources[0])
-        ));
+        assert_eq!(source_index(&rows[0], 3, Some(&sources)).unwrap(), Some(1));
+        assert_eq!(source_index(&rows[1], 3, Some(&sources)).unwrap(), Some(0));
     });
 }
 
 #[test]
 fn captured_rule_images_reject_invalid_source_indices_and_observe_cancellation() {
     let definitions = columns("integer");
-    let sources: Arc<[RuleRowImage]> = vec![RuleRowImage::empty()].into();
+    let sources =
+        RuleRows::from_rows([Ok(RuleRowImage::empty())], 1, CancellationToken::new()).unwrap();
     for index in [
         Value::Int(-1),
         Value::Int(1),
@@ -243,7 +241,7 @@ fn captured_rule_images_reject_invalid_source_indices_and_observe_cancellation()
                 &Assignment,
                 output,
                 &definitions,
-                Some(Arc::clone(&sources)),
+                Some(sources.clone()),
             )
             .err()
             .unwrap();
@@ -263,7 +261,7 @@ fn captured_rule_images_reject_invalid_source_indices_and_observe_cancellation()
             &Assignment,
             output,
             &definitions,
-            Some(Arc::clone(&sources)),
+            Some(sources.clone()),
         )
         .err()
         .unwrap();
@@ -289,5 +287,5 @@ fn captured_rule_images_reject_invalid_source_indices_and_observe_cancellation()
         .unwrap();
         assert_eq!(error.sqlstate(), Some("57014"));
     });
-    assert_eq!(Arc::strong_count(&sources), 1);
+    assert!(sources.get(0).unwrap().context.is_none());
 }

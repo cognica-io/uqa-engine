@@ -104,3 +104,7 @@ PR #1151 is merged as `0e6cbbeea` with both actual Linux/macOS results (1,215 ch
 ## Builtin scalar-cast delivery
 
 PR #1156 retains the scalar conversion implementation from `ef5b07a90` on the preceding rule-input unit. All crate files and regression entries match that locally verified combined source after reconstructing the unchanged relocated public COPY fixture. The independent main integration also passes all 3,816 selected cases and strict four-crate Clippy. The final automatic Linux/macOS results remain required; other cast families, routine descriptors and controlled historical acceptance remain open.
+
+## Prepared original rule events
+
+The next #714 unit retains original event images in bounded encrypted indexed storage and shares their complete source context through RETURNING. All 4,413 original local owner/consumer cases and five final ownership cases pass, including construction/replay of 32MiB below the fixed 2MiB allocation ceiling, strict Clippy and independent PostgreSQL 18.4 output. Delivery integrates only this unit on #1156. All crate files and inventory entries match original combined source `2bed81bb8` after reconstructing the unchanged relocated COPY fixture. An additional 251 related local cases and strict four-crate Clippy pass on the delivery preparation. Actual automatic platform qualification remains required.

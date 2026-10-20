@@ -16636,6 +16636,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_events_spill_original_images_and_replay_selected_ordinals_with_bounded_memory",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/rows/tests.rs",
+      "capability": "Bounded original rewrite-rule events",
+      "workload": "2,048 original OLD/NEW events totaling 32MiB, 64KiB work memory, repeated out-of-order reads after sharing and dropping the initial owner.",
+      "invariant": "Construction and replay remain below 2MiB live allocation; exact full-width document identities and payloads survive, and event allocations are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_events_preserve_complete_context_schema_lock_lineage_and_absent_images",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/rows/tests.rs",
+      "capability": "Bounded original rewrite-rule events",
+      "workload": "Memory and forced disk retention with absent/empty OLD/NEW images, qualified text, collation and a maximum-width row-lock identity.",
+      "invariant": "The complete immutable source schema and physical lock lineage survive positional replay; empty documents remain distinct from missing images.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_event_failure_and_cancellation_preserve_the_published_owner",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/rows/tests.rs",
+      "capability": "Bounded original rewrite-rule events",
+      "workload": "A partially constructed replacement fails and the current shared owner is subsequently cancelled.",
+      "invariant": "Failed replacement leaves the original image readable; cancellation rejects every owner and admission without publishing another event.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

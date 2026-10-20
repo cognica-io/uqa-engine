@@ -171,6 +171,8 @@ $$
 
 The reverse direction cannot reconstruct positions, scores, or fields. Optimizer laws that rely on idempotence therefore apply only to membership-only trees unless a payload-specific proof exists.
 
+Prepared rewrite-rule events are owned by Execution's indexed spill store. OLD/NEW documents and full-width storage identities use the existing tagged value codec; source contexts retain their complete immutable SQL schema and the physical-row codec preserves lock origins. Shared readers decode one original event at a time, and an ordered supplemental projection replaces its owner only after completion. SQL still owns action binding and logical field metadata; Engine supplies the existing session, catalog and transaction adapters.
+
 ## Composition boundary
 
 ```mermaid

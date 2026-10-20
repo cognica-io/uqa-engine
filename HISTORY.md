@@ -12,7 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Set-oriented rewrite-rule action inputs use bounded encrypted spill batches instead of complete generated VALUES plans, preserving original event ordinals, composite reads, collations and transaction behavior.
+- Set-oriented rewrite-rule action inputs and prepared original event images use bounded encrypted spill storage, preserving original event ordinals, composite reads, complete source schemas, lock lineage, collations and transaction behavior.
 
 - Borrow immutable scalar-query and CTE plans during nested privilege analysis instead of copying complete plan payloads, preserving lexical visibility, authorization subjects and error order.
 
