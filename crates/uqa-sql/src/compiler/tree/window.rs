@@ -141,6 +141,7 @@ pub(in crate::compiler) fn resolve_named_windows_in_expr(
         Expr::Default
         | Expr::Literal(_)
         | Expr::TypedLiteral { .. }
+        | Expr::RetainedLiteral(_)
         | Expr::Param(_)
         | Expr::Column(_)
         | Expr::QualifiedColumn { .. }

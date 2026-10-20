@@ -48,10 +48,27 @@ pub fn bind_insert_values_action_from_rows<R: RuleRowValues>(
     columns: &BTreeMap<String, RuleColumnMetadata>,
     bind_action: &BindRuleAction<'_>,
 ) -> Result<Statement, SQLError> {
+    bind_insert_values_action_from_rows_with_storage(rows, columns, bind_action, None)
+}
+
+pub fn bind_insert_values_action_from_rows_with_storage<R: RuleRowValues>(
+    rows: impl IntoIterator<Item = Result<R, SQLError>>,
+    columns: &BTreeMap<String, RuleColumnMetadata>,
+    bind_action: &BindRuleAction<'_>,
+    storage: Option<&dyn crate::ir::ConstantValueStorage>,
+) -> Result<Statement, SQLError> {
     let mut combined = None;
     for row in rows {
         let row = row?;
-        let bound = bind_action(&mut runtime_rule_resolver(&row, columns))?;
+        let mut resolver = runtime_rule_resolver(&row, columns);
+        let bound = if let Some(storage) = storage {
+            bind_action(&mut RetainedInputResolver {
+                inner: &mut resolver,
+                storage,
+            })?
+        } else {
+            bind_action(&mut resolver)?
+        };
         let Statement::Insert(mut insert) = bound else {
             return Err(SQLError::Internal(
                 "rewrite rule INSERT VALUES action changed statement kind".into(),
@@ -86,6 +103,46 @@ pub fn bind_insert_values_action_from_rows<R: RuleRowValues>(
         };
         insert.rows.clear();
         Ok(bound)
+    }
+}
+
+struct RetainedInputResolver<'a, 'b> {
+    inner: &'a mut RuntimeRuleResolver<'b>,
+    storage: &'a dyn crate::ir::ConstantValueStorage,
+}
+
+impl VariableResolver for RetainedInputResolver<'_, '_> {
+    fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+        self.inner.resolve_name(name)
+    }
+    fn resolve_qualified(
+        &mut self,
+        qualifier: &str,
+        column: &str,
+    ) -> Result<Option<ResolvedVariable>, SQLError> {
+        self.inner.resolve_qualified(qualifier, column)
+    }
+    fn resolve_param(&mut self, index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
+        self.inner.resolve_param(index)
+    }
+    fn rewrite_name(&mut self, name: &str) -> Result<Option<Expr>, SQLError> {
+        self.inner
+            .rewrite_name(name)?
+            .map(|value| crate::ast::RetainedInputLiteral::retain(value, self.storage))
+            .transpose()
+    }
+    fn rewrite_qualified(
+        &mut self,
+        qualifier: &str,
+        column: &str,
+    ) -> Result<Option<Expr>, SQLError> {
+        self.inner
+            .rewrite_qualified(qualifier, column)?
+            .map(|value| crate::ast::RetainedInputLiteral::retain(value, self.storage))
+            .transpose()
+    }
+    fn rewrite_qualified_whole_row(&mut self, qualifier: &str) -> Result<Option<Expr>, SQLError> {
+        self.inner.rewrite_qualified_whole_row(qualifier)
     }
 }
 

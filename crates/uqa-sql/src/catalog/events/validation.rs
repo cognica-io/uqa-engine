@@ -756,6 +756,7 @@ fn validate_rule_expr_scopes(catalog: &dyn RuleSourceCatalog, expr: &Expr) -> Re
         Expr::Default
         | Expr::Literal(_)
         | Expr::TypedLiteral { .. }
+        | Expr::RetainedLiteral(_)
         | Expr::Star
         | Expr::QualifiedStar(_)
         | Expr::Column(_)

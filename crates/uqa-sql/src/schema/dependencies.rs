@@ -116,6 +116,7 @@ pub fn walk_schema_expr_mut(
         | Expr::InternalColumn(_)
         | Expr::Literal(_)
         | Expr::TypedLiteral { .. }
+        | Expr::RetainedLiteral(_)
         | Expr::Param(_) => {}
     }
     Ok(())

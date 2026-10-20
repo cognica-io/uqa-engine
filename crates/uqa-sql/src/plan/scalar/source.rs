@@ -75,6 +75,7 @@ pub(super) enum Node<'a> {
     },
     InternalColumn(InternalColumnRef),
     Literal(Source<'a, Value>),
+    RetainedLiteral(Source<'a, Box<crate::ast::RetainedInputLiteral>>),
     TypedLiteral {
         value: Source<'a, Value>,
         ty: Source<'a, String>,
@@ -174,6 +175,7 @@ fn owned(expression: Expr) -> Node<'static> {
         },
         Expr::InternalColumn(value) => Node::InternalColumn(value),
         Expr::Literal(value) => Node::Literal(Source::Owned(value)),
+        Expr::RetainedLiteral(value) => Node::RetainedLiteral(Source::Owned(value)),
         Expr::TypedLiteral {
             value,
             ty,
@@ -284,6 +286,7 @@ fn borrowed(expression: &Expr) -> Node<'_> {
         },
         Expr::InternalColumn(value) => Node::InternalColumn(*value),
         Expr::Literal(value) => Node::Literal(Source::Borrowed(value)),
+        Expr::RetainedLiteral(value) => Node::RetainedLiteral(Source::Borrowed(value)),
         Expr::TypedLiteral {
             value,
             ty,

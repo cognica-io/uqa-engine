@@ -326,7 +326,7 @@ fn validate_generation_expression(
                 "cannot use subquery in column generation expression",
             ))
         }
-        Expr::Literal(_) | Expr::TypedLiteral { .. } => Ok(()),
+        Expr::Literal(_) | Expr::TypedLiteral { .. } | Expr::RetainedLiteral(_) => Ok(()),
     }
 }
 
@@ -412,6 +412,7 @@ pub fn bind_schema_column_references(expression: &mut Expr, qualifier: &str) {
         | Expr::InternalColumn(_)
         | Expr::Literal(_)
         | Expr::TypedLiteral { .. }
+        | Expr::RetainedLiteral(_)
         | Expr::Param(_)
         | Expr::WindowCall { .. }
         | Expr::ScalarSubquery(_)

@@ -43,6 +43,7 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
         }
         Expr::Literal(value) => schema_literal_text(value)?,
         Expr::TypedLiteral { value, ty, .. } => format!("({})::{ty}", schema_literal_text(value)?),
+        Expr::RetainedLiteral(literal) => schema_expr_text(&literal.materialize()?)?,
         Expr::Param(index) => format!("${index}"),
         Expr::Func {
             name,

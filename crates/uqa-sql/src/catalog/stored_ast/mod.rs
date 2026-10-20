@@ -356,6 +356,9 @@ where
     }
 
     fn bind_expression_type(&mut self, expression: &mut Expr) -> Result<(), SQLError> {
+        if let Expr::RetainedLiteral(literal) = expression {
+            *expression = literal.materialize()?;
+        }
         if let Some(visit) = self.expression.as_mut() {
             visit(expression)?;
         }
@@ -510,6 +513,7 @@ where
             | Expr::InternalColumn(_)
             | Expr::Literal(_)
             | Expr::TypedLiteral { .. }
+            | Expr::RetainedLiteral(_)
             | Expr::Param(_) => {}
         }
         Ok(())

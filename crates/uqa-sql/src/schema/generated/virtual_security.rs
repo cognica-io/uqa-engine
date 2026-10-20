@@ -167,6 +167,7 @@ fn children(expression: &Expr) -> Vec<&Expr> {
         | Expr::InternalColumn(_)
         | Expr::Literal(_)
         | Expr::TypedLiteral { .. }
+        | Expr::RetainedLiteral(_)
         | Expr::Param(_)
         | Expr::WindowCall { .. }
         | Expr::ScalarSubquery(_)
