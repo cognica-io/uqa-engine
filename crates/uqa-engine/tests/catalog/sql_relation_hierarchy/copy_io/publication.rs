@@ -6,7 +6,7 @@
 
 //! Bounded evaluated mutation publication through the public COPY API.
 
-use super::{copy_to_string, exec, Engine};
+use super::{copy_engine, copy_to_string, exec, Engine};
 
 struct CheckedOutput {
     width: usize,
@@ -200,6 +200,21 @@ fn copy_trigger_view_insert_keeps_bounded_input_and_proposed_rows(#[case] select
 
 #[test]
 fn rule_values_insert_does_not_retain_complete_candidate_images() {
+    let values = (1..=128)
+        .map(|id| format!("({id},repeat('x',131072))"))
+        .collect::<Vec<_>>()
+        .join(",");
+    assert_rule_insert_memory_bound(&format!("VALUES {values}"));
+}
+
+#[test]
+fn rule_select_insert_does_not_retain_complete_query_input() {
+    assert_rule_insert_memory_bound(
+        "SELECT n,repeat('x',131072) FROM generate_series(1,128) AS s(n)",
+    );
+}
+
+fn assert_rule_insert_memory_bound(source: &str) {
     let directory = tempfile::tempdir().unwrap();
     let engine = allocation_engine(&directory.path().join("rule-insert.db"));
     exec(
@@ -210,15 +225,17 @@ fn rule_values_insert_does_not_retain_complete_candidate_images() {
          DO ALSO INSERT INTO rule_insert_log VALUES (NEW.id)",
     );
     engine.set_query_memory_limit(Some(256 * 1024));
-    let values = (1..=128)
-        .map(|id| format!("({id},repeat('x',131072))"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let sql = format!("INSERT INTO rule_insert_output VALUES {values}");
+    let sql = format!("INSERT INTO rule_insert_output {source}");
     let allocated = allocation_counter::measure(|| exec(&engine, &sql));
     // The 4MiB session allowance plus bounded spill overhead cannot retain all 16MiB of candidates.
     assert!(allocated.bytes_max < 8 * 1024 * 1024, "{allocated:?}");
-    assert_eq!(copy_to_string(&engine, "COPY (SELECT count(*), min(length(body)), max(length(body)) FROM rule_insert_output) TO STDOUT"), "128\t131072\t131072\n");
+    assert_eq!(
+        copy_to_string(
+            &engine,
+            "COPY (SELECT count(*), min(length(body)), max(length(body)) FROM rule_insert_output) TO STDOUT"
+        ),
+        "128\t131072\t131072\n"
+    );
     assert_eq!(
         copy_to_string(
             &engine,
@@ -226,4 +243,69 @@ fn rule_values_insert_does_not_retain_complete_candidate_images() {
         ),
         "128\t8256\n"
     );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn rule_select_input_preserves_positions_and_rolls_back_source_failure(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("rule-source.db");
+    let engine = copy_engine(provider, &path);
+    exec(
+        &engine,
+        "CREATE TABLE positions_probe(id INTEGER PRIMARY KEY, value INTEGER);
+        CREATE TABLE positions_probe_log(id INTEGER,value INTEGER);
+        CREATE RULE capture AS ON INSERT TO positions_probe
+        DO ALSO INSERT INTO positions_probe_log VALUES (NEW.id,NEW.value)",
+    );
+    engine.set_query_memory_limit(Some(1024));
+    exec(
+        &engine,
+        "INSERT INTO positions_probe
+        SELECT n AS same,n+10 AS same FROM generate_series(1,3) AS s(n)",
+    );
+    for table in ["positions_probe", "positions_probe_log"] {
+        assert_eq!(
+            copy_to_string(
+                &engine,
+                &format!("COPY (SELECT id,value FROM {table} ORDER BY id) TO STDOUT")
+            ),
+            "1\t11\n2\t12\n3\t13\n"
+        );
+    }
+    exec(&engine, "BEGIN; SAVEPOINT input_failure");
+    let error = engine
+        .sql(
+            "INSERT INTO positions_probe
+        SELECT n+10,10/(3-n) FROM generate_series(1,3) AS s(n)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22012"));
+    exec(&engine, "ROLLBACK TO input_failure; COMMIT");
+    for table in ["positions_probe", "positions_probe_log"] {
+        assert_eq!(
+            copy_to_string(
+                &engine,
+                &format!("COPY (SELECT count(*),sum(value) FROM {table}) TO STDOUT")
+            ),
+            "3\t36\n"
+        );
+    }
+    drop(engine);
+    if provider != 0 {
+        let reopened = copy_engine(provider, &path);
+        for table in ["positions_probe", "positions_probe_log"] {
+            assert_eq!(
+                copy_to_string(
+                    &reopened,
+                    &format!("COPY (SELECT id,value FROM {table} ORDER BY id) TO STDOUT")
+                ),
+                "1\t11\n2\t12\n3\t13\n"
+            );
+        }
+    }
 }

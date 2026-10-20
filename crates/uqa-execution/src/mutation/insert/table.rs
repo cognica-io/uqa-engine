@@ -13,10 +13,7 @@ use super::{
     known_new::KnownNewInserts,
     pending::{PendingInsertRow, PendingInsertRows},
     rows::prepare_values_insert_row,
-    source::{
-        insert_source_expression_rows, InsertSelectConsumer, InsertSelectIdentity,
-        PreparedInsertSelect,
-    },
+    source::{InsertInputRows, InsertSelectConsumer, InsertSelectIdentity, PreparedInsertSelect},
     supplied_identities::SuppliedIdentities,
     triggers::insert_statement_events,
 };
@@ -302,7 +299,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         uqa_sql::ast::RuleEvent::Insert,
                     )?;
                 if !view_original_query && !surviving_view_rules_require_rows {
-                    rule_source_rows = Some(Vec::new());
+                    rule_source_rows = Some(InsertInputRows::values(&[]));
                 } else if !has_any_insert_rules {
                     let snapshot_scope = scope.returning_statement_snapshot_scope();
                     let mut source_scope = snapshot_scope.clone();
@@ -435,13 +432,17 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     }
                     let mut source_scope = scope.returning_statement_snapshot_scope();
                     source_scope.enable_command_progress_streaming();
-                    let result = crate::query::statement::execute_query_plan_with_ctes(
+                    let result = crate::query::statement::execute_query_plan_output(
                         &read_context.query,
                         &source,
                         params,
                         &mut source_scope,
+                        QueryOutputMode::SharedSpill,
                     )?;
-                    rule_source_rows = Some(insert_source_expression_rows(result)?);
+                    rule_source_rows = Some(InsertInputRows::query(
+                        result,
+                        context.query.source.relational.runtime.cancellation_token(),
+                    )?);
                 }
             }
 
@@ -481,7 +482,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             let snapshot_scope = scope.returning_statement_snapshot_scope();
             let overlay = MutationOverlayScope::new(mutation.state);
             let mut conflict_locks = InsertConflictLocks::new(&preparation.referential);
-            let input_rows = rule_source_rows.as_deref().unwrap_or(&stmt.rows);
+            let input_rows =
+                rule_source_rows.unwrap_or_else(|| InsertInputRows::values(&stmt.rows));
             let prepared_schema = prepared_insert_spill_schema();
             let mut prepared_rows = crate::SpillBuffer::new(
                 crate::query::projection::physical_work_mem_bytes(
@@ -508,6 +510,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 .flatten();
             for row in input_rows {
                 cancel.check()?;
+                let row = row?;
                 if row.len() > columns.len() || (!implicit_columns && row.len() != columns.len()) {
                     return Err(SQLError::Routine {
                         sqlstate: "42601".into(),
