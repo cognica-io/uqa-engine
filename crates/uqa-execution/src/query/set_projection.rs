@@ -126,6 +126,7 @@ pub fn build_set_projection<'a>(
     runtime: Arc<dyn SetFunctionRuntime + 'a>,
     params: &'a [SQLParam],
     evaluator: SharedExpressionEvaluator<'a>,
+    work_mem: usize,
     output: SetProjectionOutput,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     let SetProjectionOutput {
@@ -171,17 +172,15 @@ pub fn build_set_projection<'a>(
         ));
     }
     if pass_through {
-        Ok(Box::new(Project::appending_target_evaluator(
-            operator,
-            plan.projections,
-            evaluator,
-        )))
+        Ok(Box::new(
+            Project::appending_target_evaluator(operator, plan.projections, evaluator)
+                .with_memory_budget(work_mem),
+        ))
     } else {
-        Ok(Box::new(Project::with_target_evaluator(
-            operator,
-            plan.projections,
-            evaluator,
-        )))
+        Ok(Box::new(
+            Project::with_target_evaluator(operator, plan.projections, evaluator)
+                .with_memory_budget(work_mem),
+        ))
     }
 }
 

@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound expanded scalar-projection output before COPY and query consumers, preserving input-batch error order, row positions, cancellation and directional cursor behavior.
+
 - Materialize public SQL rows as each input batch arrives, releasing completed physical inputs before the next pull while preserving positional metadata, compatibility labels and statement evaluation order.
 
 - Bound deferred foreign-key parent keys with exact spill-backed membership while preserving cross-type comparison, validation order, cancellation and rollback.
