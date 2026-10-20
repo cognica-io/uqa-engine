@@ -24,10 +24,9 @@ pub(in crate::optimizer::scalar) fn fold_composite_constructor(
     else {
         return Ok(expression);
     };
-    if !items
-        .iter()
-        .all(|item| super::literal_value(item).is_some())
-    {
+    if !items.iter().try_fold(true, |all, item| {
+        Ok::<_, SQLError>(all && super::literal_value(item)?.is_some())
+    })? {
         return Ok(expression);
     }
     let ty = match bound_type {
@@ -46,7 +45,11 @@ pub(in crate::optimizer::scalar) fn fold_composite_constructor(
         &control,
         |index| {
             control
-                .copy_value(super::literal_value(&items[index]).expect("constant argument"))
+                .copy_value(
+                    super::literal_value(&items[index])?
+                        .as_deref()
+                        .expect("constant argument"),
+                )
                 .map_err(Into::into)
         },
     )?

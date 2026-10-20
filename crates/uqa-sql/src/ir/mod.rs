@@ -10,10 +10,14 @@ mod call_arguments;
 pub(crate) use call_arguments::scalar_call_argument_value_owned;
 mod collation;
 pub use collation::ResultCollation;
+mod retained;
 mod traversal;
 pub use call_arguments::{
     analyze_expression_call_arguments, scalar_call_argument, scalar_call_arguments,
     scalar_call_arguments_with_control, validate_scalar_call_arguments, ScalarCallArgument,
+};
+pub use retained::{
+    ConstantValueSource, ConstantValueStorage, RetainedConstantValue, RetainedScalarLiteral,
 };
 
 use crate::ast::{
@@ -139,6 +143,9 @@ pub enum ScalarExpr {
         subquery: SubqueryId,
         negated: bool,
     },
+    /// An evaluated constant with shared bounded payload ownership. Serialized plans retain the ordinary literal representation; their reader can choose storage again at optimization.
+    #[serde(untagged, skip_deserializing)]
+    RetainedLiteral(Box<RetainedScalarLiteral>),
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

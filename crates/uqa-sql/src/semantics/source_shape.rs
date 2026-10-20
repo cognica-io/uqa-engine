@@ -83,106 +83,14 @@ pub fn collect_from_qualifiers(from: &SourcePlan, out: &mut Vec<String>) {
 }
 
 pub fn collect_subquery_ids(expression: &ScalarExpr, output: &mut BTreeSet<usize>) {
-    match expression {
-        ScalarExpr::ScalarSubquery(id) | ScalarExpr::Exists { subquery: id, .. } => {
+    expression.visit(&mut |node| match node {
+        ScalarExpr::ScalarSubquery(id)
+        | ScalarExpr::Exists { subquery: id, .. }
+        | ScalarExpr::InSubquery { subquery: id, .. } => {
             output.insert(*id);
         }
-        ScalarExpr::InSubquery { expr, subquery, .. } => {
-            collect_subquery_ids(expr, output);
-            output.insert(*subquery);
-        }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::CompositeRow { items, .. }
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => {
-            for item in items {
-                collect_subquery_ids(item, output);
-            }
-        }
-        ScalarExpr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            for argument in args {
-                collect_subquery_ids(argument, output);
-            }
-            for order in order_by {
-                collect_subquery_ids(&order.expr, output);
-            }
-            if let Some(filter) = filter {
-                collect_subquery_ids(filter, output);
-            }
-        }
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            collect_subquery_ids(lhs, output);
-            collect_subquery_ids(rhs, output);
-        }
-        ScalarExpr::Not(inner)
-        | ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. }
-        | ScalarExpr::Collated { expr: inner, .. } => collect_subquery_ids(inner, output),
-        ScalarExpr::Between { expr, low, high } => {
-            collect_subquery_ids(expr, output);
-            collect_subquery_ids(low, output);
-            collect_subquery_ids(high, output);
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            collect_subquery_ids(expr, output);
-            for item in list {
-                collect_subquery_ids(item, output);
-            }
-        }
-        ScalarExpr::WindowCall {
-            args, spec, filter, ..
-        } => {
-            for argument in args {
-                collect_subquery_ids(argument, output);
-            }
-            if let Some(filter) = filter {
-                collect_subquery_ids(filter, output);
-            }
-            for partition in &spec.partition_by {
-                collect_subquery_ids(partition, output);
-            }
-            for order in &spec.order_by {
-                collect_subquery_ids(&order.expr, output);
-            }
-            if let Some(frame) = &spec.frame {
-                collect_frame_bound_subquery_ids(&frame.start, output);
-                collect_frame_bound_subquery_ids(&frame.end, output);
-            }
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base {
-                collect_subquery_ids(base, output);
-            }
-            for (condition, result) in when {
-                collect_subquery_ids(condition, output);
-                collect_subquery_ids(result, output);
-            }
-            if let Some(branch) = else_branch {
-                collect_subquery_ids(branch, output);
-            }
-        }
-        ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Column(_)
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedColumn { .. }
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::Param(_) => {}
-    }
+        _ => {}
+    });
 }
 
 pub fn collect_frame_bound_subquery_ids(

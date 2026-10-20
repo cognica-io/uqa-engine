@@ -70,7 +70,7 @@ fn selected_constant_fields_retain_postgresql_collations() {
         let folded =
             fold_literal_expression(expression, |_| panic!("constant field already read")).unwrap();
         assert_eq!(
-            literal_value(&folded),
+            literal_value(&folded).unwrap().as_deref(),
             Some(&case.value.map_or(Value::Null, Value::Str))
         );
         let stored = serde_json::to_value(&folded).unwrap();

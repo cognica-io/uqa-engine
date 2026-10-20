@@ -30,6 +30,9 @@ impl Deparser<'_> {
             return self.collation(clause, scope, subqueries);
         }
         match expression {
+            ScalarExpr::RetainedLiteral(value) => {
+                self.expression(&value.materialize()?, scope, subqueries)
+            }
             ScalarExpr::Column(name) => Ok(self.column_reference(None, name, scope)),
             ScalarExpr::QualifiedColumn { qualifier, column } => {
                 Ok(self.column_reference(Some(qualifier), column, scope))

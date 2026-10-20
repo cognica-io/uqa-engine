@@ -375,6 +375,7 @@ fn references_external_row(
         ScalarExpr::Default
         | ScalarExpr::Literal(_)
         | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::Param(_) => false,
     }
 }

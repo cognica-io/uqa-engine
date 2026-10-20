@@ -46,6 +46,20 @@ pub fn encode_prepared_insert_spill_row(prepared: PreparedInsertSpillRow) -> Phy
     ]))])
 }
 
+pub fn push_prepared_insert_spill_row(
+    buffer: &mut crate::SpillBuffer,
+    schema: &RowSchema,
+    prepared: PreparedInsertSpillRow,
+) -> Result<(), SQLError> {
+    buffer
+        .push(crate::Batch::from_physical_rows(
+            schema.clone(),
+            vec![encode_prepared_insert_spill_row(prepared)],
+        ))
+        .map_err(crate::physical::physical_exec_error)?;
+    Ok(())
+}
+
 pub fn decode_prepared_insert_spill_row(
     row: OwnedPhysicalRow,
 ) -> Result<PreparedInsertSpillRow, SQLError> {

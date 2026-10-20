@@ -66,7 +66,6 @@ pub(super) fn outer_expression_contains_volatile_function(
         return expr_contains_volatile_function(context.volatility, expression);
     }
     match expression {
-        ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } => false,
         ScalarExpr::Func {
             name,
             binding,
@@ -122,25 +121,13 @@ pub(super) fn outer_expression_contains_volatile_function(
             spec,
             filter,
             ..
-        } => {
-            uqa_sql::semantics::volatility::function_volatility(
-                context.volatility,
-                name,
-                args.len(),
-            ) == uqa_sql::ast::FunctionVolatility::Volatile
-                || args
-                    .iter()
-                    .chain(filter.as_deref())
-                    .chain(&spec.partition_by)
-                    .chain(spec.order_by.iter().map(|order| &order.expr))
-                    .any(|expr| outer_expression_contains_volatile_function(context, expr))
-                || spec.frame.as_ref().is_some_and(|frame| {
-                    frame_bound_outer_expression_contains_volatile_function(context, &frame.start)
-                        || frame_bound_outer_expression_contains_volatile_function(
-                            context, &frame.end,
-                        )
-                })
-        }
+        } => window_outer_expression_contains_volatile_function(
+            context,
+            name,
+            args,
+            spec,
+            filter.as_deref(),
+        ),
         ScalarExpr::Case {
             base,
             when,
@@ -160,8 +147,32 @@ pub(super) fn outer_expression_contains_volatile_function(
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. }
         | ScalarExpr::Param(_) => false,
     }
+}
+
+fn window_outer_expression_contains_volatile_function(
+    context: FilterPushdownContext<'_>,
+    name: &str,
+    args: &[ScalarExpr],
+    spec: &uqa_sql::ScalarWindowSpec,
+    filter: Option<&ScalarExpr>,
+) -> bool {
+    uqa_sql::semantics::volatility::function_volatility(context.volatility, name, args.len())
+        == uqa_sql::ast::FunctionVolatility::Volatile
+        || args
+            .iter()
+            .chain(filter)
+            .chain(&spec.partition_by)
+            .chain(spec.order_by.iter().map(|order| &order.expr))
+            .any(|expr| outer_expression_contains_volatile_function(context, expr))
+        || spec.frame.as_ref().is_some_and(|frame| {
+            frame_bound_outer_expression_contains_volatile_function(context, &frame.start)
+                || frame_bound_outer_expression_contains_volatile_function(context, &frame.end)
+        })
 }
 
 pub(super) fn frame_bound_outer_expression_contains_volatile_function(
