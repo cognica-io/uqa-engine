@@ -96,6 +96,90 @@ fn copy_spilled_returning_preserves_values_and_row_images(#[case] provider: usiz
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn copy_rule_returning_keeps_source_context_and_rolls_back_failed_delivery(
+    #[case] provider: usize,
+) {
+    struct FailedFlush;
+    impl std::io::Write for FailedFlush {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("rule output closed"))
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("rule-returning.db");
+    let engine = copy_engine(provider, &path);
+    exec(
+        &engine,
+        "CREATE TABLE rule_bounded_event(id INTEGER PRIMARY KEY, body TEXT);
+        CREATE TABLE rule_bounded_target(id INTEGER PRIMARY KEY, body TEXT);
+        INSERT INTO rule_bounded_event VALUES (1, repeat('x', 4096)), (2, repeat('x', 4096));
+        INSERT INTO rule_bounded_target VALUES (1, 'target-before'), (2, 'target-before');
+        CREATE RULE redirect AS ON UPDATE TO rule_bounded_event DO INSTEAD
+          UPDATE rule_bounded_target SET body = NEW.body || '-action'
+          WHERE rule_bounded_target.id = OLD.id RETURNING rule_bounded_target.*",
+    );
+    engine.set_query_memory_limit(Some(1024));
+    let copy = "COPY (UPDATE rule_bounded_event AS e SET body=e.body || '-new'
+        FROM (VALUES (1, 'source-one'), (2, 'source-two')) AS s(id,label) WHERE e.id=s.id
+        RETURNING e.id AS item, old.body AS item, new.body AS item, s.label AS item)
+        TO STDOUT WITH (FORMAT csv, HEADER)";
+    assert_eq!(
+        engine
+            .copy_to(copy, &mut FailedFlush)
+            .unwrap_err()
+            .sqlstate(),
+        Some("58030")
+    );
+    let before = engine
+        .sql("SELECT body FROM rule_bounded_target ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(before.rows.len(), 2);
+    assert!(before
+        .rows
+        .iter()
+        .all(|row| row["body"] == Value::Str("target-before".into())));
+
+    let output = copy_to_string(&engine, copy);
+    let mut lines = output.lines();
+    assert_eq!(lines.next(), Some("item,item,item,item"));
+    let mut actual = lines.collect::<Vec<_>>();
+    actual.sort_unstable();
+    let body = format!("{}-new-action", "x".repeat(4096));
+    assert_eq!(
+        actual,
+        [
+            format!("1,target-before,{body},source-one"),
+            format!("2,target-before,{body},source-two")
+        ]
+    );
+    assert!(engine
+        .sql("SELECT body FROM rule_bounded_event", &[])
+        .unwrap()
+        .rows
+        .iter()
+        .all(|row| row["body"] == Value::Str("x".repeat(4096))));
+    drop(engine);
+    if provider != 0 {
+        let reopened = copy_engine(provider, &path);
+        let rows = reopened
+            .sql("SELECT body FROM rule_bounded_target ORDER BY id", &[])
+            .unwrap();
+        assert_eq!(rows.rows.len(), 2);
+        assert!(rows
+            .rows
+            .iter()
+            .all(|row| row["body"] == Value::Str(body.clone())));
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn copy_output_failure_rolls_back_the_implicit_mutation(#[case] provider: usize) {
     struct Sink {
         mode: &'static str,

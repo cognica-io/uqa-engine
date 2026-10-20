@@ -38,7 +38,7 @@ impl ReturningRows {
         ))
     }
 
-    fn with_budget(bytes: usize, cancellation: CancellationToken) -> Self {
+    pub(crate) fn with_budget(bytes: usize, cancellation: CancellationToken) -> Self {
         Self {
             buffer: SpillBuffer::new(bytes / 2),
             schema: None,

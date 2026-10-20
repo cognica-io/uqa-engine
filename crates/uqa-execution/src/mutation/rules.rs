@@ -10,6 +10,7 @@ mod returning;
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use uqa_core::Value;
 use uqa_sql::ast::{RuleEvent, Statement};
@@ -55,7 +56,7 @@ use uqa_sql::semantics::rules::binding::RuleColumnMetadata;
 pub struct PreparedRuleBatch {
     table: String,
     event: RuleEvent,
-    rows: Vec<RuleRowImage>,
+    rows: Arc<[RuleRowImage]>,
     rules: Vec<PreparedRule>,
     suppress_original: Vec<bool>,
     action_qualification_count: Option<usize>,
@@ -104,7 +105,7 @@ impl PreparedRuleBatch {
     pub fn missing_action_row_columns(&self) -> Vec<(BTreeSet<String>, BTreeSet<String>)> {
         self.matched_action_row_columns()
             .into_iter()
-            .zip(&self.rows)
+            .zip(self.rows.iter())
             .map(|(columns, row)| {
                 let missing = |record: &Option<Document>| {
                     if let Some(record) = record {
@@ -128,7 +129,7 @@ impl PreparedRuleBatch {
                 "rewrite-rule supplemental row count changed after qualification".into(),
             ));
         }
-        for (target, supplemental) in self.rows.iter_mut().zip(rows) {
+        for (target, supplemental) in Arc::make_mut(&mut self.rows).iter_mut().zip(rows) {
             target.supplement_documents(supplemental);
         }
         Ok(())
@@ -193,7 +194,7 @@ impl PreparedRuleBatch {
                 let (action_matching_rows, action_rows) = if self.event == RuleEvent::Insert
                     && prepared.rule.bound_condition_plan().is_some()
                 {
-                    reevaluated_rows = self.rows.clone();
+                    reevaluated_rows = self.rows.to_vec();
                     let mut matched = Vec::new();
                     for (row_index, row) in reevaluated_rows.iter_mut().enumerate() {
                         if rule_condition_matches(
@@ -214,7 +215,7 @@ impl PreparedRuleBatch {
                         reevaluated_rows.as_slice(),
                     )
                 } else {
-                    (prepared.matching_rows.as_slice(), self.rows.as_slice())
+                    (prepared.matching_rows.as_slice(), self.rows.as_ref())
                 };
                 let action_returns = statement_has_returning(action);
                 let captures_action = request.captures() && action_returns;
@@ -351,20 +352,38 @@ impl PreparedRuleBatch {
                             | (RuleEvent::Delete, Statement::Delete(_))
                     )
                 {
-                    affected_rows = result.affected_rows;
+                    affected_rows = match &result {
+                        crate::statement::plan_executor::StatementOutput::Mutation(result) => {
+                            result.affected_rows
+                        }
+                        crate::statement::plan_executor::StatementOutput::Command(result) => {
+                            result.affected_rows
+                        }
+                        crate::statement::plan_executor::StatementOutput::Query(_) => 0,
+                    };
                     sets_command_tag = true;
                 }
                 if captures_action {
+                    let crate::statement::plan_executor::StatementOutput::Mutation(result) = result
+                    else {
+                        return Err(SQLError::Internal(
+                            "rewrite-rule RETURNING provider is not a mutation".into(),
+                        ));
+                    };
                     let definitions = returning_columns.as_deref().ok_or_else(|| {
                         SQLError::Internal(
                             "rewrite-rule RETURNING capture lost the event row type".into(),
                         )
                     })?;
                     let captured = capture_rule_returning_result(
+                        super::returning::ReturningRows::with_budget(
+                            context.memory.work_mem_bytes()?,
+                            context.cancellation.clone(),
+                        ),
                         context.assignment,
                         result,
                         definitions,
-                        captures_source_context.then_some(self.rows.as_slice()),
+                        captures_source_context.then(|| Arc::clone(&self.rows)),
                     )?;
                     returning = Some(captured);
                 }
@@ -410,7 +429,7 @@ where
             table,
             event,
             suppress_original: vec![false; rows.len()],
-            rows,
+            rows: rows.into(),
             rules: Vec::new(),
             action_qualification_count: None,
         });
@@ -443,7 +462,7 @@ where
     Ok(PreparedRuleBatch {
         table,
         event,
-        rows,
+        rows: rows.into(),
         rules: prepared_rules,
         suppress_original,
         action_qualification_count: None,

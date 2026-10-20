@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Keep rewrite-rule action output and captured current/OLD/NEW images in bounded spill storage, sharing the original source context without per-output copies while preserving assignment order, owner privileges, COPY failure rollback and durable results.
+
 - Accumulate mutation RETURNING values in bounded spill batches, detach unselected OLD/NEW payloads and pass ordinary mutation output directly to COPY and modifying CTE consumers. Preserve output positions and statement rollback; public SQL results still materialize their requested rows.
 
 - Deliver COPY SELECT rows through the bounded query spool and keep sink output and flush inside the statement transaction, preserving the selected rows and rolling back failed or cancelled mutating exports.
