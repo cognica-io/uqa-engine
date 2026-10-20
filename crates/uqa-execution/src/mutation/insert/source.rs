@@ -481,3 +481,5 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
 use crate::mutation::preparation::MutationPreparationContext;
 
 pub mod binding;
+mod inputs;
+pub(super) use inputs::InsertInputRows;

@@ -16985,6 +16985,74 @@
         ""
       ],
       "capability": "Bounded original INSERT candidates"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "insert_source_input_bounds_live_payload_during_creation_and_replay",
+      "source": "crates/uqa-execution/src/mutation/insert/source/inputs/tests.rs",
+      "workload": "512 lazy 32KiB rows become a completed 64KiB spill and then ordered input expressions.",
+      "invariant": "Creation and replay stay below the unchanged 2MiB peak allocation ceiling, with every ordinal and payload byte preserved.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded INSERT SELECT rule inputs"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "insert_source_input_preserves_positions_nulls_and_zero_column_multiplicity",
+      "source": "crates/uqa-execution/src/mutation/insert/source/inputs/tests.rs",
+      "workload": "Duplicate public labels, a NULL value, a hidden physical column and 4,097 zero-column rows.",
+      "invariant": "Public positions preserve duplicate names and NULLs, hidden columns are excluded and nullary multiplicity is exact.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded INSERT SELECT rule inputs"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "insert_source_input_observes_cancellation_and_requires_bounded_query_output",
+      "source": "crates/uqa-execution/src/mutation/insert/source/inputs/tests.rs",
+      "workload": "Cancellation after source completion, an unbounded output representation and a borrowed VALUES DEFAULT expression.",
+      "invariant": "Reads observe 57014; an unexpected unbounded query output fails; VALUES expressions remain borrowed and unevaluated.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded INSERT SELECT rule inputs"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "rule_select_insert_does_not_retain_complete_query_input",
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/publication.rs",
+      "workload": "A completed 128-row, 16MiB INSERT SELECT with a rewrite rule, 256KiB query memory and 4MiB native SQLite session retention.",
+      "invariant": "Peak additional allocation stays below the unchanged 8MiB ceiling and all target and rule-output counts match independent PostgreSQL 18.4.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded INSERT SELECT rule inputs"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "rule_select_input_preserves_positions_and_rolls_back_source_failure",
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/publication.rs",
+      "workload": "INSERT SELECT with duplicate source labels and a late division error, savepoint recovery and reopen across all four providers.",
+      "invariant": "Exact target and rule-output values match PostgreSQL 18.4; the failed source query publishes no rows, rollback recovers and committed rows survive reopen.",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Bounded INSERT SELECT rule inputs"
     }
   ]
 }

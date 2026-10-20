@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound completed SELECT inputs for INSERT rewrite rules without retaining every result row, preserving positional assignments, source errors and rule ordering.
+
 - Bound original INSERT rewrite-rule candidates and their prepared identities by the configured work memory, preserving defaults, rule suppression, generated columns and publication order.
 
 - Evaluate unrewritten view INSERT inputs and INSTEAD OF row triggers in PostgreSQL order, preserving prior sequence effects on source errors and bounding input and RETURNING retention.
