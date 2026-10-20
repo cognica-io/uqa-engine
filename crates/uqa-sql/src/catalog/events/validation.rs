@@ -450,6 +450,7 @@ fn rule_pseudo_relation_name(name: &str) -> Option<String> {
 
 fn first_rule_pseudo_relation_in_from(from: &FromClause) -> Option<String> {
     match from {
+        crate::ast::FromClause::RetainedRows(_) => None,
         FromClause::Table {
             name,
             qualifier,
@@ -638,6 +639,7 @@ fn validate_rule_from_scopes(
     from: &FromClause,
 ) -> Result<(), SQLError> {
     match from {
+        crate::ast::FromClause::RetainedRows(_) => {}
         FromClause::Table { .. } => {}
         FromClause::Join {
             left, right, on, ..

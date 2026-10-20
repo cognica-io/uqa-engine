@@ -30,6 +30,9 @@ fn copy_engine(provider: usize, path: &std::path::Path) -> Engine {
     }
 }
 
+#[path = "copy_io/rules.rs"]
+mod rules;
+
 #[rstest::rstest]
 #[case::memory(0)]
 #[case::sqlite(1)]

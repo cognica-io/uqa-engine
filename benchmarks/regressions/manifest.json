@@ -14863,7 +14863,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -16347,6 +16347,243 @@
       "capability": "Borrowed authorization plan inputs",
       "workload": "Source-expression authorization borrows the original scalar-query arena and encounters a denied correlated leaf column.",
       "invariant": "The original plan arena is borrowed by identity; leaf c0 precedes the c2 denial with SQLSTATE 42501 and no later root check."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sources_bind_complete_types_without_sampling_or_exposing_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/tests/retained_sources.rs",
+      "capability": "Execution-owned retained row sources",
+      "workload": "Zero, one and one million retained rows with internal integer/text columns and explicit C collation.",
+      "invariant": "Binding and ordered analysis agree without inspecting values, SQL-visible names or a false outer correlation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sources_cannot_escape_into_stored_syntax_or_sql_text",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/tests/retained_sources.rs",
+      "capability": "Execution-owned retained row sources",
+      "workload": "Serialization, deserialization, SQL rendering and descriptors with ordinary/hidden names or the wrong relation identity.",
+      "invariant": "Execution-only inputs cannot become stored statements or expose SQL names; invalid descriptors fail closed."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sources_share_owned_record_descriptors_and_clone_without_row_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/tests/retained_sources.rs",
+      "capability": "Execution-owned retained row sources",
+      "workload": "Clone 128 descriptors for one million record-valued rows.",
+      "invariant": "Clones share the original schema and exact record fields, allocating below 32KiB independently of row count."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_rows_stream_repeatable_spilled_inputs_with_bounded_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/retained_source/tests.rs",
+      "capability": "Execution-owned retained row sources",
+      "workload": "Two independent readers over 16MiB of original rows retained with a 4KiB spill allowance.",
+      "invariant": "Exact order, multiplicity, values and collation; reopening starts at the first row; peak live allocation below 2MiB."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_row_scopes_preserve_nested_owners_and_remove_failed_actions",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/retained_source/tests.rs",
+      "capability": "Execution-owned retained row sources",
+      "workload": "Duplicate identity, nested action unwind and an opened reader surviving its scope.",
+      "invariant": "A failed action removes only its own identity; expired descriptors cannot reopen a source; existing readers retain their owner."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_row_sources_reject_mismatched_descriptors_and_keep_empty_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/retained_source/tests.rs",
+      "capability": "Execution-owned retained row sources",
+      "workload": "Empty and single-row sources with changed type or row-count descriptors.",
+      "invariant": "Only the exact active descriptor can open a source; an empty source remains empty."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "retained_row_plans_preserve_cardinality_identity_and_internal_predicates",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/tests/retained_rows.rs",
+      "capability": "Execution-owned retained row sources",
+      "workload": "Optimize zero, one and 2,048 retained rows with an internal-column predicate.",
+      "invariant": "Costing retains the declared cardinality; optimization preserves source identity and cannot elide the internal predicate into SQL qualifier filters."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_row_rechecks_copy_internal_values_and_null_extensions_by_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/locking/leaf_validation/tests.rs",
+      "capability": "Execution-owned retained row sources",
+      "workload": "A joined candidate with unrelated leading columns, then NULL-extended and missing internal attributes.",
+      "invariant": "Rechecks copy only the structurally identified values, preserve the complete original schema/collation and NULL extensions, and reject missing identities."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_row_nullary_sources_keep_multiplicity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/retained_source/tests.rs",
+      "capability": "Execution-owned retained row sources",
+      "workload": "Three zero-column rows forced through the spill reader.",
+      "invariant": "Physical width zero does not collapse multiplicity to zero rows or one row; cost and reader retain exactly three."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_row_workers_share_owners_without_row_copies_or_thread_leaks",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/retained_source/tests.rs",
+      "capability": "Execution-owned retained row sources",
+      "workload": "Capture 1,024 contexts over 4MiB spilled rows; read through branch and partition workers and a captured statement after the parent scope ends.",
+      "invariant": "Context capture allocates below 32KiB, each reader retains below 2MiB, and all 64 rows remain ordered and exact; scope exit and unwind restore thread isolation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_rule_layout_keeps_declared_width_collation_and_whole_row_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Differently ordered text/SMALLINT columns, NULL fields and whole OLD/NEW records.",
+      "invariant": "Declared widths, collations, original field order and original event ordinal survive the internal source descriptor."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_rule_input_rejects_an_unrelated_source_before_action_binding",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Two distinct opaque owners with the same physical width.",
+      "invariant": "An unrelated descriptor cannot bind or execute an action."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_action_input_spills_without_copying_a_complete_values_plan",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/rules/row_source/tests.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "1,024 original OLD/NEW images, 8KiB per field, in reversed selection order with 64KiB work memory.",
+      "invariant": "The 32MiB action input retains below 2MiB additional live allocation; two readers preserve every byte and original ordinal without a complete VALUES plan."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_action_input_preserves_empty_null_and_selected_original_ordinals",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/rules/row_source/tests.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Empty and two selected NULL events with a one-byte spill allowance.",
+      "invariant": "Exact multiplicity and noncontiguous original ordinals survive; dropping the action makes its source inaccessible."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_action_input_cancellation_and_bad_ordinals_do_not_bind_or_keep_a_source",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/rules/row_source/tests.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Cancelled production and an invalid qualified event ordinal.",
+      "invariant": "Failed input cannot invoke the action binder, and later independent source scopes clean up correctly."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_admitted_fields_read_current_types_only_when_the_source_is_built",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/retained_source/tests/admitted.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Spilled admitted composite constants before addition, after addition and after rollback of their descriptor.",
+      "invariant": "Typed fields observe the current descriptor at source construction, untyped whole rows and original values remain unchanged, and cancellation precedes catalog reads."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "spill_batch_writer_bounds_zero_width_row_batches_and_keeps_their_count",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/batch_writer.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "5,000 zero-column rows with 64KiB spill memory.",
+      "invariant": "Pending batches remain bounded by 1,024 rows without losing zero-column multiplicity."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "rule_retained_inputs_preserve_composite_reads_multiplicity_and_rollback",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/rules.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Set-oriented INSERT SELECT rule over eight 4KiB events, two action rows per event, added composite fields and one-kilobyte work memory.",
+      "invariant": "Outputs match independent PostgreSQL 18.4; empty inputs add nothing, transaction rollback restores both relations and persistent providers reopen identically."
     },
     {
       "package": "uqa-sql",

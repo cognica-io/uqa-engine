@@ -135,6 +135,7 @@ impl TraversalAnalysis<'_> {
         support: &BTreeMap<String, BackwardScanSupport>,
     ) -> Result<BackwardScanSupport, SQLError> {
         match source {
+            SourcePlan::RetainedRows(_) => Ok(BackwardScanSupport::Materialize),
             SourcePlan::Table { name, .. } => {
                 if let Some(traversal) =
                     cte_reference_name(name).and_then(|name| support.get(&name))

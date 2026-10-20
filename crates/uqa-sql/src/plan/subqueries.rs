@@ -165,6 +165,7 @@ fn visit_root(root: &mut RelationalPlan, visitor: &mut dyn FnMut(&mut ScalarExpr
 
 fn visit_source(source: &mut SourcePlan, visitor: &mut dyn FnMut(&mut ScalarExpr)) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join {
             left, right, on, ..
         } => {

@@ -195,6 +195,7 @@ fn visit_local_roots_mut(block: &mut QueryBlockPlan, visit: &mut dyn FnMut(&mut 
 
 fn visit_source_roots_mut(source: &mut SourcePlan, visit: &mut dyn FnMut(&mut ScalarExpr)) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table { .. } | SourcePlan::Subquery { .. } => {}
         SourcePlan::Join {
             left, right, on, ..

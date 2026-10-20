@@ -672,6 +672,7 @@ impl<'a> StoredColumnBinder<'a> {
         context: &ColumnBindingContext,
     ) -> Result<ColumnScope, SQLError> {
         match source {
+            crate::ast::FromClause::RetainedRows(_) => Ok(opaque_scope(&[], None)),
             source @ FromClause::Table { .. } => self.bind_table_source(source, context),
             source @ FromClause::Join { .. } => self.bind_join(source, outer, context),
             FromClause::Values {

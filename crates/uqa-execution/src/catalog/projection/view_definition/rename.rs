@@ -189,7 +189,7 @@ impl Deparser<'_> {
             self.preserve_join_columns(source, scope, rename)?;
         }
         match source {
-            SourcePlan::Table { .. } => {}
+            SourcePlan::RetainedRows(_) | SourcePlan::Table { .. } => {}
             SourcePlan::Subquery { body, .. } => self.rename_query(body, &scope.child(), rename)?,
             SourcePlan::Values { rows, .. } => {
                 for row in rows {

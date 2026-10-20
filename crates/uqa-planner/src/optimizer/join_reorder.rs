@@ -237,6 +237,7 @@ fn reorder_source_joins(
     statistics: &dyn SourceStatistics,
 ) -> JoinGraphResult<()> {
     match source {
+        SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join { left, right, .. } => {
             reorder_source_joins(left, &[], statistics)?;
             reorder_source_joins(right, &[], statistics)?;
@@ -283,6 +284,7 @@ fn reordered_inner_join_source(
     let mut relation_tables = BTreeMap::new();
     for (source_id, atom) in atoms.iter().enumerate() {
         let (qualifier, cardinality, column_stats, access_cost, paradigm) = match atom {
+            SourcePlan::RetainedRows(_) => return Ok(None),
             SourcePlan::Table {
                 name,
                 qualifier,
@@ -402,6 +404,7 @@ fn flatten_reorderable_inner_join(
     predicates: &mut Vec<ScalarExpr>,
 ) -> bool {
     match source {
+        SourcePlan::RetainedRows(_) => false,
         SourcePlan::Join {
             left,
             right,
@@ -802,6 +805,7 @@ fn attach_join_predicates(
 fn source_qualifiers(source: &SourcePlan) -> BTreeSet<String> {
     let mut qualifiers = BTreeSet::new();
     match source {
+        SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join {
             alias: Some(alias), ..
         } => {

@@ -324,7 +324,7 @@ fn source_schema_is_execution_defined(
                 && context.has_table_function(&function.name.to_ascii_lowercase())
         }),
         SourcePlan::Subquery { body, .. } => query_schema_is_execution_defined(context, body),
-        SourcePlan::Table { .. } | SourcePlan::Values { .. } => false,
+        SourcePlan::RetainedRows(_) | SourcePlan::Table { .. } | SourcePlan::Values { .. } => false,
     }
 }
 

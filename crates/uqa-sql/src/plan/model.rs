@@ -235,6 +235,10 @@ pub struct TableFunctionPlan {
 /// The row-producing source below a query block.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SourcePlan {
+    /// Execution-scoped rows; never persisted as stored syntax or a reusable catalog plan.
+    #[serde(skip)]
+    #[doc(hidden)]
+    RetainedRows(crate::ast::RetainedRowSource),
     Table {
         name: String,
         /// The statement's prepared view or folded CTE. Stored syntax never retains an execution-specific projection or folded value.

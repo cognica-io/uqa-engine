@@ -24,6 +24,7 @@ pub(super) fn preserve_table_column_name(
     to: &str,
 ) -> Result<bool, SQLError> {
     match source {
+        crate::ast::FromClause::RetainedRows(_) => Ok(false),
         FromClause::Table {
             name,
             qualifier,

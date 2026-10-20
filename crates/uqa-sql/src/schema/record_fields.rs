@@ -112,6 +112,23 @@ impl RowSchema {
         self
     }
 
+    pub(crate) fn with_physical_record_metadata(
+        mut self,
+        fields: impl IntoIterator<Item = (usize, RecordMetadata)>,
+    ) -> Self {
+        for (slot, fields) in fields {
+            assert!(
+                slot < self.physical_width(),
+                "record metadata requires a physical slot"
+            );
+            Arc::make_mut(&mut self.index)
+                .cold
+                .record_fields
+                .insert(slot, fields);
+        }
+        self
+    }
+
     /// Preserve descriptors when a namespace boundary rebuilds the same logical columns in a compact physical row.
     pub fn with_record_fields_from(self, input: &Self) -> Self {
         let width = self.len().min(input.len());

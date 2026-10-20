@@ -72,6 +72,7 @@ fn upgrade_ctes(ctes: &mut [CTE]) -> bool {
 impl FromClause {
     fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
         match self {
+            crate::ast::FromClause::RetainedRows(_) => false,
             Self::Table { .. } => false,
             Self::Join {
                 left, right, on, ..

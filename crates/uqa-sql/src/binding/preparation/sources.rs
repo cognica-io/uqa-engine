@@ -22,6 +22,7 @@ impl Preparation<'_> {
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
         match source {
+            crate::plan::SourcePlan::RetainedRows(source) => return Ok(source.schema().clone()),
             SourcePlan::Table { .. } => {}
             SourcePlan::Values {
                 rows,

@@ -59,6 +59,7 @@ pub fn outer_join_nullable_qualifiers(from: &SourcePlan) -> BTreeSet<String> {
 
 pub fn collect_from_qualifiers(from: &SourcePlan, out: &mut Vec<String>) {
     match from {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join {
             left, right, alias, ..
         } => {

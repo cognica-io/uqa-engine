@@ -87,6 +87,7 @@ pub fn bind_session_portal_source_plan(
     visible_ctes: &std::collections::BTreeSet<String>,
 ) -> Result<(), SQLError> {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => Ok(()),
         SourcePlan::Table { name, .. } => {
             bind_session_portal_relation_reference(inputs, name, visible_ctes)
         }

@@ -253,6 +253,7 @@ pub fn final_filter_after_qualifier_pushdown(
 
 pub fn qualifier_filter_elision_safe(from: &SourcePlan) -> bool {
     match from {
+        SourcePlan::RetainedRows(_) => true,
         SourcePlan::Join {
             left,
             right,
@@ -454,6 +455,7 @@ pub fn collect_cte_source_references(
     references: &mut BTreeMap<String, Vec<String>>,
 ) {
     match source {
+        SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table {
             name,
             qualifier,

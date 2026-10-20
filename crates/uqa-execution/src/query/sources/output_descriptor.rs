@@ -80,6 +80,7 @@ impl<'a, S: Clone> DescriptorScope<'a, S> {
 
     fn source(&mut self, source: &'a SourcePlan, bound: bool) -> Result<bool, SQLError> {
         match source {
+            SourcePlan::RetainedRows(_) => Ok(true),
             SourcePlan::Subquery { body, .. } => self.query(body),
             SourcePlan::Join { left, right, .. } => {
                 Ok(self.source(left, bound)? || self.source(right, bound)?)

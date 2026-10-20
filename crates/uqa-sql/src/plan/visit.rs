@@ -105,6 +105,7 @@ impl SourcePlan {
     /// Visit every scalar expression this source owns, each root once: join conditions, `VALUES` rows, function arguments and the expressions of the query bodies nested in derived tables.
     pub fn visit_scalar_expressions(&self, visit: &mut dyn FnMut(&ScalarExpr)) {
         match self {
+            crate::plan::SourcePlan::RetainedRows(_) => {}
             Self::Table { .. } => {}
             Self::Subquery { body, .. } => body.visit_scalar_expressions(visit),
             Self::Join {
