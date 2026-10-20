@@ -14863,7 +14863,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -17197,6 +17197,74 @@
       "workload": "Four UPDATE rules combine sparse and all-row actions, a never-matching action and conditional INSTEAD suppression with 16KiB query memory.",
       "invariant": "Final values, action order and zero-row behavior match independent PostgreSQL 18.4.",
       "capability": "Bounded rewrite-rule selection metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "transition_capture_bounds_both_image_owners_and_preserves_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/triggers/queue/images/tests.rs",
+      "capability": "Bounded trigger transition capture",
+      "workload": "512 pairs of generated 32KiB OLD/NEW records under separate 16KiB capture allowances, followed by complete replay.",
+      "invariant": "Combined capture and replay peak allocation remains below 2MiB; both complete images, multiplicity and event order are preserved."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "transition_capture_preserves_raw_identity_and_defers_field_observation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/triggers/queue/images/tests.rs",
+      "capability": "Bounded trigger transition capture",
+      "workload": "In-memory and forced-spill capture of nullary typed records, duplicate labels, NULL, nonrecords and an unread corrupt physical field.",
+      "invariant": "Raw type OIDs and field representations survive capture; SQL field decoding and nonrecord validation are deferred to their existing consumers."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "transition_capture_initializes_once_and_propagates_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/triggers/queue/images/tests.rs",
+      "capability": "Bounded trigger transition capture",
+      "workload": "Lazy capture owner initialization and cancellation between image reads and before first capture.",
+      "invariant": "The allowance is resolved once per owner, cancelled input is not retained, SQLSTATE 57014 propagates and the failed reader stops."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "transition_materialization_preserves_image_read_errors_without_consuming_later_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/triggers/transitions.rs",
+      "capability": "Bounded trigger transition capture",
+      "workload": "A valid nullary record followed by an injected fallible image-read error and a forbidden later read.",
+      "invariant": "Materialization propagates the original typed error and does not consume later input or publish a successful prefix."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "captured_transition_images_preserve_repeated_reads_empty_events_and_rollback",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_triggers/transition/capture.rs",
+      "capability": "Bounded trigger transition capture",
+      "workload": "Four providers with 32KiB rows, repeated row/statement transition reads, zero-row UPDATE, DELETE, transaction rollback and persistent reopen under 64KiB query memory.",
+      "invariant": "Exact PostgreSQL18.4 OLD/NEW audit rows and surviving values match through repeat reads, rollback and reopen; empty events remain visible."
     }
   ]
 }

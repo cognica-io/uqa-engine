@@ -12,6 +12,9 @@ use uqa_engine::Engine;
 
 use super::{exec, strings};
 
+#[path = "transition/capture.rs"]
+mod capture;
+
 fn install_transition_fixture(engine: &Engine) {
     exec(
         engine,
