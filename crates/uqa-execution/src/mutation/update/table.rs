@@ -306,7 +306,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                         &statement_commands,
                         &context.mutation.preparation.referential.triggers,
                         &update_statement_events(update_original_query, &update_statement),
-                        Vec::new(),
+                        crate::mutation::triggers::events::AfterRowEvents::default(),
                     )?;
                     return Ok(result);
                 }
@@ -620,7 +620,10 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                         &action_schema,
                         PreparedMutationAction::Rewrite(prepared.rewrite),
                     )?;
-                    events.append_after_rows(prepared.after_row_events);
+                    events.append_after_rows(
+                        prepared.after_row_events,
+                        &context.mutation.preparation.referential.triggers,
+                    )?;
                 }
             }
             let published = overlay.finish();
@@ -745,7 +748,10 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                             &action_schema,
                             PreparedMutationAction::Rewrite(prepared.rewrite),
                         )?;
-                        events.append_after_rows(prepared.after_row_events);
+                        events.append_after_rows(
+                            prepared.after_row_events,
+                            &context.mutation.preparation.referential.triggers,
+                        )?;
                     }
                 }
                 rule_published = overlay.finish();

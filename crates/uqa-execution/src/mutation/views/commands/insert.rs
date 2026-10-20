@@ -191,7 +191,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     &statement_commands,
                     &context.mutation.preparation.referential.triggers,
                     std::slice::from_ref(&view_statement),
-                    Vec::new(),
+                    crate::mutation::triggers::events::AfterRowEvents::default(),
                 )?;
                 return row_output.finish();
             }
@@ -330,7 +330,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     &statement_commands,
                     &context.mutation.preparation.referential.triggers,
                     std::slice::from_ref(&view_statement),
-                    Vec::new(),
+                    crate::mutation::triggers::events::AfterRowEvents::default(),
                 )?;
             }
             let mut result = row_output.finish()?;

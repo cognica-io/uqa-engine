@@ -9,6 +9,7 @@
 //! Every command of a statement queues into one queue: the primary command, its data-modifying WITH items, and the referential actions that the queued events run as they fire. A relation and an operation that the statement writes keep one state (`AfterTriggersTableData`): the rows its transition tables collect, whether its BEFORE STATEMENT triggers fired, and where its AFTER STATEMENT events wait in the queue. A later command on the same relation and operation therefore fires no second BEFORE STATEMENT trigger and moves the AFTER STATEMENT events to the end of the queue (`cancel_prior_stmt_triggers`), until a trigger reads the transition tables and closes the state, after which the rows start a new one.
 
 use super::context::TriggerContext;
+use super::events::{AfterRowEvents, EventBuffer};
 use super::{AfterRowTriggerEvent, TransitionTables};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -20,8 +21,11 @@ use uqa_sql::SQLError;
 mod images;
 use images::TransitionImages;
 
+#[cfg(test)]
+mod tests;
+
 /// A relation and operation that a command writes, with the columns an UPDATE sets, which its statement triggers fire for.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatementEvent {
     pub relation: String,
     pub event: TriggerEvent,
@@ -46,12 +50,11 @@ pub struct AfterTriggerQueue {
 
 #[derive(Default)]
 struct QueueState {
-    entries: Vec<QueueEntry>,
-    /// The first entry that has not fired.
-    next: usize,
+    entries: EventBuffer<QueueEntry>,
     tables: Vec<TableState>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 enum QueueEntry {
     Row {
         event: AfterRowTriggerEvent,
@@ -62,8 +65,6 @@ enum QueueEntry {
         statement: StatementEvent,
         table: usize,
     },
-    /// An entry that fired or that a later command cancelled.
-    Done,
 }
 
 /// The state of one relation and operation within the statement.
@@ -76,8 +77,8 @@ struct TableState {
     /// A trigger has read the transition tables, which take no further rows.
     closed: bool,
     before_fired: bool,
-    /// Where the AFTER STATEMENT events of the state were queued, from which a later command cancels them.
-    statements_from: Option<usize>,
+    /// Only the most recently queued statement event may fire for this open state.
+    statement_position: Option<u64>,
     old_rows: TransitionImages,
     new_rows: TransitionImages,
     transitions: Option<Arc<TransitionTables>>,
@@ -138,7 +139,7 @@ impl QueueState {
             capture,
             closed: false,
             before_fired: false,
-            statements_from: None,
+            statement_position: None,
             old_rows: TransitionImages::default(),
             new_rows: TransitionImages::default(),
             transitions: None,
@@ -146,28 +147,34 @@ impl QueueState {
         Ok(self.tables.len() - 1)
     }
 
-    /// Cancel the AFTER STATEMENT events that an earlier command queued for `table` and that have not fired.
-    fn cancel_prior_statements(&mut self, table: usize) {
-        let Some(from) = self.tables[table].statements_from else {
-            return;
-        };
-        for entry in self.entries.iter_mut().skip(from.max(self.next)) {
-            if matches!(entry, QueueEntry::Statement { table: queued, .. } if *queued == table) {
-                *entry = QueueEntry::Done;
+    /// A superseded statement event is skipped without scanning or rewriting queued row events.
+    fn take_next(
+        &mut self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<Option<QueueEntry>> {
+        loop {
+            let position = self.entries.position();
+            let Some(entry) = self.entries.take_next(cancellation)? else {
+                return Ok(None);
+            };
+            let table = match &entry {
+                QueueEntry::Statement { table, .. } => Some(*table),
+                QueueEntry::Row { table, .. } => *table,
+            };
+            let target = table
+                .map(|table| {
+                    self.tables.get(table).ok_or_else(|| {
+                        SQLError::Internal("AFTER event refers to a missing relation state".into())
+                    })
+                })
+                .transpose()?;
+            if matches!(entry, QueueEntry::Statement { .. })
+                && target.expect("statement relation state").statement_position != Some(position)
+            {
+                continue;
             }
+            return Ok(Some(entry));
         }
-    }
-
-    /// Take the next entry to fire, leaving it done.
-    fn take_next(&mut self) -> Option<QueueEntry> {
-        while self.next < self.entries.len() {
-            let entry = std::mem::replace(&mut self.entries[self.next], QueueEntry::Done);
-            self.next += 1;
-            if !matches!(entry, QueueEntry::Done) {
-                return Some(entry);
-            }
-        }
-        None
     }
 }
 
@@ -200,14 +207,14 @@ impl AfterTriggerQueue {
         &self,
         context: &TriggerContext<'_>,
         statements: &[StatementEvent],
-        rows: Vec<AfterRowTriggerEvent>,
+        mut rows: AfterRowEvents,
     ) -> Result<()> {
         let mut state = self.state.lock();
         let tables = statements
             .iter()
             .map(|statement| state.open_table(context, &statement.relation, statement.event))
             .collect::<Result<Vec<_>>>()?;
-        for event in rows {
+        while let Some(event) = rows.take_next(context.runtime.cancellation)? {
             let table = if event.captured {
                 statements
                     .iter()
@@ -237,16 +244,23 @@ impl AfterTriggerQueue {
                     )?;
                 }
             }
-            state.entries.push(QueueEntry::Row { event, table });
+            state.entries.push(
+                &QueueEntry::Row { event, table },
+                || context.runtime.work_mem_bytes(),
+                context.runtime.cancellation,
+            )?;
         }
         for (statement, table) in statements.iter().zip(tables) {
-            state.cancel_prior_statements(table);
             let position = state.entries.len();
-            state.tables[table].statements_from = Some(position);
-            state.entries.push(QueueEntry::Statement {
-                statement: statement.clone(),
-                table,
-            });
+            state.entries.push(
+                &QueueEntry::Statement {
+                    statement: statement.clone(),
+                    table,
+                },
+                || context.runtime.work_mem_bytes(),
+                context.runtime.cancellation,
+            )?;
+            state.tables[table].statement_position = Some(position);
         }
         Ok(())
     }
@@ -254,7 +268,7 @@ impl AfterTriggerQueue {
     /// Fire the queued events in order, with the events that the referential actions among them queue as they run (`afterTriggerInvokeEvents`).
     pub fn fire(&self, context: &TriggerContext<'_>) -> Result<()> {
         loop {
-            let Some(entry) = self.state.lock().take_next() else {
+            let Some(entry) = self.state.lock().take_next(context.runtime.cancellation)? else {
                 return Ok(());
             };
             match entry {
@@ -264,7 +278,6 @@ impl AfterTriggerQueue {
                 QueueEntry::Statement { statement, table } => {
                     self.fire_after_statement(context, &statement, table)?;
                 }
-                QueueEntry::Done => {}
             }
         }
     }
