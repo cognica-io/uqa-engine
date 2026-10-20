@@ -10,9 +10,10 @@ use super::{
     build_join_spill_with_ctes, build_returning_value_row, count_view_source_qualifications,
     finish_view_dml, matching_source_context, materialize_view_rows, required_view_delete_columns,
     resolve_view_target, target_row, validate_dml_expression_qualifiers,
-    validate_returning_alias_relations, view_document, with_mutation_snapshot, BTreeSet, CteScope,
-    DeletePlan, DmlReturningShape, MutationStatementContext, ReturningValueProjectionRow, SQLError,
-    SQLParam, SourceOutputPruning, ViewDmlSourceMatch, ViewSourceQualification,
+    validate_returning_alias_relations, view_document, view_values, with_mutation_snapshot,
+    BTreeSet, CteScope, DeletePlan, DmlReturningShape, MutationStatementContext,
+    ReturningValueProjectionRow, RuleRowBuffer, SQLError, SQLParam, SourceOutputPruning,
+    ViewDmlSourceMatch, ViewSourceQualification,
 };
 use crate::mutation::output::MutationOutput;
 
@@ -250,8 +251,20 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                     })
                 })
                 .transpose()?;
-            let mut pending = Vec::new();
-            for old in candidates {
+            let cancellation = context.mutation.rules.rules.cancellation.clone();
+            let mut pending = RuleRowBuffer::new(
+                context.mutation.rules.rules.memory.work_mem_bytes()?,
+                cancellation.clone(),
+            );
+            for candidate in candidates
+                .read_rows()
+                .map_err(crate::physical::physical_exec_error)?
+            {
+                cancellation.check()?;
+                let old = candidate
+                    .map_err(crate::physical::physical_exec_error)?
+                    .row
+                    .into_physical_values();
                 let physical = target_row(&target, &stmt.target_qualifier, &old)?;
                 let Some(source_match) = matching_source_context(
                     read_context
@@ -273,28 +286,24 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                     ViewDmlSourceMatch::TargetOnly => None,
                     ViewDmlSourceMatch::Source(source) => Some(source),
                 };
-                pending.push((old, source_context));
+                pending.push(crate::mutation::rules::RuleRowImage {
+                    old_storage_table: None,
+                    old_doc_id: None,
+                    old: Some(view_document(&target, &old)?),
+                    new_storage_table: None,
+                    new_doc_id: None,
+                    new: None,
+                    context: source_context,
+                })?;
             }
-            let rule_rows = pending
-                .iter()
-                .map(|(old, source_context)| {
-                    Ok(crate::mutation::rules::RuleRowImage {
-                        old_storage_table: None,
-                        old_doc_id: None,
-                        old: Some(view_document(&target, old)?),
-                        new_storage_table: None,
-                        new_doc_id: None,
-                        new: None,
-                        context: source_context.clone(),
-                    })
-                })
-                .collect::<Result<Vec<_>, SQLError>>()?;
+            let pending = pending.finish();
+            drop(candidates);
             let mut outer_rule_batches = crate::mutation::rules::views::prepare_view_rule_batches(
                 crate::mutation::rules::views::ViewRuleBatchRequest {
                     context: context.mutation.rules,
                     relations: &stmt.view_rule_relations,
                     event: uqa_sql::ast::RuleEvent::Delete,
-                    rows: &rule_rows,
+                    rows: &pending,
                     params,
                     scope: &snapshot,
                     insert_plans: &[],
@@ -302,11 +311,11 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                     document_relation: Some(&target.canonical_name),
                 },
             )?;
-            let mut rule_batch = crate::mutation::rules::prepare_rule_batch(
+            let mut rule_batch = crate::mutation::rules::prepare_retained_rule_batch(
                 context.mutation.rules.rules,
                 &target.canonical_name,
                 uqa_sql::ast::RuleEvent::Delete,
-                rule_rows,
+                pending.clone(),
             )?;
             let action_qualification_count = source_delete_qualification_count
                 .or(row_independent_delete_qualification)
@@ -335,10 +344,13 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
             let mut returning_rows = crate::mutation::returning::ReturningRows::new(
                 context.query.source.relational.runtime,
             )?;
-            for (index, (old, source_context)) in pending.into_iter().enumerate() {
+            for index in 0..pending.len() {
                 if rule_batch.suppresses(index)? {
                     continue;
                 }
+                let row = pending.get(index)?;
+                let old = view_values(&target, row.old)?;
+                let source_context = row.context;
                 if crate::mutation::triggers::fire_instead_of_row_triggers(
                     &context.mutation.preparation.referential.triggers,
                     &target.canonical_name,

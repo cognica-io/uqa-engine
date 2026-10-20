@@ -50,7 +50,7 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
     required_columns: Option<&BTreeSet<String>>,
     params: &[SQLParam],
     scope: &mut CteScope<S>,
-) -> Result<Vec<Vec<Value>>, SQLError> {
+) -> Result<crate::SharedSpill, SQLError> {
     let mut query = target.definition.query.clone();
     if let Some(required_columns) = required_columns {
         let required_positions = target
@@ -67,11 +67,12 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
         scope.catalog_read_view()?.view_owner(&target.definition)?
     };
     let mut privilege_scope = scope.enter_privilege_subject(privilege_subject);
-    let result = crate::query::statement::execute_query_plan_with_ctes(
+    let result = crate::query::statement::execute_query_plan_output(
         context,
         &query,
         params,
         &mut privilege_scope,
+        crate::query::statement::consumer::QueryOutputMode::SharedSpill,
     )?;
     if result.columns.len() != target.columns.len() {
         return Err(SQLError::Internal(format!(
@@ -81,21 +82,19 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
             target.columns.len()
         )));
     }
-    (0..result.rows.len())
-        .map(|row| {
-            (0..target.columns.len())
-                .map(|column| {
-                    result.value_at(row, column).cloned().ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "view `{}` omitted result column {}",
-                            target.canonical_name,
-                            column + 1
-                        ))
-                    })
-                })
-                .collect()
-        })
-        .collect()
+    let runtime = context.source.relational.runtime;
+    let schema = RowSchema::new(target.columns.clone());
+    let mut rows = crate::SpillBuffer::new(runtime.work_mem_bytes()?);
+    for row in crate::query::output::PublicQueryRows::new(result, "view mutation input")? {
+        runtime.check_cancelled()?;
+        rows.push(crate::Batch::from_physical_rows(
+            schema.clone(),
+            vec![PhysicalRow::from_values(row?)],
+        ))
+        .map_err(crate::physical::physical_exec_error)?;
+    }
+    rows.into_shared(schema)
+        .map_err(crate::physical::physical_exec_error)
 }
 
 pub fn target_row(

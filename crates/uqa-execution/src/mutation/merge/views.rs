@@ -35,7 +35,7 @@ struct PairingInput<'a, S: Clone + 'static> {
     runtime: crate::query::runtime::QueryRuntimeView<'a>,
     target: &'a ViewDmlTarget,
     plan: &'a MergePlan,
-    candidates: &'a [Vec<Value>],
+    candidates: &'a crate::SharedSpill,
     source_rows: &'a crate::SharedSpill,
     params: &'a [SQLParam],
     ctes: &'a CteScope<S>,
@@ -70,8 +70,16 @@ fn build_view_merge_pairings<S: Clone + 'static>(
         source_rows.row_schema().clone(),
         PhysicalRow::nulls(source_rows.row_schema().physical_width()),
     );
-    for values in candidates {
-        let target_row = target_row(target, &plan.target_qualifier, values)?;
+    for candidate in candidates
+        .read_rows()
+        .map_err(crate::physical::physical_exec_error)?
+    {
+        runtime.check_cancelled()?;
+        let values = candidate
+            .map_err(crate::physical::physical_exec_error)?
+            .row
+            .into_physical_values();
+        let target_row = target_row(target, &plan.target_qualifier, &values)?;
         if let Some(predicate) = &plan.target_predicate {
             let visible =
                 eval_mutation_expr(expressions, ctes, predicate, Some(&target_row), params)?;
@@ -106,7 +114,7 @@ fn build_view_merge_pairings<S: Clone + 'static>(
                 &mut pairings,
                 &schema,
                 MergePairKind::Matched,
-                Some(values),
+                Some(&values),
                 &source,
             )?;
         }
@@ -115,11 +123,23 @@ fn build_view_merge_pairings<S: Clone + 'static>(
                 &mut pairings,
                 &schema,
                 MergePairKind::NotMatchedBySource,
-                Some(values),
+                Some(&values),
                 &null_source,
             )?;
         }
     }
+    append_unmatched_view_sources(&mut pairings, &schema, &mut matched_source, source_rows)?;
+    pairings
+        .into_shared(schema)
+        .map_err(crate::physical::physical_exec_error)
+}
+
+fn append_unmatched_view_sources(
+    pairings: &mut crate::SpillBuffer,
+    schema: &RowSchema,
+    matched_source: &mut crate::ExactRowSet,
+    source_rows: &crate::SharedSpill,
+) -> Result<(), SQLError> {
     for (index, source) in source_rows
         .read_rows()
         .map_err(crate::physical::physical_exec_error)?
@@ -132,17 +152,15 @@ fn build_view_merge_pairings<S: Clone + 'static>(
             .map_err(crate::physical::physical_exec_error)?
         {
             push_view_merge_pair(
-                &mut pairings,
-                &schema,
+                pairings,
+                schema,
                 MergePairKind::NotMatchedByTarget,
                 None,
                 &source,
             )?;
         }
     }
-    pairings
-        .into_shared(schema)
-        .map_err(crate::physical::physical_exec_error)
+    Ok(())
 }
 
 enum SelectedViewMergeAction {

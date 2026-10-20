@@ -21,18 +21,13 @@ use crate::mutation::{
 
 mod delete;
 pub use delete::run_view_delete_inner;
+mod pending;
+use crate::mutation::rules::{RuleRowBuffer, RuleRows};
+use pending::{view_values, PendingViewUpdate};
 
 enum ViewDmlSourceMatch {
     TargetOnly,
     Source(OwnedPhysicalRow),
-}
-
-struct PendingViewUpdate {
-    old: Vec<Value>,
-    new: Vec<Value>,
-    source_context: Option<OwnedPhysicalRow>,
-    evaluation_row: OwnedPhysicalRow,
-    evaluated_assignments: BTreeSet<usize>,
 }
 
 fn evaluate_view_update_assignments<S: Clone + Send + Sync + 'static>(
@@ -129,7 +124,7 @@ struct ViewSourceQualification<'a, S: Clone + 'static> {
     target: &'a ViewDmlTarget,
     target_qualifier: &'a str,
     predicate: Option<&'a ScalarExpr>,
-    candidates: &'a [Vec<Value>],
+    candidates: &'a crate::SharedSpill,
     source_rows: &'a crate::SharedSpill,
     params: &'a [SQLParam],
     ctes: &'a CteScope<S>,
@@ -165,8 +160,15 @@ fn count_view_source_qualifications<S: Clone + Send + Sync + 'static>(
         }
         return Ok(count);
     }
-    for candidate in candidates {
-        let physical = target_row(target, target_qualifier, candidate)?;
+    for candidate in candidates
+        .read_rows()
+        .map_err(crate::physical::physical_exec_error)?
+    {
+        let candidate = candidate
+            .map_err(crate::physical::physical_exec_error)?
+            .row
+            .into_physical_values();
+        let physical = target_row(target, target_qualifier, &candidate)?;
         for source in source_rows
             .read_rows()
             .map_err(crate::physical::physical_exec_error)?
@@ -454,8 +456,18 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 } else {
                     None
                 };
-            let mut pending = Vec::new();
-            for old in candidates {
+            let work_mem = context.mutation.rules.rules.memory.work_mem_bytes()?;
+            let cancellation = context.mutation.rules.rules.cancellation.clone();
+            let mut pending = RuleRowBuffer::new(work_mem, cancellation.clone());
+            for candidate in candidates
+                .read_rows()
+                .map_err(crate::physical::physical_exec_error)?
+            {
+                cancellation.check()?;
+                let old = candidate
+                    .map_err(crate::physical::physical_exec_error)?
+                    .row
+                    .into_physical_values();
                 let physical = target_row(&target, &stmt.target_qualifier, &old)?;
                 let Some(source_match) = matching_source_context(
                     read_context
@@ -497,27 +509,15 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                     params,
                     &snapshot,
                 )?;
-                pending.push(row);
+                pending.push(row.into_image(&target)?)?;
             }
-            let rule_rows = pending
-                .iter()
-                .map(|row| {
-                    Ok(crate::mutation::rules::RuleRowImage {
-                        old_storage_table: None,
-                        old_doc_id: None,
-                        old: Some(view_document(&target, &row.old)?),
-                        new_storage_table: None,
-                        new_doc_id: None,
-                        new: Some(view_document(&target, &row.new)?),
-                        context: row.source_context.clone(),
-                    })
-                })
-                .collect::<Result<Vec<_>, SQLError>>()?;
-            let mut rule_batch = crate::mutation::rules::prepare_rule_batch(
+            let pending = pending.finish();
+            drop(candidates);
+            let mut rule_batch = crate::mutation::rules::prepare_retained_rule_batch(
                 context.mutation.rules.rules,
                 &target.canonical_name,
                 uqa_sql::ast::RuleEvent::Update,
-                rule_rows,
+                pending.clone(),
             )?;
             let update_qualification_count = source_update_qualification_count
                 .or(row_independent_update_qualification)
@@ -525,55 +525,40 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
             rule_batch.set_action_qualification_count(update_qualification_count);
             if !original_query_survives {
                 let action_columns = rule_batch.matched_action_row_columns()?;
-                for (row, required) in pending.iter_mut().zip(action_columns.reader()?) {
-                    let [required] = required?;
-                    evaluate_view_update_assignments(
-                        &read_context.mutation.preparation.referential.assignment,
-                        &target,
-                        stmt,
-                        Some(&required),
-                        row,
-                        params,
-                        &snapshot,
-                    )?;
-                }
-                rule_batch.supplement_rows(
+                let updated = RuleRows::from_rows(
                     pending
                         .iter()
-                        .map(|row| {
-                            Ok(crate::mutation::rules::RuleRowImage {
-                                old_storage_table: None,
-                                old_doc_id: None,
-                                old: Some(view_document(&target, &row.old)?),
-                                new_storage_table: None,
-                                new_doc_id: None,
-                                new: Some(view_document(&target, &row.new)?),
-                                context: row.source_context.clone(),
-                            })
-                        })
-                        .collect::<Result<Vec<_>, SQLError>>()?,
+                        .zip(action_columns.reader()?)
+                        .map(|(image, required)| {
+                            let [required] = required?;
+                            let mut row = PendingViewUpdate::from_image(
+                                &target,
+                                stmt,
+                                image?,
+                                condition_columns.as_ref(),
+                            )?;
+                            evaluate_view_update_assignments(
+                                &read_context.mutation.preparation.referential.assignment,
+                                &target,
+                                stmt,
+                                Some(&required),
+                                &mut row,
+                                params,
+                                &snapshot,
+                            )?;
+                            row.into_image(&target)
+                        }),
+                    work_mem,
+                    cancellation.clone(),
                 )?;
-                let outer_rule_rows = pending
-                    .iter()
-                    .map(|row| {
-                        Ok(crate::mutation::rules::RuleRowImage {
-                            old_storage_table: None,
-                            old_doc_id: None,
-                            old: Some(view_document(&target, &row.old)?),
-                            new_storage_table: None,
-                            new_doc_id: None,
-                            new: Some(view_document(&target, &row.new)?),
-                            context: row.source_context.clone(),
-                        })
-                    })
-                    .collect::<Result<Vec<_>, SQLError>>()?;
+                rule_batch.supplement_rows_from_iter(updated.iter())?;
                 let mut outer_rule_batches =
                     crate::mutation::rules::views::prepare_view_rule_batches(
                         crate::mutation::rules::views::ViewRuleBatchRequest {
                             context: context.mutation.rules,
                             relations: &stmt.view_rule_relations,
                             event: uqa_sql::ast::RuleEvent::Update,
-                            rows: &outer_rule_rows,
+                            rows: &updated,
                             params,
                             scope: &snapshot,
                             insert_plans: &[],
@@ -673,16 +658,19 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
             let mut returning_rows = crate::mutation::returning::ReturningRows::new(
                 context.query.source.relational.runtime,
             )?;
-            for (index, row) in pending.into_iter().enumerate() {
+            for index in 0..pending.len() {
                 if rule_batch.suppresses(index)? {
                     continue;
                 }
+                let row = pending.get(index)?;
+                let old = view_values(&target, row.old)?;
+                let new = view_values(&target, row.new)?;
                 let Some(final_new) = crate::mutation::triggers::fire_instead_of_row_triggers(
                     &context.mutation.preparation.referential.triggers,
                     &target.canonical_name,
                     uqa_sql::ast::TriggerEvent::Update,
-                    Some(&row.old),
-                    Some(&row.new),
+                    Some(&old),
+                    Some(&new),
                     &assigned_columns,
                 )?
                 else {
@@ -697,10 +685,10 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                             table: &target.canonical_name,
                             target_qualifier: &stmt.target_qualifier,
                             current: &final_new,
-                            old: Some(&row.old),
+                            old: Some(&old),
                             new: Some(&final_new),
                             aliases: &stmt.returning_aliases,
-                            context: row.source_context.as_ref(),
+                            context: row.context.as_ref(),
                         },
                         &stmt.returning,
                         params,

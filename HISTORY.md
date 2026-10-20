@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain complete view mutation inputs and pending OLD/NEW images in bounded spill owners without changing rule, trigger or assignment evaluation order.
+
 - Bound projected ordered scan batches by work memory while preserving source order, metadata and NULL slots.
 
 - Collect complete SQL results incrementally without retaining a second population of physical batches or cloning each spilled batch before positional output.
