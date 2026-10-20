@@ -55,3 +55,12 @@ fn deleted_row_membership_propagates_cancellation_before_write_and_read() {
     );
     assert_eq!(unfinished.finish().err().unwrap().sqlstate(), Some("57014"));
 }
+
+#[test]
+fn deleted_row_membership_preserves_typed_memory_exhaustion() {
+    let mut rows = DeletedRowBuffer::new(0, CancellationToken::new());
+    let error = rows.insert("t", 1).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"), "{error:?}");
+    let error = rows.insert_if_absent("t", 1).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"), "{error:?}");
+}
