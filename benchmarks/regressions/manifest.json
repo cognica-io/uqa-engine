@@ -16152,6 +16152,32 @@
       "capability": "SQLite connection-local page cache",
       "workload": "A managed connection checks the compiled memory-management option, releases its own cache and reads its unchanged row.",
       "invariant": "The bundled global memory-management option is disabled while ordinary values and connection-local cache reclamation remain available."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "text_size_limits_reject_oversized_results_before_allocator_or_quota",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/scalar_math/text/limits.rs",
+      "capability": "PostgreSQL text output sizes",
+      "workload": "Padding and repeat lengths at the PostgreSQL UTF8 allocation boundary, through ordinary and 4KB-budgeted producers.",
+      "invariant": "SQLSTATE 54000 precedes output allocation and quota errors for invalid lengths; adjacent valid lengths reach the quota, with peak allocation below 64KB."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "text_size_limits_preserve_empty_fill_null_negative_and_int4_semantics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/scalar_math/text/limits.rs",
+      "capability": "PostgreSQL text output sizes",
+      "workload": "Empty padding, negative and out-of-int4 counts, truncation, and strict NULL arguments.",
+      "invariant": "Results and SQLSTATE 22003 match the independent PostgreSQL 18.4 reference without attempting huge allocations."
     }
   ]
 }
