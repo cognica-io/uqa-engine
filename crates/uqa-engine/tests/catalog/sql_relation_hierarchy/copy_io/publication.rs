@@ -6,7 +6,7 @@
 
 //! Bounded evaluated mutation publication through the public COPY API.
 
-use super::{copy_to_string, exec, Engine};
+use super::{copy_engine, copy_to_string, exec, Engine};
 
 struct CheckedOutput {
     width: usize,
