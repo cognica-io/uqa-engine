@@ -9,6 +9,34 @@
 use super::*;
 
 #[test]
+fn suppressed_rule_deletes_do_not_retain_complete_candidate_documents() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE suppressed_deletes(id INTEGER PRIMARY KEY, body TEXT);
+        INSERT INTO suppressed_deletes SELECT n, repeat('x',32768) FROM generate_series(1,512) AS s(n);
+        CREATE RULE suppress_delete AS ON DELETE TO suppressed_deletes DO INSTEAD NOTHING");
+    engine.set_query_memory_limit(Some(64 * 1024));
+    for sql in [
+        "DELETE FROM suppressed_deletes",
+        "DELETE FROM suppressed_deletes AS e USING (VALUES (1)) AS s(n) WHERE e.id >= s.n",
+    ] {
+        let allocated = allocation_counter::measure(|| {
+            exec(&engine, sql);
+        });
+        assert!(
+            allocated.bytes_max < 2 * 1024 * 1024,
+            "{sql}: {allocated:?}"
+        );
+    }
+    let unchanged = exec(
+        &engine,
+        "SELECT count(*), min(length(body)), max(length(body)) FROM suppressed_deletes",
+    );
+    assert_eq!(unchanged.value_at(0, 0), Some(&Value::Int(512)));
+    assert_eq!(unchanged.value_at(0, 1), Some(&Value::Int(32768)));
+    assert_eq!(unchanged.value_at(0, 2), Some(&Value::Int(32768)));
+}
+
+#[test]
 fn suppressed_rule_updates_do_not_retain_complete_candidate_documents() {
     let engine = Engine::new();
     exec(&engine, "CREATE TABLE suppressed_events(id INTEGER PRIMARY KEY, body TEXT);

@@ -39,6 +39,40 @@ impl RuleRowImage {
         supplement_document(&mut self.new, supplemental.new);
     }
 
+    pub(crate) fn from_delete_candidate(
+        candidate: super::candidate::MutationCandidate<Option<OwnedPhysicalRow>>,
+    ) -> Self {
+        Self {
+            old_storage_table: Some(candidate.identity.table),
+            old_doc_id: Some(candidate.identity.doc_id),
+            old: Some(candidate.document),
+            context: candidate.context,
+            ..Self::empty()
+        }
+    }
+
+    pub(crate) fn into_delete_candidate(
+        self,
+    ) -> Result<super::candidate::MutationCandidate<Option<OwnedPhysicalRow>>, uqa_sql::SQLError>
+    {
+        let invalid = || {
+            uqa_sql::SQLError::Internal(
+                "rewrite-rule event lost its original delete candidate".into(),
+            )
+        };
+        if self.new_storage_table.is_some() || self.new_doc_id.is_some() || self.new.is_some() {
+            return Err(invalid());
+        }
+        Ok(super::candidate::MutationCandidate {
+            identity: super::candidate::PhysicalDocumentIdentity {
+                table: self.old_storage_table.ok_or_else(invalid)?,
+                doc_id: self.old_doc_id.ok_or_else(invalid)?,
+            },
+            document: self.old.ok_or_else(invalid)?,
+            context: self.context,
+        })
+    }
+
     pub(crate) fn from_rewrite_candidate(
         candidate: super::candidate::MutationRewriteCandidate<Option<OwnedPhysicalRow>>,
     ) -> Self {

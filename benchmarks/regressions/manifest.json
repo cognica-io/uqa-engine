@@ -16688,6 +16688,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "suppressed_rule_deletes_do_not_retain_complete_candidate_documents",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_rules/bounded_events.rs",
+      "capability": "Bounded rewrite-rule delete candidates",
+      "workload": "512 rows with 32KiB text, DELETE and DELETE USING suppressed by a rewrite rule under 64KiB query work memory.",
+      "invariant": "Candidate production and rule qualification keep peak live allocation below 2MiB while preserving all 512 original values and the complete USING context.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
