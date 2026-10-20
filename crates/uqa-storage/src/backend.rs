@@ -527,6 +527,16 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(None)
     }
 
+    /// Visit every previously evaluated entry in increasing identity order on one retained read boundary. False, without callbacks, declines an unbuilt index or an unsupported provider. A callback may capture values but must not reenter persistence. Consumer errors stop before the next entry and must propagate unchanged.
+    fn visit_btree_index_entries(
+        &self,
+        _table: &str,
+        _field: &crate::ValueIndexKey,
+        _visit: &mut dyn FnMut(DocId, Value) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<bool> {
+        Ok(false)
+    }
+
     fn btree_index_fields(&self, _table: &str) -> StorageBackendResult<Vec<crate::ValueIndexKey>> {
         Ok(Vec::new())
     }

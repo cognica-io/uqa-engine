@@ -315,6 +315,15 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         btree_index::fields(self.store.as_ref(), table)
     }
 
+    fn visit_btree_index_entries(
+        &self,
+        table: &str,
+        field: &crate::ValueIndexKey,
+        visit: &mut dyn FnMut(DocId, Value) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<bool> {
+        btree_index::visit_entries(self.store.as_ref(), table, field, visit)
+    }
+
     fn read_btree_index_entry(
         &self,
         table: &str,
