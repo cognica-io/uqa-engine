@@ -16,6 +16,35 @@ mod revisions;
 mod selection;
 
 #[test]
+fn explicit_memory_tier_limit_spills_with_admitted_metadata_and_survives_fork() {
+    let control = StorageReadControl::with_limit(64 * 1024);
+    let original = PrivateRecordChanges::with_memory_tier_limit(control.memory(), 0);
+    let mut expected = Model::new();
+    for index in 0..32 {
+        stage(
+            &original,
+            &mut expected,
+            index,
+            Some("value".into()),
+            &control,
+        );
+        assert!(original.owner.state.lock().records.len() <= 1);
+    }
+    assert!(spilled_runs(&original) > 0);
+    let before = original.snapshot().unwrap();
+    let fork = original.fork();
+    let mut forked = expected.clone();
+    for index in 32..64 {
+        stage(&fork, &mut forked, index, Some("fork".into()), &control);
+        assert!(fork.owner.state.lock().records.len() <= 1);
+    }
+    assert_matches(&before, &expected, &control);
+    assert_matches(&original.snapshot().unwrap(), &expected, &control);
+    assert_matches(&fork.snapshot().unwrap(), &forked, &control);
+    assert!(control.memory().used() <= 64 * 1024);
+}
+
+#[test]
 fn forked_private_roots_share_prefix_and_undo_independently() {
     let control = StorageReadControl::with_limit(1 << 20);
     let original = PrivateRecordChanges::new(control.memory());

@@ -116,6 +116,8 @@ struct State {
     records: Records,
     /// The estimated bytes the memory tier holds, which decide when it spills.
     resident: usize,
+    /// An optional earlier spill threshold, independent of the hard allowance for run metadata and I/O.
+    memory_tier_limit: Option<usize>,
     runs: RunSet,
     sources: Sources,
     scopes: Option<RevisionScopes>,
@@ -135,16 +137,22 @@ impl State {
 
     /// The smallest memory tier that spills, which is also the size of the smallest runs.
     fn least_spill(&self) -> usize {
-        self.records.budget().limit() / RESIDENT_DIVISOR
+        let ordinary = self.records.budget().limit() / RESIDENT_DIVISOR;
+        self.memory_tier_limit
+            .map_or(ordinary, |limit| ordinary.min(limit.max(1)))
     }
 
     /// Move the memory tier into a new run when the transaction's allowance is under pressure: more than half of it is used and the memory tier holds a share of it worth a run. The allowance measures what this tier actually holds, so changes that share their values with an earlier owner do not spill on their own. Failure leaves both tiers unchanged.
     fn make_room(&mut self, control: &StorageReadControl) -> VersionResult<()> {
         let budget = self.records.budget();
-        if self.records.is_empty()
-            || self.resident < self.least_spill()
-            || budget.used() <= budget.limit() / PRESSURE_DIVISOR
-        {
+        let retain = self.memory_tier_limit.map_or_else(
+            || {
+                self.resident < self.least_spill()
+                    || budget.used() <= budget.limit() / PRESSURE_DIVISOR
+            },
+            |limit| self.resident <= limit,
+        );
+        if self.records.is_empty() || retain {
             return Ok(());
         }
         let memory = self.records.budget().clone();
@@ -208,6 +216,7 @@ impl PrivateRecordChanges {
                 state: Mutex::new(State {
                     records: state.records.clone(),
                     resident: state.resident,
+                    memory_tier_limit: state.memory_tier_limit,
                     runs: state.runs.clone(),
                     sources: state.sources.clone(),
                     scopes: state.scopes.as_ref().map(RevisionScopes::fork),
@@ -265,6 +274,13 @@ impl PrivateRecordChanges {
         Self::with_revision_scope(memory, None)
     }
 
+    /// Spill the resident tier earlier while retaining the same hard allowance for keys, run metadata and I/O scratch. The threshold is checked before each atomic write; the current write may exceed it. Forks preserve the policy. Ordinary transaction owners retain their pressure-based policy.
+    pub fn with_memory_tier_limit(memory: &MemoryBudget, bytes: usize) -> Self {
+        let changes = Self::new(memory);
+        changes.owner.state.lock().memory_tier_limit = Some(bytes);
+        changes
+    }
+
     /// Adopt a sorted derived run without copying its payloads. Its writes share `revision`; subsequent changes and savepoints use the ordinary private-root lifecycle.
     pub(in crate::mvcc) fn from_spilled_run(
         run: Option<run::SpilledRun>,
@@ -310,6 +326,7 @@ impl PrivateRecordChanges {
                 state: Mutex::new(State {
                     records: Records::new(memory),
                     resident: 0,
+                    memory_tier_limit: None,
                     runs: RunSet::empty(),
                     sources: Sources::new(memory),
                     scopes: scope.map(|scope| RevisionScopes::new(memory, scope)),
