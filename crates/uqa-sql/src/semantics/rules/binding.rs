@@ -23,7 +23,9 @@ pub trait RuleRowValues {
 }
 
 mod actions;
-pub use actions::{bind_insert_values_action, bind_set_oriented_action, BoundSetOrientedAction};
+pub use actions::{
+    bind_insert_values_action, bind_set_oriented_action, BoundSetOrientedAction, RetainedRuleInput,
+};
 
 pub struct RuleColumnMetadata {
     pub ty: crate::ast::ColumnType,

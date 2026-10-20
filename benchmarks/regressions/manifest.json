@@ -16477,6 +16477,113 @@
       "capability": "Execution-owned retained row sources",
       "workload": "Capture 1,024 contexts over 4MiB spilled rows; read through branch and partition workers and a captured statement after the parent scope ends.",
       "invariant": "Context capture allocates below 32KiB, each reader retains below 2MiB, and all 64 rows remain ordered and exact; scope exit and unwind restore thread isolation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_rule_layout_keeps_declared_width_collation_and_whole_row_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Differently ordered text/SMALLINT columns, NULL fields and whole OLD/NEW records.",
+      "invariant": "Declared widths, collations, original field order and original event ordinal survive the internal source descriptor."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_rule_input_rejects_an_unrelated_source_before_action_binding",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Two distinct opaque owners with the same physical width.",
+      "invariant": "An unrelated descriptor cannot bind or execute an action."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_action_input_spills_without_copying_a_complete_values_plan",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/rules/row_source/tests.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "1,024 original OLD/NEW images, 8KiB per field, in reversed selection order with 64KiB work memory.",
+      "invariant": "The 32MiB action input retains below 2MiB additional live allocation; two readers preserve every byte and original ordinal without a complete VALUES plan."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_action_input_preserves_empty_null_and_selected_original_ordinals",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/rules/row_source/tests.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Empty and two selected NULL events with a one-byte spill allowance.",
+      "invariant": "Exact multiplicity and noncontiguous original ordinals survive; dropping the action makes its source inaccessible."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_action_input_cancellation_and_bad_ordinals_do_not_bind_or_keep_a_source",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/rules/row_source/tests.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Cancelled production and an invalid qualified event ordinal.",
+      "invariant": "Failed input cannot invoke the action binder, and later independent source scopes clean up correctly."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_admitted_fields_read_current_types_only_when_the_source_is_built",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/retained_source/tests/admitted.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Spilled admitted composite constants before addition, after addition and after rollback of their descriptor.",
+      "invariant": "Typed fields observe the current descriptor at source construction, untyped whole rows and original values remain unchanged, and cancellation precedes catalog reads."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "spill_batch_writer_bounds_zero_width_row_batches_and_keeps_their_count",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/batch_writer.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "5,000 zero-column rows with 64KiB spill memory.",
+      "invariant": "Pending batches remain bounded by 1,024 rows without losing zero-column multiplicity."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "rule_retained_inputs_preserve_composite_reads_multiplicity_and_rollback",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/rules.rs",
+      "capability": "Bounded set-oriented rule inputs",
+      "workload": "Set-oriented INSERT SELECT rule over eight 4KiB events, two action rows per event, added composite fields and one-kilobyte work memory.",
+      "invariant": "Outputs match independent PostgreSQL 18.4; empty inputs add nothing, transaction rollback restores both relations and persistent providers reopen identically."
     }
   ]
 }

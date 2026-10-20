@@ -21,6 +21,9 @@ use super::{RuleColumnMetadata, RuleRowValues, RuntimeRuleResolver};
 #[cfg(test)]
 mod tests;
 
+mod retained;
+pub use retained::RetainedRuleInput;
+
 type BindRuleAction<'a> = dyn Fn(&mut dyn VariableResolver) -> Result<Statement, SQLError> + 'a;
 
 pub fn bind_insert_values_action(
@@ -117,12 +120,18 @@ fn runtime_rule_resolver<'a>(
 
 struct RuleRowSource {
     clause: FromClause,
+    metadata: RuleRowMetadata,
+}
+
+struct RuleRowMetadata {
     relation: InternalRelationId,
     old_columns: BTreeMap<String, InternalColumnRef>,
     new_columns: BTreeMap<String, InternalColumnRef>,
     old_row: InternalColumnRef,
     new_row: InternalColumnRef,
     source_index: InternalColumnRef,
+    types: Vec<Option<ColumnType>>,
+    collations: Vec<Option<u32>>,
 }
 
 pub struct BoundSetOrientedAction {
@@ -137,14 +146,21 @@ pub fn bind_set_oriented_action(
     bind_action: &BindRuleAction<'_>,
 ) -> Result<BoundSetOrientedAction, SQLError> {
     let source = rule_row_source(matching_rows, rows, columns)?;
-    let source_index = Expr::InternalColumn(source.source_index);
+    bind_source_action(source, bind_action)
+}
+
+fn bind_source_action(
+    source: RuleRowSource,
+    bind_action: &BindRuleAction<'_>,
+) -> Result<BoundSetOrientedAction, SQLError> {
+    let source_index = Expr::InternalColumn(source.metadata.source_index);
     let mut bound = bind_action(&mut RuleSourceResolver {
-        old_columns: &source.old_columns,
-        new_columns: &source.new_columns,
-        old_row: source.old_row,
-        new_row: source.new_row,
+        old_columns: &source.metadata.old_columns,
+        new_columns: &source.metadata.new_columns,
+        old_row: source.metadata.old_row,
+        new_row: source.metadata.new_row,
     })?;
-    attach_rule_row_source(&mut bound, source.clause, source.relation)?;
+    attach_rule_row_source(&mut bound, source.clause, source.metadata.relation)?;
     Ok(BoundSetOrientedAction {
         statement: bound,
         source_index,
@@ -156,27 +172,7 @@ fn rule_row_source(
     rows: &[impl RuleRowValues],
     columns: &BTreeMap<String, RuleColumnMetadata>,
 ) -> Result<RuleRowSource, SQLError> {
-    let relation = InternalRelationId::allocate();
-    let mut internal_column_types = Vec::with_capacity(columns.len() * 2 + 3);
-    let mut internal_column_collations = Vec::with_capacity(columns.len() * 2 + 3);
-    let mut old_columns = BTreeMap::new();
-    let mut new_columns = BTreeMap::new();
-    for (index, (column, metadata)) in columns.iter().enumerate() {
-        let old = relation.column(index * 2);
-        let new = relation.column(index * 2 + 1);
-        old_columns.insert(column.clone(), old);
-        new_columns.insert(column.clone(), new);
-        internal_column_types.push(Some(metadata.ty.clone()));
-        internal_column_types.push(Some(metadata.ty.clone()));
-        internal_column_collations.extend([metadata.collation_oid; 2]);
-    }
-    let old_row = relation.column(internal_column_types.len());
-    internal_column_types.push(Some(ColumnType::Record));
-    let new_row = relation.column(internal_column_types.len());
-    internal_column_types.push(Some(ColumnType::Record));
-    let source_index = relation.column(internal_column_types.len());
-    internal_column_types.push(Some(ColumnType::BigInteger));
-    internal_column_collations.extend([None; 3]);
+    let metadata = rule_row_metadata(InternalRelationId::allocate(), columns);
     let values = matching_rows
         .iter()
         .map(|row_index| {
@@ -184,7 +180,7 @@ fn rule_row_source(
                 SQLError::Internal("rewrite rule lost its qualified row image".into())
             })?;
             let resolver = runtime_rule_resolver(row, columns);
-            let mut values = Vec::with_capacity(internal_column_types.len());
+            let mut values = Vec::with_capacity(metadata.types.len());
             for column in columns.keys() {
                 values.push(resolver.field_expression(row.old_row(), row.old_doc_id(), column)?);
                 values.push(resolver.field_expression(row.new_row(), row.new_doc_id(), column)?);
@@ -207,17 +203,48 @@ fn rule_row_source(
             rows: values,
             alias: None,
             column_aliases: Vec::new(),
-            internal_relation: Some(relation),
-            internal_column_types,
-            internal_column_collations,
+            internal_relation: Some(metadata.relation),
+            internal_column_types: metadata.types.clone(),
+            internal_column_collations: metadata.collations.clone(),
         },
+        metadata,
+    })
+}
+
+fn rule_row_metadata(
+    relation: InternalRelationId,
+    columns: &BTreeMap<String, RuleColumnMetadata>,
+) -> RuleRowMetadata {
+    let mut internal_column_types = Vec::with_capacity(columns.len() * 2 + 3);
+    let mut internal_column_collations = Vec::with_capacity(columns.len() * 2 + 3);
+    let mut old_columns = BTreeMap::new();
+    let mut new_columns = BTreeMap::new();
+    for (index, (column, metadata)) in columns.iter().enumerate() {
+        let old = relation.column(index * 2);
+        let new = relation.column(index * 2 + 1);
+        old_columns.insert(column.clone(), old);
+        new_columns.insert(column.clone(), new);
+        internal_column_types.push(Some(metadata.ty.clone()));
+        internal_column_types.push(Some(metadata.ty.clone()));
+        internal_column_collations.extend([metadata.collation_oid; 2]);
+    }
+    let old_row = relation.column(internal_column_types.len());
+    internal_column_types.push(Some(ColumnType::Record));
+    let new_row = relation.column(internal_column_types.len());
+    internal_column_types.push(Some(ColumnType::Record));
+    let source_index = relation.column(internal_column_types.len());
+    internal_column_types.push(Some(ColumnType::BigInteger));
+    internal_column_collations.extend([None; 3]);
+    RuleRowMetadata {
         relation,
         old_columns,
         new_columns,
         old_row,
         new_row,
         source_index,
-    })
+        types: internal_column_types,
+        collations: internal_column_collations,
+    }
 }
 
 struct RuleSourceResolver<'a> {

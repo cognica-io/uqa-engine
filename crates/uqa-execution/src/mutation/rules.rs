@@ -7,6 +7,7 @@
 //! `PostgreSQL` rewrite-rule qualification, OLD/NEW binding, action ordering, and recursion checks.
 
 mod returning;
+mod row_source;
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -28,7 +29,7 @@ pub use inputs::RuleInputProjection;
 pub use crate::mutation::row_images::RuleRowImage;
 use returning::capture_rule_returning_result;
 pub use returning::RuleReturningResult;
-use uqa_sql::semantics::rules::binding::{bind_insert_values_action, bind_set_oriented_action};
+use uqa_sql::semantics::rules::binding::bind_insert_values_action;
 pub use uqa_sql::semantics::rules::returning::RuleReturningRequest;
 pub use uqa_sql::semantics::rules::validate_rule_returning_contract;
 use uqa_sql::semantics::rules::{
@@ -292,20 +293,27 @@ impl PreparedRuleBatch {
                                 .into(),
                     });
                 }
-                let (mut bound, source_index) = if needs_row_source
+                let (mut bound, source_index, _input_scope) = if needs_row_source
                     && matches!(action, Statement::Insert(insert) if !insert.rows.is_empty())
                 {
                     (
                         bind_insert_values_action(matching_rows, rows, &columns, &bind_action)?,
                         None,
+                        None,
                     )
                 } else if needs_row_source {
-                    let bound =
-                        bind_set_oriented_action(matching_rows, rows, &columns, &bind_action)?;
+                    let (bound, scope) = row_source::bind_retained_action(
+                        matching_rows,
+                        rows,
+                        &columns,
+                        context.memory.work_mem_bytes()?,
+                        context.cancellation,
+                        &bind_action,
+                    )?;
                     let source_index = captures_source_context.then_some(bound.source_index);
-                    (bound.statement, source_index)
+                    (bound.statement, source_index, Some(scope))
                 } else {
-                    (action.clone(), None)
+                    (action.clone(), None, None)
                 };
                 if captures_action {
                     if provider_captured {
