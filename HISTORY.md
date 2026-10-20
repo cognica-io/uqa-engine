@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reuse compiled regular expressions by pattern, flags and collation in a bounded session cache. Charge retained state to its owning allowance, preserve invocation cancellation and scratch limits, and release memory on eviction and session destruction.
 
+- Encode COPY TO text/CSV incrementally with admitted per-field scratch and bounded cancellation checks, preserving PostgreSQL bytes, duplicate output columns and partial-write failures without allocating a second complete output buffer.
+
 - Remove the bundled SQLite process-wide page-cache memory-management mutex through the maintained rusqlite packages, preserving SQLCipher, connection-local cache release and database formats; direct Rust driver dependencies must use the maintained package identity.
 
 - Reuse the result schema produced by ordered statement input analysis, avoiding a second complete binding pass while preserving output types, collations, anonymous-record fields and procedural dependency scopes.

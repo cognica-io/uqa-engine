@@ -6,14 +6,15 @@
 
 //! Execute COPY byte streams through the ordinary INSERT and SELECT statement paths.
 use std::io::{Read, Write};
-use uqa_core::Value;
+use uqa_core::{
+    memory::{MemoryBudget, ProductionControl},
+    CancellationToken, Value,
+};
 use uqa_sql::{
     ast::{Expr, InsertStmt, ReturningAliases, Statement},
     catalog::security::table::TableAclPrivilege,
     copy::stream::CopyCatalog,
-    copy::{
-        compile_copy, decode_copy_input, encode_copy_result_with_engine, CopyDirection, CopyTarget,
-    },
+    copy::{compile_copy, decode_copy_input, write_copy_result, CopyDirection, CopyTarget},
     expr::EngineHook,
     SQLError, SQLParam, SQLResult,
 };
@@ -39,6 +40,8 @@ pub struct CopyExecutionContext<'a> {
     pub privileges: &'a dyn CopyPrivileges,
     pub statements: &'a dyn CopyStatements,
     pub output: &'a dyn EngineHook,
+    pub memory: &'a dyn crate::query::runtime::QueryMemorySettings,
+    pub cancellation: &'a CancellationToken,
 }
 pub fn copy_from(
     context: &CopyExecutionContext<'_>,
@@ -176,10 +179,15 @@ pub fn copy_to(
         sqlstate: "54000".into(),
         message: "COPY output row count exceeds u64".into(),
     })?;
-    let bytes = encode_copy_result_with_engine(&result, &copy.options, context.output)?;
-    output
-        .write_all(&bytes)
-        .map_err(|error| copy_io_error("write COPY TO stream", error))?;
+    let memory = MemoryBudget::new(context.memory.work_mem_bytes()?);
+    let control = ProductionControl::new(&memory, context.cancellation, context.cancellation);
+    write_copy_result(
+        &result,
+        &copy.options,
+        output,
+        Some(context.output),
+        &control,
+    )?;
     Ok(row_count)
 }
 

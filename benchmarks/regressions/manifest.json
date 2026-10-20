@@ -15507,6 +15507,175 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "text_and_csv_bytes_match_postgresql_typed_output",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "Controlled text/CSV encoder over PostgreSQL fixtures and bounded, failing or cancelling sinks.",
+      "invariant": "Text and CSV match independent PostgreSQL 18 output for NULL, empty, Unicode, escaping, bytea, boolean, padded char and catalog vectors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "encoded_export_larger_than_allowance_retains_only_current_field",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "Controlled text/CSV encoder over PostgreSQL fixtures and bounded, failing or cancelling sinks.",
+      "invariant": "An 8MiB export has at most 16KiB admitted encoding scratch, zero retained scratch after each row and the expected byte count and CRC.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "large_borrowed_unicode_field_needs_no_owned_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "Controlled text/CSV encoder over PostgreSQL fixtures and bounded, failing or cancelling sinks.",
+      "invariant": "A large escaped Unicode field produces the expected bytes without an owned scratch allocation and each write is bounded to 8192 bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "partial_and_interrupted_writes_preserve_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "Controlled text/CSV encoder over PostgreSQL fixtures and bounded, failing or cancelling sinks.",
+      "invariant": "Short and interrupted writes produce every expected byte once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cancellation_after_sink_write_releases_formatted_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "Controlled text/CSV encoder over PostgreSQL fixtures and bounded, failing or cancelling sinks.",
+      "invariant": "Both cancellation owners interrupt after one sink call, including interrupted writes, and release all formatted scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sink_failure_and_write_zero_release_scratch_without_retrying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "Controlled text/CSV encoder over PostgreSQL fixtures and bounded, failing or cancelling sinks.",
+      "invariant": "I/O failures and zero writes report 58030, stop at the first failed write and release all formatted scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scratch_refusal_and_unsupported_format_emit_no_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "Controlled text/CSV encoder over PostgreSQL fixtures and bounded, failing or cancelling sinks.",
+      "invariant": "Memory refusal and unsupported format report their original SQLSTATE without emitting bytes or retaining allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "custom_csv_options_preserve_null_quotes_and_escape_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "Controlled text/CSV encoder over PostgreSQL fixtures and bounded, failing or cancelling sinks.",
+      "invariant": "Custom delimiter, NULL, quote and distinct escape preserve PostgreSQL output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "positional_duplicate_labels_and_zero_column_rows_are_preserved",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "Controlled text/CSV encoder over PostgreSQL fixtures and bounded, failing or cancelling sinks.",
+      "invariant": "Duplicate output labels retain distinct positional values and zero-column rows retain their row boundaries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "csv_single_column_end_marker_matches_postgresql_quoting",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "COPY CSV of a lone end marker and the same value in a multi-column row.",
+      "invariant": "Only a single-column end marker is quoted, matching independent PostgreSQL output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_output_preserves_session_style_duplicate_labels_and_mutation_returning",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "Public COPY output lifetime",
+      "workload": "Public COPY calls with session output styles, DML RETURNING, modifying CTEs and failing or cancelling sinks.",
+      "invariant": "Session semantics and original output/error behavior survive incremental encoding; failures abort the active explicit transaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_output_sink_cancellation_and_io_error_abort_explicit_transaction",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "Public COPY output lifetime",
+      "workload": "Public COPY calls with session output styles, DML RETURNING, modifying CTEs and failing or cancelling sinks.",
+      "invariant": "Session semantics and original output/error behavior survive incremental encoding; failures abort the active explicit transaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "interval_output_reads_live_settings_and_restores_its_caller",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "Incremental COPY output",
+      "workload": "Change the live interval output setting between encoded rows under a different caller scope.",
+      "invariant": "Both row encodings match PostgreSQL, the caller scope is restored and admitted scratch is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "exhausted_retention_preserves_compilation_results_and_diagnostics",
       "cases": 1,
       "case_names": [
