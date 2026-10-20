@@ -45,33 +45,45 @@ fn view_rule_inputs_bound_live_payload_and_retain_row_specific_types() {
 
 #[test]
 fn view_rule_query_input_preserves_duplicate_positions_and_excludes_hidden_slots() {
-    let schema = RowSchema::new(vec!["same".into(), "same".into(), "hidden".into()]);
-    let mut buffer = SpillBuffer::new(16 * 1024);
-    let mut writer = SpillBatchWriter::new(schema.clone()).unwrap();
-    writer
-        .push(
-            &mut buffer,
-            PhysicalRow::from_values(vec![Value::Int(7), Value::Null, Value::Int(99)]),
-        )
-        .unwrap();
-    writer.finish(&mut buffer).unwrap();
-    let output = QueryOutput {
-        columns: vec!["same".into(), "same".into()],
-        column_types: vec![Some(ColumnType::Integer), Some(ColumnType::Text)],
-        internal_schema: schema.clone(),
-        rows: QueryRows::SharedSpill(buffer.into_shared(schema).unwrap()),
-    };
-    let rows = ViewInputRows::query(output, CancellationToken::new())
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    assert_eq!(
-        rows,
-        vec![vec![
-            (Value::Int(7), Some(ColumnType::Integer)),
-            (Value::Null, Some(ColumnType::Text))
-        ]]
-    );
+    let input = RowSchema::new(vec!["hidden".into(), "second".into(), "first".into()]);
+    for (schema, values) in [
+        (
+            RowSchema::new(vec!["same".into(), "same".into(), "hidden".into()]),
+            vec![Value::Int(7), Value::Null, Value::Int(99)],
+        ),
+        (
+            RowSchema::remap_positions(&input, &[("same".into(), 2), ("same".into(), 1)], &[]),
+            vec![Value::Int(99), Value::Null, Value::Int(7)],
+        ),
+        (
+            RowSchema::remap_positions(&input, &[("same".into(), 2), ("same".into(), 9)], &[]),
+            vec![Value::Int(99), Value::Int(88), Value::Int(7)],
+        ),
+    ] {
+        let mut buffer = SpillBuffer::new(16 * 1024);
+        let mut writer = SpillBatchWriter::new(schema.clone()).unwrap();
+        writer
+            .push(&mut buffer, PhysicalRow::from_values(values))
+            .unwrap();
+        writer.finish(&mut buffer).unwrap();
+        let output = QueryOutput {
+            columns: vec!["same".into(), "same".into()],
+            column_types: vec![Some(ColumnType::Integer), Some(ColumnType::Text)],
+            internal_schema: schema.clone(),
+            rows: QueryRows::SharedSpill(buffer.into_shared(schema).unwrap()),
+        };
+        let rows = ViewInputRows::query(output, CancellationToken::new())
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![vec![
+                (Value::Int(7), Some(ColumnType::Integer)),
+                (Value::Null, Some(ColumnType::Text))
+            ]]
+        );
+    }
 }
 
 #[test]
