@@ -9,8 +9,8 @@ use super::{
     assignment::refresh_stored_generated_columns,
     candidate::{MutationLockTarget, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     constraints::{
-        lock_document_key_dependencies, partition_insert_target,
-        period::period_foreign_key_coverage, validate_partition_constraint, ConstraintStatement,
+        lock_document_key_dependencies, partition_insert_target, validate_partition_constraint,
+        ConstraintStatement,
     },
     errors::{dml_storage_error, missing_document_error},
     events::ReferentialRewritePreparation,
@@ -43,8 +43,11 @@ mod delete;
 mod references;
 mod rewrite;
 mod snapshots;
+use super::deleted_rows::DeletedRowLookup;
+use actions::defer_deleted_key_checks_excluding;
 pub use actions::{defer_deleted_key_checks, defer_updated_key_checks};
 pub use delete::prepare_document_delete;
+pub(crate) use delete::prepare_document_delete_excluding;
 pub use references::{
     apply_set_action_to_child, lock_referencing_child, referencing_rows, ReferencingChildLock,
 };
