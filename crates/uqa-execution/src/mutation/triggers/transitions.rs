@@ -60,16 +60,27 @@ pub(super) fn materialize_transition_rows(
         .map(|column| column.name.clone())
         .collect::<Vec<_>>();
     let schema = crate::RowSchema::with_types(
-        names.clone(),
+        names,
         columns
             .iter()
             .map(|column| Some(column.ty.clone()))
             .collect(),
     );
-    let mut spill = crate::SpillBuffer::new(
+    spool_transition_rows(
+        schema,
+        values,
         crate::query::projection::physical_work_mem_bytes(context.runtime)?.max(1),
-    );
-    let mut rows = Vec::with_capacity(crate::DEFAULT_BATCH_SIZE);
+    )
+}
+
+fn spool_transition_rows(
+    schema: crate::RowSchema,
+    values: impl IntoIterator<Item = Value>,
+    work_mem: usize,
+) -> Result<crate::SharedSpill> {
+    let mut spill = crate::SpillBuffer::new(work_mem);
+    let mut writer = crate::spill::SpillBatchWriter::new(schema.clone())
+        .map_err(crate::physical::physical_exec_error)?;
     for value in values {
         if matches!(value, Value::Null) {
             continue;
@@ -79,27 +90,21 @@ pub(super) fn materialize_transition_rows(
                 "transition relation row is not a record".into(),
             ));
         };
-        let fields = fields.into_iter().collect::<BTreeMap<_, _>>();
-        let mut row = uqa_sql::ResultRow::new();
-        for name in &names {
-            row.insert(
-                name.clone(),
-                fields.get(name).cloned().unwrap_or(Value::Null),
-            );
-        }
-        rows.push(row);
-        if rows.len() == crate::DEFAULT_BATCH_SIZE {
-            spill
-                .push(crate::Batch::new(schema.clone(), std::mem::take(&mut rows)))
-                .map_err(crate::physical::physical_exec_error)?;
-            rows.reserve(crate::DEFAULT_BATCH_SIZE);
-        }
-    }
-    if !rows.is_empty() {
-        spill
-            .push(crate::Batch::new(schema.clone(), rows))
+        let mut fields = fields.into_iter().collect::<BTreeMap<_, _>>();
+        let row = crate::PhysicalRow::from_values(
+            schema
+                .columns()
+                .iter()
+                .map(|name| fields.remove(name).unwrap_or(Value::Null))
+                .collect(),
+        );
+        writer
+            .push(&mut spill, row)
             .map_err(crate::physical::physical_exec_error)?;
     }
+    writer
+        .finish(&mut spill)
+        .map_err(crate::physical::physical_exec_error)?;
     spill
         .into_shared(schema)
         .map_err(crate::physical::physical_exec_error)
@@ -169,4 +174,95 @@ fn compute_transition_capture_required(
         pending.extend(hierarchy.parents);
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uqa_sql::ast::ColumnType;
+
+    #[test]
+    fn transition_rows_keep_nullary_cardinality_and_reject_nonrecords() {
+        let values = std::iter::repeat_with(|| Value::Record(Vec::new().into()))
+            .take(4097)
+            .chain(std::iter::once(Value::Null));
+        let output = spool_transition_rows(crate::RowSchema::default(), values, 64).unwrap();
+        let mut count = 0;
+        for row in output.read_rows().unwrap() {
+            assert!(row.unwrap().row.value(0).is_none());
+            count += 1;
+        }
+        assert_eq!(count, 4097);
+        let repeated = crate::RowSchema::with_types(
+            vec!["value".into(), "value".into()],
+            vec![Some(ColumnType::Integer); 2],
+        );
+        let output = spool_transition_rows(
+            repeated,
+            [Value::Record(vec![("value".into(), Value::Int(7))].into())],
+            64,
+        )
+        .unwrap();
+        let row = output.read_rows().unwrap().next().unwrap().unwrap();
+        assert_eq!(row.row.value(0), Some(&Value::Int(7)));
+        assert_eq!(row.row.value(1), Some(&Value::Null));
+        let result = spool_transition_rows(
+            crate::RowSchema::default(),
+            [Value::Record(Vec::new().into()), Value::Int(1)],
+            64,
+        );
+        assert!(matches!(
+            result,
+            Err(SQLError::Internal(message)) if message == "transition relation row is not a record"
+        ));
+    }
+
+    #[test]
+    fn transition_row_batches_bound_wide_payloads_and_preserve_named_projection() {
+        let schema = crate::RowSchema::with_types(
+            vec!["id".into(), "body".into(), "missing".into()],
+            vec![
+                Some(ColumnType::Integer),
+                Some(ColumnType::Text),
+                Some(ColumnType::Text),
+            ],
+        );
+        let allocated = allocation_counter::measure(|| {
+            let values = (0..512).flat_map(|id| {
+                [
+                    Value::Null,
+                    Value::Record(
+                        vec![
+                            (
+                                "body".into(),
+                                Value::Str(format!("{id:04}{}", "x".repeat(32764))),
+                            ),
+                            ("ignored".into(), Value::Int(-1)),
+                            ("id".into(), Value::Int(id)),
+                        ]
+                        .into(),
+                    ),
+                ]
+            });
+            let output = spool_transition_rows(schema.clone(), values, 16 * 1024).unwrap();
+            for _ in 0..2 {
+                let mut count = 0;
+                for row in output.read_rows().unwrap() {
+                    let row = row.unwrap();
+                    assert_eq!(row.row.value(0), Some(&Value::Int(count)));
+                    let Some(Value::Str(body)) = row.row.value(1) else {
+                        panic!("text body")
+                    };
+                    assert_eq!(body.len(), 32768);
+                    assert_eq!(&body[..4], format!("{count:04}"));
+                    assert!(body.as_bytes()[4..].iter().all(|byte| *byte == b'x'));
+                    assert_eq!(row.row.value(2), Some(&Value::Null));
+                    count += 1;
+                }
+                assert_eq!(count, 512);
+            }
+        });
+        // A 16MiB transition input is generated and replayed under the original 16KiB spool allowance.
+        assert!(allocated.bytes_max < 2 * 1024 * 1024, "{allocated:?}");
+    }
 }

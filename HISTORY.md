@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Materialize trigger transition relations in batches bounded by row bytes, preserving named projection, row order and NULL handling without retaining a complete batch of wide payloads.
+
 - Added a released-package TPC-H comparison that validates an installed `usql` and a local PostgreSQL 18 server against the checked-in PostgreSQL 18 results and times both in alternating rounds. The 0.6.0 measurement and the latency regression since the 2026-08-09 snapshot, tracked in #1108, are recorded in the TPC-H benchmark README.
 
 ### Fixed

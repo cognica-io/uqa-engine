@@ -16753,6 +16753,32 @@
       "capability": "Bounded prepared UPDATE publication",
       "workload": "COPY UPDATE RETURNING over 512 rows with 32KiB payloads, 64KiB query work memory and 4MiB session retention.",
       "invariant": "Peak additional Rust allocation stays below the unchanged 8MiB ceiling; all 512 exact output rows and final changed values match PostgreSQL 18."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "transition_row_batches_bound_wide_payloads_and_preserve_named_projection",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/triggers/transitions.rs",
+      "capability": "Bounded trigger transition materialization",
+      "workload": "512 generated 32KiB named records interspersed with absent images, a 16KiB spool allowance, and two independent reads.",
+      "invariant": "Peak additional allocation stays below 2MiB; positional output preserves identity, exact body bytes, omitted-column NULLs and order without retaining the complete 16MiB input."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "transition_rows_keep_nullary_cardinality_and_reject_nonrecords",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/triggers/transitions.rs",
+      "capability": "Bounded trigger transition materialization",
+      "workload": "4,097 zero-column records plus an absent image at 64 bytes of spool allowance; then an invalid non-record after a valid row.",
+      "invariant": "Zero-width rows preserve multiplicity, absent images contribute no row, and malformed images retain the existing internal diagnostic instead of silently disappearing."
     }
   ]
 }
