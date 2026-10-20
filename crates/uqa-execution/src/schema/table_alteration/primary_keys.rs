@@ -137,6 +137,8 @@ pub(super) fn validate_rows<S: Clone + 'static>(
         if !selected.is_empty() {
             crate::schema::validation::validate_not_null_columns(
                 context.constraints.rows.reads,
+                context.constraints.rows.memory,
+                context.constraints.rows.cancellation,
                 &table,
                 &selected,
             )?;

@@ -371,7 +371,17 @@ pub fn find_foreign_key_parent(
         return find_exact_foreign_key_parent(context, fk, &lookup.values);
     }
     for physical_table in foreign_key_scan_tables(context.partitions.catalog, &fk.ref_table)? {
-        for doc_id in context.reads.table_doc_ids(&physical_table)? {
+        let ids = super::candidate_ids::CandidateIds::from_pages(
+            context.memory.work_mem_bytes()?,
+            context.cancellation,
+            |after, limit, control| {
+                context
+                    .reads
+                    .table_doc_id_page(&physical_table, after, limit, control)
+            },
+        )?;
+        for row in ids.read_rows()? {
+            let (_, doc_id) = row?;
             let Some(document) = context.reads.get_document(&physical_table, doc_id)? else {
                 continue;
             };

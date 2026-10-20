@@ -18468,6 +18468,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "constraint_validation_spills_initial_identities_before_row_evaluation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/validation/tests.rs",
+      "capability": "Bounded constraint identity capture",
+      "workload": "65,536 live identities under 64KiB work memory, plus zero-allowance and empty populations; row evaluation invalidates the backing identity source.",
+      "invariant": "Peak allocation stays below 512KiB; all initial identities are captured before any row callback and replayed in their original order without a whole-table ID collection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "constraint_validation_preserves_missing_rows_and_first_invalid_column",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/validation/tests.rs",
+      "capability": "Bounded constraint identity capture",
+      "workload": "A captured population with a missing first row and a later NULL in the second required column.",
+      "invariant": "Missing rows are skipped; the first offending row and physical column preserve SQLSTATE 23502 and the original diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "constraint_identity_capture_propagates_cancellation_and_page_failure_before_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/validation/tests.rs",
+      "capability": "Bounded constraint identity capture",
+      "workload": "An identity-page error after the first page, followed by an already-cancelled invocation at zero retention allowance.",
+      "invariant": "The page error remains XX001 without evaluating rows; cancellation is 57014 and prevents another provider page read.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

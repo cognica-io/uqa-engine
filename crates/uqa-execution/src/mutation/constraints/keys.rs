@@ -45,7 +45,17 @@ pub fn without_overlaps_conflict(
         });
     }
     let ordinary_columns = &constraint.columns[..constraint.columns.len() - 1];
-    for doc_id in context.reads.table_doc_ids(table)? {
+    let ids = crate::mutation::candidate_ids::CandidateIds::from_pages(
+        context.memory.work_mem_bytes()?,
+        context.cancellation,
+        |after, limit, control| {
+            context
+                .reads
+                .table_doc_id_page(table, after, limit, control)
+        },
+    )?;
+    for row in ids.read_rows()? {
+        let (_, doc_id) = row?;
         if ignored_doc_id == Some(doc_id) {
             continue;
         }

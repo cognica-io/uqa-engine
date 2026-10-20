@@ -259,7 +259,17 @@ fn find_conflict_excluding(
     ignored: DocId,
 ) -> Result<Option<DocId>, SQLError> {
     // A probe would compare the excluded row with its own key before applying its identity filter. Only other visible rows participate in this uniqueness check; rewrite validation separately compares any retained old index entry.
-    for id in context.reads.live_table_doc_ids(table)? {
+    let ids = crate::mutation::candidate_ids::CandidateIds::from_pages(
+        context.memory.work_mem_bytes()?,
+        context.cancellation,
+        |after, limit, control| {
+            context
+                .reads
+                .live_table_doc_id_page(table, after, limit, control)
+        },
+    )?;
+    for row in ids.read_rows()? {
+        let (_, id) = row?;
         if id == ignored {
             continue;
         }

@@ -418,7 +418,13 @@ pub fn validate_not_null_rows(
     {
         return Ok(());
     }
-    crate::schema::validation::validate_not_null_rows(context.rows.reads, table, column)
+    crate::schema::validation::validate_not_null_rows(
+        context.rows.reads,
+        context.rows.memory,
+        context.rows.cancellation,
+        table,
+        column,
+    )
 }
 
 fn validate_check_rows(
@@ -436,6 +442,8 @@ fn validate_check_rows(
             reads: context.rows.reads,
             expressions: context.rows.partitions.expressions,
             types: context.rows.partitions.types,
+            memory: context.rows.memory,
+            cancellation: context.rows.cancellation,
         },
         table,
         name,
