@@ -17599,6 +17599,32 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "private_snapshot_read_scopes_reuse_blocks_and_release_the_last_cache_owner",
+      "source": "crates/uqa-storage/src/mvcc/overlay/read_scope/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Scoped private-snapshot read caching",
+      "workload": "Thirty-two repeated reads of one spilled record, with no scope, overlapping scopes and final scope release.",
+      "invariant": "Cold reads decode 32 entry blocks; warmed scoped reads perform no additional entry or value file I/O. The final scope releases cached bytes while the immutable snapshot remains."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "private_snapshot_read_scopes_preserve_frozen_visibility_and_failed_admission",
+      "source": "crates/uqa-storage/src/mvcc/overlay/read_scope/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Scoped private-snapshot read caching",
+      "workload": "A frozen spilled view, failed zero-byte scope admission, a later writer replacement, owner drop and cancellation.",
+      "invariant": "Failed admission preserves active readers and releases partial ownership; the frozen view still returns its original bytes, cancellation propagates and final ownership releases every charged byte."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "explicit_memory_tier_limit_spills_with_admitted_metadata_and_survives_fork",
       "source": "crates/uqa-storage/src/mvcc/overlay/tests.rs",
       "cases": 1,

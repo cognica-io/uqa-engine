@@ -28,8 +28,10 @@ mod retained;
 mod scopes;
 pub use scopes::PrivateRevisionScope;
 use scopes::RevisionScopes;
+mod read_scope;
 pub(in crate::mvcc) mod run;
 mod run_set;
+pub use read_scope::PrivateRecordReadScope;
 mod tiers;
 use retained::{RetainedSources, Sources};
 use run::SpilledRunWriter;
@@ -262,14 +264,10 @@ impl PrivateRecordChanges {
     pub(in crate::mvcc) fn read_scope(
         &self,
         control: &StorageReadControl,
-    ) -> VersionResult<BudgetedVec<run::RunCacheReader>> {
+    ) -> VersionResult<PrivateRecordReadScope> {
         control.check()?;
         let state = self.owner.state.lock();
-        let mut readers = BudgetedVec::new(control.memory());
-        for run in state.runs.newest_first() {
-            readers.push(run.cache_reader())?;
-        }
-        Ok(readers)
+        PrivateRecordReadScope::new(&state.runs, control)
     }
 
     pub fn new(memory: &MemoryBudget) -> Self {

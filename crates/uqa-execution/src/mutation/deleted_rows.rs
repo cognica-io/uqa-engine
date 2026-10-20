@@ -9,7 +9,10 @@
 use uqa_core::{memory::MemoryBudget, CancellationToken, DocId};
 use uqa_sql::SQLError;
 use uqa_storage::{
-    mvcc::{PrivateRecordChanges, PrivateRecordSnapshot, RecordWrite, VersionError},
+    mvcc::{
+        PrivateRecordChanges, PrivateRecordReadScope, PrivateRecordSnapshot, RecordWrite,
+        VersionError,
+    },
     read_control::StorageReadControl,
 };
 
@@ -80,8 +83,11 @@ impl DeletedRowBuffer {
 
     pub(crate) fn finish(self) -> Result<DeletedRows, SQLError> {
         self.control.cancellation().check()?;
+        let records = self.records.snapshot().map_err(storage_error)?;
+        let read_scope = records.read_scope(&self.control).map_err(storage_error)?;
         Ok(DeletedRows {
-            records: self.records.snapshot().map_err(storage_error)?,
+            records,
+            _read_scope: read_scope,
             control: self.control,
         })
     }
@@ -90,6 +96,7 @@ impl DeletedRowBuffer {
 /// Membership probes use the exact ordered key lookup, never a traversal of the other deleted rows. Owning the frozen root keeps its authenticated spill alive independently of the builder.
 pub(crate) struct DeletedRows {
     records: PrivateRecordSnapshot,
+    _read_scope: PrivateRecordReadScope,
     control: StorageReadControl,
 }
 
