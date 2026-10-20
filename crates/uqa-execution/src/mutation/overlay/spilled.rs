@@ -35,6 +35,50 @@ pub(crate) type StagedRow = Option<CommandStoredDocument>;
 /// One record to write: its key, and its value or `None` to remove it.
 pub(super) type SpilledRecord = (Vec<u8>, Option<Vec<u8>>);
 
+/// Pending row/index records and key-count deltas. End each batch by both bytes and record count so admission never copies a whole resident tier at once.
+pub(super) struct WriteBatch {
+    records: Vec<SpilledRecord>,
+    counts: std::collections::BTreeMap<Vec<u8>, i64>,
+    bytes: usize,
+    byte_limit: usize,
+}
+
+impl WriteBatch {
+    pub(super) fn new(control: &StorageReadControl) -> Self {
+        Self {
+            records: Vec::new(),
+            counts: std::collections::BTreeMap::new(),
+            bytes: 0,
+            byte_limit: PAGE_BYTES.min(control.memory().limit() / 16),
+        }
+    }
+
+    pub(super) fn push(&mut self, record: SpilledRecord) {
+        self.bytes = self
+            .bytes
+            .saturating_add(size_of::<SpilledRecord>())
+            .saturating_add(record.0.capacity())
+            .saturating_add(record.1.as_ref().map_or(0, Vec::capacity));
+        self.records.push(record);
+    }
+
+    pub(super) fn count(&mut self, key: Vec<u8>, change: i64) {
+        use std::collections::btree_map::Entry;
+        let bytes = key.capacity() + size_of::<SpilledRecord>() + size_of::<i64>();
+        match self.counts.entry(key) {
+            Entry::Vacant(entry) => {
+                self.bytes = self.bytes.saturating_add(bytes);
+                entry.insert(change);
+            }
+            Entry::Occupied(mut entry) => *entry.get_mut() += change,
+        }
+    }
+
+    pub(super) fn is_full(&self) -> bool {
+        self.records.len() + self.counts.len() >= PAGE_RECORDS || self.bytes >= self.byte_limit
+    }
+}
+
 /// The key of the row record of `id`.
 pub(super) fn row_key(id: DocId) -> Vec<u8> {
     let mut key = Vec::with_capacity(ROW_KEY_BYTES);
@@ -238,19 +282,15 @@ pub(super) struct SpillWriter<'a> {
 }
 
 impl SpillWriter<'_> {
-    /// Write `batch`, whose records have distinct keys, together with the key records whose entry counts `changes` moves, and empty `batch` and `changes`.
-    pub(super) fn write(
-        &self,
-        batch: &mut Vec<SpilledRecord>,
-        changes: &mut std::collections::BTreeMap<Vec<u8>, i64>,
-    ) -> Result<(), SQLError> {
-        if !changes.is_empty() {
+    /// Write the distinct records and their key-count deltas, then empty the batch.
+    pub(super) fn write(&self, batch: &mut WriteBatch) -> Result<(), SQLError> {
+        if !batch.counts.is_empty() {
             // The counts so far include the batches this transaction already wrote.
             let view = self
                 .records
                 .snapshot()
                 .map_err(|error| super::storage_error(version_error(error)))?;
-            for (key, change) in std::mem::take(changes) {
+            for (key, change) in std::mem::take(&mut batch.counts) {
                 if change == 0 {
                     continue;
                 }
@@ -260,13 +300,16 @@ impl SpillWriter<'_> {
                     .ok_or_else(|| {
                         SQLError::Internal("a spilled key count is out of range".into())
                     })?;
-                batch.push((key, (count != 0).then(|| count.to_le_bytes().to_vec())));
+                batch
+                    .records
+                    .push((key, (count != 0).then(|| count.to_le_bytes().to_vec())));
             }
         }
-        if batch.is_empty() {
+        if batch.records.is_empty() {
             return Ok(());
         }
         let writes = batch
+            .records
             .iter()
             .map(|(key, value)| RecordWrite {
                 key,
@@ -277,7 +320,8 @@ impl SpillWriter<'_> {
         self.records
             .apply(&writes, self.control)
             .map_err(|error| super::storage_error(version_error(error)))?;
-        batch.clear();
+        batch.records.clear();
+        batch.bytes = 0;
         Ok(())
     }
 }

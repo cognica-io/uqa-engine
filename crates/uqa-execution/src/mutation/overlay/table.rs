@@ -104,8 +104,7 @@ impl CommandTableOverlay {
         let spilled = self.rows.spilled.as_mut().expect("a spilled tier");
         let previous = Arc::clone(spilled.view());
         spilled.transact(control, |writer| {
-            let mut batch = Vec::new();
-            let mut counts = std::collections::BTreeMap::new();
+            let mut batch = spilled::WriteBatch::new(control);
             for (&id, row) in memory {
                 control.check().map_err(resource_error)?;
                 // The entries of the version this row replaces leave the spilled tier with it.
@@ -140,20 +139,16 @@ impl CommandTableOverlay {
                                     .map_err(storage_error)?,
                                 None,
                             ));
-                            *counts
-                                .entry(
-                                    spilled::key_record(ordinal, old.bytes())
-                                        .map_err(storage_error)?,
-                                )
-                                .or_insert(0) -= 1;
+                            batch.count(
+                                spilled::key_record(ordinal, old.bytes()).map_err(storage_error)?,
+                                -1,
+                            );
                         }
                         if let Some(new) = &new {
-                            *counts
-                                .entry(
-                                    spilled::key_record(ordinal, new.bytes())
-                                        .map_err(storage_error)?,
-                                )
-                                .or_insert(0) += 1;
+                            batch.count(
+                                spilled::key_record(ordinal, new.bytes()).map_err(storage_error)?,
+                                1,
+                            );
                         }
                     }
                     if let (Some(row), Some(new)) = (row, &new) {
@@ -163,11 +158,11 @@ impl CommandTableOverlay {
                         ));
                     }
                 }
-                if batch.len() >= spilled::PAGE_RECORDS {
-                    writer.write(&mut batch, &mut counts)?;
+                if batch.is_full() {
+                    writer.write(&mut batch)?;
                 }
             }
-            writer.write(&mut batch, &mut counts)
+            writer.write(&mut batch)
         })?;
         self.rows.clear_memory();
         self.exact_indexes.for_each_mut(|_, index| index.clear());
@@ -204,8 +199,7 @@ impl CommandTableOverlay {
             let view = Arc::clone(spilled.view());
             spilled.transact(control, |writer| {
                 let mut after = None;
-                let mut batch = Vec::new();
-                let mut counts = std::collections::BTreeMap::new();
+                let mut batch = spilled::WriteBatch::new(control);
                 loop {
                     let page = spilled::row_page(&view, after, control).map_err(storage_error)?;
                     for (id, row) in page.rows.iter() {
@@ -228,13 +222,15 @@ impl CommandTableOverlay {
                                 .complete(row)?,
                             )),
                         ));
-                        *counts
-                            .entry(
-                                spilled::key_record(ordinal, key.bytes()).map_err(storage_error)?,
-                            )
-                            .or_insert(0) += 1;
+                        batch.count(
+                            spilled::key_record(ordinal, key.bytes()).map_err(storage_error)?,
+                            1,
+                        );
+                        if batch.is_full() {
+                            writer.write(&mut batch)?;
+                        }
                     }
-                    writer.write(&mut batch, &mut counts)?;
+                    writer.write(&mut batch)?;
                     match page.resume {
                         Some(resume) => after = Some(resume),
                         None => return Ok(()),

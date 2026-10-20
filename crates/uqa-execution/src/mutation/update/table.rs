@@ -11,7 +11,10 @@ use crate::mutation::{
     assignment::MutationAssignmentTarget,
     candidate::{MutationRewriteCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     command_scope::MutationOverlayScope,
-    prepared::PreparedMutationAction,
+    prepared::{
+        decode_prepared_mutation_action_row, prepared_mutation_action_schema,
+        push_prepared_mutation_action, PreparedMutationAction,
+    },
     returning::DmlReturningShape,
     statement_end,
     triggers::queue::StatementEvent,
@@ -380,7 +383,9 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 context.mutation.rules.rules.memory.work_mem_bytes()?,
                 context.mutation.rules.rules.cancellation.clone(),
             );
-            let mut prepared_updates = Vec::new();
+            let action_schema = prepared_mutation_action_schema();
+            let mut prepared_updates =
+                crate::SpillBuffer::new(context.mutation.rules.rules.memory.work_mem_bytes()?);
             let mut events = crate::mutation::events::MutationEventQueue::default();
             let mut locked_ids = BTreeSet::new();
             for (storage_table, doc_id) in candidates {
@@ -606,10 +611,12 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                         returning_rows.push(returning)?;
                     }
                     affected += u64::from(prepared.affected);
-                    prepared_updates.push((
+                    push_prepared_mutation_action(
+                        &mut prepared_updates,
+                        &action_schema,
                         PreparedMutationAction::Rewrite(prepared.rewrite),
-                        prepared.after_row_events,
-                    ));
+                    )?;
+                    events.append_after_rows(prepared.after_row_events);
                 }
             }
             let published = overlay.finish();
@@ -723,10 +730,12 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                             returning_rows.push(returning)?;
                         }
                         affected += u64::from(prepared.affected);
-                        prepared_updates.push((
+                        push_prepared_mutation_action(
+                            &mut prepared_updates,
+                            &action_schema,
                             PreparedMutationAction::Rewrite(prepared.rewrite),
-                            prepared.after_row_events,
-                        ));
+                        )?;
+                        events.append_after_rows(prepared.after_row_events);
                     }
                 }
                 rule_published = overlay.finish();
@@ -735,19 +744,25 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 debug_assert_eq!(pending_updates.len(), 0);
                 (None, None)
             };
-            if !prepared_updates.is_empty() {
+            if prepared_updates.rows() != 0 {
                 context.mutation.state.prepare_writer()?;
                 let mut publication = statement_end::publication_batch(&statement_commands)
                     .with_published(published)
                     .with_published(rule_published);
-                for (action, after_rows) in prepared_updates {
+                for row in prepared_updates
+                    .drain_rows()
+                    .map_err(crate::physical::physical_exec_error)?
+                {
+                    cancel.check()?;
+                    let action = decode_prepared_mutation_action_row(
+                        row.map_err(crate::physical::physical_exec_error)?,
+                    )?;
                     crate::mutation::publication::publish_prepared_mutation_action(
                         context.mutation.publication,
                         action,
                         crate::mutation::publication::InsertedIdentity::Unknown,
                         &mut publication,
                     )?;
-                    events.append_after_rows(after_rows);
                 }
                 crate::mutation::publication::finish_mutation_publication(
                     context.mutation.publication,

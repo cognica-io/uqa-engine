@@ -16714,6 +16714,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "wide_rows_spill_with_the_original_unpressured_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/overlay/tests/spilled.rs",
+      "capability": "Bounded command overlay spill admission",
+      "workload": "512 rows of 32KiB, with and without an exact integer index, under the original unpressured 4MiB command allowance.",
+      "invariant": "Staging and exact lookups finish without 53200; spilled row payloads and tuple metadata remain exact, and the last owner releases the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "failure_after_multiple_spill_batches_preserves_the_previous_view_and_writer",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/overlay/tests/spilled.rs",
+      "capability": "Bounded command overlay spill admission",
+      "workload": "A retained committed view, multiple byte-bounded wide-row write batches, an injected failure, and a later successful publication.",
+      "invariant": "Failure rolls back all batches; the earlier view remains stable, the next publication exposes no failed rows, and the final owner releases retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_update_publication_does_not_retain_complete_prepared_documents",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/publication.rs",
+      "capability": "Bounded prepared UPDATE publication",
+      "workload": "COPY UPDATE RETURNING over 512 rows with 32KiB payloads, 64KiB query work memory and 4MiB session retention.",
+      "invariant": "Peak additional Rust allocation stays below the unchanged 8MiB ceiling; all 512 exact output rows and final changed values match PostgreSQL 18."
     }
   ]
 }
