@@ -17,6 +17,9 @@ use uqa_sql::ast::{TriggerEvent, TriggerTiming};
 use uqa_sql::error::Result;
 use uqa_sql::SQLError;
 
+mod images;
+use images::TransitionImages;
+
 /// A relation and operation that a command writes, with the columns an UPDATE sets, which its statement triggers fire for.
 #[derive(Debug, Clone)]
 pub struct StatementEvent {
@@ -75,8 +78,8 @@ struct TableState {
     before_fired: bool,
     /// Where the AFTER STATEMENT events of the state were queued, from which a later command cancels them.
     statements_from: Option<usize>,
-    old_rows: Vec<Value>,
-    new_rows: Vec<Value>,
+    old_rows: TransitionImages,
+    new_rows: TransitionImages,
     transitions: Option<Arc<TransitionTables>>,
 }
 
@@ -136,8 +139,8 @@ impl QueueState {
             closed: false,
             before_fired: false,
             statements_from: None,
-            old_rows: Vec::new(),
-            new_rows: Vec::new(),
+            old_rows: TransitionImages::default(),
+            new_rows: TransitionImages::default(),
             transitions: None,
         });
         Ok(self.tables.len() - 1)
@@ -220,10 +223,18 @@ impl AfterTriggerQueue {
             if let Some(table) = table {
                 let target = &mut state.tables[table];
                 if target.capture.old && !matches!(event.old, Value::Null) {
-                    target.old_rows.push(event.old.clone());
+                    target.old_rows.push(
+                        &event.old,
+                        || context.runtime.work_mem_bytes(),
+                        context.runtime.cancellation,
+                    )?;
                 }
                 if target.capture.new && !matches!(event.new, Value::Null) {
-                    target.new_rows.push(event.new.clone());
+                    target.new_rows.push(
+                        &event.new,
+                        || context.runtime.work_mem_bytes(),
+                        context.runtime.cancellation,
+                    )?;
                 }
             }
             state.entries.push(QueueEntry::Row { event, table });
@@ -311,7 +322,8 @@ impl AfterTriggerQueue {
                 super::transitions::materialize_transition_rows(
                     context,
                     &target.relation,
-                    std::mem::take(&mut target.old_rows),
+                    std::mem::take(&mut target.old_rows)
+                        .into_rows(context.runtime.cancellation_token())?,
                 )
             })
             .transpose()?;
@@ -322,7 +334,8 @@ impl AfterTriggerQueue {
                 super::transitions::materialize_transition_rows(
                     context,
                     &target.relation,
-                    std::mem::take(&mut target.new_rows),
+                    std::mem::take(&mut target.new_rows)
+                        .into_rows(context.runtime.cancellation_token())?,
                 )
             })
             .transpose()?;

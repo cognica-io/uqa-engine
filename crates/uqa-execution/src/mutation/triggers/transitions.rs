@@ -48,7 +48,7 @@ impl TransitionTables {
 pub(super) fn materialize_transition_rows(
     context: &TriggerContext<'_>,
     table: &str,
-    values: impl IntoIterator<Item = Value>,
+    values: impl IntoIterator<Item = Result<Value>>,
 ) -> Result<crate::SharedSpill> {
     let columns = context
         .relations
@@ -75,13 +75,14 @@ pub(super) fn materialize_transition_rows(
 
 fn spool_transition_rows(
     schema: crate::RowSchema,
-    values: impl IntoIterator<Item = Value>,
+    values: impl IntoIterator<Item = Result<Value>>,
     work_mem: usize,
 ) -> Result<crate::SharedSpill> {
     let mut spill = crate::SpillBuffer::new(work_mem);
     let mut writer = crate::spill::SpillBatchWriter::new(schema.clone())
         .map_err(crate::physical::physical_exec_error)?;
     for value in values {
+        let value = value?;
         if matches!(value, Value::Null) {
             continue;
         }
@@ -186,7 +187,8 @@ mod tests {
         let values = std::iter::repeat_with(|| Value::Record(Vec::new().into()))
             .take(4097)
             .chain(std::iter::once(Value::Null));
-        let output = spool_transition_rows(crate::RowSchema::default(), values, 64).unwrap();
+        let output =
+            spool_transition_rows(crate::RowSchema::default(), values.map(Ok), 64).unwrap();
         let mut count = 0;
         for row in output.read_rows().unwrap() {
             assert!(row.unwrap().row.value(0).is_none());
@@ -199,7 +201,9 @@ mod tests {
         );
         let output = spool_transition_rows(
             repeated,
-            [Value::Record(vec![("value".into(), Value::Int(7))].into())],
+            [Ok(Value::Record(
+                vec![("value".into(), Value::Int(7))].into(),
+            ))],
             64,
         )
         .unwrap();
@@ -208,13 +212,32 @@ mod tests {
         assert_eq!(row.row.value(1), Some(&Value::Null));
         let result = spool_transition_rows(
             crate::RowSchema::default(),
-            [Value::Record(Vec::new().into()), Value::Int(1)],
+            [Ok(Value::Record(Vec::new().into())), Ok(Value::Int(1))],
             64,
         );
         assert!(matches!(
             result,
             Err(SQLError::Internal(message)) if message == "transition relation row is not a record"
         ));
+    }
+
+    #[test]
+    fn transition_materialization_preserves_image_read_errors_without_consuming_later_rows() {
+        let mut requested = 0;
+        let values = std::iter::from_fn(|| {
+            requested += 1;
+            Some(match requested {
+                1 => Ok(Value::Record(Vec::new().into())),
+                2 => Err(SQLError::UnknownTable("retained-image-read".into())),
+                _ => panic!("read after image failure"),
+            })
+        });
+        let result = spool_transition_rows(crate::RowSchema::default(), values, 1);
+        assert!(matches!(
+            result,
+            Err(SQLError::UnknownTable(name)) if name == "retained-image-read"
+        ));
+        assert_eq!(requested, 2);
     }
 
     #[test]
@@ -244,7 +267,7 @@ mod tests {
                     ),
                 ]
             });
-            let output = spool_transition_rows(schema.clone(), values, 16 * 1024).unwrap();
+            let output = spool_transition_rows(schema.clone(), values.map(Ok), 16 * 1024).unwrap();
             for _ in 0..2 {
                 let mut count = 0;
                 for row in output.read_rows().unwrap() {

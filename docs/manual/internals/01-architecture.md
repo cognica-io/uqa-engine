@@ -173,6 +173,8 @@ The reverse direction cannot reconstruct positions, scores, or fields. Optimizer
 
 Prepared rewrite-rule events and original UPDATE/DELETE candidates are owned by Execution's indexed spill store. Ordinary UPDATE, UPDATE FROM, DELETE and DELETE USING move each original image into that owner as candidates are selected; automatic-view projection and supplementation stream into bounded replacement owners, and suppressed candidates are rejected before decoding for publication. OLD/NEW documents and full-width storage identities use the existing tagged value codec; source contexts retain their complete immutable SQL schema and the physical-row codec preserves lock origins. Shared readers decode one original event at a time, and an ordered supplemental projection replaces its owner only after completion. SQL still owns action binding and logical field metadata; Engine supplies the existing session, catalog and transaction adapters. Evaluated DELETE publication actions use the common mutation prepared-action spill codec shared with MERGE; neither command re-evaluates expressions when replaying its publication sequence.
 
+Execution's trigger statement queue captures OLD/NEW Value images in separate byte-bounded spools before any transition relation is read. Raw type identities and opaque SQL datums remain uninterpreted. The first transition read closes its collection state, resolves the relation descriptor at the original boundary and projects the fallible image stream into repeatable transition tables. AFTER event queues retain their separate scheduling and ownership contracts.
+
 ## Composition boundary
 
 ```mermaid
