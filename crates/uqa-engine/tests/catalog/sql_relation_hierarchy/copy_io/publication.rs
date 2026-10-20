@@ -156,6 +156,17 @@ fn copy_values_insert_publication_does_not_retain_complete_prepared_documents() 
 #[case::values(false)]
 #[case::select(true)]
 fn copy_trigger_view_insert_keeps_bounded_input_and_proposed_rows(#[case] select: bool) {
+    assert_bounded_trigger_view_insert(select, false);
+}
+
+#[rstest::rstest]
+#[case::values(false)]
+#[case::select(true)]
+fn copy_rule_trigger_view_insert_keeps_bounded_input_and_proposed_rows(#[case] select: bool) {
+    assert_bounded_trigger_view_insert(select, true);
+}
+
+fn assert_bounded_trigger_view_insert(select: bool, rule: bool) {
     let directory = tempfile::tempdir().unwrap();
     let engine = allocation_engine(&directory.path().join("view-insert.db"));
     exec(
@@ -167,6 +178,14 @@ fn copy_trigger_view_insert_keeps_bounded_input_and_proposed_rows(#[case] select
         CREATE TRIGGER retain_view_row INSTEAD OF INSERT ON view_input_target
         FOR EACH ROW EXECUTE FUNCTION retain_view_row()",
     );
+    if rule {
+        exec(
+            &engine,
+            "CREATE TABLE view_input_audit(id INTEGER);
+            CREATE RULE audit_view_input AS ON INSERT TO view_input_target
+            DO ALSO INSERT INTO view_input_audit VALUES(NEW.id)",
+        );
+    }
     engine.set_query_memory_limit(Some(512 * 1024));
     let source = if select {
         "SELECT n, repeat('x',131072) FROM generate_series(1,128) AS s(n)".to_owned()
@@ -196,6 +215,15 @@ fn copy_trigger_view_insert_keeps_bounded_input_and_proposed_rows(#[case] select
         ),
         "0\n"
     );
+    if rule {
+        assert_eq!(
+            copy_to_string(
+                &engine,
+                "COPY (SELECT count(*),sum(id) FROM view_input_audit) TO STDOUT"
+            ),
+            "128\t8256\n"
+        );
+    }
 }
 
 #[test]

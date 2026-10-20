@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Rewrite-rule view INSERT retains completed input values and their assignment types, plus proposed row images, in bounded spill owners instead of complete payload vectors.
+
 - Bound completed SELECT inputs for INSERT rewrite rules without retaining every result row, preserving positional assignments, source errors and rule ordering.
 
 - Bound original INSERT rewrite-rule candidates and their prepared identities by the configured work memory, preserving defaults, rule suppression, generated columns and publication order.

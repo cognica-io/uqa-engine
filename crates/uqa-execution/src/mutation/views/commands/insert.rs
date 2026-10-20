@@ -8,9 +8,9 @@
 
 use super::{
     eval_mutation_expr, resolve_view_target, run_suppressed_view_insert_rules, target_columns,
-    validate_returning_alias_relations, values_from_result, view_document, with_mutation_snapshot,
-    BTreeSet, CteScope, DmlReturningShape, InsertPlan, MutationStatementContext, SQLError,
-    SQLParam, ScalarExpr, SourceOutputPruning, Value,
+    validate_returning_alias_relations, view_document, with_mutation_snapshot, BTreeSet, CteScope,
+    DmlReturningShape, InsertPlan, MutationStatementContext, SQLError, SQLParam, ScalarExpr,
+    SourceOutputPruning, Value,
 };
 use crate::mutation::output::MutationOutput;
 use crate::query::statement::consumer::QueryOutputMode;
@@ -18,6 +18,8 @@ use std::{cell::Cell, rc::Rc};
 
 mod rows;
 use rows::{ViewInsertRows, ViewInsertSource};
+mod inputs;
+use inputs::{ViewInputBuffer, ViewInputRows};
 
 #[expect(
     clippy::too_many_lines,
@@ -193,6 +195,9 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 )?;
                 return row_output.finish();
             }
+            let rule_context = context.mutation.rules.rules;
+            let bytes = rule_context.memory.work_mem_bytes()?;
+            let cancellation = rule_context.cancellation.clone();
             let input_rows = if let Some(source) = stmt.source.as_deref() {
                 let mut source = source.clone();
                 if !original_query_survives {
@@ -216,24 +221,15 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     }
                 }
                 let mut source_scope = ctes.returning_statement_snapshot_scope();
-                let result = crate::query::statement::execute_query_plan_with_ctes(
+                source_scope.enable_command_progress_streaming();
+                let result = crate::query::statement::execute_query_plan_output(
                     &read_context.query,
                     &source,
                     params,
                     &mut source_scope,
+                    QueryOutputMode::SharedSpill,
                 )?;
-                let types = result.column_types.clone();
-                values_from_result(result)?
-                    .into_iter()
-                    .map(|row| {
-                        row.into_iter()
-                            .enumerate()
-                            .map(|(position, value)| {
-                                (value, types.get(position).cloned().flatten())
-                            })
-                            .collect()
-                    })
-                    .collect()
+                ViewInputRows::query(result, cancellation.clone())?
             } else {
                 let snapshot = ctes.returning_statement_snapshot_scope();
                 let expressions = read_context
@@ -244,9 +240,9 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     .expressions;
                 let hook = expressions.expressions.bind_scope(snapshot.clone());
                 let schema = crate::RowSchema::default();
-                stmt.rows
-                    .iter()
-                    .map(|row| {
+                let mut input = ViewInputBuffer::new(bytes, cancellation.clone());
+                for row in &stmt.rows {
+                    input.push(
                         row.iter()
                             .map(|expression| {
                                 if matches!(expression, ScalarExpr::Default) {
@@ -268,34 +264,28 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                                     Ok((value, source))
                                 }
                             })
-                            .collect()
-                    })
-                    .collect::<Result<Vec<Vec<_>>, SQLError>>()?
+                            .collect::<Result<Vec<_>, SQLError>>()?,
+                    )?;
+                }
+                input.finish()
             };
-            let mut proposed_rows = Vec::with_capacity(input_rows.len());
+            let mut rule_rows = crate::mutation::rules::RuleRowBuffer::new(bytes, cancellation);
             for input in input_rows {
+                let input = input?;
                 let width = input.len();
-                proposed_rows.push(row_output.project(
-                    &columns,
-                    &positions,
-                    width,
-                    input.into_iter().map(Ok),
-                )?);
+                let new =
+                    row_output.project(&columns, &positions, width, input.into_iter().map(Ok))?;
+                rule_rows.push(crate::mutation::rules::RuleRowImage {
+                    old_storage_table: None,
+                    old_doc_id: None,
+                    old: None,
+                    new_storage_table: None,
+                    new_doc_id: None,
+                    new: Some(view_document(&target, &new)?),
+                    context: None,
+                })?;
             }
-            let rule_rows = proposed_rows
-                .iter()
-                .map(|new| {
-                    Ok(crate::mutation::rules::RuleRowImage {
-                        old_storage_table: None,
-                        old_doc_id: None,
-                        old: None,
-                        new_storage_table: None,
-                        new_doc_id: None,
-                        new: Some(view_document(&target, new)?),
-                        context: None,
-                    })
-                })
-                .collect::<Result<Vec<_>, SQLError>>()?;
+            let rule_rows = rule_rows.finish();
             let outer_rule_batches = crate::mutation::rules::views::prepare_view_rule_batches(
                 crate::mutation::rules::views::ViewRuleBatchRequest {
                     context: context.mutation.rules,
@@ -309,14 +299,29 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     document_relation: Some(&target.canonical_name),
                 },
             )?;
-            let rule_batch = crate::mutation::rules::prepare_rule_batch(
-                context.mutation.rules.rules,
+            let rule_batch = crate::mutation::rules::prepare_retained_rule_batch(
+                rule_context,
                 &target.canonical_name,
                 uqa_sql::ast::RuleEvent::Insert,
-                rule_rows,
+                rule_rows.clone(),
             )?;
-            for (index, new) in proposed_rows.into_iter().enumerate() {
+            for (index, row) in rule_rows.iter().enumerate() {
+                let row = row?;
                 if !rule_batch.suppresses(index) {
+                    let mut document = row.new.ok_or_else(|| {
+                        SQLError::Internal("view INSERT rule input lost its proposed row".into())
+                    })?;
+                    let new = target
+                        .columns
+                        .iter()
+                        .map(|column| {
+                            document.remove(column).ok_or_else(|| {
+                                SQLError::Internal(format!(
+                                    "view INSERT rule input lost column `{column}`"
+                                ))
+                            })
+                        })
+                        .collect::<Result<Vec<_>, SQLError>>()?;
                     row_output.apply(&new)?;
                 }
             }

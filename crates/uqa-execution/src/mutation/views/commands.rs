@@ -31,7 +31,7 @@ use uqa_sql::semantics::{
 };
 use uqa_sql::{
     plan::{DeletePlan, InsertPlan, QueryPlan, UpdatePlan},
-    SQLError, SQLParam, SQLResult, ScalarExpr,
+    SQLError, SQLParam, ScalarExpr,
 };
 use uqa_storage::document_store::Document;
 
@@ -112,23 +112,6 @@ pub fn target_row(
         RowSchema::with_relation_qualifier(&target.schema, qualifier),
         PhysicalRow::from_values(values.to_vec()),
     ))
-}
-
-fn values_from_result(result: SQLResult) -> Result<Vec<Vec<Value>>, SQLError> {
-    (0..result.rows.len())
-        .map(|row| {
-            (0..result.columns.len())
-                .map(|column| {
-                    result.value_at(row, column).cloned().ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "query result omitted output column {}",
-                            column + 1
-                        ))
-                    })
-                })
-                .collect()
-        })
-        .collect()
 }
 
 fn view_document(target: &ViewDmlTarget, values: &[Value]) -> Result<Document, SQLError> {
