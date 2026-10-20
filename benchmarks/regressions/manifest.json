@@ -18312,6 +18312,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "test",
+      "test": "expanded_projection_spills_before_retaining_a_complete_input_batch",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/project/tests.rs",
+      "capability": "Bounded scalar projection output",
+      "workload": "128 row-dependent 128KiB values are evaluated from one input batch under a 512KiB projection allowance.",
+      "invariant": "Peak additional allocation remains below 2MiB; all input expressions finish before the first output, duplicate positions and exact values survive spill, and no expression repeats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "test",
+      "test": "expanded_projection_reports_late_input_error_before_any_output",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/project/tests.rs",
+      "capability": "Bounded scalar projection output",
+      "workload": "The last of 128 expanding expressions raises 22012 after earlier output has spilled.",
+      "invariant": "The original error precedes all output, each preceding expression runs once and the unfinished spill is discarded.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "test",
+      "test": "expanded_projection_close_discards_its_unread_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/project/tests.rs",
+      "capability": "Bounded scalar projection output",
+      "workload": "Close the bounded projection immediately after its first decoded output batch.",
+      "invariant": "Unread output and its spill owner are released and subsequent pulls return no rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "test",
+      "test": "expanded_projection_cancel_discards_its_unread_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/project/tests.rs",
+      "capability": "Bounded scalar projection output",
+      "workload": "Cancel the invoking statement while decoded output batches remain.",
+      "invariant": "The next pull reports 57014, drops the retained reader and does not re-evaluate expressions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "test",
+      "test": "single_row_projection_retains_its_original_unsplit_layout",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/project/tests.rs",
+      "capability": "Bounded scalar projection output",
+      "workload": "One computed input row uses a zero-byte retained batch allowance.",
+      "invariant": "The indivisible row remains in its original shared-fragment layout and is evaluated once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_scalar_projection_does_not_retain_complete_expanded_batch",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/projection.rs",
+      "capability": "Bounded public COPY projection",
+      "workload": "A scalar SELECT projection expands 128 small inputs to 16MiB of row-dependent output with 512KiB work memory.",
+      "invariant": "Fixed 8MiB peak Rust allocation ceiling and exact PostgreSQL-compatible output of 128 rows with 131072 x bytes each; the sink retains no output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_ordered_projection_does_not_retain_complete_expanded_batch",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/projection.rs",
+      "capability": "Bounded public COPY projection",
+      "workload": "A SELECT projection expands 128 reversed inputs into 4MiB of three-digit-prefixed payloads, sorts by the expanded value and exports under 64KiB work memory.",
+      "invariant": "Fixed 2MiB peak allocation ceiling: 1MiB for sixteen decoded merge inputs with 32KiB values and keys, plus 1MiB for bounded batches/codec scratch. Exact ascending output; no complete 4MiB projection can fit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_window_projection_does_not_retain_complete_expanded_batch",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/projection.rs",
+      "capability": "Bounded public COPY projection",
+      "workload": "A window SELECT projection expands 128 small inputs to 16MiB of row-dependent output with 512KiB work memory.",
+      "invariant": "Fixed 8MiB peak Rust allocation ceiling and exact PostgreSQL-compatible output of 128 rows with 131072 x bytes each; the sink retains no output.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

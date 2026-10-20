@@ -210,11 +210,10 @@ fn attach_ordered_output<'a, S: Clone + 'static>(
                 },
             )?
         } else {
-            Box::new(Project::appending_target_evaluator(
-                operator,
-                physical,
-                Arc::clone(&evaluator),
-            ))
+            Box::new(
+                Project::appending_target_evaluator(operator, physical, Arc::clone(&evaluator))
+                    .with_memory_budget(runtime.work_mem_bytes()?),
+            )
         };
         operator = attach_order_limit(
             operator,

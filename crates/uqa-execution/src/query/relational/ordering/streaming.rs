@@ -77,11 +77,14 @@ pub(crate) fn attach_streaming_order_projection<'a, S: Clone + 'static>(
             },
         )?;
     } else if !before_sort.is_empty() {
-        operator = Box::new(crate::Project::appending_target_evaluator(
-            operator,
-            before_sort,
-            Arc::clone(evaluator),
-        ));
+        operator = Box::new(
+            crate::Project::appending_target_evaluator(
+                operator,
+                before_sort,
+                Arc::clone(evaluator),
+            )
+            .with_memory_budget(runtime.work_mem_bytes()?),
+        );
     }
     // A postponed target set expands the sorted input before OFFSET/LIMIT counts output rows.
     if sets_after_sort {

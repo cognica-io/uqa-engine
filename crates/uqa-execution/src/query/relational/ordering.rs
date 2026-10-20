@@ -79,11 +79,10 @@ pub fn attach_final_projection_order<'a, S: Clone + 'static>(
         if batch_size == 1 {
             operator = Box::new(RowAtATime::new(operator));
         }
-        Box::new(crate::Project::with_target_evaluator(
-            operator,
-            projections,
-            Arc::clone(&evaluator),
-        ))
+        Box::new(
+            crate::Project::with_target_evaluator(operator, projections, Arc::clone(&evaluator))
+                .with_memory_budget(runtime.work_mem_bytes()?),
+        )
     };
     attach_order_limit(
         operator, statement, output, context, params, ctes, runtime, evaluator, None,
@@ -106,11 +105,14 @@ fn attach_deferred_order_projection<'a, S: Clone + 'static>(
     } = execution;
     let (sort_statement, sort_projections, projections) =
         prepare_deferred_order_projection(statement, output, projections)?;
-    operator = Box::new(crate::Project::appending_target_evaluator(
-        operator,
-        sort_projections,
-        Arc::clone(&evaluator),
-    ));
+    operator = Box::new(
+        crate::Project::appending_target_evaluator(
+            operator,
+            sort_projections,
+            Arc::clone(&evaluator),
+        )
+        .with_memory_budget(runtime.work_mem_bytes()?),
+    );
     operator = attach_order_limit(
         operator,
         &sort_statement,
@@ -123,11 +125,10 @@ fn attach_deferred_order_projection<'a, S: Clone + 'static>(
         None,
     )?;
     operator = Box::new(RowAtATime::new(operator));
-    Ok(Box::new(crate::Project::with_target_evaluator(
-        operator,
-        projections,
-        evaluator,
-    )))
+    Ok(Box::new(
+        crate::Project::with_target_evaluator(operator, projections, evaluator)
+            .with_memory_budget(runtime.work_mem_bytes()?),
+    ))
 }
 
 type PreparedDeferredOrderProjection = (

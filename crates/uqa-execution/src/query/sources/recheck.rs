@@ -84,11 +84,10 @@ pub fn build_row_lock_recheck_operator<'a, S: Clone + Send + Sync + 'static>(
     operator = if projections.is_empty() {
         operator
     } else {
-        Box::new(Project::appending_target_evaluator(
-            operator,
-            projections.to_vec(),
-            evaluator,
-        )) as Box<dyn PhysicalOperator + 'a>
+        Box::new(
+            Project::appending_target_evaluator(operator, projections.to_vec(), evaluator)
+                .with_memory_budget(context.relational.runtime.work_mem_bytes()?),
+        ) as Box<dyn PhysicalOperator + 'a>
     };
     Ok(operator)
 }

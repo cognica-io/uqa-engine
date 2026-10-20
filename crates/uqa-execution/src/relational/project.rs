@@ -13,8 +13,12 @@ use super::{
     PhysicalScanDirection, RowSchema, SQLParam, ScalarExpr, SharedExpressionEvaluator,
 };
 use crate::batch::ProjectedSlot;
+use crate::spill::{SpillBatchWriter, SpillDrain};
 
 pub use uqa_sql::plan::ProjectionTarget;
+
+#[cfg(test)]
+mod tests;
 
 /// Per-row scalar projection. Each `(alias, expr)` pair is evaluated
 /// against the input row and written under `alias` in the output. The
@@ -25,6 +29,8 @@ pub struct Project<'a> {
     evaluator: SharedExpressionEvaluator<'a>,
     schema: RowSchema,
     ordering: Vec<crate::PhysicalOrder>,
+    work_mem: Option<usize>,
+    pending: Option<SpillDrain>,
 }
 
 fn projection_layout(
@@ -216,6 +222,8 @@ impl<'a> Project<'a> {
             evaluator,
             schema,
             ordering: Vec::new(),
+            work_mem: None,
+            pending: None,
         }
     }
 
@@ -277,7 +285,66 @@ impl<'a> Project<'a> {
             evaluator,
             schema,
             ordering,
+            work_mem: None,
+            pending: None,
         }
+    }
+
+    /// Bound evaluated output while retaining the original input-batch evaluation boundary.
+    pub fn with_memory_budget(mut self, bytes: usize) -> Self {
+        self.work_mem = Some(bytes);
+        self
+    }
+
+    fn prepare_batch(&mut self, batch: Batch) -> ExecResult<Option<Batch>> {
+        let Some(budget) = self
+            .work_mem
+            .filter(|_| !self.computed.is_empty() && batch.rows.len() > 1)
+        else {
+            return self.project_batch(batch).map(Some);
+        };
+        // Finish every expression in this input batch before exposing its first result. Only the storage of those evaluated rows changes.
+        let mut output = crate::SpillBuffer::new(budget / 2);
+        let mut writer = SpillBatchWriter::new(self.schema.clone())?;
+        for row in batch.rows {
+            let values = self.project_values(&batch.schema, &row)?;
+            writer.push(&mut output, row.append_values(values))?;
+        }
+        writer.finish(&mut output)?;
+        self.pending = Some(output.drain()?);
+        self.next_pending()
+    }
+
+    fn next_pending(&mut self) -> ExecResult<Option<Batch>> {
+        if self.pending.is_some() {
+            if let Err(error) = uqa_sql::expr::check_statement_cancellation() {
+                self.pending = None;
+                return Err(uqa_sql::SQLError::from(error).into());
+            }
+        }
+        let batch = self.pending.as_mut().and_then(Iterator::next).transpose();
+        if !matches!(batch, Ok(Some(_))) {
+            self.pending = None;
+        }
+        batch
+    }
+
+    fn project_values(
+        &self,
+        schema: &RowSchema,
+        row: &crate::PhysicalRow,
+    ) -> ExecResult<Vec<Value>> {
+        self.computed
+            .iter()
+            .map(|expression| {
+                self.evaluator.evaluate_physical_with_function_states(
+                    expression,
+                    schema,
+                    row,
+                    self.computed.calls(),
+                )
+            })
+            .collect()
     }
 
     fn project_batch(&self, batch: Batch) -> ExecResult<Batch> {
@@ -286,18 +353,7 @@ impl<'a> Project<'a> {
         }
         let mut out = Vec::with_capacity(batch.rows.len());
         for row in batch.rows {
-            let values = self
-                .computed
-                .iter()
-                .map(|expression| {
-                    self.evaluator.evaluate_physical_with_function_states(
-                        expression,
-                        &batch.schema,
-                        &row,
-                        self.computed.calls(),
-                    )
-                })
-                .collect::<ExecResult<Vec<Value>>>()?;
+            let values = self.project_values(&batch.schema, &row)?;
             out.push(row.append_values(values));
         }
         Ok(Batch::from_physical_rows(self.schema.clone(), out))
@@ -323,28 +379,37 @@ impl PhysicalOperator for Project<'_> {
     }
 
     fn open(&mut self) -> ExecResult<()> {
+        self.pending = None;
         self.child.open()
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
+        if let Some(batch) = self.next_pending()? {
+            return Ok(Some(batch));
+        }
         let Some(batch) = self.child.next()? else {
             return Ok(None);
         };
-        self.project_batch(batch).map(Some)
+        self.prepare_batch(batch)
     }
 
     fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
+        if let Some(batch) = self.next_pending()? {
+            return Ok(Some(batch));
+        }
         let Some(batch) = self.child.next_direction(direction)? else {
             return Ok(None);
         };
-        self.project_batch(batch).map(Some)
+        self.prepare_batch(batch)
     }
 
     fn rewind(&mut self) -> ExecResult<()> {
+        self.pending = None;
         self.child.rewind()
     }
 
     fn close(&mut self) -> ExecResult<()> {
+        self.pending = None;
         self.child.close()
     }
 }

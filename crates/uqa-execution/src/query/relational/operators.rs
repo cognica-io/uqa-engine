@@ -238,11 +238,14 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                     if statement.limit.is_some() || statement.offset.is_some() {
                         operator = Box::new(RowAtATime::new(operator));
                     }
-                    operator = Box::new(Project::with_target_evaluator(
-                        operator,
-                        projections,
-                        Arc::clone(&evaluator),
-                    ));
+                    operator = Box::new(
+                        Project::with_target_evaluator(
+                            operator,
+                            projections,
+                            Arc::clone(&evaluator),
+                        )
+                        .with_memory_budget(runtime.work_mem_bytes()?),
+                    );
                     operator = attach_order_limit(
                         operator,
                         statement,
@@ -296,11 +299,14 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                             },
                         )?
                     } else {
-                        Box::new(Project::appending_target_evaluator(
-                            operator,
-                            physical,
-                            Arc::clone(&evaluator),
-                        ))
+                        Box::new(
+                            Project::appending_target_evaluator(
+                                operator,
+                                physical,
+                                Arc::clone(&evaluator),
+                            )
+                            .with_memory_budget(runtime.work_mem_bytes()?),
+                        )
                     };
                     operator = attach_order_limit(
                         operator,
@@ -337,11 +343,14 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                             physical,
                         )?;
                     if !before_sort.is_empty() {
-                        operator = Box::new(Project::appending_target_evaluator(
-                            operator,
-                            before_sort,
-                            Arc::clone(&evaluator),
-                        ));
+                        operator = Box::new(
+                            Project::appending_target_evaluator(
+                                operator,
+                                before_sort,
+                                Arc::clone(&evaluator),
+                            )
+                            .with_memory_budget(runtime.work_mem_bytes()?),
+                        );
                     }
                     sort_statement.locking.clear();
                     sort_statement.limit = None;

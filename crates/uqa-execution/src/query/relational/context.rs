@@ -82,6 +82,7 @@ pub fn build_set_projection<'a, S: Clone + 'static>(
         context.expression_scope(ctes.clone()),
         params,
         evaluator,
+        context.runtime.work_mem_bytes()?,
         output,
     )
 }

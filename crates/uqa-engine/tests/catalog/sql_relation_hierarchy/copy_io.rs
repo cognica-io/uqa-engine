@@ -36,6 +36,9 @@ mod candidates;
 #[path = "copy_io/publication.rs"]
 mod publication;
 
+#[path = "copy_io/projection.rs"]
+mod projection;
+
 #[path = "copy_io/rules.rs"]
 mod rules;
 
