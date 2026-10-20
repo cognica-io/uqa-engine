@@ -11,6 +11,8 @@ use uqa_sql::{SQLError, SQLResult};
 
 mod exists;
 pub use exists::collect_exists_key_operator;
+mod public_rows;
+pub(crate) use public_rows::PublicQueryRows;
 
 #[cfg(test)]
 mod tests;

@@ -14,6 +14,29 @@ use uqa_sql::ResultRow;
 
 use crate::{Batch, RowSchema};
 
+/// Resolve repeated public labels to their distinct logical positions in order.
+pub(crate) fn result_column_positions(
+    schema: &RowSchema,
+    columns: &[String],
+) -> Vec<Option<usize>> {
+    let mut occurrences = BTreeMap::<&str, usize>::new();
+    columns
+        .iter()
+        .map(|name| {
+            let occurrence = occurrences.entry(name.as_str()).or_default();
+            let position = schema
+                .columns()
+                .iter()
+                .enumerate()
+                .filter(|(_, input)| input == &name)
+                .nth(*occurrence)
+                .map(|(position, _)| position);
+            *occurrence += 1;
+            position
+        })
+        .collect()
+}
+
 /// A column vector preserves its position in the declared output schema.
 ///
 /// Duplicate labels remain distinct because conversion from a physical batch
@@ -41,23 +64,7 @@ impl ColumnarBatch {
     /// columns remain distinct for wire and cursor consumers.
     pub fn from_batch(schema: &[String], batch: Batch) -> Self {
         let row_count = batch.rows.len();
-        let mut occurrences = BTreeMap::<&str, usize>::new();
-        let positions = schema
-            .iter()
-            .map(|name| {
-                let occurrence = occurrences.entry(name.as_str()).or_default();
-                let position = batch
-                    .schema
-                    .columns()
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, input)| input == &name)
-                    .nth(*occurrence)
-                    .map(|(position, _)| position);
-                *occurrence += 1;
-                position
-            })
-            .collect::<Vec<_>>();
+        let positions = result_column_positions(&batch.schema, schema);
         let mut columns = schema
             .iter()
             .map(|name| ColumnVector {

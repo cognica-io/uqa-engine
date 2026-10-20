@@ -10,8 +10,8 @@ use uqa_core::{CancellationToken, Value};
 use uqa_sql::{ast::ColumnType, SQLError};
 
 use crate::physical::physical_exec_error;
-use crate::query::output::{query_output_shared, QueryOutput};
-use crate::spill::{BufferedIndexedSpill, SharedSpillReader, SpillRows};
+use crate::query::output::{PublicQueryRows, QueryOutput};
+use crate::spill::BufferedIndexedSpill;
 use crate::{PhysicalRow, RowSchema};
 
 type TypedInput = Vec<(Value, Option<ColumnType>)>;
@@ -60,9 +60,8 @@ enum ViewInputStorage {
         position: u64,
     },
     Query {
-        columns: Vec<String>,
         types: Vec<Option<ColumnType>>,
-        rows: Box<SpillRows<SharedSpillReader>>,
+        rows: Box<PublicQueryRows>,
     },
 }
 
@@ -76,14 +75,12 @@ impl ViewInputRows {
         output: QueryOutput,
         cancellation: CancellationToken,
     ) -> Result<Self, SQLError> {
-        let columns = output.columns.clone();
         let types = output.column_types.clone();
-        let retained = query_output_shared(output, "view INSERT rule input")?;
+        let rows = PublicQueryRows::new(output, "view INSERT rule input")?;
         Ok(Self {
             rows: ViewInputStorage::Query {
-                columns,
                 types,
-                rows: Box::new(retained.read_rows().map_err(physical_exec_error)?),
+                rows: Box::new(rows),
             },
             cancellation,
         })
@@ -106,23 +103,14 @@ impl Iterator for ViewInputRows {
                 *position += 1;
                 Some(row.and_then(decode))
             }
-            ViewInputStorage::Query {
-                columns,
-                types,
-                rows,
-            } => rows.next().map(|row| {
-                let row = row.map_err(physical_exec_error)?;
-                let mut values = row.row.into_physical_values().into_iter();
-                columns
-                    .iter()
-                    .enumerate()
-                    .map(|(position, column)| {
-                        let value = values.next().ok_or_else(|| {
-                            invalid(format!("source omitted public column `{column}`"))
-                        })?;
-                        Ok((value, types.get(position).cloned().flatten()))
-                    })
-                    .collect()
+            ViewInputStorage::Query { types, rows } => rows.next().map(|row| {
+                row.map(|values| {
+                    values
+                        .into_iter()
+                        .enumerate()
+                        .map(|(position, value)| (value, types.get(position).cloned().flatten()))
+                        .collect()
+                })
             }),
         }
     }

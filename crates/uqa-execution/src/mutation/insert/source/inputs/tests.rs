@@ -87,6 +87,50 @@ fn insert_source_input_preserves_positions_nulls_and_zero_column_multiplicity() 
         count += 1;
     }
     assert_eq!(count, 4097);
+    let schema = RowSchema::remap_positions(
+        &RowSchema::new(vec!["private".into(), "second".into(), "first".into()]),
+        &[
+            ("same".into(), 2),
+            ("same".into(), 1),
+            ("missing".into(), 9),
+        ],
+        &[],
+    );
+    let result = output(
+        vec!["same".into(), "same".into(), "missing".into()],
+        schema,
+        std::iter::once(vec![Value::Int(99), Value::Int(2), Value::Int(1)]),
+    );
+    let row = InsertInputRows::query(result, CancellationToken::new())
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        row.as_ref(),
+        &[
+            ScalarExpr::Literal(Value::Int(1)),
+            ScalarExpr::Literal(Value::Int(2)),
+            ScalarExpr::Literal(Value::Null),
+        ]
+    );
+    let result = output(
+        vec!["third".into(), "second".into()],
+        RowSchema::new(vec!["private".into(), "second".into(), "third".into()]),
+        std::iter::once(vec![Value::Int(99), Value::Int(2), Value::Int(3)]),
+    );
+    let row = InsertInputRows::query(result, CancellationToken::new())
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        row.as_ref(),
+        &[
+            ScalarExpr::Literal(Value::Int(3)),
+            ScalarExpr::Literal(Value::Int(2)),
+        ]
+    );
 }
 
 #[test]
