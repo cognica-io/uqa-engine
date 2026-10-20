@@ -74,7 +74,63 @@ impl Write for DigestSink<'_> {
         Ok(bytes.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
-        panic!("COPY does not own sink flushing")
+        Ok(())
+    }
+}
+
+#[test]
+fn output_completion_observes_flush_failure_cancellation_and_interruption() {
+    struct Sink<'a> {
+        token: &'a CancellationToken,
+        mode: &'static str,
+        calls: usize,
+    }
+    impl Write for Sink<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.calls += 1;
+            match self.mode {
+                "failure" => Err(std::io::Error::other("flush failed")),
+                "cancel" => {
+                    self.token.cancel();
+                    Ok(())
+                }
+                "interrupted" if self.calls == 1 => {
+                    Err(std::io::Error::from(std::io::ErrorKind::Interrupted))
+                }
+                _ => Ok(()),
+            }
+        }
+    }
+    for (mode, state, calls) in [
+        ("failure", Some("58030"), 1),
+        ("cancel", Some("57014"), 1),
+        ("cancelled", Some("57014"), 0),
+        ("interrupted", None, 2),
+        ("success", None, 1),
+    ] {
+        let token = CancellationToken::new();
+        let memory = MemoryBudget::new(0);
+        let control = ProductionControl::new(&memory, &token, &token);
+        let options = options("text");
+        let mut sink = Sink {
+            token: &token,
+            mode,
+            calls: 0,
+        };
+        let encoder = CopyEncoder::new(&options, &mut sink, None, control).unwrap();
+        if mode == "cancelled" {
+            token.cancel();
+        }
+        let result = encoder.finish();
+        match state {
+            Some(state) => assert_eq!(result.unwrap_err().sqlstate(), Some(state)),
+            None => result.unwrap(),
+        }
+        assert_eq!(sink.calls, calls, "{mode}");
+        assert_eq!(memory.used(), 0);
     }
 }
 

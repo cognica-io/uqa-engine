@@ -7,7 +7,7 @@
 //! SQL batch scheduling over live cache, transaction and statement inputs.
 
 use super::{
-    plan_executor::UnifiedPlanExecutor,
+    plan_executor::{StatementOutput, UnifiedPlanExecutor},
     transactions::{
         abort_explicit_statement_error, rollback_after_statement_error, rollback_implicit_statement,
     },
@@ -46,7 +46,42 @@ pub fn execute_nested<S: Clone + Send + Sync + 'static>(
     execute_with_context(context, sql, params, true, &mut None)
 }
 
-type ResultConsumer<'a> = Option<&'a mut dyn FnMut(&SQLResult) -> Result<(), SQLError>>;
+enum ResultConsumer<'a> {
+    Completed(&'a mut dyn FnMut(&SQLResult) -> Result<(), SQLError>),
+    WithinStatement(&'a mut dyn FnMut(StatementOutput) -> Result<(), SQLError>),
+}
+
+/// Consume results before the implicit statement or batch commits. Consumer errors
+/// follow the same rollback/abort path as errors raised by statement execution.
+pub fn execute_with_output<S: Clone + Send + Sync + 'static>(
+    context: &BatchExecutionContext<'_, S>,
+    sql: &str,
+    params: &[SQLParam],
+    consume: &mut dyn FnMut(StatementOutput) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    execute_with_context(
+        context,
+        sql,
+        params,
+        false,
+        &mut Some(ResultConsumer::WithinStatement(consume)),
+    )
+    .map(|_| ())
+}
+
+fn execute_plan<S: Clone + Send + Sync + 'static>(
+    executor: &mut UnifiedPlanExecutor<'_, '_, S>,
+    plan: &UnifiedPlan,
+    consumer: &mut Option<ResultConsumer<'_>>,
+) -> Result<SQLResult, SQLError> {
+    if let Some(ResultConsumer::WithinStatement(consume)) = consumer {
+        consume(executor.execute_for_output(plan)?)?;
+        // This entry point hands off the result and returns no public row vector.
+        Ok(SQLResult::empty())
+    } else {
+        executor.execute(plan)
+    }
+}
 
 enum StatementInput<'sql> {
     Cached(Arc<uqa_sql::Statement>),
@@ -72,7 +107,7 @@ pub fn execute_simple_query<S: Clone + Send + Sync + 'static>(
     nested_statement: bool,
     consume: &mut dyn FnMut(&SQLResult) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
-    let mut consumer: ResultConsumer<'_> = Some(consume);
+    let mut consumer = Some(ResultConsumer::Completed(consume));
     let result = execute_with_context(context, sql, params, nested_statement, &mut consumer)?;
     consume_result(context, &result, &mut consumer)
 }
@@ -80,9 +115,9 @@ pub fn execute_simple_query<S: Clone + Send + Sync + 'static>(
 fn consume_result<S: Clone + Send + Sync + 'static>(
     context: &BatchExecutionContext<'_, S>,
     result: &SQLResult,
-    consumer: &mut ResultConsumer<'_>,
+    consumer: &mut Option<ResultConsumer<'_>>,
 ) -> Result<(), SQLError> {
-    if let Some(consume) = consumer {
+    if let Some(ResultConsumer::Completed(consume)) = consumer {
         let _statement_thread = super::context::statement_thread_scope(
             context.statements,
             context.runtime.cancellation,
@@ -98,7 +133,7 @@ fn execute_with_context<S: Clone + Send + Sync + 'static>(
     sql: &str,
     params: &[SQLParam],
     nested_statement: bool,
-    consumer: &mut ResultConsumer<'_>,
+    consumer: &mut Option<ResultConsumer<'_>>,
 ) -> Result<SQLResult, SQLError> {
     // Reject cancelled tokens up-front so a stale cancel signal does
     // not leak into a fresh batch. Callers that want the
@@ -139,13 +174,13 @@ fn execute_with_context<S: Clone + Send + Sync + 'static>(
                 for notice in parser.notices.iter() {
                     context.runtime.notices.push(notice.clone());
                 }
-                return UnifiedPlanExecutor::with_nested_statement(
+                let mut executor = UnifiedPlanExecutor::with_nested_statement(
                     context.statements.statement_execution_context(),
                     params,
                     nested_statement,
                 )
-                .with_source_sql(sql)
-                .execute(plan.as_ref());
+                .with_source_sql(sql);
+                return execute_plan(&mut executor, plan.as_ref(), consumer);
             }
         }
     }
@@ -170,7 +205,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     sql: &str,
     params: &[SQLParam],
     nested_statement: bool,
-    consumer: &mut ResultConsumer<'_>,
+    consumer: &mut Option<ResultConsumer<'_>>,
     display: Option<&uqa_sql::ast::TypeDisplayScope>,
     cached_statement: Option<CachedStatement>,
 ) -> Result<SQLResult, SQLError> {
@@ -388,13 +423,13 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         uqa_sql::semantics::effects::transaction_blocks::no_transaction_in_progress_warning(),
                     );
                 }
-                last = UnifiedPlanExecutor::with_nested_statement(
+                let mut executor = UnifiedPlanExecutor::with_nested_statement(
                     context.statements.statement_execution_context(),
                     params,
                     nested_statement || simple_query_batch,
                 )
-                .with_source_sql(sql)
-                .execute(initial_plan.as_ref())?;
+                .with_source_sql(sql);
+                last = execute_plan(&mut executor, initial_plan.as_ref(), consumer)?;
                 if simple_query_batch
                     && transaction.as_ref().is_some_and(|transaction| {
                         matches!(
@@ -490,7 +525,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     nested_statement || simple_query_batch,
                 )
                 .with_source_sql(sql);
-                match executor.execute(&optimized) {
+                match execute_plan(&mut executor, &optimized, consumer) {
                     Ok(result) => last = result,
                     Err(error) => return Err(context.transactions.abort_after_error(error)),
                 }
@@ -657,7 +692,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     nested_statement || simple_query_batch,
                 )
                 .with_source_sql(sql);
-                match executor.execute(&optimized) {
+                match execute_plan(&mut executor, &optimized, consumer) {
                     Ok(result) => {
                         // Commit failure cleanup is owned by the transaction
                         // layer, including cache restoration and stack reset.
@@ -691,13 +726,13 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     }
                     plan
                 };
-                last = UnifiedPlanExecutor::with_nested_statement(
+                let mut executor = UnifiedPlanExecutor::with_nested_statement(
                     context.statements.statement_execution_context(),
                     params,
                     nested_statement || simple_query_batch,
                 )
-                .with_source_sql(sql)
-                .execute(optimized.as_ref())?;
+                .with_source_sql(sql);
+                last = execute_plan(&mut executor, optimized.as_ref(), consumer)?;
             }
             if statement_index != final_statement_index {
                 consume_result(context, &last, consumer)?;

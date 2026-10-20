@@ -74,7 +74,19 @@ impl CopyStatements for Engine {
             params,
         )
     }
-    fn execute_text(&self, text: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
-        uqa_execution::statement::batch::execute(&self.batch_execution_context(), text, params)
+    fn execute_text_with_output(
+        &self,
+        text: &str,
+        params: &[SQLParam],
+        consume: &mut dyn FnMut(
+            uqa_execution::statement::plan_executor::StatementOutput,
+        ) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        uqa_execution::statement::batch::execute_with_output(
+            &self.batch_execution_context(),
+            text,
+            params,
+            consume,
+        )
     }
 }

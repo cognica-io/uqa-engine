@@ -27,6 +27,12 @@ use crate::query::statement::{
 };
 use crate::scalar::plan::{analyze_physical_call_arguments, eval_physical_call_arguments};
 
+/// Statement output consumed inside the transaction, retaining a bounded query spool instead of a public row vector.
+pub enum StatementOutput {
+    Query(QueryOutput),
+    Command(SQLResult),
+}
+
 /// Owns top-level plan orchestration. Relational, mutation, DDL, procedural,
 /// and prepared-plan execution all enter through this exhaustive dispatcher;
 /// leaf executors never choose a second top-level SQL path.
