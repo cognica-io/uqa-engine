@@ -134,6 +134,7 @@ pub struct ConstraintContext<'a> {
     pub diagnostics: &'a dyn ConstraintDiagnosticSource,
     /// The memory a constraint's validation may sort keys in before it spills.
     pub memory: &'a dyn crate::query::runtime::QueryMemorySettings,
+    pub cancellation: &'a uqa_core::CancellationToken,
 }
 
 /// Capture catalog output and authority only after a key conflict has been found.

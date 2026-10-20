@@ -47,14 +47,13 @@ pub fn validate_foreign_key_rows(
             continue;
         };
         let parent_exists = if foreign_key.period {
-            crate::mutation::constraints::period::period_foreign_key_coverage(
+            crate::mutation::constraints::period::period_foreign_key_is_covered(
                 context,
                 foreign_key,
                 &values.values,
                 &[],
                 None,
             )?
-            .0
         } else {
             crate::mutation::constraints::find_foreign_key_parent(context, foreign_key, &values)?
                 .is_some()

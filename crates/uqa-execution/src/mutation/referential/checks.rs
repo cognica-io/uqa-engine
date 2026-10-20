@@ -22,7 +22,7 @@ use uqa_sql::{
 use uqa_storage::document_store::Document;
 
 use super::ReferentialContext;
-use crate::mutation::constraints::{period::period_foreign_key_coverage, ConstraintContext};
+use crate::mutation::constraints::{period::period_foreign_key_is_covered, ConstraintContext};
 
 /// A foreign key check or referential action queued with the AFTER ROW triggers of a written row.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -429,15 +429,13 @@ fn period_key_referenced<S: Clone + 'static>(
                 )? {
                     return Ok(true);
                 }
-                if !period_foreign_key_coverage(
+                if !period_foreign_key_is_covered(
                     context.constraints,
                     foreign_key,
                     &lookup.values,
                     &[],
                     None,
-                )?
-                .0
-                {
+                )? {
                     referenced = true;
                     return Ok(false);
                 }

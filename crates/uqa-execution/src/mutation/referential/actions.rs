@@ -260,9 +260,7 @@ fn defer_period_key_checks<S: Clone + 'static>(
                     &child_lookup.values,
                     excluded_parents,
                     replacement,
-                )?
-                .0
-                {
+                )? {
                     return Ok(true);
                 }
                 context.deferrals.defer_foreign_key_check(
