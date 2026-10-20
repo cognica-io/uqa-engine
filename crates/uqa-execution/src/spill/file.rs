@@ -31,6 +31,15 @@ impl SpillFileArena {
         }
     }
 
+    pub(super) fn reopen(&self) -> ExecResult<TemporaryFile> {
+        self.file
+            .lock()
+            .as_ref()
+            .ok_or_else(|| spill_error("spill arena has no sealed file"))?
+            .reopen()
+            .map_err(|error| spill_error(error.to_string()))
+    }
+
     /// Only the newest segment may grow. Older readers keep their sealed byte range and cannot read a later segment.
     pub(super) fn append(
         &self,

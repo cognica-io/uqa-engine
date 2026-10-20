@@ -24,8 +24,8 @@ impl PhysicalOperator for InspectFiles {
     fn next(&mut self) -> ExecResult<Option<Batch>> {
         let files = std::fs::read_dir(&self.directory).unwrap().count();
         assert!(
-            files <= 1,
-            "initial sorted runs created {files} separate files"
+            files <= 2,
+            "initial sorted runs created {files} files instead of one data arena and one bounded descriptor catalog"
         );
         Ok(self.rows.next().map(|row| {
             Batch::from_physical_rows(

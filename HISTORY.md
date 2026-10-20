@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Spill external-sort run descriptors sequentially instead of retaining one buffer and file owner per run, preserving comparison order and stable merge results.
+
 - Bound referential candidate capture across native index probes, command overlays and selected snapshot fallbacks.
 
 - Stream native equality candidates under the original snapshot and read allowance without collecting all matching identities.
