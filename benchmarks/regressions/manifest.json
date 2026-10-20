@@ -16308,6 +16308,45 @@
       "capability": "Retained clause type selections",
       "workload": "Independent PostgreSQL 18.4 HAVING type errors and JSON grouping/ordering capability errors.",
       "invariant": "Preserve SQLSTATE and primary diagnostic while retaining types only within one validation invocation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "nested_privilege_analysis_does_not_copy_inherited_subquery_plans",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/tests/semantics/privileges.rs",
+      "capability": "Borrowed authorization plan inputs",
+      "workload": "Nested correlated authorization with a retained 1MiB scalar-query arena.",
+      "invariant": "Authorization remains below 256KiB of allocation and checks the same root column; immutable unrelated plan payloads are not copied at each scope."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "nested_privilege_analysis_does_not_copy_local_cte_plans",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/tests/semantics/privileges.rs",
+      "capability": "Borrowed authorization plan inputs",
+      "workload": "An unused 1MiB CTE declaration beside a nested correlated query.",
+      "invariant": "Authorization remains below 256KiB and preserves lexical CTE visibility and exact required root columns without cloning the declaration."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "borrowed_privilege_query_arena_preserves_denials_and_check_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/tests/semantics/privileges.rs",
+      "capability": "Borrowed authorization plan inputs",
+      "workload": "Source-expression authorization borrows the original scalar-query arena and encounters a denied correlated leaf column.",
+      "invariant": "The original plan arena is borrowed by identity; leaf c0 precedes the c2 denial with SQLSTATE 42501 and no later root check."
     }
   ]
 }
