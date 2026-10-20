@@ -28,8 +28,10 @@ mod file;
 mod format;
 mod indexed;
 mod match_flags;
+mod segments;
 pub(crate) use file::SpillFileArena;
 pub(crate) use match_flags::MatchFlags;
+pub(crate) use segments::SpillSegmentDescriptor;
 
 use format::{
     append_batches, decode_batch, encoded_batch_overhead_size, encoded_batch_size,

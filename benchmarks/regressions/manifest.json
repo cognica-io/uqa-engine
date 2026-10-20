@@ -18139,6 +18139,19 @@
       "capability": "Bounded referential fallback identities",
       "workload": "Fixed/latest/private identity reconciliation plus 16,384 paged identities, forced spill, seven-row consumer stop and cancellation.",
       "invariant": "Private deletions and replacements mask the latest view; exact ordered identities stay under a fixed 512KiB allocation ceiling, stop once requested and preserve 57014."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sorted_run_descriptors_spill_without_retaining_per_run_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/external_sort/runs/tests.rs",
+      "capability": "Bounded external-sort run metadata",
+      "workload": "8,192 one-row runs in one shared arena, with ordered replay and complete file cleanup.",
+      "invariant": "Run metadata retains at most 512KiB additional allocation independent of run count; exactly two files serve the populated run list and no files remain after owner release.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

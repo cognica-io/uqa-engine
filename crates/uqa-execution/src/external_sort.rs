@@ -29,6 +29,8 @@ use crate::relational::{SharedExpressionEvaluator, SortKey};
 use crate::spill::{EncodedBatchSizer, SpillBatchWriter, SpillBuffer, SpillDrain, SpillFileArena};
 
 mod comparison;
+mod runs;
+use runs::RunList;
 mod top_k;
 use comparison::compare_records;
 
@@ -151,13 +153,17 @@ impl<'a> ExternalSort<'a> {
             .with_arena(arena)
     }
 
-    fn build_initial_runs(&mut self) -> ExecResult<Vec<SortedRun>> {
+    fn build_initial_runs(&mut self) -> ExecResult<RunList> {
         let arena = SpillFileArena::new(self.spill_directory.clone());
         let mut sequence = 0_u64;
         let mut pending = Vec::new();
         let mut pending_size = EncodedBatchSizer::new(&self.run_schema)?;
         let mut top_k_heap = false;
-        let mut runs = Vec::new();
+        let mut runs = RunList::new(
+            arena.clone(),
+            self.run_schema.clone(),
+            self.spill_directory.clone(),
+        );
 
         while let Some(batch) = self.child.next()? {
             for row in batch.rows {
@@ -200,7 +206,7 @@ impl<'a> ExternalSort<'a> {
                     if let Some(run) =
                         self.finish_run(std::mem::take(&mut pending), true, &arena)?
                     {
-                        runs.push(run);
+                        runs.push(run)?;
                     }
                     pending_size = EncodedBatchSizer::new(&self.run_schema)?;
                     top_k_heap = false;
@@ -217,7 +223,7 @@ impl<'a> ExternalSort<'a> {
                     if let Some(run) =
                         self.finish_run(std::mem::take(&mut pending), true, &arena)?
                     {
-                        runs.push(run);
+                        runs.push(run)?;
                     }
                     pending_size = EncodedBatchSizer::new(&self.run_schema)?;
                     top_k_heap = false;
@@ -225,9 +231,9 @@ impl<'a> ExternalSort<'a> {
             }
         }
 
-        let force_spill = !runs.is_empty();
+        let force_spill = runs.len() != 0;
         if let Some(run) = self.finish_run(pending, force_spill, &arena)? {
-            runs.push(run);
+            runs.push(run)?;
         }
         Ok(runs)
     }
@@ -265,16 +271,24 @@ impl<'a> ExternalSort<'a> {
         Ok(Some(SortedRun { buffer }))
     }
 
-    fn collapse_runs(&mut self, mut runs: Vec<SortedRun>) -> ExecResult<Option<SortedRun>> {
+    fn collapse_runs(&mut self, mut runs: RunList) -> ExecResult<Option<SortedRun>> {
         while runs.len() > 1 {
             let arena = SpillFileArena::new(self.spill_directory.clone());
             self.merge_pass_count = self.merge_pass_count.checked_add(1).ok_or_else(|| {
                 ExecError::Other("external sort merge-pass count overflow".into())
             })?;
-            let mut inputs = runs.into_iter();
-            let mut merged = Vec::new();
+            let mut inputs = runs.into_reader()?;
+            let mut merged = RunList::new(
+                arena.clone(),
+                self.run_schema.clone(),
+                self.spill_directory.clone(),
+            );
             loop {
-                let group: Vec<_> = inputs.by_ref().take(EXTERNAL_SORT_MERGE_FAN_IN).collect();
+                let mut group = Vec::with_capacity(EXTERNAL_SORT_MERGE_FAN_IN);
+                for _ in 0..EXTERNAL_SORT_MERGE_FAN_IN {
+                    let Some(run) = inputs.next()? else { break };
+                    group.push(run);
+                }
                 if group.is_empty() {
                     break;
                 }
@@ -285,11 +299,11 @@ impl<'a> ExternalSort<'a> {
                     self.create_run_buffer(&arena),
                     &self.run_schema,
                     self.input_slots.len(),
-                )?);
+                )?)?;
             }
             runs = merged;
         }
-        Ok(runs.pop())
+        runs.into_reader()?.next()
     }
 }
 
