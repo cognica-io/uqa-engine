@@ -17,13 +17,14 @@ impl LocalTableRowSource {
     ) -> ExecResult<Option<Vec<PhysicalRow>>> {
         let fields = self.columns.iter().map(String::as_str).collect::<Vec<_>>();
         let mut rows = Vec::with_capacity(max_rows);
+        let mut size = crate::spill::EncodedBatchSizer::new(&self.physical_schema)?;
         while rows.len() < max_rows {
             self.cancellation.check().map_err(SQLError::from)?;
             let remaining = max_rows - rows.len();
             let shared = self
                 .table
                 .read_documents()
-                .next_shared_fields(self.after, remaining, &fields)
+                .next_shared_fields(self.after, remaining.min(self.shared_page_rows), &fields)
                 .map_err(|error| {
                     SQLError::Internal(format!(
                         "scan shared projected fields from `{}`: {error}",
@@ -41,13 +42,23 @@ impl LocalTableRowSource {
                     })?;
                     if keep {
                         let (values, projection) = shared.into_parts();
-                        rows.push(self.with_lock_identity(
+                        let row = self.with_lock_identity(
                             PhysicalRow::from_shared_values(values, projection),
                             id,
-                        )?);
+                        )?;
+                        let before = size.bytes();
+                        size.append(&row)?;
+                        self.shared_page_rows = self
+                            .scan_batch_bytes
+                            .div_ceil((size.bytes() - before).max(1))
+                            .clamp(1, crate::DEFAULT_BATCH_SIZE);
+                        rows.push(row);
+                        if size.bytes() >= self.scan_batch_bytes {
+                            break;
+                        }
                     }
                 }
-                if reached_end {
+                if reached_end || (!rows.is_empty() && size.bytes() >= self.scan_batch_bytes) {
                     break;
                 }
                 continue;
@@ -59,7 +70,7 @@ impl LocalTableRowSource {
                 .read_documents()
                 .for_each_next_fields_borrowed(self.after, remaining, &fields, &mut |id, values| {
                     last = Some(id);
-                    let result = (|| -> Result<(), SQLError> {
+                    let result = (|| -> ExecResult<()> {
                         self.cancellation.check().map_err(SQLError::from)?;
                         if let Some(predicate) = &self.predicate {
                             if !predicate.keep(values)? {
@@ -69,14 +80,16 @@ impl LocalTableRowSource {
                         let row = PhysicalRow::from_values(
                             values.iter().map(|value| (*value).clone()).collect(),
                         );
-                        rows.push(self.with_lock_identity(row, id)?);
+                        let row = self.with_lock_identity(row, id)?;
+                        size.append(&row)?;
+                        rows.push(row);
                         Ok(())
                     })();
                     if let Err(error) = result {
                         failure = Some(error);
                         return false;
                     }
-                    true
+                    rows.is_empty() || size.bytes() < self.scan_batch_bytes
                 })
                 .map_err(|error| {
                     SQLError::Internal(format!(
@@ -85,7 +98,7 @@ impl LocalTableRowSource {
                     ))
                 });
             if let Some(error) = failure {
-                return Err(error.into());
+                return Err(error);
             }
             let Some(visited) = visited? else {
                 return Ok((!rows.is_empty()).then_some(rows));
@@ -93,7 +106,7 @@ impl LocalTableRowSource {
             if let Some(last) = last {
                 self.after = Some(last);
             }
-            if visited == 0 {
+            if visited == 0 || (!rows.is_empty() && size.bytes() >= self.scan_batch_bytes) {
                 break;
             }
         }

@@ -8,6 +8,7 @@ use super::ScoredInput;
 use uqa_core::ScoredEntry;
 
 mod borrowed;
+mod memory;
 
 #[test]
 fn score_cutoff_retains_the_complete_boundary_tie_group() {

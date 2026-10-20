@@ -357,24 +357,27 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
             })
             .transpose()?
             .map(Value::Int);
-        sources.push(LocalTableRowSource::new(LocalTableScanConfig {
-            cancellation: context.runtime.cancellation_token(),
-            serializable: context.tables.serializable_read(&table_name)?,
-            table_name,
-            table,
-            column_definitions,
-            columns: columns.clone(),
-            schema: schema.clone(),
-            physical_schema: physical_schema.clone(),
-            metadata,
-            table_oid,
-            predicate,
-            estimated_cardinality,
-            lock_origin,
-            recheck_pins,
-            candidates: candidates.map(std::sync::Arc::from),
-            command_changes,
-        }));
+        sources.push(
+            LocalTableRowSource::new(LocalTableScanConfig {
+                cancellation: context.runtime.cancellation_token(),
+                serializable: context.tables.serializable_read(&table_name)?,
+                table_name,
+                table,
+                column_definitions,
+                columns: columns.clone(),
+                schema: schema.clone(),
+                physical_schema: physical_schema.clone(),
+                metadata,
+                table_oid,
+                predicate,
+                estimated_cardinality,
+                lock_origin,
+                recheck_pins,
+                candidates: candidates.map(std::sync::Arc::from),
+                command_changes,
+            })
+            .with_scan_batch_bytes(context.runtime.work_mem_bytes()?),
+        );
     }
     let source: Box<dyn crate::RowSource> = if sources.len() == 1 {
         Box::new(

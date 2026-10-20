@@ -18,6 +18,8 @@ mod row_source;
 pub type SharedLockOrigin = (Arc<str>, Arc<str>);
 
 pub struct LocalTableRowSource {
+    scan_batch_bytes: usize,
+    shared_page_rows: usize,
     cancellation: uqa_core::CancellationToken,
     serializable: crate::serializable::SerializableScan,
     table_name: String,
@@ -106,19 +108,20 @@ impl crate::RowSource for HierarchyRowSource {
         &mut self,
         max_rows: usize,
     ) -> crate::ExecResult<Vec<crate::PhysicalRow>> {
-        let mut rows = Vec::with_capacity(max_rows);
-        while rows.len() < max_rows {
+        if max_rows == 0 {
+            return Ok(Vec::new());
+        }
+        loop {
             let Some(source) = self.sources.front_mut() else {
-                break;
+                return Ok(Vec::new());
             };
-            let mut batch = source.next_physical_rows_batch(max_rows - rows.len())?;
+            let batch = source.next_physical_rows_batch(max_rows)?;
             if batch.is_empty() {
                 self.sources.pop_front();
             } else {
-                rows.append(&mut batch);
+                return Ok(batch);
             }
         }
-        Ok(rows)
     }
 }
 
@@ -145,6 +148,8 @@ pub struct LocalTableScanConfig {
 impl LocalTableRowSource {
     pub fn new(config: LocalTableScanConfig) -> Self {
         Self {
+            scan_batch_bytes: 64 * 1024 * 1024,
+            shared_page_rows: 1,
             cancellation: config.cancellation,
             serializable: crate::serializable::SerializableScan::new(config.serializable),
             table_name: config.table_name,
@@ -171,6 +176,12 @@ impl LocalTableRowSource {
             command_base_ids: std::collections::VecDeque::new(),
             command_base_exhausted: false,
         }
+    }
+
+    /// Bound an ordered shared or borrowed projection batch without combining independently bounded child batches. The current row may exceed the allowance.
+    pub fn with_scan_batch_bytes(mut self, bytes: usize) -> Self {
+        self.scan_batch_bytes = bytes;
+        self
     }
 }
 
