@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound UNION, INTERSECT and EXCEPT output batches by bytes while preserving row order and duplicate multiplicities across batch boundaries.
+
 - Retain wide lazy rule inputs and VALUES constants once through shared immutable handles, preserving demand order and typed observations.
 
 - Bound command and statement AFTER-trigger event retention with ordered spill replay, preserving transition-table visibility and reentrant cascades.

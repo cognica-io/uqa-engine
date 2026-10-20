@@ -17970,6 +17970,19 @@
       "capability": "Retained rule input payloads",
       "workload": "512 32KiB INSERT values, two conditional ALSO rules and an unconditional INSTEAD NOTHING rule under 64KiB query memory.",
       "invariant": "Peak live allocation stays below the unchanged 8MiB ceiling, the base remains empty, and both action groups contain exactly the independently verified PostgreSQL counts/sums/lengths."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "set_operation_output_batches_bound_wide_rows_and_repeated_groups",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/set_operation/tests/memory.rs",
+      "capability": "Bounded set-operation output",
+      "workload": "512 left and 256 right 32KiB rows through UNION ALL, UNION DISTINCT, INTERSECT ALL and EXCEPT ALL under 64KiB work memory.",
+      "invariant": "Exact output and bag multiplicities survive byte-sized batch boundaries, no batch exceeds two wide rows, and peak additional allocation remains below the fixed 2MiB ceiling."
     }
   ]
 }
