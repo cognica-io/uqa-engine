@@ -9,8 +9,14 @@
 mod suppression;
 pub(crate) use suppression::RuleSuppression;
 
+mod columns;
+pub use columns::{RuleColumnIter, RuleColumnSets};
+
 mod indices;
 use indices::{RuleIndexBuffer, RuleIndices};
+
+#[cfg(test)]
+mod column_tests;
 
 mod returning;
 mod row_source;
@@ -25,7 +31,6 @@ use uqa_sql::ast::{RuleEvent, Statement};
 use uqa_sql::plpgsql::VariableResolver;
 use uqa_sql::semantics::sets::placement_scope::SetPlacementScope;
 use uqa_sql::SQLError;
-use uqa_storage::document_store::Document;
 
 use uqa_core::RelationIdentity;
 mod context;
@@ -84,9 +89,6 @@ pub enum RuleRowSide {
     New,
 }
 
-/// Required OLD and NEW columns, respectively, that qualification has not yet projected.
-pub type MissingRuleRowColumns = (BTreeSet<String>, BTreeSet<String>);
-
 impl PreparedRuleBatch {
     pub fn event_row_count(&self) -> usize {
         self.rows.len()
@@ -99,49 +101,6 @@ impl PreparedRuleBatch {
 
     pub fn suppresses(&self, index: usize) -> Result<bool, SQLError> {
         self.suppress_original.suppresses(index)
-    }
-
-    pub fn matched_action_row_columns(&self) -> Result<Vec<BTreeSet<String>>, SQLError> {
-        let mut rows = vec![BTreeSet::new(); self.rows.len()];
-        for rule in &self.rules {
-            let columns = rule
-                .action_row_columns
-                .iter()
-                .flatten()
-                .cloned()
-                .collect::<BTreeSet<_>>();
-            if columns.is_empty() {
-                continue;
-            }
-            for row in rule.matching_rows.reader()? {
-                if let Some(required) = rows.get_mut(row?) {
-                    required.extend(columns.iter().cloned());
-                }
-            }
-        }
-        Ok(rows)
-    }
-
-    pub fn missing_action_row_columns(&self) -> Result<Vec<MissingRuleRowColumns>, SQLError> {
-        self.matched_action_row_columns()?
-            .into_iter()
-            .zip(self.rows.iter())
-            .map(|(columns, row)| {
-                let row = row?;
-                let missing = |record: &Option<Document>| {
-                    if let Some(record) = record {
-                        columns
-                            .iter()
-                            .filter(|column| !record.contains_key(*column))
-                            .cloned()
-                            .collect()
-                    } else {
-                        BTreeSet::new()
-                    }
-                };
-                Ok((missing(&row.old), missing(&row.new)))
-            })
-            .collect()
     }
 
     pub fn supplement_rows(&mut self, rows: Vec<RuleRowImage>) -> Result<(), SQLError> {

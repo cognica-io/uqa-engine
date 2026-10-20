@@ -17356,6 +17356,97 @@
       "workload": "RIGHT and FULL nested-loop joins run with one-byte and 64KiB work allowances over matched and unmatched source rows.",
       "invariant": "Shared cached match flags preserve exactly the matched pair and required null-extended rows.",
       "capability": "Bounded rewrite-rule suppression metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "matched_rule_columns_bound_memory_and_preserve_sparse_action_unions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/column_tests.rs",
+      "capability": "Rewrite-rule required-column retention",
+      "workload": "16,384 original events, unconditional and sparse rules with overlapping action columns; existing images prepared outside allocation scope.",
+      "invariant": "Peak additional live allocations remain below 512KiB; every original ordinal receives the exact union of matched action columns.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "missing_rule_columns_bound_memory_and_keep_old_new_presence",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/column_tests.rs",
+      "capability": "Rewrite-rule required-column retention",
+      "workload": "16,384 original events with partially projected OLD and optional NEW images, unconditional and sparse rule actions.",
+      "invariant": "Peak additional allocations remain below 512KiB; missing columns preserve both existing keys and absence of either image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_column_projection_rejects_invalid_qualification_order_and_bounds",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/column_tests.rs",
+      "capability": "Rewrite-rule required-column retention",
+      "workload": "Reversed, duplicate and out-of-range qualification ordinals through the actual prepared-batch consumer.",
+      "invariant": "Invalid qualification metadata is rejected before supplemental expression evaluation; generic action selection remains order preserving.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_column_runs_preserve_uniform_empty_sparse_and_owned_replay",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/columns/tests.rs",
+      "capability": "Rewrite-rule required-column retention",
+      "workload": "Zero, one and 129 rows, uniform and fragmented requirements under one-byte and 16KiB allowances with independent readers.",
+      "invariant": "Exact OLD/NEW column sets and row count survive owner drop; uniform requirements retain one set and fragmented requirements spill.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_column_readers_validate_runs_counts_and_column_names",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/columns/tests.rs",
+      "capability": "Rewrite-rule required-column retention",
+      "workload": "Invalid lengths, widths, names, duplicates and truncated/excess declared counts.",
+      "invariant": "Malformed metadata reports an error and failed readers stop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_column_metadata_finishes_before_consumption_and_propagates_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/columns/tests.rs",
+      "capability": "Rewrite-rule required-column retention",
+      "workload": "Late metadata failure and cancellation before construction or during independent replay.",
+      "invariant": "Construction fails before exposing incomplete projection requirements; cancellation propagates as SQLSTATE 57014.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "nested_view_rule_columns_preserve_sparse_old_new_and_lazy_unused_fields",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_rules/selection.rs",
+      "capability": "Rewrite-rule required-column retention",
+      "workload": "Two nested views, distinct sparse OLD/NEW action requirements, an unselected division-by-zero expression and a zero-row UPDATE.",
+      "invariant": "PostgreSQL 18.4 exact action order and values, final table rows and lazy unused-field evaluation remain unchanged.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

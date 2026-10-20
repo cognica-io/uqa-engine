@@ -324,16 +324,20 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
         },
     )?;
     let action_columns = rule_batch.missing_action_row_columns()?;
-    for ((expressions, values), (_, required)) in
-        stmt.rows.iter().zip(&mut cached_rows).zip(&action_columns)
+    for ((expressions, values), columns_required) in stmt
+        .rows
+        .iter()
+        .zip(&mut cached_rows)
+        .zip(action_columns.reader()?)
     {
+        let [_, required] = columns_required?;
         evaluate_insert_rule_columns(
             read_assignment,
             target,
             positions,
             columns,
             expressions,
-            required,
+            &required,
             values,
             params,
             &snapshot,
