@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Share bounded MVCC blocks across frozen snapshot point reads, avoiding repeated file reads during DELETE identity membership checks while preserving visibility, cancellation and cache admission.
 
+- Preserve spill-backed physical row membership when query work memory is smaller than one key, keeping mandatory run metadata and I/O scratch separately admitted instead of rejecting ordinary DELETE work.
+
 - Bound DELETE qualification and root-row identity sets with encrypted ordered spill, preserving trigger selection, savepoint recovery and deferred PERIOD exclusions without complete identity-set copies.
 
 - Bound trigger transition-image capture and materialization by row bytes, preserving raw OLD/NEW values, late relation-type lookup, row order, named-column projection, absent images and repeatable reads.

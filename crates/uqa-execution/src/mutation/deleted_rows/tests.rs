@@ -58,9 +58,34 @@ fn deleted_row_membership_propagates_cancellation_before_write_and_read() {
 
 #[test]
 fn deleted_row_membership_preserves_typed_memory_exhaustion() {
-    let mut rows = DeletedRowBuffer::new(0, CancellationToken::new());
+    let memory = MemoryBudget::new(0);
+    let mut rows = DeletedRowBuffer {
+        records: PrivateRecordChanges::new(&memory),
+        control: StorageReadControl::new(&memory, &CancellationToken::new()),
+    };
     let error = rows.insert("t", 1).unwrap_err();
     assert_eq!(error.sqlstate(), Some("53200"), "{error:?}");
     let error = rows.insert_if_absent("t", 1).unwrap_err();
     assert_eq!(error.sqlstate(), Some("53200"), "{error:?}");
+}
+
+#[test]
+fn physical_row_membership_spills_below_one_key_without_losing_exact_keys() {
+    for bytes in [0, 1, 80] {
+        let allocated = allocation_counter::measure(|| {
+            let mut rows = DeletedRowBuffer::new(bytes, CancellationToken::new());
+            for id in (0..256).rev() {
+                assert!(rows.insert_if_absent("partition", id).unwrap());
+            }
+            assert!(!rows.insert_if_absent("partition", 17).unwrap());
+            rows.insert("partition2", DocId::MAX).unwrap();
+            let rows = rows.finish().unwrap();
+            for id in 0..256 {
+                assert!(rows.contains("partition", id).unwrap());
+                assert!(!rows.contains("partition2", id).unwrap());
+            }
+            assert!(rows.contains("partition2", DocId::MAX).unwrap());
+        });
+        assert!(allocated.bytes_max < 512 * 1024, "{bytes}: {allocated:?}");
+    }
 }
