@@ -95,7 +95,7 @@ fn numeric_row_casts_resolve_types_once_and_retain_only_the_source_name() {
     assert_eq!(catalog.resolutions.get(), 2);
     assert_eq!(catalog.callbacks.get(), 10_000);
     assert_eq!(prepared.calls().row_casts.len(), 1);
-    let RowCast::Numeric { source, .. } = prepared.calls().row_casts[0].1.get().unwrap() else {
+    let RowCast::Resolved { source, .. } = prepared.calls().row_casts[0].1.get().unwrap() else {
         panic!("numeric state");
     };
     assert_eq!(budget.used(), source.reserved_bytes());

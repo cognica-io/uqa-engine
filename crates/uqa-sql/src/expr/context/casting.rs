@@ -12,6 +12,7 @@ use uqa_core::{
 };
 
 use super::super::casting::{cast_value_from_with_control, parse_pg_array_literal_with_input};
+use super::super::ResolvedCast;
 use super::{format_regtype_elements_with_control, format_regtype_value_with_control, EngineHook};
 use crate::{
     ast::ColumnType,
@@ -302,7 +303,7 @@ pub fn cast_value_with_type_resolution_with_control(
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
-    cast_with_numeric_resolution(value, source_ty, target_ty, engine, control, &mut None)
+    cast_with_resolution(value, source_ty, target_ty, engine, control, &mut None)
 }
 
 /// Return an immutable numeric conversion when the ordinary catalog-aware cast selected one. Callers may retain it only within the same prepared expression and type-schema scope; the first evaluation keeps the original resolution, callback and failure order.
@@ -313,19 +314,31 @@ pub fn cast_value_with_numeric_resolution_with_control(
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<(Produced<Value>, Option<super::super::NumericCast>)> {
-    let mut numeric = None;
-    let output =
-        cast_with_numeric_resolution(value, source_ty, target_ty, engine, control, &mut numeric)?;
-    Ok((output, numeric))
+    let (output, resolved) =
+        cast_value_with_resolution_with_control(value, source_ty, target_ty, engine, control)?;
+    Ok((output, resolved.and_then(|cast| cast.numeric())))
 }
 
-fn cast_with_numeric_resolution(
+/// Return the builtin scalar selection reached by an ordinary successful conversion. The caller may reuse it only for the same immutable expression and type-schema identity with explicit builtin type names.
+pub fn cast_value_with_resolution_with_control(
     value: &Value,
     source_ty: Option<&str>,
     target_ty: &str,
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
-    numeric: &mut Option<super::super::NumericCast>,
+) -> Result<(Produced<Value>, Option<ResolvedCast>)> {
+    let mut resolved = None;
+    let output = cast_with_resolution(value, source_ty, target_ty, engine, control, &mut resolved)?;
+    Ok((output, resolved))
+}
+
+fn cast_with_resolution(
+    value: &Value,
+    source_ty: Option<&str>,
+    target_ty: &str,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+    resolved: &mut Option<ResolvedCast>,
 ) -> Result<Produced<Value>> {
     control.check()?;
     let resolved_target = resolve_catalog_type_with_control(target_ty, engine, control)?;
@@ -403,9 +416,10 @@ fn cast_with_numeric_resolution(
         }
     }
     if let (Some(source), Some(target)) = (resolved_source_type.as_deref(), target_column_type) {
-        if let Some(cast) = super::super::casting::numeric::NumericCast::select(source, target) {
+        if let Some(cast) = ResolvedCast::select(source, target).filter(|cast| cast.accepts(value))
+        {
             let output = cast.evaluate(value, control)?;
-            *numeric = Some(cast);
+            *resolved = Some(cast);
             return Ok(output);
         }
     }
