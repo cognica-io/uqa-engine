@@ -137,8 +137,11 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
         |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
             let mut affected = 0u64;
             let cancel = context.query.source.relational.runtime.cancellation_token();
-            let mut qualified_targets: Vec<MutationCandidate<Option<crate::OwnedPhysicalRow>>> =
-                Vec::new();
+            let mut qualified_targets = crate::mutation::rules::RuleRowBuffer::new(
+                context.mutation.rules.rules.memory.work_mem_bytes()?,
+                cancel.clone(),
+            );
+            let mut root_deletes = BTreeSet::<(String, DocId)>::new();
             let mut returning_rows = crate::mutation::returning::ReturningRows::new(
                 context.query.source.relational.runtime,
             )?;
@@ -433,14 +436,18 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                     continue;
                 }
                 if has_any_delete_rules {
-                    qualified_targets.push(MutationCandidate {
-                        identity: PhysicalDocumentIdentity {
-                            table: storage_table,
-                            doc_id,
-                        },
-                        document: doc,
-                        context: returning_context,
-                    });
+                    qualified_targets.push(
+                        crate::mutation::rules::RuleRowImage::from_delete_candidate(
+                            MutationCandidate {
+                                identity: PhysicalDocumentIdentity {
+                                    table: storage_table,
+                                    doc_id,
+                                },
+                                document: doc,
+                                context: returning_context,
+                            },
+                        ),
+                    )?;
                 } else if crate::mutation::triggers::fire_before_row_triggers(
                     &context.mutation.preparation.referential.triggers,
                     &storage_table,
@@ -458,37 +465,32 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                         .staging
                         .commands
                         .stage_command_document(&storage_table, doc_id, None)?;
-                    qualified_targets.push(MutationCandidate {
-                        identity: PhysicalDocumentIdentity {
-                            table: storage_table,
-                            doc_id,
-                        },
-                        document: doc,
-                        context: returning_context,
-                    });
+                    root_deletes.insert((storage_table.clone(), doc_id));
+                    qualified_targets.push(
+                        crate::mutation::rules::RuleRowImage::from_delete_candidate(
+                            MutationCandidate {
+                                identity: PhysicalDocumentIdentity {
+                                    table: storage_table,
+                                    doc_id,
+                                },
+                                document: doc,
+                                context: returning_context,
+                            },
+                        ),
+                    )?;
                 }
             }
             drop(qualification_overlay);
+            let qualified_targets = qualified_targets.finish();
             let (view_rule_returning, rule_returning, to_delete) = if has_any_delete_rules {
-                let rule_rows = qualified_targets
-                    .iter()
-                    .map(|candidate| crate::mutation::rules::RuleRowImage {
-                        old_storage_table: Some(candidate.identity.table.clone()),
-                        old_doc_id: Some(candidate.identity.doc_id),
-                        old: Some(candidate.document.clone()),
-                        new_storage_table: None,
-                        new_doc_id: None,
-                        new: None,
-                        context: candidate.context.clone(),
-                    })
-                    .collect::<Vec<_>>();
+                let rule_rows = &qualified_targets;
                 let mut view_rule_batches =
                     crate::mutation::rules::views::prepare_view_rule_batches(
                         crate::mutation::rules::views::ViewRuleBatchRequest {
                             context: context.mutation.rules,
                             relations: &stmt.view_rule_relations,
                             event: uqa_sql::ast::RuleEvent::Delete,
-                            rows: &rule_rows,
+                            rows: rule_rows,
                             params,
                             scope: &snapshot_ctes,
                             insert_plans: &[],
@@ -502,14 +504,15 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                     .collect::<Vec<_>>();
                 let mut rule_batch = (has_delete_rules && view_original_query)
                     .then(|| {
-                        crate::mutation::rules::prepare_rule_batch(
+                        crate::mutation::rules::prepare_retained_rule_batch(
                             context.mutation.rules.rules,
                             &stmt.table,
                             uqa_sql::ast::RuleEvent::Delete,
-                            base_rule_indices
-                                .iter()
-                                .filter_map(|index| rule_rows.get(*index).cloned())
-                                .collect(),
+                            rule_rows.select(
+                                &base_rule_indices,
+                                context.mutation.rules.rules.memory.work_mem_bytes()?,
+                                cancel.clone(),
+                            )?,
                         )
                     })
                     .transpose()?;
@@ -567,10 +570,11 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                 }
                 let qualification_overlay = MutationOverlayScope::new(context.mutation.state);
                 let mut to_delete = Vec::with_capacity(qualified_targets.len());
-                for (index, candidate) in qualified_targets.into_iter().enumerate() {
-                    if view_rule_batches.suppresses(index) || base_rule_suppressed[index] {
+                for (index, suppressed) in base_rule_suppressed.iter().copied().enumerate() {
+                    if view_rule_batches.suppresses(index) || suppressed {
                         continue;
                     }
+                    let candidate = qualified_targets.get(index)?.into_delete_candidate()?;
                     if crate::mutation::triggers::fire_before_row_triggers(
                         &context.mutation.preparation.referential.triggers,
                         &candidate.identity.table,
@@ -594,21 +598,19 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                             candidate.identity.doc_id,
                             None,
                         )?;
-                    to_delete.push(candidate);
+                    root_deletes.insert((candidate.identity.table, candidate.identity.doc_id));
+                    to_delete.push(index);
                 }
                 drop(qualification_overlay);
                 (view_rule_returning, rule_returning, to_delete)
             } else {
-                (None, None, qualified_targets)
+                (None, None, (0..qualified_targets.len()).collect::<Vec<_>>())
             };
-            let root_deletes: BTreeSet<(String, DocId)> = to_delete
-                .iter()
-                .map(|candidate| (candidate.identity.table.clone(), candidate.identity.doc_id))
-                .collect();
             let mut prepared_deletes = Vec::with_capacity(to_delete.len());
             let mut events = crate::mutation::events::MutationEventQueue::default();
             let overlay = MutationOverlayScope::new(context.mutation.state);
-            for candidate in to_delete {
+            for index in to_delete {
+                let candidate = qualified_targets.get(index)?.into_delete_candidate()?;
                 if let Some(prepared) = crate::mutation::referential::prepare_document_delete(
                     &context.mutation.preparation.referential,
                     &candidate.identity.table,
