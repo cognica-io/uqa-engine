@@ -340,43 +340,37 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 .transpose()?;
             let qualification =
                 crate::mutation::qualification::RowQualification::new(retrieval_snapshot);
-            let candidates: Vec<(String, uqa_core::DocId)> = if preselected {
-                let filter = stmt.predicate.as_ref().ok_or_else(|| {
-                    SQLError::Internal("UPDATE preselection is missing its predicate".into())
-                })?;
-                let mut candidates = Vec::new();
-                for table in &target_tables {
-                    candidates.extend(
-                        crate::query::block::where_filter::collect_where_doc_ids(
-                            &read_context.query.source,
-                            table,
-                            &stmt.target_qualifier,
-                            filter,
-                            params,
-                            ctes,
-                        )?
-                        .into_iter()
-                        .map(|doc_id| (table.clone(), doc_id)),
-                    );
+            let mut candidates = crate::mutation::candidate_ids::CandidateIds::new(
+                context.mutation.rules.rules.memory.work_mem_bytes()?,
+                cancel.clone(),
+            );
+            for (table_index, table) in target_tables.iter().enumerate() {
+                if preselected {
+                    let filter = stmt.predicate.as_ref().ok_or_else(|| {
+                        SQLError::Internal("UPDATE preselection is missing its predicate".into())
+                    })?;
+                    for doc_id in crate::query::block::where_filter::collect_where_doc_ids(
+                        &read_context.query.source,
+                        table,
+                        &stmt.target_qualifier,
+                        filter,
+                        params,
+                        ctes,
+                    )? {
+                        candidates.push(table_index, doc_id)?;
+                    }
+                } else {
+                    let tables = read_context.query.source.scans.tables;
+                    let source = tables.table(table)?;
+                    let changes = tables.command_overlay_changes(table)?.unwrap_or_default();
+                    candidates.capture_table(
+                        table_index,
+                        source.read_documents().as_ref(),
+                        &changes,
+                    )?;
                 }
-                candidates
-            } else {
-                let mut candidates = Vec::new();
-                for table in &target_tables {
-                    candidates.extend(
-                        read_context
-                            .mutation
-                            .preparation
-                            .referential
-                            .constraints
-                            .reads
-                            .table_doc_ids(table)?
-                            .into_iter()
-                            .map(|doc_id| (table.clone(), doc_id)),
-                    );
-                }
-                candidates
-            };
+            }
+            let candidates = candidates.finish()?;
             let snapshot_ctes = ctes.returning_statement_snapshot_scope();
             let overlay = MutationOverlayScope::new(context.mutation.state);
             let mut pending_updates = crate::mutation::rules::RuleRowBuffer::new(
@@ -388,7 +382,14 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 crate::SpillBuffer::new(context.mutation.rules.rules.memory.work_mem_bytes()?);
             let mut events = crate::mutation::events::MutationEventQueue::default();
             let mut locked_ids = BTreeSet::new();
-            for (storage_table, doc_id) in candidates {
+            for candidate_id in candidates.read_rows()? {
+                let (table_index, doc_id) = candidate_id?;
+                let storage_table = target_tables
+                    .get(table_index)
+                    .ok_or_else(|| {
+                        SQLError::Internal("mutation candidate has an invalid table ordinal".into())
+                    })?
+                    .clone();
                 cancel.check()?;
                 let Some(candidate) = read_context
                     .mutation
