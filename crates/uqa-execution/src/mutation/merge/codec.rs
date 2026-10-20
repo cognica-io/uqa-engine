@@ -11,14 +11,10 @@ use uqa_core::{DocId, Value};
 use uqa_sql::{ast::ColumnType, SQLError};
 use uqa_storage::document_store::Document;
 
-use crate::mutation::prepared::{
-    decode_prepared_doc_id, decode_prepared_mutation_action, encode_prepared_doc_id,
-    encode_prepared_mutation_action, PreparedMutationAction,
-};
+use crate::mutation::prepared::{decode_prepared_doc_id, encode_prepared_doc_id};
 
 const MERGE_SPILL_CODEC_VERSION: i64 = 1;
 const MERGE_PAIR_HEADER_WIDTH: usize = 5;
-const MERGE_ACTION_WIDTH: usize = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergePairKind {
@@ -166,51 +162,15 @@ pub fn merge_source_index_value(index: usize) -> Value {
     Value::Str(index.to_string())
 }
 
-pub fn prepared_mutation_action_schema() -> RowSchema {
-    RowSchema::with_internal_relation_types(
-        uqa_sql::ast::InternalRelationId::allocate(),
-        vec![None],
-    )
-}
-
-pub fn push_prepared_mutation_action(
-    buffer: &mut crate::SpillBuffer,
-    schema: &RowSchema,
-    action: PreparedMutationAction,
-) -> Result<(), SQLError> {
-    buffer
-        .push(crate::Batch::from_physical_rows(
-            schema.clone(),
-            vec![PhysicalRow::from_values(vec![
-                encode_prepared_mutation_action(action),
-            ])],
-        ))
-        .map_err(crate::physical::physical_exec_error)?;
-    Ok(())
-}
-
-pub fn decode_prepared_mutation_action_row(
-    row: OwnedPhysicalRow,
-) -> Result<PreparedMutationAction, SQLError> {
-    if row.schema.physical_width() != MERGE_ACTION_WIDTH {
-        return Err(SQLError::Internal(format!(
-            "MERGE prepared action spill has {} fields, expected {MERGE_ACTION_WIDTH}",
-            row.schema.physical_width()
-        )));
-    }
-    let payload = row
-        .physical_value_at(0)
-        .cloned()
-        .ok_or_else(|| SQLError::Internal("MERGE prepared action spill lost its payload".into()))?;
-    decode_prepared_mutation_action(payload)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::mutation::prepared::{PreparedDocumentInsert, PreparedMutationAction};
+    use crate::mutation::prepared::{
+        decode_prepared_mutation_action_row, encode_prepared_mutation_action,
+        prepared_mutation_action_schema, PreparedDocumentInsert, PreparedMutationAction,
+    };
 
     fn source_row() -> OwnedPhysicalRow {
         OwnedPhysicalRow::new(

@@ -10,7 +10,10 @@ use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatem
 use crate::mutation::{
     candidate::{MutationCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     command_scope::MutationOverlayScope,
-    prepared::PreparedMutationAction,
+    prepared::{
+        decode_prepared_mutation_action_row, prepared_mutation_action_schema,
+        push_prepared_mutation_action, PreparedMutationAction,
+    },
     returning::{DmlReturningShape, ReturningProjectionRow},
     row_images::{MutationRowImage, MutationRowImages},
     statement_end,
@@ -606,7 +609,9 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
             } else {
                 (None, None, (0..qualified_targets.len()).collect::<Vec<_>>())
             };
-            let mut prepared_deletes = Vec::with_capacity(to_delete.len());
+            let action_schema = prepared_mutation_action_schema();
+            let mut prepared_deletes =
+                crate::SpillBuffer::new(context.mutation.rules.rules.memory.work_mem_bytes()?);
             let mut events = crate::mutation::events::MutationEventQueue::default();
             let overlay = MutationOverlayScope::new(context.mutation.state);
             for index in to_delete {
@@ -652,15 +657,27 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                             &snapshot_ctes,
                         )?)?;
                     }
-                    prepared_deletes.push(PreparedMutationAction::Delete(prepared));
+                    cancel.check()?;
+                    push_prepared_mutation_action(
+                        &mut prepared_deletes,
+                        &action_schema,
+                        PreparedMutationAction::Delete(prepared),
+                    )?;
                 }
             }
             let published = overlay.finish();
-            if !prepared_deletes.is_empty() {
+            if prepared_deletes.rows() != 0 {
                 context.mutation.state.prepare_writer()?;
                 let mut publication =
                     statement_end::publication_batch(&statement_commands).with_published(published);
-                for action in prepared_deletes {
+                for row in prepared_deletes
+                    .drain_rows()
+                    .map_err(crate::physical::physical_exec_error)?
+                {
+                    cancel.check()?;
+                    let action = decode_prepared_mutation_action_row(
+                        row.map_err(crate::physical::physical_exec_error)?,
+                    )?;
                     crate::mutation::publication::publish_prepared_mutation_action(
                         context.mutation.publication,
                         action,
