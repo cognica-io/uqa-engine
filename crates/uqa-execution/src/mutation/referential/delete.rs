@@ -5,8 +5,8 @@
 //
 
 use super::{
-    defer_deleted_key_checks, lock_mutation_target, BTreeSet, DocId, MutationLockTarget,
-    PreparedDocumentDelete, ReferentialContext, SQLError,
+    defer_deleted_key_checks_excluding, lock_mutation_target, BTreeSet, DeletedRowLookup, DocId,
+    MutationLockTarget, PreparedDocumentDelete, ReferentialContext, SQLError,
 };
 
 /// Lock the row that `table` holds at `doc_id` and prepare its delete, firing its BEFORE ROW triggers when `fire_row_triggers` holds, and leave for the transaction the checks of the deferred `NO ACTION` keys it removes. `root_deletes` holds the rows the same statement deletes. `None` when the row is gone or a BEFORE ROW trigger skipped it.
@@ -15,6 +15,22 @@ pub fn prepare_document_delete<S: Clone + 'static>(
     table: &str,
     doc_id: DocId,
     root_deletes: &BTreeSet<(String, DocId)>,
+    fire_row_triggers: bool,
+) -> Result<Option<PreparedDocumentDelete>, SQLError> {
+    prepare_document_delete_excluding(
+        context,
+        table,
+        doc_id,
+        &|table, id| Ok(root_deletes.contains(&(table.to_owned(), id))),
+        fire_row_triggers,
+    )
+}
+
+pub(crate) fn prepare_document_delete_excluding<S: Clone + 'static>(
+    context: &ReferentialContext<'_, S>,
+    table: &str,
+    doc_id: DocId,
+    root_deletes: &DeletedRowLookup<'_>,
     fire_row_triggers: bool,
 ) -> Result<Option<PreparedDocumentDelete>, SQLError> {
     context
@@ -54,7 +70,7 @@ pub fn prepare_document_delete<S: Clone + 'static>(
     {
         return Ok(None);
     }
-    defer_deleted_key_checks(context, table, doc_id, &document, root_deletes)?;
+    defer_deleted_key_checks_excluding(context, table, doc_id, &document, root_deletes)?;
     Ok(Some(PreparedDocumentDelete {
         table: table.to_string(),
         doc_id,

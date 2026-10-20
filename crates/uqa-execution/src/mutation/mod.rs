@@ -58,6 +58,7 @@ pub mod statement;
 pub mod statement_end;
 
 pub mod delete;
+mod deleted_rows;
 
 pub mod dispatch;
 

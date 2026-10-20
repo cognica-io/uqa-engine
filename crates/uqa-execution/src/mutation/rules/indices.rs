@@ -30,7 +30,7 @@ enum IndexStorage {
 }
 
 impl RuleIndices {
-    pub(super) fn all(count: usize, cancellation: CancellationToken) -> Self {
+    pub(crate) fn all(count: usize, cancellation: CancellationToken) -> Self {
         Self {
             storage: IndexStorage::Range(0..count),
             count,
@@ -66,7 +66,7 @@ impl RuleIndices {
     }
 }
 
-pub(super) struct RuleIndexBuffer {
+pub(crate) struct RuleIndexBuffer {
     rows: SpillBuffer,
     writer: SpillBatchWriter,
     pending: Option<Range<usize>>,
@@ -76,7 +76,7 @@ pub(super) struct RuleIndexBuffer {
 }
 
 impl RuleIndexBuffer {
-    pub(super) fn new(bytes: usize, cancellation: CancellationToken) -> Result<Self, SQLError> {
+    pub(crate) fn new(bytes: usize, cancellation: CancellationToken) -> Result<Self, SQLError> {
         Ok(Self {
             rows: SpillBuffer::new(bytes),
             writer: SpillBatchWriter::new(schema()).map_err(physical_exec_error)?,
@@ -87,7 +87,7 @@ impl RuleIndexBuffer {
         })
     }
 
-    pub(super) fn push(&mut self, index: usize) -> Result<(), SQLError> {
+    pub(crate) fn push(&mut self, index: usize) -> Result<(), SQLError> {
         self.cancellation.check()?;
         let end = index
             .checked_add(1)
@@ -109,7 +109,7 @@ impl RuleIndexBuffer {
         Ok(())
     }
 
-    pub(super) fn finish(mut self) -> Result<RuleIndices, SQLError> {
+    pub(crate) fn finish(mut self) -> Result<RuleIndices, SQLError> {
         self.cancellation.check()?;
         let storage = if self.flushed {
             self.flush_pending()?;

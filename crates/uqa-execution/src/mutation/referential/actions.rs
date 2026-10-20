@@ -7,8 +7,8 @@
 //! The deferred `NO ACTION` checks that a delete or an update of a referenced row leaves for its transaction. A foreign key that is not deferred is checked, and its referential action taken, by the internal triggers that the row's change queues (`super::checks`).
 
 use super::{
-    foreign_key_comparison_types, foreign_key_lookup_values, period_foreign_key_coverage,
-    referencing_rows, referrers_to_for_actions, BTreeSet, DocId, Document, ForeignKey,
+    foreign_key_comparison_types, foreign_key_lookup_values, referencing_rows,
+    referrers_to_for_actions, BTreeSet, DeletedRowLookup, DocId, Document, ForeignKey,
     ForeignKeyAction, PhysicalDocumentIdentity, ReferentialContext, SQLError, Value,
 };
 
@@ -70,9 +70,9 @@ pub fn defer_updated_key_checks<S: Clone + 'static>(
                     foreign_key: &fk,
                     derived: firing.derived,
                     expected: &expected,
-                    root_deletes: &BTreeSet::new(),
+                    root_deletes: &|_, _| Ok(false),
                 },
-                std::slice::from_ref(&parent),
+                &|table, id| Ok(table == parent.table && id == parent.doc_id),
                 Some((&parent, new_doc)),
             )?;
             continue;
@@ -105,6 +105,22 @@ pub fn defer_deleted_key_checks<S: Clone + 'static>(
     parent_doc_id: DocId,
     parent_document: &Document,
     root_deletes: &BTreeSet<(String, DocId)>,
+) -> Result<(), SQLError> {
+    defer_deleted_key_checks_excluding(
+        context,
+        parent_table,
+        parent_doc_id,
+        parent_document,
+        &|table, id| Ok(root_deletes.contains(&(table.to_owned(), id))),
+    )
+}
+
+pub(crate) fn defer_deleted_key_checks_excluding<S: Clone + 'static>(
+    context: &ReferentialContext<'_, S>,
+    parent_table: &str,
+    parent_doc_id: DocId,
+    parent_document: &Document,
+    root_deletes: &DeletedRowLookup<'_>,
 ) -> Result<(), SQLError> {
     for (ref_table, fk) in referrers_to_for_actions(context.constraints.referrers, parent_table)? {
         if fk.on_delete != ForeignKeyAction::NoAction {
@@ -141,20 +157,13 @@ pub fn defer_deleted_key_checks<S: Clone + 'static>(
             firing.derived,
         )?;
         if fk.period {
-            let mut excluded_parents = root_deletes
-                .iter()
-                .map(|(table, doc_id)| PhysicalDocumentIdentity {
-                    table: table.clone(),
-                    doc_id: *doc_id,
-                })
-                .collect::<Vec<_>>();
-            let parent_identity = PhysicalDocumentIdentity {
-                table: parent_table.to_string(),
-                doc_id: parent_doc_id,
+            let excluded_parents = |table: &str, id| {
+                if table == parent_table && id == parent_doc_id {
+                    Ok(true)
+                } else {
+                    root_deletes(table, id)
+                }
             };
-            if !excluded_parents.contains(&parent_identity) {
-                excluded_parents.push(parent_identity);
-            }
             defer_period_key_checks(
                 context,
                 PeriodKeyChecks {
@@ -178,7 +187,7 @@ pub fn defer_deleted_key_checks<S: Clone + 'static>(
             &expected,
             ForeignKeyAction::NoAction,
         )? {
-            if root_deletes.contains(&(child.table.clone(), child.doc_id)) {
+            if root_deletes(&child.table, child.doc_id)? {
                 continue;
             }
             context.deferrals.defer_foreign_key_check(
@@ -202,14 +211,14 @@ struct PeriodKeyChecks<'a> {
     derived: Option<&'a uqa_sql::ast::ReferencedPartitionConstraint>,
     expected: &'a [Value],
     /// The rows the same statement deletes, which need no check.
-    root_deletes: &'a BTreeSet<(String, DocId)>,
+    root_deletes: &'a DeletedRowLookup<'a>,
 }
 
 /// Leave for the transaction a check of each row that references the leading values of a removed period key over a period the remaining referenced rows no longer cover. `excluded_parents` holds the referenced rows the statement removes, and `replacement` the row an update writes in place of one.
 fn defer_period_key_checks<S: Clone + 'static>(
     context: &ReferentialContext<'_, S>,
     key: PeriodKeyChecks<'_>,
-    excluded_parents: &[PhysicalDocumentIdentity],
+    excluded_parents: &DeletedRowLookup<'_>,
     replacement: Option<(&PhysicalDocumentIdentity, &Document)>,
 ) -> Result<(), SQLError> {
     let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
@@ -220,10 +229,7 @@ fn defer_period_key_checks<S: Clone + 'static>(
     )? {
         let rows = snapshot.table(&physical_table)?;
         for child_id in rows.doc_ids()? {
-            if key
-                .root_deletes
-                .contains(&(physical_table.clone(), child_id))
-            {
+            if (key.root_deletes)(&physical_table, child_id)? {
                 continue;
             }
             let Some(child_document) = rows.document(child_id)? else {
@@ -241,7 +247,7 @@ fn defer_period_key_checks<S: Clone + 'static>(
             if child_lookup.values[..ordinary_len] != key.expected[..ordinary_len] {
                 continue;
             }
-            if period_foreign_key_coverage(
+            if crate::mutation::constraints::period::period_foreign_key_coverage_excluding(
                 context.constraints,
                 key.foreign_key,
                 &child_lookup.values,

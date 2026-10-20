@@ -9,6 +9,7 @@ use super::{
     dml_storage_error, missing_document_error, ConstraintContext, Document, ForeignKey,
     PhysicalDocumentIdentity, SQLError, Value,
 };
+use crate::mutation::deleted_rows::DeletedRowLookup;
 use uqa_sql::{expr::multirange_from_ranges, semantics::period::period_ranges};
 
 /// The child's period ranges, the periods of the referenced rows whose ordinary key matches the child's, and the identities of those rows.
@@ -23,6 +24,26 @@ pub fn period_foreign_key_coverage(
     foreign_key: &ForeignKey,
     local_values: &[Value],
     excluded_parents: &[PhysicalDocumentIdentity],
+    replacement_parent: Option<(&PhysicalDocumentIdentity, &Document)>,
+) -> Result<(bool, Vec<PhysicalDocumentIdentity>), SQLError> {
+    period_foreign_key_coverage_excluding(
+        context,
+        foreign_key,
+        local_values,
+        &|table, id| {
+            Ok(excluded_parents
+                .iter()
+                .any(|row| row.table == table && row.doc_id == id))
+        },
+        replacement_parent,
+    )
+}
+
+pub(crate) fn period_foreign_key_coverage_excluding(
+    context: ConstraintContext<'_>,
+    foreign_key: &ForeignKey,
+    local_values: &[Value],
+    excluded_parents: &DeletedRowLookup<'_>,
     replacement_parent: Option<(&PhysicalDocumentIdentity, &Document)>,
 ) -> Result<(bool, Vec<PhysicalDocumentIdentity>), SQLError> {
     let Some(parents) = period_parents(
@@ -51,12 +72,14 @@ pub fn period_foreign_key_overlap(
     local_values: &[Value],
 ) -> Result<bool, SQLError> {
     Ok(
-        period_parents(context, foreign_key, local_values, &[], None)?.is_some_and(|parents| {
-            parents
-                .child_ranges
-                .iter()
-                .any(|range| parents.coverage.overlaps_range(range))
-        }),
+        period_parents(context, foreign_key, local_values, &|_, _| Ok(false), None)?.is_some_and(
+            |parents| {
+                parents
+                    .child_ranges
+                    .iter()
+                    .any(|range| parents.coverage.overlaps_range(range))
+            },
+        ),
     )
 }
 
@@ -64,7 +87,7 @@ fn period_parents(
     context: ConstraintContext<'_>,
     foreign_key: &ForeignKey,
     local_values: &[Value],
-    excluded_parents: &[PhysicalDocumentIdentity],
+    excluded_parents: &DeletedRowLookup<'_>,
     replacement_parent: Option<(&PhysicalDocumentIdentity, &Document)>,
 ) -> Result<Option<PeriodParents>, SQLError> {
     super::authorize_foreign_key_parent_namespace(context, foreign_key)?;
@@ -105,7 +128,7 @@ fn period_parents(
             let replacement = replacement_parent
                 .filter(|(replacement_identity, _)| *replacement_identity == &identity)
                 .map(|(_, document)| document);
-            if replacement.is_none() && excluded_parents.contains(&identity) {
+            if replacement.is_none() && excluded_parents(&identity.table, identity.doc_id)? {
                 continue;
             }
             let owned_parent = if replacement.is_some() {

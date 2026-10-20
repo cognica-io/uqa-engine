@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound DELETE qualification and root-row identity sets with encrypted ordered spill, preserving trigger selection, savepoint recovery and deferred PERIOD exclusions without complete identity-set copies.
+
 - Bound trigger transition-image capture and materialization by row bytes, preserving raw OLD/NEW values, late relation-type lookup, row order, named-column projection, absent images and repeatable reads.
 
 - Bound rewrite-rule matching, original-row suppression, required columns and local-to-original ordinal maps with compact uniform states and spill-backed selections, preserving event order, duplicate ordinals, suppression unions, lazy OLD/NEW projection and cancellation.

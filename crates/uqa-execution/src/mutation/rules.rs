@@ -13,7 +13,7 @@ mod columns;
 pub use columns::{RuleColumnIter, RuleColumnSets};
 
 mod indices;
-use indices::RuleIndexBuffer;
+pub(crate) use indices::RuleIndexBuffer;
 pub(crate) use indices::RuleIndices;
 
 #[cfg(test)]
