@@ -104,6 +104,14 @@ impl<'a> ScalarEvalContext<'a> {
             .and_then(|states| states.row_cast(operand))
     }
 
+    pub(super) fn numeric_operator(
+        &self,
+        arguments: &[super::ScalarExpr],
+    ) -> Option<&std::sync::OnceLock<super::state::NumericCall>> {
+        self.function_states
+            .and_then(|states| states.numeric_operator(arguments))
+    }
+
     pub(super) fn column_slot(
         &self,
         expression: &super::ScalarExpr,

@@ -191,6 +191,19 @@ fn numeric(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     let values = evaluate_items(args, context, control)?;
+    let slot = context.numeric_operator(args);
+    if let Some(super::super::state::NumericCall::Resolved { operation, schema }) =
+        slot.and_then(std::sync::OnceLock::get)
+    {
+        let same_schema = match (schema, context.row_schema()) {
+            (None, None) => true,
+            (Some(retained), Some(current)) => current.shares_index(retained),
+            _ => false,
+        };
+        if same_schema {
+            return operation.evaluate(&values, control);
+        }
+    }
     let mut types = ProductionVec::new(*control);
     let empty_schema = crate::RowSchema::default();
     if binding.argument_types.is_empty() {
@@ -220,5 +233,17 @@ fn numeric(
         }
     }
     let types = types.finish()?;
-    uqa_sql::expr::eval_numeric_operator_with_control(operator, &values, &types, control)
+    let (value, resolved) =
+        uqa_sql::expr::eval_numeric_operator_with_resolution(operator, &values, &types, control)?;
+    if let Some(slot) = slot.filter(|slot| slot.get().is_none()) {
+        let state = resolved.map_or(
+            super::super::state::NumericCall::PerEvaluation,
+            |operation| super::super::state::NumericCall::Resolved {
+                operation,
+                schema: context.row_schema().cloned(),
+            },
+        );
+        let _ = slot.set(state);
+    }
+    Ok(value)
 }
