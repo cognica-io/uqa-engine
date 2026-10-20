@@ -74,6 +74,17 @@ impl<T: std::ops::Deref<Target = Engine>> ReferentialReadSnapshot for ReferenceS
     fn doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         self.0.live_table_doc_ids(table)
     }
+    fn doc_id_page(
+        &self,
+        table: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
+        uqa_execution::mutation::constraints::context::MutationRead::live_table_doc_id_page(
+            &*self.0, table, after, limit, control,
+        )
+    }
     fn value_index_scan_key(
         &self,
         table: &str,
@@ -81,6 +92,15 @@ impl<T: std::ops::Deref<Target = Engine>> ReferentialReadSnapshot for ReferenceS
         predicate: &uqa_core::Predicate,
     ) -> Result<Option<uqa_core::PostingList>, SQLError> {
         self.0.value_index_scan_key(table, key, predicate)
+    }
+    fn visit_value_index_equal(
+        &self,
+        table: &str,
+        key: &uqa_storage::ValueIndexKey,
+        value: &uqa_core::Value,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        self.0.visit_value_index_equal(table, key, value, visit)
     }
     fn document(
         &self,

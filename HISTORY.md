@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound referential candidate capture across native index probes, command overlays and selected snapshot fallbacks.
+
 - Stream native equality candidates under the original snapshot and read allowance without collecting all matching identities.
 
 - Spill referential target identities and prepared cascade images while preserving selection, lock rechecks and writer admission.

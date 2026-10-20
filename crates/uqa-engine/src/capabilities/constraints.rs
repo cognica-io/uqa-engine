@@ -74,6 +74,24 @@ impl MutationRead for Engine {
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         Engine::query_table_doc_ids(self, table)
     }
+    fn table_doc_id_page(
+        &self,
+        table: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
+        let state = self.require_query_table(table)?;
+        let changes = self.command_overlay_changes(table)?.unwrap_or_default();
+        let source = state.document_store.read();
+        uqa_execution::query::document_changes::VisibleDocumentIds {
+            source: source.as_ref(),
+            changes: &changes,
+            control,
+        }
+        .page(after, limit, control, true)
+        .map_err(|error| uqa_sql::catalog::errors::storage_error("mutation identity page", &error))
+    }
     fn live_table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         Engine::live_table_doc_ids(self, table)
     }
@@ -136,6 +154,28 @@ impl MutationIndexRead for Engine {
     ) -> Result<Vec<DocId>, SQLError> {
         Engine::command_overlay_matches(self, table, columns, values)
     }
+    fn visit_staged_matches(
+        &self,
+        table: &str,
+        columns: &[String],
+        values: &[Value],
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        if self.session.command_mutation_overlays.lock().is_empty() {
+            return Ok(());
+        }
+        let table = self.command_overlay_table_name(table)?;
+        let control = self.query_retention_control()?;
+        uqa_execution::mutation::overlay::CommandMutationOverlay::visit_matches_with_catalog(
+            &mut self.session.command_mutation_overlays.lock(),
+            &table,
+            columns,
+            values,
+            &control,
+            Some(self),
+            visit,
+        )
+    }
     fn staged_expression_matches(
         &self,
         table: &str,
@@ -160,6 +200,15 @@ impl MutationIndexRead for Engine {
         predicate: &Predicate,
     ) -> Result<Option<PostingList>, SQLError> {
         Engine::value_index_scan_key(self, table, key, predicate)
+    }
+    fn visit_value_index_equal(
+        &self,
+        table: &str,
+        key: &ValueIndexKey,
+        value: &Value,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        Engine::visit_value_index_equal(self, table, key, value, visit)
     }
 }
 impl ConstraintTransactions for Engine {

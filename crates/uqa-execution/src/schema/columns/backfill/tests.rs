@@ -261,6 +261,15 @@ impl MutationRead for Fixture {
     fn live_table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         self.table_doc_ids(table)
     }
+    fn table_doc_id_page(
+        &self,
+        _: &str,
+        _: Option<DocId>,
+        _: usize,
+        _: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
+        unreachable!("backfill uses the existing live-row list")
+    }
     fn live_table_doc_id_page(
         &self,
         _: &str,

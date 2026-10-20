@@ -13,6 +13,45 @@ fn ids(list: &PostingList) -> Vec<DocId> {
 }
 
 #[test]
+fn equality_bucket_visits_keep_constant_workspace_and_typed_consumer_errors() {
+    let count = 16_384;
+    let index = ColumnValueIndex::build("key", (0..count).map(|id| (id, Value::Int(7))));
+    let mut next = 0;
+    let allocated = allocation_counter::measure(|| {
+        assert!(index
+            .visit_equal_with_catalog(&Value::Int(7), None, &mut |id| {
+                assert_eq!(id, next);
+                next += 1;
+                Ok(())
+            })
+            .unwrap());
+    });
+    assert_eq!(next, count);
+    assert!(allocated.bytes_max < 4096, "{allocated:?}");
+    next = 0;
+    let error = index
+        .visit_equal_with_catalog(&Value::Int(7), None, &mut |id| {
+            next += 1;
+            if id == 2 {
+                Err(uqa_sql::SQLError::Routine {
+                    sqlstate: "53200".into(),
+                    message: "candidate consumer exhausted".into(),
+                })
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert_eq!(next, 3);
+    assert!(index
+        .visit_equal_with_catalog(&Value::Int(8), None, &mut |_| {
+            panic!("missing bucket visited a row")
+        })
+        .unwrap());
+}
+
+#[test]
 fn build_scan_equals_and_ranges() {
     let index = ColumnValueIndex::build(
         "qty",
@@ -143,6 +182,15 @@ fn legacy_vector_index_probes_preserve_operator_failures_without_rejecting_singl
         .is_empty());
     for stored in [invalid.clone(), valid.clone()] {
         let index = ColumnValueIndex::build("v", [(1, stored)].into_iter());
+        assert_eq!(
+            index
+                .visit_equal_with_catalog(&invalid, None, &mut |_| {
+                    panic!("failed SQL comparison delivered a candidate")
+                })
+                .unwrap_err()
+                .sqlstate(),
+            Some("42804")
+        );
         assert_eq!(
             index
                 .scan_observing(&Predicate::Equals(invalid.clone()), || Ok(()))
@@ -283,6 +331,16 @@ fn typed_field_probes_preserve_btree_operator_errors() {
         );
         let index = ColumnValueIndex::build("v", [(1, row.clone())].into_iter());
         assert!(index.field_candidates(&row).is_none());
+        let error = index
+            .visit_equal_with_catalog(&row, None, &mut |_| {
+                panic!("missing comparison operator delivered a candidate")
+            })
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42883"));
+        assert_eq!(
+            error.to_string(),
+            format!("could not identify a comparison function for type {name}")
+        );
         for predicate in [
             Predicate::Equals(row.clone()),
             Predicate::NotEquals(row.clone()),

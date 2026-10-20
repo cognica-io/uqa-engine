@@ -9,8 +9,9 @@
 use super::{ReferentialContext, ReferentialReadSnapshot, ReferentialSnapshots};
 use crate::mutation::constraints::context::{MutationIndexRead, MutationRead};
 use crate::mutation::constraints::index_keys::changes_error;
+use crate::mutation::row_membership::{PhysicalRowBuffer, PhysicalRows};
 use crate::query::document_changes::DocumentChanges;
-use uqa_core::{DocId, Predicate, Value};
+use uqa_core::{CancellationToken, DocId, Value};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
@@ -74,78 +75,105 @@ impl ReferenceTableSnapshot<'_> {
         &self,
         columns: &[String],
         values: &[Value],
-    ) -> Result<Option<Vec<DocId>>, SQLError> {
+        bytes: usize,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<PhysicalRows>, SQLError> {
+        let buffer = || PhysicalRowBuffer::new(bytes, cancellation.clone(), "reference candidates");
         for (column, value) in columns.iter().zip(values) {
             let key = uqa_storage::ValueIndexKey::Column(column.clone());
-            let predicate = Predicate::Equals(value.clone());
-            let Some(current) = self
+            let mut current = buffer();
+            if !self
                 .indexes
-                .value_index_scan_key(&self.table, &key, &predicate)?
-            else {
+                .visit_value_index_equal(&self.table, &key, value, &mut |id| {
+                    current.insert("", id)
+                })?
+            {
                 continue;
-            };
+            }
+            let current = current.finish()?;
             let latest = if let Some(latest) = self.latest {
-                let Some(indexed) = latest.value_index_scan_key(&self.table, &key, &predicate)?
-                else {
+                let mut ids = buffer();
+                if !latest.visit_value_index_equal(&self.table, &key, value, &mut |id| {
+                    ids.insert("", id)
+                })? {
                     continue;
-                };
-                Some(indexed)
+                }
+                Some(ids.finish()?)
             } else {
                 None
             };
-            let mut ids = std::collections::BTreeSet::new();
+            let mut ids = buffer();
             if let Some(latest) = &latest {
-                for entry in latest.entries() {
-                    if !self
-                        .changes
-                        .contains_change(entry.doc_id)
-                        .map_err(changes_error)?
-                    {
-                        ids.insert(entry.doc_id);
+                latest.visit(&mut |_, id| {
+                    if !self.changes.contains_change(id).map_err(changes_error)? {
+                        ids.insert("", id)?;
                     }
-                }
+                    Ok(true)
+                })?;
             }
-            for entry in current.entries() {
-                let changed = self
-                    .changes
-                    .contains_change(entry.doc_id)
-                    .map_err(changes_error)?;
+            current.visit(&mut |_, id| {
+                let changed = self.changes.contains_change(id).map_err(changes_error)?;
                 if changed {
                     if self.changes.row_matches(
-                        entry.doc_id,
+                        id,
                         columns,
                         values,
                         crate::query::exact_lookup::FieldPresence::MissingIsNull,
                     )? {
-                        ids.insert(entry.doc_id);
+                        ids.insert("", id)?;
                     }
                 } else if latest.is_none() {
-                    ids.insert(entry.doc_id);
+                    ids.insert("", id)?;
                 }
-            }
-            ids.extend(self.indexes.staged_matches(&self.table, columns, values)?);
-            return Ok(Some(ids.into_iter().collect()));
+                Ok(true)
+            })?;
+            self.indexes
+                .visit_staged_matches(&self.table, columns, values, &mut |id| ids.insert("", id))?;
+            return Ok(Some(ids.finish()?));
         }
         Ok(None)
     }
 
-    pub fn doc_ids(&self) -> Result<Vec<DocId>, SQLError> {
-        let Some(latest) = self.latest else {
-            return self.current.table_doc_ids(&self.table);
-        };
-        let mut ids = latest
-            .doc_ids(&self.table)?
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>();
-        for change in self.changes.changes() {
-            let (doc_id, _) = change.map_err(changes_error)?;
-            if self.current.get_document(&self.table, doc_id)?.is_some() {
-                ids.insert(doc_id);
-            } else {
-                ids.remove(&doc_id);
+    pub fn visit_doc_ids(
+        &self,
+        bytes: usize,
+        cancellation: &CancellationToken,
+        visit: &mut dyn FnMut(DocId) -> Result<bool, SQLError>,
+    ) -> Result<(), SQLError> {
+        let control = uqa_storage::read_control::StorageReadControl::new(
+            &uqa_core::memory::MemoryBudget::new(64 * 1024),
+            cancellation,
+        );
+        let mut ids = PhysicalRowBuffer::new(bytes, cancellation.clone(), "reference candidates");
+        let mut after = None;
+        loop {
+            let page = match self.latest {
+                Some(latest) => latest.doc_id_page(&self.table, after, 128, &control)?,
+                None => self
+                    .current
+                    .table_doc_id_page(&self.table, after, 128, &control)?,
+            };
+            let Some(last) = page.last().copied() else {
+                break;
+            };
+            after = Some(last);
+            for &id in &*page {
+                if self.latest.is_none()
+                    || !self.changes.contains_change(id).map_err(changes_error)?
+                {
+                    ids.insert("", id)?;
+                }
             }
         }
-        Ok(ids.into_iter().collect())
+        if self.latest.is_some() {
+            for change in self.changes.changes() {
+                let (id, _) = change.map_err(changes_error)?;
+                if self.current.get_document(&self.table, id)?.is_some() {
+                    ids.insert("", id)?;
+                }
+            }
+        }
+        ids.finish()?.visit(&mut |_, id| visit(id))
     }
 
     pub fn document(&self, doc_id: DocId) -> Result<Option<Document>, SQLError> {

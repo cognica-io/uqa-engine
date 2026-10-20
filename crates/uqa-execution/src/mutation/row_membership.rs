@@ -114,6 +114,38 @@ pub(crate) struct PhysicalRows {
 }
 
 impl PhysicalRows {
+    /// Replay frozen keys in storage order without collecting the complete identity population.
+    pub(crate) fn visit(
+        &self,
+        visit: &mut dyn FnMut(&str, DocId) -> Result<bool, SQLError>,
+    ) -> Result<(), SQLError> {
+        let mut failure = None;
+        let result = self.records.visit(&[], None, &self.control, &mut |record| {
+            let key = record.key();
+            let Some((table, id)) = key.len().checked_sub(8).map(|width| key.split_at(width))
+            else {
+                return Err(VersionError::InvalidEncoding(
+                    "physical row key is too short",
+                ));
+            };
+            let table = std::str::from_utf8(table).map_err(|_| {
+                VersionError::InvalidEncoding("physical relation name is not UTF-8")
+            })?;
+            let id = DocId::from_be_bytes(id.try_into().expect("fixed identity suffix"));
+            match visit(table, id) {
+                Ok(more) => Ok(more),
+                Err(error) => {
+                    failure = Some(error);
+                    Ok(false)
+                }
+            }
+        });
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        result.map_err(|error| storage_error(self.operation, error))
+    }
+
     pub(crate) fn contains(&self, table: &str, doc_id: DocId) -> Result<bool, SQLError> {
         self.control.cancellation().check()?;
         self.records

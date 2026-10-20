@@ -30,6 +30,17 @@ impl MutationRead for Reads<'_> {
         MutationRead::live_table_doc_ids(self.engine, table)
     }
 
+    fn table_doc_id_page(
+        &self,
+        table: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
+        self.enumerations.set(self.enumerations.get() + 1);
+        MutationRead::table_doc_id_page(self.engine, table, after, limit, control)
+    }
+
     fn live_table_doc_id_page(
         &self,
         table: &str,

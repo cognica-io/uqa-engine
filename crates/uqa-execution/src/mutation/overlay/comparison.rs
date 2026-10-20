@@ -55,16 +55,14 @@ pub(super) fn find_match(
     Ok(found)
 }
 
-pub(super) fn matches(
+pub(super) fn visit_matches(
     overlays: &[CommandMutationOverlay],
     table: &str,
-    fields: &[String],
-    values: &[Value],
-    kind: super::KeyKind,
+    keys: &super::matching::MatchKeys<'_>,
     control: &StorageReadControl,
     catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
-) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
-    let mut found = uqa_core::memory::BudgetedVec::new(control.memory());
+    visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
     let production = uqa_core::memory::ProductionControl::new(
         control.memory(),
         control.cancellation(),
@@ -84,16 +82,16 @@ pub(super) fn matches(
                 continue;
             }
             if matches_fields_with_control(
-                kind.document(&document)?,
-                fields,
-                values,
+                keys.kind.document(&document)?,
+                keys.fields,
+                keys.values,
                 FieldPresence::MissingIsNull,
                 &production,
                 catalog,
             )? {
-                found.push(id).map_err(super::resource_error)?;
+                visit(id)?;
             }
         }
     }
-    Ok(found)
+    Ok(())
 }

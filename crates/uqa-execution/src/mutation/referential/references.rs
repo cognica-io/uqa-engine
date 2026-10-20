@@ -132,15 +132,16 @@ pub fn referencing_rows<S: Clone + 'static>(
     for (table_index, physical_table) in tables.iter().enumerate() {
         let rows = snapshot.table(physical_table)?;
         let indexed = if comparison.exact_local_lookup {
-            rows.indexed_doc_ids(&fk.local_columns, expected)?
+            rows.indexed_doc_ids(
+                &fk.local_columns,
+                expected,
+                context.constraints.memory.work_mem_bytes()?,
+                context.triggers.runtime.cancellation,
+            )?
         } else {
             None
         };
-        let ids = match indexed {
-            Some(ids) => ids,
-            None => rows.doc_ids()?,
-        };
-        for doc_id in ids {
+        let mut visit = |doc_id| -> Result<bool, SQLError> {
             context.triggers.runtime.cancellation.check()?;
             let Some(doc) = rows.document(doc_id)? else {
                 return Err(missing_document_error(
@@ -169,6 +170,15 @@ pub fn referencing_rows<S: Clone + 'static>(
                 }
                 out.push(table_index, doc_id)?;
             }
+            Ok(true)
+        };
+        match indexed {
+            Some(ids) => ids.visit(&mut |_, id| visit(id))?,
+            None => rows.visit_doc_ids(
+                context.constraints.memory.work_mem_bytes()?,
+                context.triggers.runtime.cancellation,
+                &mut visit,
+            )?,
         }
     }
     Ok(ReferencingRows {
