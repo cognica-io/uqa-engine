@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "workload": "regex_predicates",
+  "fixture": "crates/uqa-engine/benches/regex_predicates.rs",
+  "reference_revision": "6b9f8cb87cf459f10237294565e3f444f750fcfa",
+  "reference_fixture_overlay": "Apply only the identical benchmark source and Cargo bench declaration to the reference; retain both hashes with its executable provenance.",
+  "rows": 20000,
+  "expected_matches": 10000,
+  "criterion": {
+    "sample_size": 10,
+    "warm_up_milliseconds": 500,
+    "measurement_seconds": 2,
+    "sampling_mode": "linear"
+  },
+  "regression_protocol": {
+    "calibration_pairs": 32,
+    "pairs": 8,
+    "ordering": "counterbalanced",
+    "point_estimator": "median_of_paired_slope_ratios"
+  },
+  "regression_gates": [
+    {"benchmark": "regex_predicates/equality", "max": 1.10},
+    {"benchmark": "regex_predicates/literal", "max": 1.00},
+    {"benchmark": "regex_predicates/character_class", "max": 1.00}
+  ]
+}

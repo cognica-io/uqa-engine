@@ -65,6 +65,10 @@ pub struct StatementValidationContext<'a> {
 
 /// Capture live subsystem inputs only when a statement is ready to execute.
 pub trait StatementExecutionInputs<S: Clone + 'static> {
+    /// The session-owned compiled regex cache, shared by its nested statements and workers.
+    fn regex_cache(&self) -> Option<std::sync::Arc<uqa_sql::expr::RegexCache>> {
+        None
+    }
     fn statement_execution_context(&self) -> StatementExecutionContext<'_, S>;
     /// The live transaction start, or the current message's start outside a transaction. `None` preserves the calling statement's clock without capturing execution inputs.
     fn transaction_timestamp_micros(&self) -> Option<i64> {
@@ -101,6 +105,7 @@ pub(super) fn statement_thread_scope<S: Clone + 'static>(
     cancellation: &uqa_core::CancellationToken,
 ) -> super::thread_scope::StatementThreadScope {
     super::thread_context::StatementThreadContext {
+        regex_cache: statements.regex_cache(),
         temporal_input: uqa_sql::expr::TemporalInputContext {
             transaction_clock_micros: statements
                 .transaction_timestamp_micros()

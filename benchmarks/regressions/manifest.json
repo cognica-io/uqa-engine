@@ -15310,6 +15310,227 @@
       ]
     },
     {
+      "package": "uqa-pg-regex",
+      "kind": "lib",
+      "test": "retained_patterns_keep_original_charges_and_use_each_invocations_resources",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/src/regex/tests.rs",
+      "capability": "Retained PostgreSQL regular expressions",
+      "workload": "Retain a compiled pattern, repeat matching, refuse and cancel later scratch, then match and destroy it on another thread.",
+      "invariant": "Compiled bytes remain on the original owner; every invocation returns its scratch and observes its own failures; cross-thread destruction releases every original byte."
+    },
+    {
+      "package": "uqa-pg-regex",
+      "kind": "lib",
+      "test": "a_failed_resource_transfer_releases_the_still_borrowed_compiled_context",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-regex/src/regex/tests.rs",
+      "capability": "Retained PostgreSQL regular expressions",
+      "workload": "Panic while acquiring the owner for a compiled pattern.",
+      "invariant": "The still-borrowed context is freed and its original charge returned before unwinding completes."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "repeated_patterns_compile_once_and_release_the_complete_retained_owner",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Repeated and varying patterns, compile flags and collations, thirty-two-entry eviction, memory pressure and admission refusal, nested and worker contexts, cancellation, scratch refusal and clearing during an active call.",
+      "invariant": "Repeated identical compilation inputs compile once per cache lifetime; retained state is admitted and bounded, current invocation checks are preserved, matching holds no cache mutex and all original reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "keys_distinguish_pattern_flags_and_collation_and_keep_postgresql_results",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Repeated and varying patterns, compile flags and collations, thirty-two-entry eviction, memory pressure and admission refusal, nested and worker contexts, cancellation, scratch refusal and clearing during an active call.",
+      "invariant": "Repeated identical compilation inputs compile once per cache lifetime; retained state is admitted and bounded, current invocation checks are preserved, matching holds no cache mutex and all original reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "the_thirty_two_entry_limit_evicts_the_least_recently_used_pattern",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Repeated and varying patterns, compile flags and collations, thirty-two-entry eviction, memory pressure and admission refusal, nested and worker contexts, cancellation, scratch refusal and clearing during an active call.",
+      "invariant": "Repeated identical compilation inputs compile once per cache lifetime; retained state is admitted and bounded, current invocation checks are preserved, matching holds no cache mutex and all original reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "hits_observe_each_current_cancellation_and_scratch_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Repeated and varying patterns, compile flags and collations, thirty-two-entry eviction, memory pressure and admission refusal, nested and worker contexts, cancellation, scratch refusal and clearing during an active call.",
+      "invariant": "Repeated identical compilation inputs compile once per cache lifetime; retained state is admitted and bounded, current invocation checks are preserved, matching holds no cache mutex and all original reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cache_scopes_restore_nested_sessions_and_move_compiled_state_to_a_worker",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Repeated and varying patterns, compile flags and collations, thirty-two-entry eviction, memory pressure and admission refusal, nested and worker contexts, cancellation, scratch refusal and clearing during an active call.",
+      "invariant": "Repeated identical compilation inputs compile once per cache lifetime; retained state is admitted and bounded, current invocation checks are preserved, matching holds no cache mutex and all original reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_compilations_keep_errors_and_release_partial_contexts",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Repeated and varying patterns, compile flags and collations, thirty-two-entry eviction, memory pressure and admission refusal, nested and worker contexts, cancellation, scratch refusal and clearing during an active call.",
+      "invariant": "Repeated identical compilation inputs compile once per cache lifetime; retained state is admitted and bounded, current invocation checks are preserved, matching holds no cache mutex and all original reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cleared_active_patterns_cannot_repopulate_a_new_cache_generation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Repeated and varying patterns, compile flags and collations, thirty-two-entry eviction, memory pressure and admission refusal, nested and worker contexts, cancellation, scratch refusal and clearing during an active call.",
+      "invariant": "Repeated identical compilation inputs compile once per cache lifetime; retained state is admitted and bounded, current invocation checks are preserved, matching holds no cache mutex and all original reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_byte_pressure_reclaims_idle_patterns_before_declining_retention",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Repeated and varying patterns, compile flags and collations, thirty-two-entry eviction, memory pressure and admission refusal, nested and worker contexts, cancellation, scratch refusal and clearing during an active call.",
+      "invariant": "Repeated identical compilation inputs compile once per cache lifetime; retained state is admitted and bounded, current invocation checks are preserved, matching holds no cache mutex and all original reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "simultaneous_invocations_do_not_hold_the_cache_mutex_during_matching",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Repeated and varying patterns, compile flags and collations, thirty-two-entry eviction, memory pressure and admission refusal, nested and worker contexts, cancellation, scratch refusal and clearing during an active call.",
+      "invariant": "Repeated identical compilation inputs compile once per cache lifetime; retained state is admitted and bounded, current invocation checks are preserved, matching holds no cache mutex and all original reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cache_admission_failures_return_every_partial_charge",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Repeated and varying patterns, compile flags and collations, thirty-two-entry eviction, memory pressure and admission refusal, nested and worker contexts, cancellation, scratch refusal and clearing during an active call.",
+      "invariant": "Repeated identical compilation inputs compile once per cache lifetime; retained state is admitted and bounded, current invocation checks are preserved, matching holds no cache mutex and all original reservations are released."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "regex_cache_is_owned_by_the_session_and_survives_transaction_boundaries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/tests/queries/regex_cache.rs",
+      "capability": "Session regular-expression ownership",
+      "workload": "Repeated SQL predicates through transaction commit/rollback, independent SQLite sessions and portal workers, then session destruction.",
+      "invariant": "Results and NULLs remain exact; the session reuses one retained allocation across statements, peers own independent caches, portal workers share the invoking owner and session destruction returns every retained byte."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "regex_cache_is_shared_with_portal_workers_and_released_when_the_session_ends",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/tests/queries/regex_cache.rs",
+      "capability": "Session regular-expression ownership",
+      "workload": "Repeated SQL predicates through transaction commit/rollback, independent SQLite sessions and portal workers, then session destruction.",
+      "invariant": "Results and NULLs remain exact; the session reuses one retained allocation across statements, peers own independent caches, portal workers share the invoking owner and session destruction returns every retained byte."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_compilation_does_not_evict_a_full_cache_without_memory_pressure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded retained regular expressions",
+      "workload": "Fill all 32 cache slots, compile an invalid pattern, then visit every retained pattern again.",
+      "invariant": "The invalid pattern returns 2201B without evicting a valid pattern, changing retained bytes or recompiling any cached pattern."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "exhausted_retention_preserves_compilation_results_and_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Exhaust cache retention while executing valid, invalid and excessively complex patterns, refuse actual compilation scratch, and transfer completed state between shared or separate owners.",
+      "invariant": "Retention capacity cannot alter compilation results or PostgreSQL diagnostics; transient compilation uses its original allowance, completed retained state remains charged, and every lease is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "completed_compilations_transfer_only_their_live_bytes_to_retention",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Bounded SQL regular-expression reuse",
+      "workload": "Exhaust cache retention while executing valid, invalid and excessively complex patterns, refuse actual compilation scratch, and transfer completed state between shared or separate owners.",
+      "invariant": "Retention capacity cannot alter compilation results or PostgreSQL diagnostics; transient compilation uses its original allowance, completed retained state remains charged, and every lease is released."
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "executable_analysis_derives_each_query_result_once",
@@ -15360,6 +15581,32 @@
       "capability": "Shared ordered statement analysis",
       "workload": "A procedural query occurrence with a numeric modifier under one retained binding scope.",
       "invariant": "One block analysis preserves the result modifier and releases the original catalog scope."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "impossible_admission_preserves_idle_patterns_under_shared_and_parent_pressure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Regex retention admission",
+      "workload": "Completed-state admission under pressure from an independent retained owner, with shared or separate compilation budgets and a limiting parent allowance.",
+      "invariant": "Impossible key/state requests preserve idle compiled patterns and existing hits do not recompile; all reservations release."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admission_reclaims_only_useful_idle_entries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/regex/cache/tests.rs",
+      "capability": "Regex retention admission",
+      "workload": "Two retained patterns and an exhausted allowance admit a small completed state by evicting the older pattern.",
+      "invariant": "Admission succeeds, the newer pattern remains a cache hit, only the removed pattern recompiles, and all memory releases."
     },
     {
       "package": "uqa-storage-sqlite",

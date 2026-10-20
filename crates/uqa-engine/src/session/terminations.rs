@@ -207,6 +207,9 @@ impl Engine {
                 break;
             }
         }
+        if let Some(cache) = self.session.regex_cache.lock().take() {
+            cache.clear();
+        }
         let _ = self.clear_notification_listener_without_transaction();
         self.release_automatic_statistics_client();
     }

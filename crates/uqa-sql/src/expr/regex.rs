@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL regular expressions, evaluated by `PostgreSQL` 18.4's Advanced Regular Expression engine as `src/backend/utils/adt/regexp.c` calls it. Compiled expressions and their working memory are local to one call and charged to its allowance; only admitted `Value` payloads cross the result boundary.
+//! SQL regular expressions, evaluated by `PostgreSQL` 18.4's Advanced Regular Expression engine as `src/backend/utils/adt/regexp.c` calls it. Compiled expressions may remain in the session’s bounded, admitted cache. Each search uses the invoking call’s scratch and cancellation; only admitted `Value` payloads cross the result boundary.
 
 use crate::error::{Result, SQLError};
 use std::borrow::Cow;
@@ -13,6 +13,8 @@ use uqa_core::{
     Value,
 };
 
+mod cache;
+pub use cache::{current_regex_cache, RegexCache, RegexCacheScope};
 mod engine;
 mod flags;
 mod match_set;

@@ -1,6 +1,6 @@
 # Implementation plans
 
-The [SQLite page-cache correction](sqlite-page-cache.md) adopts the published managed driver for #348; fork publication and local UQA provider/spill/file-mode plus actual 0.3.6 migration verification are complete in [PR #1144](https://github.com/cognica-io/uqa-engine/pull/1144); automatic platform acceptance remains pending.
+The [open performance ledger](open-performance-corrections.md) preserves all six original issues and their source-scoped evidence. The [SQLite page-cache correction](sqlite-page-cache.md) is merged in [PR #1144](https://github.com/cognica-io/uqa-engine/pull/1144), closing #348 after local and actual Linux/macOS qualification. Regex #1063 passes its final controlled comparison; current platform and remaining COPY, type, analysis and historical-noise obligations are recorded in the ledger.
 
 The [statement-analysis reuse correction](statement-analysis-reuse.md) removes the duplicate result-analysis pass in #1117. Local tests reproduce two block analyses before the correction and one afterward; the complete local SQL suite, 1,469 selected Engine cases and actual Linux/macOS regression checks pass. Each platform verifies 1,143 checks / 1,643 cases and eight independent-process histories at source `4645582ad1eb5652df0274139c4dd389fad2e4cb`. The plan preserves all six original performance issues and the remaining execution, privilege, type-resolution and timing obligations.
 

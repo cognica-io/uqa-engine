@@ -28,3 +28,18 @@ pub trait RegexResources {
     /// Under Emscripten the engine's calls run on the WebAssembly call stack, which can be neither measured nor switched. There `depth` is the upper bound on live engine frames across every operation on the thread, times a fixed charge per frame, so it does not start again at zero in an operation that a hook runs. The charge is calibrated so that [`crate::MAX_STACK_DEPTH`] corresponds to half of V8's default stack at the largest engine frame measured, 1493 frames, which leaves the other half to the embedding: every compilation and execution fails with `REG_ETOOBIG` before it can exhaust the call stack, whatever its pattern and input.
     fn stack_too_deep(&mut self, depth: usize) -> bool;
 }
+
+impl<T: RegexResources + ?Sized> RegexResources for &mut T {
+    fn reserve(&mut self, bytes: usize) -> bool {
+        (**self).reserve(bytes)
+    }
+    fn release(&mut self, bytes: usize) {
+        (**self).release(bytes);
+    }
+    fn cancel_requested(&mut self) -> bool {
+        (**self).cancel_requested()
+    }
+    fn stack_too_deep(&mut self, depth: usize) -> bool {
+        (**self).stack_too_deep(depth)
+    }
+}

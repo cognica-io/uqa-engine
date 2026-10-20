@@ -13,6 +13,10 @@ use uqa_sql::expr::{
 
 /// Assert that the invoking thread runs under `engine`'s statement thread context with `clock`.
 fn assert_session_context(engine: &Engine, clock: Option<i64>) {
+    assert!(std::sync::Arc::ptr_eq(
+        &uqa_sql::expr::current_regex_cache().unwrap(),
+        &engine.session_regex_cache()
+    ));
     assert_eq!(transaction_clock_micros(), clock);
     assert_eq!(temporal_date_order(), TemporalDateOrder::DayMonthYear);
     assert_eq!(
