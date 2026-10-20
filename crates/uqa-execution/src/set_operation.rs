@@ -380,6 +380,7 @@ pub struct ExternalSetOperation<'a> {
     right_group: Option<RowGroup>,
     pending_row: Option<PhysicalRow>,
     pending_count: usize,
+    output_bytes: usize,
     union_all_left_done: bool,
     incremental_union_all: bool,
     directional_position: DirectionalAppendPosition,
@@ -501,6 +502,7 @@ impl<'a> ExternalSetOperation<'a> {
             right_group: None,
             pending_row: None,
             pending_count: 0,
+            output_bytes: work_mem_bytes,
             union_all_left_done: false,
             incremental_union_all: false,
             directional_position: DirectionalAppendPosition::BeforeFirst,
@@ -509,6 +511,7 @@ impl<'a> ExternalSetOperation<'a> {
 
     fn next_union_all(&mut self) -> ExecResult<Option<Batch>> {
         let mut rows = Vec::with_capacity(DEFAULT_BATCH_SIZE);
+        let mut size = crate::spill::EncodedBatchSizer::new(&self.schema)?;
         while rows.len() < DEFAULT_BATCH_SIZE {
             let next = if self.union_all_left_done {
                 self.right.next_row()?
@@ -521,7 +524,12 @@ impl<'a> ExternalSetOperation<'a> {
             let Some(row) = next else {
                 break;
             };
-            rows.push(row.without_lock_origins());
+            let row = row.without_lock_origins();
+            size.append(&row)?;
+            rows.push(row);
+            if size.bytes() >= self.output_bytes {
+                break;
+            }
         }
         if rows.is_empty() {
             Ok(None)
@@ -727,6 +735,7 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
             };
         }
         let mut rows = Vec::with_capacity(DEFAULT_BATCH_SIZE);
+        let mut size = crate::spill::EncodedBatchSizer::new(&self.schema)?;
         while rows.len() < DEFAULT_BATCH_SIZE {
             if self.pending_count > 0 {
                 let row = self.pending_row.as_ref().ok_or_else(|| {
@@ -734,10 +743,14 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
                         "set-operation has pending multiplicity without a pending row".into(),
                     )
                 })?;
+                size.append(row)?;
                 rows.push(row.clone());
                 self.pending_count -= 1;
                 if self.pending_count == 0 {
                     self.pending_row = None;
+                }
+                if size.bytes() >= self.output_bytes {
+                    break;
                 }
                 continue;
             }
@@ -800,6 +813,7 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
 #[cfg(test)]
 mod tests {
     mod enums;
+    mod memory;
     mod ranges;
     use super::*;
     use crate::physical::run_to_rows;
