@@ -12,6 +12,7 @@ use crate::{
     plan::{CtePlan, QueryPlan},
     SQLError,
 };
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy)]
@@ -65,12 +66,12 @@ pub trait PrivilegeCteCatalog {
     fn privilege_subject(&self) -> Result<&RoleReference, SQLError>;
 }
 #[derive(Clone)]
-pub struct PrivilegeScope<'a> {
+pub struct PrivilegeScope<'a, Queries = Vec<QueryPlan>> {
     pub catalog: &'a dyn PrivilegeCatalog,
     pub resolution: RelationNameResolution,
     pub inherited: &'a dyn PrivilegeCteCatalog,
-    pub scalar_subqueries: Vec<QueryPlan>,
-    local_ctes: BTreeMap<String, CtePlan>,
+    pub scalar_subqueries: Queries,
+    local_ctes: BTreeMap<String, Cow<'a, CtePlan>>,
     pub(super) include_authorization_only_columns: bool,
 }
 impl<'a> PrivilegeScope<'a> {
@@ -89,8 +90,50 @@ impl<'a> PrivilegeScope<'a> {
             include_authorization_only_columns: true,
         }
     }
+}
+
+impl<'a> PrivilegeScope<'a, &'a [QueryPlan]> {
+    /// Borrow the executing statement's immutable query arena without copying its plans. The owned constructor and its public vector remain available for callers that retain a scope.
+    pub fn borrowed(
+        catalog: &'a dyn PrivilegeCatalog,
+        resolution: RelationNameResolution,
+        inherited: &'a dyn PrivilegeCteCatalog,
+        scalar_subqueries: &'a [QueryPlan],
+    ) -> Self {
+        Self {
+            catalog,
+            resolution,
+            inherited,
+            scalar_subqueries,
+            local_ctes: BTreeMap::new(),
+            include_authorization_only_columns: true,
+        }
+    }
+}
+
+impl<'a, Queries: AsRef<[QueryPlan]>> PrivilegeScope<'a, Queries> {
     pub fn insert_deferred(&mut self, plan: CtePlan) {
-        self.local_ctes.insert(plan.name.clone(), plan);
+        self.local_ctes.insert(plan.name.clone(), Cow::Owned(plan));
+    }
+
+    pub(super) fn insert_deferred_ref(&mut self, plan: &'a CtePlan) {
+        self.local_ctes
+            .insert(plan.name.clone(), Cow::Borrowed(plan));
+    }
+
+    pub(super) fn reborrow(&self) -> PrivilegeScope<'_, &[QueryPlan]> {
+        PrivilegeScope {
+            catalog: self.catalog,
+            resolution: self.resolution.clone(),
+            inherited: self.inherited,
+            scalar_subqueries: self.scalar_subqueries.as_ref(),
+            local_ctes: self
+                .local_ctes
+                .iter()
+                .map(|(name, plan)| (name.clone(), Cow::Borrowed(plan.as_ref())))
+                .collect(),
+            include_authorization_only_columns: self.include_authorization_only_columns,
+        }
     }
     pub fn is_visible_cte(&self, name: &str) -> bool {
         crate::semantics::cte_reference_name(name)
@@ -108,6 +151,7 @@ impl<'a> PrivilegeScope<'a> {
     pub fn deferred_reference(&self, name: &str) -> Option<&CtePlan> {
         self.local_ctes
             .get(&crate::semantics::cte_reference_name(name)?)
+            .map(AsRef::as_ref)
             .or_else(|| self.inherited.deferred_reference(name))
     }
 

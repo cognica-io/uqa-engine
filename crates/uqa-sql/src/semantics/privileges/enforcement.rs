@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 pub(super) fn ensure_required_select(
     lineage: &SourceLineage,
     required: &BTreeSet<BaseColumn>,
-    scope: &PrivilegeScope<'_>,
+    scope: &PrivilegeScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
 ) -> Result<(), SQLError> {
     let mut resolution = scope.resolution.clone();
     resolution.set_lookup_mode(RelationLookupMode::Bound);
