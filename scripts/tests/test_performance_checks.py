@@ -91,6 +91,26 @@ class PerformanceChecksTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "source must belong"):
                     self.write_inventory()
 
+    def test_source_inventory_rejects_wrong_harness_before_building(self):
+        for directory, correct, wrong in (("src", "lib", "test"), ("tests", "test", "lib")):
+            with self.subTest(directory=directory):
+                self.check["source"] = f"crates/uqa-example/{directory}/checks.rs"
+                source = self.root / self.check["source"]
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text("fn bounded_work() {}\n", encoding="utf-8")
+                self.check["kind"] = correct
+                self.write_inventory()
+                self.check["kind"] = wrong
+                with self.assertRaisesRegex(ValueError, "source and harness kind differ"):
+                    self.write_inventory()
+
+    def test_source_inventory_rejects_sources_outside_existing_harnesses(self):
+        for source in ("crates/uqa-example", "crates/uqa-example/benches/checks.rs"):
+            with self.subTest(source=source):
+                self.check["source"] = source
+                with self.assertRaisesRegex(ValueError, "source and harness kind differ"):
+                    self.write_inventory()
+
     def test_duplicate_empty_and_unknown_inventories_fail(self):
         for checks, schema in (([self.check, self.check], 1), ([], 1), ([self.check], 2)):
             with self.subTest(checks=checks, schema=schema), self.assertRaises(ValueError):

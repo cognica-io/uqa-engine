@@ -59,6 +59,13 @@ def inventory(path: pathlib.Path = MANIFEST) -> list[dict]:
             "crates", package
         ):
             raise ValueError("test source must belong to the selected crate")
+        source_kind = {"src": "lib", "tests": "test"}.get(
+            source.parts[2] if len(source.parts) > 2 else ""
+        )
+        if source_kind != check["kind"]:
+            raise ValueError(
+                f"test source and harness kind differ: {source}: {check['kind']}"
+            )
         text = (ROOT / source).read_text(encoding="utf-8")
         if not re.search(r"\bfn " + re.escape(test) + r"\s*\(", text):
             raise ValueError(f"missing test definition: {source}: {test}")
