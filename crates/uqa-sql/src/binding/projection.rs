@@ -19,6 +19,9 @@ use crate::routines::RoutineResolution;
 
 type ProjectionStarColumn = (String, Option<ColumnType>, Option<u32>);
 
+#[cfg(test)]
+mod tests;
+
 pub(super) struct ProjectionMetadata {
     pub ty: Option<ColumnType>,
     pub collation: Option<u32>,
@@ -169,38 +172,40 @@ pub fn validate_query_block_expression_types(
         scalar_subquery_types: Some(scalar_subquery_types),
         defer_routine_namespace_errors: true,
     };
-    for expression in statement
-        .projections
+    let resolve =
+        |expression| crate::scalar_type_with_resolver(expression, schema, params, &resolver);
+    for projection in &statement.projections {
+        resolve(&projection.expr)?;
+    }
+    let mut equality_types = statement
+        .group_by
         .iter()
-        .map(|projection| &projection.expr)
-        .chain(statement.group_by.iter())
         .chain(statement.grouping_sets.iter().flatten())
-        .chain(statement.order_by.iter().map(|order| &order.expr))
-        .chain(statement.distinct_on.iter())
-        .chain(statement.r#where.iter())
+        .map(resolve)
+        .collect::<Result<Vec<_>, _>>()?;
+    let ordering_types = statement
+        .order_by
+        .iter()
+        .map(|order| resolve(&order.expr))
+        .collect::<Result<Vec<_>, _>>()?;
+    for expression in &statement.distinct_on {
+        equality_types.push(resolve(expression)?);
+    }
+    for expression in statement
+        .r#where
+        .iter()
         .chain(statement.having.iter())
         .chain(statement.limit.iter())
         .chain(statement.offset.iter())
     {
-        crate::scalar_type_with_resolver(expression, schema, params, &resolver)?;
+        resolve(expression)?;
     }
-    for expression in statement
-        .group_by
-        .iter()
-        .chain(statement.grouping_sets.iter().flatten())
-        .chain(statement.distinct_on.iter())
-    {
-        if let Some(ty) = crate::scalar_type_with_resolver(expression, schema, params, &resolver)? {
-            crate::type_resolution::ComparisonSupport::Equality
-                .require_in_catalog(&ty, routines)?;
-        }
+    // All expression type errors still precede capability checks. These selections belong only to this invocation's immutable input scope.
+    for ty in equality_types.iter().flatten() {
+        crate::type_resolution::ComparisonSupport::Equality.require_in_catalog(ty, routines)?;
     }
-    for order in &statement.order_by {
-        if let Some(ty) = crate::scalar_type_with_resolver(&order.expr, schema, params, &resolver)?
-        {
-            crate::type_resolution::ComparisonSupport::Ordering
-                .require_in_catalog(&ty, routines)?;
-        }
+    for ty in ordering_types.iter().flatten() {
+        crate::type_resolution::ComparisonSupport::Ordering.require_in_catalog(ty, routines)?;
     }
     Ok(())
 }

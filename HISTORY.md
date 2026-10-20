@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse the types selected during GROUP BY, GROUPING SETS, DISTINCT ON and ORDER BY validation when checking comparison support, preserving expression-error precedence without resolving the same clause twice.
+
 - Reuse selected builtin numeric operators within an immutable expression and input schema, preserving per-row conversions, result widths, invoking privileges, cancellation and memory ownership.
 
 - Reject oversized `lpad`, `rpad` and `repeat` output before allocation using PostgreSQL's integer-count and text-size limits, preserving empty-fill, NULL and memory-allowance behavior.
