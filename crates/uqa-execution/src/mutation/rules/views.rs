@@ -10,7 +10,7 @@ use crate::mutation::output::MutationOutput;
 use crate::{
     mutation::{
         returning::{DmlReturningShape, ReturningExecutionContext},
-        rules::{RuleContext, RuleInputProjection},
+        rules::{RuleContext, RuleInputProjection, RuleSuppression},
         views::ViewRowContext,
     },
     query::CteScope,
@@ -36,7 +36,7 @@ struct PreparedViewRuleLayer {
 pub struct PreparedViewRuleBatches {
     event: uqa_sql::ast::RuleEvent,
     layers: Vec<PreparedViewRuleLayer>,
-    suppress_original: Vec<bool>,
+    suppress_original: RuleSuppression,
 }
 
 pub struct ViewRuleReturningCapture {
@@ -78,16 +78,20 @@ impl ViewRuleReturningCapture {
 }
 
 impl PreparedViewRuleBatches {
-    fn empty(row_count: usize, event: uqa_sql::ast::RuleEvent) -> Self {
+    fn empty(
+        row_count: usize,
+        event: uqa_sql::ast::RuleEvent,
+        cancellation: uqa_core::CancellationToken,
+    ) -> Self {
         Self {
             event,
             layers: Vec::new(),
-            suppress_original: vec![false; row_count],
+            suppress_original: RuleSuppression::new(row_count, cancellation),
         }
     }
 
-    pub fn suppresses(&self, index: usize) -> bool {
-        self.suppress_original.get(index).copied().unwrap_or(false)
+    pub fn suppresses(&self, index: usize) -> Result<bool, SQLError> {
+        self.suppress_original.suppresses(index)
     }
 
     pub fn configure_action_qualification(&mut self, row_independent_count: Option<usize>) {
@@ -405,9 +409,17 @@ pub fn prepare_view_rule_batches<S: Clone + 'static, R: super::RuleEventSource +
         document_relation,
     } = request;
     if relations.is_empty() {
-        return Ok(PreparedViewRuleBatches::empty(rows.event_count(), event));
+        return Ok(PreparedViewRuleBatches::empty(
+            rows.event_count(),
+            event,
+            context.rules.cancellation.clone(),
+        ));
     }
-    let mut prepared = PreparedViewRuleBatches::empty(rows.event_count(), event);
+    let mut prepared = PreparedViewRuleBatches::empty(
+        rows.event_count(),
+        event,
+        context.rules.cancellation.clone(),
+    );
     for relation in relations {
         let required_columns = BTreeSet::new();
         let insert_plan = insert_plans.iter().find(|plan| plan.relation == *relation);
@@ -422,9 +434,12 @@ pub fn prepare_view_rule_batches<S: Clone + 'static, R: super::RuleEventSource +
             params,
             scope,
         };
-        let row_indices = (0..rows.event_count())
-            .filter(|index| !prepared.suppress_original[*index])
-            .collect::<Vec<_>>();
+        let mut row_indices = Vec::new();
+        for index in 0..rows.event_count() {
+            if !prepared.suppresses(index)? {
+                row_indices.push(index);
+            }
+        }
         let view_rows = super::RuleRows::from_rows(
             row_indices.iter().map(|index| {
                 let row = rows.event_row(*index)?;
@@ -502,8 +517,8 @@ pub fn prepare_view_rule_batches<S: Clone + 'static, R: super::RuleEventSource +
             batch.supplement_rows_from_iter(supplemental_rows)?;
         }
         for (local_index, row_index) in row_indices.iter().copied().enumerate() {
-            if batch.suppresses(local_index) {
-                prepared.suppress_original[row_index] = true;
+            if batch.suppresses(local_index)? {
+                prepared.suppress_original.suppress(row_index)?;
             }
         }
         prepared.layers.push(PreparedViewRuleLayer {

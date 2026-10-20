@@ -6,6 +6,9 @@
 
 //! `PostgreSQL` rewrite-rule qualification, OLD/NEW binding, action ordering, and recursion checks.
 
+mod suppression;
+pub(crate) use suppression::RuleSuppression;
+
 mod indices;
 use indices::{RuleIndexBuffer, RuleIndices};
 
@@ -63,7 +66,7 @@ pub struct PreparedRuleBatch {
     event: RuleEvent,
     rows: RuleRows,
     rules: Vec<PreparedRule>,
-    suppress_original: Vec<bool>,
+    suppress_original: RuleSuppression,
     action_qualification_count: Option<usize>,
     work_mem: usize,
     cancellation: uqa_core::CancellationToken,
@@ -94,8 +97,8 @@ impl PreparedRuleBatch {
         self.action_qualification_count = Some(count);
     }
 
-    pub fn suppresses(&self, index: usize) -> bool {
-        self.suppress_original.get(index).copied().unwrap_or(false)
+    pub fn suppresses(&self, index: usize) -> Result<bool, SQLError> {
+        self.suppress_original.suppresses(index)
     }
 
     pub fn matched_action_row_columns(&self) -> Result<Vec<BTreeSet<String>>, SQLError> {
@@ -534,7 +537,7 @@ where
         return Ok(PreparedRuleBatch {
             table,
             event,
-            suppress_original: vec![false; rows.len()],
+            suppress_original: RuleSuppression::new(rows.len(), cancellation.clone()),
             rows,
             rules: Vec::new(),
             action_qualification_count: None,
@@ -544,14 +547,14 @@ where
     }
     let columns = rule_columns(context.analysis, &table)?;
     let privilege_subject = context.security.privilege_subject(&table)?;
-    let mut suppress_original = vec![false; rows.len()];
+    let mut suppress_original = RuleSuppression::new(rows.len(), cancellation.clone());
     let mut prepared_rules = Vec::with_capacity(rules.len());
     for rule in rules {
         let mut prepared = prepare_rule_actions(context, rule, &columns)?;
         if prepared.rule.definition.condition.is_none() {
             prepared.matching_rows = RuleIndices::all(rows.len(), cancellation.clone());
             if prepared.rule.definition.instead {
-                suppress_original.fill(true);
+                suppress_original.suppress_all()?;
             }
             prepared_rules.push(prepared);
             continue;
@@ -571,7 +574,7 @@ where
             )? {
                 matching_rows.push(index)?;
                 if prepared.rule.definition.instead {
-                    suppress_original[index] = true;
+                    suppress_original.suppress(index)?;
                 }
             }
             projected.push(row)?;

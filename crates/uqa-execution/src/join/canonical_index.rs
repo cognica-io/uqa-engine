@@ -12,7 +12,6 @@ use std::path::Path;
 use uqa_storage::temporary_file::TemporaryFile as File;
 
 use tempfile::{Builder as TempBuilder, TempDir};
-use uqa_storage::temporary_file::TemporaryFile as NamedTempFile;
 
 use crate::distinct::EncodedKey;
 use crate::{ExecError, ExecResult};
@@ -20,59 +19,6 @@ use crate::{ExecError, ExecResult};
 use super::join_io_error;
 
 pub(super) const HASH_BUCKETS: u64 = 64;
-
-/// One byte per build-side row, held in a temporary file rather than a cardinality-sized `Vec<bool>`. Random updates are required for RIGHT/FULL joins and remain constant-memory.
-pub(super) struct MatchFlags {
-    file: NamedTempFile,
-    rows: u64,
-}
-
-impl MatchFlags {
-    pub(super) fn new(rows: u64) -> ExecResult<Self> {
-        let file =
-            NamedTempFile::new().map_err(|error| join_io_error("create match flags", error))?;
-        file.as_file()
-            .set_len(rows)
-            .map_err(|error| join_io_error("size match flags", error))?;
-        Ok(Self { file, rows })
-    }
-
-    pub(super) fn mark(&mut self, index: u64) -> ExecResult<()> {
-        self.check_index(index)?;
-        self.file
-            .as_file_mut()
-            .seek(SeekFrom::Start(index))
-            .map_err(|error| join_io_error("seek match flags", error))?;
-        self.file
-            .as_file_mut()
-            .write_all(&[1])
-            .map_err(|error| join_io_error("write match flag", error))
-    }
-
-    pub(super) fn is_marked(&mut self, index: u64) -> ExecResult<bool> {
-        self.check_index(index)?;
-        self.file
-            .as_file_mut()
-            .seek(SeekFrom::Start(index))
-            .map_err(|error| join_io_error("seek match flags", error))?;
-        let mut flag = [0_u8; 1];
-        self.file
-            .as_file_mut()
-            .read_exact(&mut flag)
-            .map_err(|error| join_io_error("read match flag", error))?;
-        Ok(flag[0] != 0)
-    }
-
-    pub(super) fn check_index(&self, index: u64) -> ExecResult<()> {
-        if index >= self.rows {
-            return Err(ExecError::Other(format!(
-                "join match flag {index} is outside 0..{}",
-                self.rows
-            )));
-        }
-        Ok(())
-    }
-}
 
 /// Exact, work-memory-bounded build-side hash index. It starts in memory and
 /// migrates atomically to bucketed temporary files before the encoded key and

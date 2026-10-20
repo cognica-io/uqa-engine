@@ -369,9 +369,12 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         },
     )?;
     view_rule_batches.configure_action_qualification(Some(update_qualification_count));
-    let base_rule_indices = (0..rule_rows.len())
-        .filter(|index| !view_rule_batches.suppresses(*index))
-        .collect::<Vec<_>>();
+    let mut base_rule_indices = Vec::new();
+    for index in 0..rule_rows.len() {
+        if !view_rule_batches.suppresses(index)? {
+            base_rule_indices.push(index);
+        }
+    }
     let mut rule_batch = (has_update_rules && view_original_query)
         .then(|| {
             crate::mutation::rules::prepare_retained_rule_batch(
@@ -389,10 +392,13 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
     if let Some(rule_batch) = rule_batch.as_mut() {
         rule_batch.set_action_qualification_count(update_qualification_count);
     }
-    let mut base_rule_suppressed = vec![false; rule_rows.len()];
+    let mut base_rule_suppressed =
+        crate::mutation::rules::RuleSuppression::new(rule_rows.len(), cancel.clone());
     if let Some(rule_batch) = rule_batch.as_ref() {
         for (local_index, global_index) in base_rule_indices.iter().copied().enumerate() {
-            base_rule_suppressed[global_index] = rule_batch.suppresses(local_index);
+            if rule_batch.suppresses(local_index)? {
+                base_rule_suppressed.suppress(global_index)?;
+            }
         }
     }
     let view_rule_outcome = view_rule_batches.execute_actions_with_affected(
@@ -442,8 +448,9 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
     }
     let overlay = MutationOverlayScope::new(context.mutation.state);
     let mut events = crate::mutation::events::MutationEventQueue::default();
-    for (index, base_suppressed) in base_rule_suppressed.iter().copied().enumerate() {
-        if view_rule_batches.suppresses(index) || base_suppressed {
+    for index in 0..rule_rows.len() {
+        let base_suppressed = base_rule_suppressed.suppresses(index)?;
+        if view_rule_batches.suppresses(index)? || base_suppressed {
             continue;
         }
         let candidate = rule_rows.get(index)?.into_rewrite_candidate()?;

@@ -687,7 +687,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             )?;
             let mut pending_base_rows = PendingInsertRows::new(work_mem, cancel.clone());
             for index in 0..pending_rule_rows.len() {
-                if view_rule_batches.suppresses(index) {
+                if view_rule_batches.suppresses(index)? {
                     continue;
                 }
                 let mut document = pending_rule_rows.get(index)?.document;
@@ -746,7 +746,9 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 for rule_index in 0..pending_base_rows.len() {
                     if rule_batch
                         .as_ref()
-                        .is_some_and(|rule_batch| rule_batch.suppresses(rule_index))
+                        .map(|rule_batch| rule_batch.suppresses(rule_index))
+                        .transpose()?
+                        .unwrap_or(false)
                     {
                         continue;
                     }

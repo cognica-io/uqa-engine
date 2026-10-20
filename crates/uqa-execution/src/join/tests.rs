@@ -100,6 +100,52 @@ fn hash_full_join_preserves_unmatched_rows() {
 }
 
 #[test]
+fn nested_loop_outer_flags_preserve_matches_and_unmatched_rows() {
+    for (kind, bytes) in [
+        (JoinKind::Right, 1),
+        (JoinKind::Right, 64 * 1024),
+        (JoinKind::Full, 1),
+        (JoinKind::Full, 64 * 1024),
+    ] {
+        let full = matches!(kind, JoinKind::Full);
+        let left = TableScan::from_rows(
+            vec!["l.id".into()],
+            [1, 2].map(|id| row(&[("l.id", Value::Int(id))])).into(),
+        );
+        let right = TableScan::from_rows(
+            vec!["r.id".into()],
+            [2, 3].map(|id| row(&[("r.id", Value::Int(id))])).into(),
+        );
+        let mut join = NestedLoopJoin::new_with_work_mem(
+            Box::new(left),
+            Box::new(right),
+            kind,
+            Some(ScalarExpr::Binary {
+                op: uqa_sql::ast::BinaryOp::Equal,
+                lhs: Box::new(ScalarExpr::Column("l.id".into())),
+                rhs: Box::new(ScalarExpr::Column("r.id".into())),
+            }),
+            evaluator(),
+            row(&[("l.id", Value::Null)]),
+            row(&[("r.id", Value::Null)]),
+            bytes,
+        );
+        let (_, actual) = run_to_rows(&mut join).unwrap();
+        let mut expected = vec![
+            row(&[("l.id", Value::Int(2)), ("r.id", Value::Int(2))]),
+            row(&[("l.id", Value::Null), ("r.id", Value::Int(3))]),
+        ];
+        if full {
+            expected.push(row(&[("l.id", Value::Int(1)), ("r.id", Value::Null)]));
+        }
+        assert_eq!(actual.len(), expected.len());
+        for row in expected {
+            assert!(actual.contains(&row), "{actual:?}");
+        }
+    }
+}
+
+#[test]
 fn hash_join_applies_residual_predicate_before_marking_matches() {
     let left = TableScan::from_rows(
         vec!["l.k".into(), "l.v".into()],

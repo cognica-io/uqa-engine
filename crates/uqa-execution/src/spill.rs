@@ -27,7 +27,9 @@ use uqa_storage::temporary_file::TemporaryFile as NamedTempFile;
 mod file;
 mod format;
 mod indexed;
+mod match_flags;
 pub(crate) use file::SpillFileArena;
+pub(crate) use match_flags::MatchFlags;
 
 use format::{
     append_batches, decode_batch, encoded_batch_overhead_size, encoded_batch_size,
