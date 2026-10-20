@@ -17595,6 +17595,32 @@
       "workload": "Self-referencing ordinary and PERIOD foreign keys, a trigger-suppressed child, savepoint recovery, replacement parent coverage, complete deletion and persistent reopen on four providers.",
       "invariant": "Selection, SQLSTATE 23503, deferred repair and durable empty results match independent PostgreSQL 18.4 under 64KiB work_mem.",
       "capability": "Bounded DELETE identity ownership"
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "explicit_memory_tier_limit_spills_with_admitted_metadata_and_survives_fork",
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Zero resident-tier threshold, admitted 64KiB storage workspace, immutable snapshot and forked private keys.",
+      "invariant": "Each write retains at most one resident key; earlier spill preserves exact snapshot/fork state within the unchanged hard allowance.",
+      "capability": "Bounded physical membership spill"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_row_membership_spills_below_one_key_without_losing_exact_keys",
+      "source": "crates/uqa-execution/src/mutation/deleted_rows/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "256 descending physical keys at work_mem 0, 1 and 80, duplicate keys, distinct partitions and u64::MAX.",
+      "invariant": "Spill occurs without enlarging the resident threshold; exact membership passes the unchanged 512KiB peak ceiling with admitted fixed metadata/I/O workspace.",
+      "capability": "Bounded physical membership spill"
     }
   ]
 }

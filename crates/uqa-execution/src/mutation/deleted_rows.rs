@@ -15,6 +15,9 @@ use uqa_storage::{
 
 pub(crate) type DeletedRowLookup<'a> = dyn Fn(&str, DocId) -> Result<bool, SQLError> + 'a;
 
+/// Ordered spill needs fixed run metadata and I/O scratch even when `work_mem` forces every key to disk.
+const SPILL_WORKSPACE_BYTES: usize = 64 * 1024;
+
 /// Accumulate exact physical keys in the storage owner's bounded ordered runs. The statement freezes them only after its BEFORE triggers have selected all rows.
 pub(crate) struct DeletedRowBuffer {
     records: PrivateRecordChanges,
@@ -23,9 +26,14 @@ pub(crate) struct DeletedRowBuffer {
 
 impl DeletedRowBuffer {
     pub(crate) fn new(bytes: usize, cancellation: CancellationToken) -> Self {
-        let memory = MemoryBudget::new(bytes);
+        let memory = MemoryBudget::new(bytes.max(SPILL_WORKSPACE_BYTES));
+        let records = if bytes < SPILL_WORKSPACE_BYTES {
+            PrivateRecordChanges::with_memory_tier_limit(&memory, bytes)
+        } else {
+            PrivateRecordChanges::new(&memory)
+        };
         Self {
-            records: PrivateRecordChanges::new(&memory),
+            records,
             control: StorageReadControl::new(&memory, &cancellation),
         }
     }
