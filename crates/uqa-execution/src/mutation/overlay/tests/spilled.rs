@@ -8,6 +8,97 @@ use super::*;
 use uqa_storage::DocumentStore;
 
 #[test]
+fn wide_rows_spill_with_the_original_unpressured_allowance() {
+    for indexed in [false, true] {
+        let control = StorageReadControl::with_limit(4 << 20);
+        let mut overlays = [CommandMutationOverlay::default()];
+        for id in 1..=512 {
+            let fields = document(i64::try_from(id).unwrap(), &"x".repeat(32 << 10));
+            overlays[0]
+                .stage(
+                    "items",
+                    id,
+                    Some((Arc::new(fields), DocumentMetadata::with_tuple_xmin(17))),
+                    &control,
+                )
+                .unwrap_or_else(|error| panic!("stage row {id}, indexed={indexed}: {error}"));
+            if indexed && id == 1 {
+                assert_eq!(find_a(&mut overlays, 1, &control), Some(1));
+            }
+        }
+        assert!(spills(&overlays[0]));
+        for id in [1, 255, 512] {
+            let row = staged(&overlays[0], id);
+            assert_eq!(row.fields.get("a"), Some(&Value::Int(id as i64)));
+            assert_eq!(row.fields.get("z"), Some(&Value::Str("x".repeat(32 << 10))));
+            assert_eq!(row.metadata.tuple_xmin(), Some(17));
+            assert_eq!(find_a(&mut overlays, id as i64, &control), Some(id));
+        }
+        drop(overlays);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
+fn failure_after_multiple_spill_batches_preserves_the_previous_view_and_writer() {
+    use crate::mutation::overlay::spilled::{row_key, SpilledRows, WriteBatch};
+
+    let control = StorageReadControl::with_limit(4 << 20);
+    let mut spilled = SpilledRows::new(&control).unwrap();
+    spilled
+        .transact(&control, |writer| {
+            let mut batch = WriteBatch::new(&control);
+            batch.push((row_key(1), Some(b"original".to_vec())));
+            writer.write(&mut batch)
+        })
+        .unwrap();
+    let previous = Arc::clone(spilled.view());
+    let error = spilled
+        .transact(&control, |writer| {
+            let mut batch = WriteBatch::new(&control);
+            for id in 1..=64 {
+                batch.push((row_key(id), Some(vec![b'x'; 32 << 10])));
+                if batch.is_full() {
+                    writer.write(&mut batch)?;
+                }
+            }
+            writer.write(&mut batch)?;
+            Err(SQLError::Internal("failure after evaluated writes".into()))
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("failure after evaluated writes"));
+    // A subsequent successful publication must not expose any of the failed batches.
+    spilled
+        .transact(&control, |writer| {
+            let mut batch = WriteBatch::new(&control);
+            batch.push((row_key(65), Some(b"later".to_vec())));
+            writer.write(&mut batch)
+        })
+        .unwrap();
+    for view in [&previous, spilled.view()] {
+        assert_eq!(
+            view.get(&row_key(1), &control).unwrap().unwrap().value(),
+            Some(b"original".as_slice())
+        );
+        assert!(view.get(&row_key(2), &control).unwrap().is_none());
+        assert!(view.get(&row_key(64), &control).unwrap().is_none());
+    }
+    assert!(previous.get(&row_key(65), &control).unwrap().is_none());
+    assert_eq!(
+        spilled
+            .view()
+            .get(&row_key(65), &control)
+            .unwrap()
+            .unwrap()
+            .value(),
+        Some(b"later".as_slice())
+    );
+    drop(previous);
+    drop(spilled);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn nested_publication_and_undo_restore_spilled_rows_and_cached_keys() {
     let (control, held) = pressured();
     let mut overlays = [CommandMutationOverlay::default()];
