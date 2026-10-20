@@ -524,7 +524,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 .unwrap_or_else(|| rule_batch.event_row_count());
             rule_batch.set_action_qualification_count(update_qualification_count);
             if !original_query_survives {
-                let action_columns = rule_batch.matched_action_row_columns();
+                let action_columns = rule_batch.matched_action_row_columns()?;
                 for (row, required) in pending.iter_mut().zip(&action_columns) {
                     evaluate_view_update_assignments(
                         &read_context.mutation.preparation.referential.assignment,

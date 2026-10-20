@@ -6,6 +6,9 @@
 
 //! `PostgreSQL` rewrite-rule qualification, OLD/NEW binding, action ordering, and recursion checks.
 
+mod indices;
+use indices::{RuleIndexBuffer, RuleIndices};
+
 mod returning;
 mod row_source;
 mod rows;
@@ -46,7 +49,7 @@ thread_local! {
 
 struct PreparedRule {
     rule: uqa_sql::catalog::events::StoredRule,
-    matching_rows: Vec<usize>,
+    matching_rows: RuleIndices,
     condition_references_row: bool,
     action_references_row: Vec<bool>,
     action_row_columns: Vec<BTreeSet<String>>,
@@ -95,22 +98,29 @@ impl PreparedRuleBatch {
         self.suppress_original.get(index).copied().unwrap_or(false)
     }
 
-    pub fn matched_action_row_columns(&self) -> Vec<BTreeSet<String>> {
+    pub fn matched_action_row_columns(&self) -> Result<Vec<BTreeSet<String>>, SQLError> {
         let mut rows = vec![BTreeSet::new(); self.rows.len()];
         for rule in &self.rules {
-            for columns in &rule.action_row_columns {
-                for row in &rule.matching_rows {
-                    if let Some(required) = rows.get_mut(*row) {
-                        required.extend(columns.iter().cloned());
-                    }
+            let columns = rule
+                .action_row_columns
+                .iter()
+                .flatten()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            if columns.is_empty() {
+                continue;
+            }
+            for row in rule.matching_rows.reader()? {
+                if let Some(required) = rows.get_mut(row?) {
+                    required.extend(columns.iter().cloned());
                 }
             }
         }
-        rows
+        Ok(rows)
     }
 
     pub fn missing_action_row_columns(&self) -> Result<Vec<MissingRuleRowColumns>, SQLError> {
-        self.matched_action_row_columns()
+        self.matched_action_row_columns()?
             .into_iter()
             .zip(self.rows.iter())
             .map(|(columns, row)| {
@@ -225,7 +235,8 @@ impl PreparedRuleBatch {
                     && prepared.rule.bound_condition_plan().is_some()
                 {
                     let mut output = RuleRowBuffer::new(self.work_mem, self.cancellation.clone());
-                    let mut matched = Vec::new();
+                    let mut matched =
+                        RuleIndexBuffer::new(self.work_mem, self.cancellation.clone())?;
                     for (row_index, row) in self.rows.iter().enumerate() {
                         let mut row = row?;
                         if rule_condition_matches(
@@ -237,23 +248,23 @@ impl PreparedRuleBatch {
                             &columns,
                             &mut |_, _, _| Ok(RuleInputProjection::default()),
                         )? {
-                            matched.push(row_index);
+                            matched.push(row_index)?;
                         }
                         output.push(row)?;
                     }
                     reevaluated_rows = output.finish();
-                    reevaluated_matching_rows = matched;
-                    (reevaluated_matching_rows.as_slice(), &reevaluated_rows)
+                    reevaluated_matching_rows = matched.finish()?;
+                    (&reevaluated_matching_rows, &reevaluated_rows)
                 } else {
-                    (prepared.matching_rows.as_slice(), &self.rows)
+                    (&prepared.matching_rows, &self.rows)
                 };
                 let action_returns = statement_has_returning(action);
                 let captures_action = request.captures() && action_returns;
                 let mut captures_source_context = false;
                 if captures_action && matches!(action, Statement::Update(_) | Statement::Delete(_))
                 {
-                    for index in action_matching_rows {
-                        if action_rows.get(*index)?.context.is_some() {
+                    for index in action_matching_rows.reader()? {
+                        if action_rows.get(index?)?.context.is_some() {
                             captures_source_context = true;
                             break;
                         }
@@ -292,8 +303,9 @@ impl PreparedRuleBatch {
                         }
                     }
                     qualification_rows = matched.finish();
-                    qualification_indices = (0..matched_count).collect::<Vec<_>>();
-                    (qualification_indices.as_slice(), &qualification_rows)
+                    qualification_indices =
+                        RuleIndices::all(matched_count, self.cancellation.clone());
+                    (&qualification_indices, &qualification_rows)
                 } else {
                     (action_matching_rows, action_rows)
                 };
@@ -329,7 +341,7 @@ impl PreparedRuleBatch {
                 {
                     (
                         bind_insert_values_action_from_rows(
-                            matching_rows.iter().map(|index| rows.get(*index)),
+                            matching_rows.reader()?.map(|index| rows.get(index?)),
                             &columns,
                             &bind_action,
                         )?,
@@ -338,9 +350,10 @@ impl PreparedRuleBatch {
                     )
                 } else if needs_row_source {
                     let (bound, scope) = row_source::bind_retained_action_from_rows(
-                        matching_rows
-                            .iter()
-                            .map(|index| rows.get(*index).map(|row| (*index, row))),
+                        matching_rows.reader()?.map(|index| {
+                            let index = index?;
+                            rows.get(index).map(|row| (index, row))
+                        }),
                         &columns,
                         context.memory.work_mem_bytes()?,
                         context.cancellation,
@@ -536,7 +549,7 @@ where
     for rule in rules {
         let mut prepared = prepare_rule_actions(context, rule, &columns)?;
         if prepared.rule.definition.condition.is_none() {
-            prepared.matching_rows.extend(0..rows.len());
+            prepared.matching_rows = RuleIndices::all(rows.len(), cancellation.clone());
             if prepared.rule.definition.instead {
                 suppress_original.fill(true);
             }
@@ -544,6 +557,7 @@ where
             continue;
         }
         let mut projected = RuleRowBuffer::new(work_mem, cancellation.clone());
+        let mut matching_rows = RuleIndexBuffer::new(work_mem, cancellation.clone())?;
         for (index, row) in rows.iter().enumerate() {
             let mut row = row?;
             if rule_condition_matches(
@@ -555,7 +569,7 @@ where
                 &columns,
                 &mut project,
             )? {
-                prepared.matching_rows.push(index);
+                matching_rows.push(index)?;
                 if prepared.rule.definition.instead {
                     suppress_original[index] = true;
                 }
@@ -563,6 +577,7 @@ where
             projected.push(row)?;
         }
         rows = projected.finish();
+        prepared.matching_rows = matching_rows.finish()?;
         prepared_rules.push(prepared);
     }
     Ok(PreparedRuleBatch {
@@ -719,7 +734,7 @@ fn prepare_rule_actions(
         .collect::<Result<Vec<_>, SQLError>>()?;
     Ok(PreparedRule {
         rule,
-        matching_rows: Vec::new(),
+        matching_rows: RuleIndices::all(0, context.cancellation.clone()),
         condition_references_row,
         action_references_row,
         action_row_columns,
