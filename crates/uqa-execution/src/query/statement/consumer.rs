@@ -20,6 +20,9 @@ pub trait QueryConsumerFactory<'consumer, S: Clone + 'static> {
     fn uses_directional_scan(&self) -> bool {
         false
     }
+    fn streams_set_inputs(&self) -> bool {
+        true
+    }
 }
 
 pub(crate) struct SetOperationConsumerFactory<'consumer, S: Clone + 'static> {
@@ -190,5 +193,8 @@ impl<'consumer, S: Clone + 'static> QueryConsumerFactory<'consumer, S>
     }
     fn uses_directional_scan(&self) -> bool {
         self.0.uses_directional_scan()
+    }
+    fn streams_set_inputs(&self) -> bool {
+        self.0.streams_set_inputs()
     }
 }

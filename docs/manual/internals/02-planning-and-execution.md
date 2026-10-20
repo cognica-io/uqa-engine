@@ -563,6 +563,8 @@ SQL owns durable relation attribute numbers, dropped-slot physical metadata and 
 
 ## Result boundaries
 
+Public SQL row collection belongs to Execution’s [statement result owner](../../../crates/uqa-execution/src/query/statement/execution/materialized.rs). Its sink converts each physical batch before requesting the next one, so completed input fragments are released while the final public rows accumulate. The result still retains all returned rows. Row-at-a-time sources reuse a conversion plan only while their immutable schema index is unchanged. Duplicate positional values, compatibility labels, NULL slots and declared collations survive the conversion. Internal query outputs retain physical metadata; set-input evaluation order, command CTE completion and AFTER triggers keep their existing statement boundaries.
+
 | API | Boundary behavior |
 | --- | --- |
 | `Engine::sql` | Fully materializes `SQLResult` rows as maps |

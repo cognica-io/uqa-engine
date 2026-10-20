@@ -23,6 +23,32 @@ struct ResultMaterializationEntry {
     take: bool,
 }
 
+/// Reuse the immutable schema's conversion plan for row-at-a-time public sinks.
+pub(crate) struct ResultRowMaterializer {
+    schema: RowSchema,
+    plan: Option<ResultMaterializationPlan>,
+}
+
+impl ResultRowMaterializer {
+    pub(crate) fn new(schema: RowSchema) -> Self {
+        let plan = (!schema.is_identity_layout())
+            .then(|| RowMaterializer::new(&schema).result_materialization_plan());
+        Self { schema, plan }
+    }
+
+    pub(crate) fn matches_schema(&self, schema: &RowSchema) -> bool {
+        self.schema.shares_index(schema)
+    }
+
+    pub(crate) fn materialize(&self, row: PhysicalRow) -> ResultRow {
+        let materializer = RowMaterializer::new(&self.schema);
+        match &self.plan {
+            Some(plan) => materializer.materialize_remapped_result_row_with_plan(row, plan),
+            None => materializer.materialize_identity_result_row(row),
+        }
+    }
+}
+
 pub(super) struct RowMaterializer<'a> {
     schema: &'a RowSchema,
 }

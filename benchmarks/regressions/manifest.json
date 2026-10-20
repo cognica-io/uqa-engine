@@ -18260,6 +18260,58 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "public_result_collection_releases_physical_batches_before_reading_the_next",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests.rs",
+      "capability": "Incremental public SQL materialization",
+      "workload": "16,384 shared physical rows arrive in 128-row batches at the public SQL result boundary.",
+      "invariant": "Each completed batch releases all physical input references before the next pull; every Unicode value and row remains in the public result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "public_result_collection_preserves_empty_and_late_error_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests.rs",
+      "capability": "Incremental public SQL materialization",
+      "workload": "Empty input and a 22012 failure after one successful physical batch.",
+      "invariant": "The source closes exactly once; metadata survives empty output and failed output retains no original physical values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "public_result_collection_preserves_duplicate_slots_and_live_layouts",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests.rs",
+      "capability": "Incremental public SQL materialization",
+      "workload": "Row and batch delivery with duplicate labels, NULL slots and alternating immutable layouts.",
+      "invariant": "Named compatibility labels, distinct positional values, live row layouts and declared output collations are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "default_batch_consumption_preserves_row_control_and_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests.rs",
+      "capability": "Incremental public SQL materialization",
+      "workload": "A three-row batch stops, rewinds or fails with 57014 on its second row.",
+      "invariant": "Default batch delivery preserves row order and the original control/error without evaluating the third row.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

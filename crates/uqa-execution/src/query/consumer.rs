@@ -6,13 +6,28 @@
 
 //! Row-delivery and directional-control protocol for physical query execution.
 
-use crate::{OwnedPhysicalRow, RowSchema};
+use crate::{Batch, OwnedPhysicalRow, RowSchema};
 use uqa_sql::SQLError;
 
 pub trait QueryRowConsumer {
     fn begin(&self, columns: &[String], schema: &RowSchema) -> Result<(), SQLError>;
 
     fn consume(&self, row: OwnedPhysicalRow) -> Result<QueryConsumerControl, SQLError>;
+
+    fn consume_batch(&self, batch: Batch) -> Result<QueryConsumerControl, SQLError> {
+        for row in batch.rows {
+            let control = self.consume(OwnedPhysicalRow::new(batch.schema.clone(), row))?;
+            if control != QueryConsumerControl::Continue {
+                return Ok(control);
+            }
+        }
+        Ok(QueryConsumerControl::Continue)
+    }
+
+    /// Whether UNION ALL may deliver directly from each child instead of its ordinary set operator.
+    fn streams_set_inputs(&self) -> bool {
+        true
+    }
 
     fn uses_directional_scan(&self) -> bool {
         false

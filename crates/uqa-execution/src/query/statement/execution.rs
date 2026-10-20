@@ -5,6 +5,8 @@
 //
 
 //! CTE scheduling, statement snapshot selection, and physical query execution.
+mod materialized;
+
 use super::{
     bound_consumer::bind_output_mode,
     consumer::{QueryOutputMode, SetOperationConsumerFactory},
@@ -37,7 +39,7 @@ pub fn execute_query_plan_with_ctes<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
 ) -> Result<SQLResult, SQLError> {
-    execute_query_plan_output(context, plan, params, ctes, QueryOutputMode::Rows)?.into_sql_result()
+    materialized::collect(|mode| execute_query_plan_output(context, plan, params, ctes, mode))
 }
 
 pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
@@ -269,7 +271,8 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
     }
     let streaming_consumer = match &output_mode {
         QueryOutputMode::RowConsumer(downstream)
-            if matches!((*kind, *all), (SetOpKind::Union, true))
+            if downstream.streams_set_inputs()
+                && matches!((*kind, *all), (SetOpKind::Union, true))
                 && order_by.is_empty()
                 && !*with_ties =>
         {
