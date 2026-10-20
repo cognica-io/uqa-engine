@@ -88,6 +88,10 @@ impl PhysicalRowBuffer {
     }
 
     pub(crate) fn finish(self) -> Result<PhysicalRows, SQLError> {
+        self.snapshot()
+    }
+
+    pub(crate) fn snapshot(&self) -> Result<PhysicalRows, SQLError> {
         self.control.cancellation().check()?;
         let records = self
             .records
@@ -99,7 +103,7 @@ impl PhysicalRowBuffer {
         Ok(PhysicalRows {
             records,
             _read_scope: read_scope,
-            control: self.control,
+            control: self.control.clone(),
             operation: self.operation,
         })
     }
@@ -121,18 +125,8 @@ impl PhysicalRows {
     ) -> Result<(), SQLError> {
         let mut failure = None;
         let result = self.records.visit(&[], None, &self.control, &mut |record| {
-            let key = record.key();
-            let Some((table, id)) = key.len().checked_sub(8).map(|width| key.split_at(width))
-            else {
-                return Err(VersionError::InvalidEncoding(
-                    "physical row key is too short",
-                ));
-            };
-            let table = std::str::from_utf8(table).map_err(|_| {
-                VersionError::InvalidEncoding("physical relation name is not UTF-8")
-            })?;
-            let id = DocId::from_be_bytes(id.try_into().expect("fixed identity suffix"));
-            match visit(table, id) {
+            let (table, id) = decode_physical_key(record.key())?;
+            match visit(&table, id) {
                 Ok(more) => Ok(more),
                 Err(error) => {
                     failure = Some(error);
@@ -156,11 +150,41 @@ impl PhysicalRows {
 }
 
 fn physical_key(table: &str, doc_id: DocId) -> Vec<u8> {
-    // The fixed-width suffix disambiguates table bytes without hashing or reserved separators.
-    let mut key = Vec::with_capacity(table.len() + 8);
-    key.extend_from_slice(table.as_bytes());
+    // Escape embedded zero bytes and terminate the relation before the fixed unsigned identity. Ordered replay then agrees with (relation, identity), including relation-name prefixes.
+    let mut key = Vec::with_capacity(table.len() + 10);
+    for byte in table.bytes() {
+        key.push(byte);
+        if byte == 0 {
+            key.push(255);
+        }
+    }
+    key.extend_from_slice(&[0, 0]);
     key.extend_from_slice(&doc_id.to_be_bytes());
     key
+}
+
+fn decode_physical_key(key: &[u8]) -> Result<(std::borrow::Cow<'_, str>, DocId), VersionError> {
+    let invalid = || VersionError::InvalidEncoding("invalid physical relation key");
+    let width = key.len().checked_sub(10).ok_or_else(invalid)?;
+    if key[width..width + 2] != [0, 0] {
+        return Err(invalid());
+    }
+    let encoded = &key[..width];
+    let table = if encoded.contains(&0) {
+        let mut decoded = Vec::with_capacity(encoded.len());
+        let mut bytes = encoded.iter().copied();
+        while let Some(byte) = bytes.next() {
+            if byte == 0 && bytes.next() != Some(255) {
+                return Err(invalid());
+            }
+            decoded.push(byte);
+        }
+        std::borrow::Cow::Owned(String::from_utf8(decoded).map_err(|_| invalid())?)
+    } else {
+        std::borrow::Cow::Borrowed(std::str::from_utf8(encoded).map_err(|_| invalid())?)
+    };
+    let id = DocId::from_be_bytes(key[width + 2..].try_into().expect("fixed identity suffix"));
+    Ok((table, id))
 }
 
 fn storage_error(operation: &str, error: VersionError) -> SQLError {

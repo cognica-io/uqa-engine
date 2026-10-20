@@ -6,7 +6,8 @@
 
 //! Select the first matching MERGE clause and evaluate typed mutation assignments.
 use super::codec::MergePairKind;
-use super::model::{MergeTargetIdentity, SelectedMergeAction};
+use super::model::SelectedMergeAction;
+use crate::mutation::row_membership::PhysicalRowBuffer;
 use crate::mutation::{
     assignment::{
         apply_missing_column_defaults, eval_mutation_assignment, MutationAssignmentContext,
@@ -16,7 +17,6 @@ use crate::mutation::{
     expressions::eval_mutation_expr,
 };
 use crate::query::CteScope;
-use std::collections::BTreeSet;
 use uqa_sql::{
     assignment::columns::validate_mutation_targets,
     plan::{MergePlan, MergeWhenPlan},
@@ -34,11 +34,11 @@ fn merge_cardinality_violation() -> SQLError {
 }
 
 pub(super) fn ensure_merge_target_is_modified_once(
-    mutated_target_ids: &mut BTreeSet<MergeTargetIdentity>,
+    mutated_target_ids: &mut PhysicalRowBuffer,
     storage_table: &str,
     doc_id: uqa_core::DocId,
 ) -> Result<(), SQLError> {
-    if mutated_target_ids.insert((storage_table.to_string(), doc_id)) {
+    if mutated_target_ids.insert_if_absent(storage_table, doc_id)? {
         return Ok(());
     }
     Err(merge_cardinality_violation())

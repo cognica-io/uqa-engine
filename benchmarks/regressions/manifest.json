@@ -18507,6 +18507,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_row_replay_preserves_relation_and_unsigned_identity_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/row_membership/tests.rs",
+      "capability": "Bounded MERGE target retention",
+      "workload": "Reversed physical identities with empty, embedded-zero, prefix-related and Unicode relation names and zero/full-width IDs under zero and 64KiB allowances.",
+      "invariant": "Spilled iteration matches the exact lexicographic (relation, unsigned identity) order used by physical lock acquisition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "merge_rechecked_targets_bound_wide_images_and_keep_exact_successors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/merge/targets/retained/tests.rs",
+      "capability": "Bounded MERGE target retention",
+      "workload": "128 refreshed 24KiB Unicode row images and full-width successor identities at zero and 64KiB allowances.",
+      "invariant": "Peak allocation stays below 512KiB; reverse lookup and independent row values preserve every successor and NULL/byte payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "merge_target_rechecks_preserve_deleted_unchanged_and_prefix_identities",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/merge/targets/retained/tests.rs",
+      "capability": "Bounded MERGE target retention",
+      "workload": "Deleted, absent and refreshed identities across prefix-related and Unicode relations with repeated lookup after mutating a returned row.",
+      "invariant": "Only the exact original key selects a frozen image; absent/deleted outcomes and retained source images remain distinct.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "merge_target_retention_preserves_cardinality_errors_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/merge/targets/retained/tests.rs",
+      "capability": "Bounded MERGE target retention",
+      "workload": "Repeated MERGE mutation of a full-width ID in separate relations followed by cancelled spill append, lookup and membership.",
+      "invariant": "Duplicate modification retains SQLSTATE 21000 and the original diagnostic; cancelled operations retain 57014.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

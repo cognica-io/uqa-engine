@@ -15,10 +15,11 @@ use super::{
     },
     model::SelectedMergeAction,
     returning::{build_merge_returning_row, MergeReturningRow},
-    targets::{lock_merge_targets, LockedMergeTargets},
+    targets::lock_merge_targets,
 };
 use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
+use crate::mutation::{candidate_ids::CandidateIds, row_membership::PhysicalRowBuffer};
 use crate::{
     mutation::{
         assignment::{refresh_stored_generated_columns, validate_view_checks, ViewCheckContext},
@@ -40,7 +41,7 @@ use crate::{
         },
         publication::{finish_mutation_publication, publish_prepared_mutation_action},
         referential::{
-            prepare_document_delete, prepare_partition_update_route,
+            prepare_document_delete_excluding, prepare_partition_update_route,
             prepare_routed_document_rewrite,
         },
         returning::{dml_returning_result_with_projections, DmlReturningShape},
@@ -55,7 +56,6 @@ use crate::{
     },
     query::{sources::build_join_spill_with_ctes, CteScope},
 };
-use std::collections::BTreeSet;
 use uqa_sql::{
     plan::{MergePlan, MergeWhenPlan},
     semantics::{
@@ -222,7 +222,11 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             .max(1);
             let mut pairings = crate::SpillBuffer::new(work_mem);
             let mut matched_source = crate::ExactRowSet::new(work_mem);
-            let mut lock_target_ids = BTreeSet::new();
+            let mut lock_target_ids = PhysicalRowBuffer::new(
+                work_mem,
+                constraints.cancellation.clone(),
+                "MERGE lock targets",
+            );
             let matched_can_mutate = stmt.when_clauses.iter().any(|clause| {
                 matches!(
                     clause,
@@ -250,24 +254,33 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             );
 
             for storage_table in &target_tables {
-                for doc_id in &read_referential
-                    .constraints
-                    .reads
-                    .table_doc_ids(storage_table)?
-                {
+                let ids = CandidateIds::from_pages(
+                    work_mem,
+                    constraints.cancellation,
+                    |after, limit, control| {
+                        read_referential.constraints.reads.table_doc_id_page(
+                            storage_table,
+                            after,
+                            limit,
+                            control,
+                        )
+                    },
+                )?;
+                for row in ids.read_rows()? {
+                    let (_, doc_id) = row?;
                     let Some(doc) = read_referential
                         .constraints
                         .reads
-                        .get_document(storage_table, *doc_id)?
+                        .get_document(storage_table, doc_id)?
                     else {
-                        return Err(missing_document_error("MERGE scan", storage_table, *doc_id));
+                        return Err(missing_document_error("MERGE scan", storage_table, doc_id));
                     };
                     let target_row = dml_target_row_for_storage(
                         read_assignment.rows,
                         &target_table,
                         storage_table,
                         &target_qual,
-                        *doc_id,
+                        doc_id,
                         &doc,
                     )?;
                     if let Some(predicate) = &stmt.target_predicate {
@@ -306,7 +319,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                     vec![encode_merge_pair(
                                         MergePairKind::Matched,
                                         Some(storage_table),
-                                        Some(*doc_id),
+                                        Some(doc_id),
                                         Some(&doc),
                                         &src,
                                     )],
@@ -315,10 +328,10 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         }
                     }
                     if target_matched && matched_can_mutate {
-                        lock_target_ids.insert((storage_table.clone(), *doc_id));
+                        lock_target_ids.insert(storage_table, doc_id)?;
                     } else if !target_matched && has_source_missing_clause {
                         if source_missing_can_mutate {
-                            lock_target_ids.insert((storage_table.clone(), *doc_id));
+                            lock_target_ids.insert(storage_table, doc_id)?;
                         }
                         pairings
                             .push(crate::Batch::from_physical_rows(
@@ -326,7 +339,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 vec![encode_merge_pair(
                                     MergePairKind::NotMatchedBySource,
                                     Some(storage_table),
-                                    Some(*doc_id),
+                                    Some(doc_id),
                                     Some(&doc),
                                     &null_source_row,
                                 )],
@@ -364,17 +377,23 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             let pairings = pairings
                 .into_shared(pair_schema)
                 .map_err(crate::physical::physical_exec_error)?;
-            let LockedMergeTargets {
-                recheck_matches,
-                deleted: deleted_targets,
-                refreshed: refreshed_targets,
-            } = lock_merge_targets(referential, stmt, &target_qual, lock_target_ids)?;
+            let mut locked_targets =
+                lock_merge_targets(referential, stmt, &target_qual, lock_target_ids.finish()?)?;
+            let recheck_matches = locked_targets.recheck_matches;
             let action_schema = prepared_mutation_action_schema();
             let mut prepared_actions = crate::SpillBuffer::new(work_mem);
             let mut events = crate::mutation::events::MutationEventQueue::default();
-            let mut root_deletes = BTreeSet::new();
+            let mut root_deletes = PhysicalRowBuffer::new(
+                work_mem,
+                constraints.cancellation.clone(),
+                "MERGE root deletes",
+            );
             let mut has_mutation = false;
-            let mut mutated_target_ids = BTreeSet::new();
+            let mut mutated_target_ids = PhysicalRowBuffer::new(
+                work_mem,
+                constraints.cancellation.clone(),
+                "MERGE modified targets",
+            );
             let snapshot_ctes = ctes.returning_statement_snapshot_scope();
             let overlay = MutationOverlayScope::new(mutation.state);
             let pairing_reader = pairings
@@ -383,33 +402,8 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             for pair in pairing_reader {
                 let pair = pair.map_err(crate::physical::physical_exec_error)?;
                 let mut pair = decode_merge_pair(pair)?;
-                let original_identity = pair
-                    .storage_table
-                    .as_ref()
-                    .zip(pair.doc_id)
-                    .map(|(table, doc_id)| (table.clone(), doc_id));
-                if original_identity
-                    .as_ref()
-                    .is_some_and(|identity| deleted_targets.contains(identity))
-                {
-                    match pair.kind {
-                        MergePairKind::Matched => {
-                            pair.kind = MergePairKind::NotMatchedByTarget;
-                            pair.storage_table = None;
-                            pair.doc_id = None;
-                            pair.target_document = None;
-                        }
-                        MergePairKind::NotMatchedBySource => continue,
-                        MergePairKind::NotMatchedByTarget => {}
-                    }
-                } else if let Some(((successor_table, successor_doc_id), document)) =
-                    original_identity
-                        .as_ref()
-                        .and_then(|identity| refreshed_targets.get(identity))
-                {
-                    pair.storage_table = Some(successor_table.clone());
-                    pair.doc_id = Some(*successor_doc_id);
-                    pair.target_document = Some(document.clone());
+                if !locked_targets.apply_to_pair(&mut pair)? {
+                    continue;
                 }
                 let mut target_row = match (pair.doc_id, pair.target_document.as_ref()) {
                     (Some(doc_id), Some(document)) => dml_target_row_for_storage(
@@ -657,9 +651,10 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             storage_table,
                             doc_id,
                         )?;
-                        root_deletes.insert((storage_table.to_string(), doc_id));
+                        root_deletes.insert(storage_table, doc_id)?;
+                        let root_deletes_snapshot = root_deletes.snapshot()?;
                         let prepared =
-                            prepare_document_delete(referential, storage_table, doc_id, &root_deletes, false)?
+                            prepare_document_delete_excluding(referential, storage_table, doc_id, &|table, id| root_deletes_snapshot.contains(table, id), false)?
                                 .ok_or_else(|| {
                                     SQLError::Internal(format!(
                                         "MERGE delete target `{storage_table}` row {doc_id} is no longer present"
