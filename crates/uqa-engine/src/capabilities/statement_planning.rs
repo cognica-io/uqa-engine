@@ -180,6 +180,15 @@ impl Engine {
     }
 }
 impl uqa_planner::statement_planning::executable::StatementOptimizationContexts for Engine {
+    fn constant_storage(
+        &self,
+    ) -> Result<Option<Arc<dyn uqa_sql::ir::ConstantValueStorage>>, SQLError> {
+        let bytes =
+            uqa_execution::query::runtime::QueryMemorySettings::work_mem_bytes(&*self.session)?;
+        Ok(Some(Arc::new(
+            uqa_execution::scalar::RetainedConstants::new(bytes),
+        )))
+    }
     fn builtin_permissions(
         &self,
     ) -> Option<Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>>

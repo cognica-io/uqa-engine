@@ -34,6 +34,20 @@ pub fn optimize_scalar_expression(
     super::optimize_scalar_slot(expression, config)
 }
 
+type ConstantStorageResult =
+    Result<Option<std::sync::Arc<dyn uqa_sql::ir::ConstantValueStorage>>, uqa_sql::SQLError>;
+
+/// Borrowed initialization is used only while optimizing a VALUES command; produced literals own their storage independently.
+#[derive(Clone, Copy)]
+pub(crate) struct ConstantStorageFactory<'a>(pub &'a dyn Fn() -> ConstantStorageResult);
+
+impl std::fmt::Debug for ConstantStorageFactory<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConstantStorageFactory")
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct OptimizerConfig<'a> {
     /// CASE/COALESCE result types and arm coercions have already been retained by the caller. Unreachable arms can be discarded without changing subsequent type inference.
@@ -44,6 +58,10 @@ pub struct OptimizerConfig<'a> {
     pub enable_join_reordering: bool,
     /// Shared scalar execution supplied by the engine composition boundary.
     pub constant_evaluator: ConstantEvaluator,
+    /// Shared storage for immutable builtin constants produced while optimizing INSERT VALUES.
+    pub constant_storage: Option<std::sync::Arc<dyn uqa_sql::ir::ConstantValueStorage>>,
+    pub(super) retain_values_constants: bool,
+    pub(crate) constant_storage_factory: Option<ConstantStorageFactory<'a>>,
     /// Retained selected-call authority for immutable evaluation. An absent catalog has no mutable routine ACLs.
     pub builtin_permissions: Option<
         std::sync::Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
@@ -54,6 +72,17 @@ pub struct OptimizerConfig<'a> {
 }
 
 impl OptimizerConfig<'_> {
+    pub(super) fn for_values(&self) -> Result<Self, uqa_sql::SQLError> {
+        let mut config = self.clone();
+        config.retain_values_constants = true;
+        if config.constant_storage.is_none() {
+            if let Some(factory) = config.constant_storage_factory {
+                config.constant_storage = factory.0()?;
+            }
+        }
+        Ok(config)
+    }
+
     #[must_use]
     pub const fn new(constant_evaluator: ConstantEvaluator) -> Self {
         Self {
@@ -63,6 +92,9 @@ impl OptimizerConfig<'_> {
             enable_vector_threshold_merge: true,
             enable_join_reordering: true,
             constant_evaluator,
+            constant_storage: None,
+            retain_values_constants: false,
+            constant_storage_factory: None,
             builtin_permissions: None,
             routine_inlining: None,
             active_inline_routines: Vec::new(),

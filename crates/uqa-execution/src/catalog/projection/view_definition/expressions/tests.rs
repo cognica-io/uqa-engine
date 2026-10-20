@@ -10,6 +10,59 @@ use crate::catalog::{
 };
 
 #[test]
+fn retained_literals_keep_the_original_sql_rendering() {
+    use super::super::{Deparser, Scope};
+    use uqa_core::Value;
+    use uqa_sql::{
+        ast::ColumnType, ir::ConstantValueStorage, ir::RetainedScalarLiteral, ScalarExpr,
+    };
+
+    let catalog = empty_catalog();
+    let resolution = RelationNameResolution {
+        search_path: vec!["public".into()],
+        temporary_schema: "pg_temp_1".into(),
+        temporary_namespace_allocated: false,
+        current_user: "uqa".into(),
+        lookup_mode: RelationLookupMode::Dynamic,
+    };
+    let storage = crate::scalar::RetainedConstants::new(64);
+    for declaration in [None, Some("\"pg_catalog\".\"text\"".to_owned())] {
+        let retained = RetainedScalarLiteral {
+            value: storage
+                .retain(Value::Str("O'Reilly λ".repeat(128)))
+                .unwrap(),
+            ty: ColumnType::Text,
+            declaration,
+            collation_oid: None,
+        };
+        let original = retained.materialize().unwrap();
+        let expression = ScalarExpr::RetainedLiteral(Box::new(retained));
+        for pretty in [false, true] {
+            let deparser = Deparser {
+                output: None,
+                catalog: &catalog,
+                dynamic: resolution.clone(),
+                bound: resolution.clone(),
+                pretty,
+                wrap: 0,
+                standalone: false,
+                indent: false,
+                routine: None,
+                aliases: std::cell::OnceCell::new(),
+            };
+            assert_eq!(
+                deparser
+                    .expression(&expression, &Scope::default(), &[])
+                    .unwrap(),
+                deparser
+                    .expression(&original, &Scope::default(), &[])
+                    .unwrap()
+            );
+        }
+    }
+}
+
+#[test]
 fn native_operator_index_keys_preserve_postgresql_parentheses() {
     let reference: serde_json::Value =
         serde_json::from_str(include_str!("prefix_indexes.json")).unwrap();

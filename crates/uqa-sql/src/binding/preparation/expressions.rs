@@ -222,6 +222,7 @@ impl Preparation<'_> {
             | ScalarExpr::InternalColumn(_)
             | ScalarExpr::Literal(_)
             | ScalarExpr::TypedLiteral { .. }
+            | ScalarExpr::RetainedLiteral(_)
             | ScalarExpr::Star
             | ScalarExpr::QualifiedStar(_)
             | ScalarExpr::Default => self.leaf_expression(expression, input, subqueries),

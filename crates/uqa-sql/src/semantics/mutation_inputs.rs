@@ -17,7 +17,10 @@ pub fn top_level_column(expr: &ScalarExpr) -> Option<&str> {
 
 pub fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
     match expr {
-        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => true,
+        ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::RetainedLiteral(_)
+        | ScalarExpr::Param(_) => true,
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
         | ScalarExpr::CompositeRow { items, .. }

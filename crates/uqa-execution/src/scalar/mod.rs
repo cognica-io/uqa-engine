@@ -8,6 +8,8 @@
 
 mod call_arguments;
 mod context;
+mod retained;
+pub use retained::RetainedConstants;
 mod evaluator;
 pub mod plan;
 mod state;

@@ -56,9 +56,7 @@ pub fn optimize_plan(
         context,
         rules,
         aggregates,
-        constant_evaluator,
-        None,
-        None,
+        crate::optimizer::OptimizerConfig::new(constant_evaluator),
         plan,
     )
 }
@@ -67,11 +65,7 @@ pub(super) fn optimize_plan_authorized(
     context: StatementStatisticsContext<'_>,
     rules: &rule_inputs::RuleInputPlanningContext<'_>,
     aggregates: &dyn crate::AggregateClassifier,
-    constant_evaluator: crate::ConstantEvaluator,
-    permissions: Option<
-        std::sync::Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
-    >,
-    routines: Option<uqa_sql::routines::inlining::RoutineInliningContext<'_>>,
+    optimizer_config: crate::optimizer::OptimizerConfig<'_>,
     mut plan: UnifiedPlan,
 ) -> Result<UnifiedPlan, SQLError> {
     rule_inputs::rewrite_plan(rules, &mut plan)?;
@@ -83,9 +77,7 @@ pub(super) fn optimize_plan_authorized(
     let optimized = optimize_plan_with_statistics(
         context.volatility,
         aggregates,
-        constant_evaluator,
-        permissions,
-        routines,
+        optimizer_config,
         plan,
         &statistics,
     );
@@ -97,17 +89,10 @@ pub(super) fn optimize_plan_authorized(
 fn optimize_plan_with_statistics(
     volatility_catalog: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
     aggregates: &dyn crate::AggregateClassifier,
-    constant_evaluator: crate::ConstantEvaluator,
-    permissions: Option<
-        std::sync::Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
-    >,
-    routines: Option<uqa_sql::routines::inlining::RoutineInliningContext<'_>>,
+    mut optimizer_config: crate::optimizer::OptimizerConfig<'_>,
     plan: crate::UnifiedPlan,
     statistics: &dyn crate::SourceStatistics,
 ) -> Result<crate::UnifiedPlan, SQLError> {
-    let mut optimizer_config = crate::optimizer::OptimizerConfig::new(constant_evaluator);
-    optimizer_config.builtin_permissions = permissions;
-    optimizer_config.routine_inlining = routines;
     if uqa_sql::semantics::volatility::unified_plan_contains_volatile_function(
         volatility_catalog,
         &plan,

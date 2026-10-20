@@ -167,7 +167,8 @@ pub(super) fn compile(
                 },
             }
         }
-        ScalarExpr::Position(_)
+        ScalarExpr::RetainedLiteral(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::Default
         | ScalarExpr::Star

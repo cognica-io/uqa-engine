@@ -257,11 +257,16 @@ fn finish_scalar(
             .as_ref()
             .map(|context| context.routines as &dyn uqa_sql::FunctionTypeResolver),
     )?;
-    Ok(if integer_syntax {
+    let optimized = if integer_syntax {
         optimized
     } else {
         constants::retain_computed_integer(optimized, None)
-    })
+    };
+    if config.retain_values_constants {
+        constants::retain_large_literal(optimized, config.constant_storage.as_deref())
+    } else {
+        Ok(optimized)
+    }
 }
 
 fn optimize_frame_bound(

@@ -60,6 +60,22 @@ impl Lowering<'_> {
                 column: self.copy_text(column)?,
             },
             ScalarExpr::Literal(value) => ScalarExpr::Literal(self.value(Source::Borrowed(value))?),
+            ScalarExpr::RetainedLiteral(literal) => {
+                ScalarExpr::RetainedLiteral(self.boxed(|this| {
+                    Ok(crate::ir::RetainedScalarLiteral {
+                        value: literal.value.clone(),
+                        declaration: literal
+                            .declaration
+                            .as_deref()
+                            .map(|name| this.copy_text(name))
+                            .transpose()?,
+                        ty: this
+                            .scalar_type_copy(Some(&literal.ty))?
+                            .expect("selected retained literal type"),
+                        collation_oid: literal.collation_oid,
+                    })
+                })?)
+            }
             ScalarExpr::TypedLiteral {
                 value,
                 ty,

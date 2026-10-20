@@ -487,7 +487,7 @@ fn eligible_definition(definition: &CreateFunction) -> bool {
 fn is_constant(expression: &ScalarExpr) -> bool {
     matches!(
         expression,
-        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. }
+        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::RetainedLiteral(_)
     )
 }
 

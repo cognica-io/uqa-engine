@@ -47,7 +47,9 @@ impl CollationResults {
         if !crate::schema::composites::type_is_collatable(ty)
             || (matches!(
                 expression,
-                ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. }
+                ScalarExpr::Literal(_)
+                    | ScalarExpr::TypedLiteral { .. }
+                    | ScalarExpr::RetainedLiteral(_)
             ) && value.derivation == ExpressionType::default_collation(Some(ty)))
             || matches!(
                 value.derivation,

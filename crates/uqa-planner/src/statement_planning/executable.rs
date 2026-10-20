@@ -15,6 +15,11 @@ use uqa_sql::{
 
 /// Borrow planner metadata after SQL analysis succeeds.
 pub trait StatementOptimizationContexts {
+    fn constant_storage(
+        &self,
+    ) -> Result<Option<std::sync::Arc<dyn uqa_sql::ir::ConstantValueStorage>>, SQLError> {
+        Ok(None)
+    }
     fn statistics(&self) -> StatementStatisticsContext<'_>;
     fn rule_inputs(&self) -> RuleInputPlanningContext<'_>;
     fn builtin_permissions(
@@ -122,13 +127,16 @@ pub fn optimize_plan(
     context: &StatementPlanningContext<'_>,
     plan: UnifiedPlan,
 ) -> Result<UnifiedPlan, SQLError> {
+    let mut config = crate::optimizer::OptimizerConfig::new(context.constant_evaluator);
+    config.builtin_permissions = context.optimization.builtin_permissions();
+    config.routine_inlining = context.optimization.routine_inlining();
+    let storage = || context.optimization.constant_storage();
+    config.constant_storage_factory = Some(crate::optimizer::ConstantStorageFactory(&storage));
     super::optimize_plan_authorized(
         context.optimization.statistics(),
         &context.optimization.rule_inputs(),
         context.aggregates,
-        context.constant_evaluator,
-        context.optimization.builtin_permissions(),
-        context.optimization.routine_inlining(),
+        config,
         plan,
     )
 }

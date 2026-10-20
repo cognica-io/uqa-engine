@@ -6,6 +6,8 @@
 
 //! Evaluation of immutable constants without erasing their declared SQL type.
 
+use std::borrow::Cow;
+
 use uqa_sql::ast::{BinaryOp, ColumnType, FunctionBinding, FunctionVolatility};
 use uqa_sql::SQLError;
 use uqa_sql::{scalar_type, FunctionTypeResolver, RowSchema, ScalarExpr};
@@ -50,12 +52,79 @@ pub(crate) fn retain_computed_integer(
     }
 }
 
-pub(super) fn literal_value(expression: &ScalarExpr) -> Option<&Value> {
-    match expression {
-        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => Some(value),
-        ScalarExpr::Collated { expr, .. } => literal_value(expr),
+pub(super) fn literal_value(expression: &ScalarExpr) -> Result<Option<Cow<'_, Value>>, SQLError> {
+    Ok(match expression {
+        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
+            Some(Cow::Borrowed(value))
+        }
+        ScalarExpr::RetainedLiteral(literal) => Some(Cow::Owned(literal.value.read()?)),
+        ScalarExpr::Collated { expr, .. } => return literal_value(expr),
         _ => None,
+    })
+}
+
+pub(super) fn retain_large_literal(
+    expression: ScalarExpr,
+    storage: Option<&dyn uqa_sql::ir::ConstantValueStorage>,
+) -> Result<ScalarExpr, SQLError> {
+    let Some(storage) = storage else {
+        return Ok(expression);
+    };
+    let (value, selected) = match &expression {
+        ScalarExpr::TypedLiteral {
+            value,
+            bound_type: Some(ty),
+            parameter_index: None,
+            composite_source: None,
+            ..
+        } => (value, Some(ty)),
+        ScalarExpr::Literal(value) => (value, None),
+        _ => return Ok(expression),
+    };
+    // Inline payload is bounded by one IR node. Large VALUES datums share the statement's byte-bounded owner instead of accumulating in every plan copy.
+    let cancellation = uqa_sql::expr::statement_cancellation().unwrap_or_default();
+    let bytes = value.retained_payload_bytes(
+        &uqa_core::memory::MemoryBudget::new(usize::MAX),
+        &cancellation,
+    )?;
+    if bytes <= size_of::<ScalarExpr>()
+        || uqa_sql::expr::composites::literal::contains_records(value)
+        || uqa_sql::expr::datums::contains_datum(value)
+    {
+        return Ok(expression);
     }
+    let inferred;
+    let ty = if let Some(ty) = selected {
+        ty
+    } else {
+        inferred = scalar_type(&expression, &RowSchema::default(), &[])?;
+        let Some(ty) = inferred.as_ref() else {
+            return Ok(expression);
+        };
+        ty
+    };
+    if uqa_sql::type_resolution::pg_catalog_builtin_type(&ty.catalog_name()).as_ref() != Some(ty) {
+        return Ok(expression);
+    }
+    let ty = ty.clone();
+    let (value, declaration, collation_oid) = match expression {
+        ScalarExpr::TypedLiteral {
+            value,
+            ty,
+            collation_oid,
+            ..
+        } => (value, Some(ty), collation_oid),
+        ScalarExpr::Literal(value) => (value, None, None),
+        _ => unreachable!("selected literal"),
+    };
+    Ok(ScalarExpr::RetainedLiteral(Box::new(
+        uqa_sql::ir::RetainedScalarLiteral {
+            value: storage.retain(value)?,
+            ty,
+            declaration,
+            collation_oid,
+        },
+    )))
 }
 
 pub(super) fn is_coalesce(name: &str, binding: Option<&FunctionBinding>) -> bool {
@@ -85,19 +154,16 @@ fn is_constant(
     }
     let constant = |expression: &ScalarExpr| is_constant(expression, types, resolver);
     match expression {
+        ScalarExpr::RetainedLiteral(_) => true,
         ScalarExpr::Collated { expr, .. } => constant(expr),
-        ScalarExpr::Literal(value) => {
-            !uqa_sql::expr::composites::literal::contains_records(value)
-                && !uqa_sql::expr::datums::contains_datum(value)
-        }
+        ScalarExpr::Literal(value) => immutable_literal(value),
         ScalarExpr::TypedLiteral {
             value,
             ty,
             bound_type,
             ..
         } => {
-            !uqa_sql::expr::composites::literal::contains_records(value)
-                && !uqa_sql::expr::datums::contains_datum(value)
+            immutable_literal(value)
                 && (bound_type.is_some() || constant_cast_type(ty, types).is_some())
         }
         ScalarExpr::Array(items)
@@ -181,6 +247,11 @@ fn is_constant(
     }
 }
 
+fn immutable_literal(value: &Value) -> bool {
+    !uqa_sql::expr::composites::literal::contains_records(value)
+        && !uqa_sql::expr::datums::contains_datum(value)
+}
+
 fn constant_scalar_type(
     expression: &ScalarExpr,
     resolver: Option<&dyn FunctionTypeResolver>,
@@ -231,7 +302,10 @@ pub(super) fn fold_authorized_literal(
         return Ok(expression);
     }
     if let ScalarExpr::Cast { expr, ty, .. } = &expression {
-        if literal_value(expr).is_some_and(|value| matches!(value, Value::Null)) {
+        if literal_value(expr)?
+            .as_deref()
+            .is_some_and(|value| matches!(value, Value::Null))
+        {
             if let Some(target) = constant_cast_type(ty, types) {
                 if !matches!(target, ColumnType::Domain { .. } | ColumnType::Named(_)) {
                     return Ok(ScalarExpr::TypedLiteral {
@@ -249,8 +323,9 @@ pub(super) fn fold_authorized_literal(
     if let Some(literal) = composite_constant_field(&expression, types) {
         return literal;
     }
-    let strict_null = strict_null_expression(&expression);
-    if literal_value(&expression).is_some()
+    let strict_null = strict_null_expression(&expression)?;
+    if matches!(expression, ScalarExpr::RetainedLiteral(_))
+        || literal_value(&expression)?.is_some()
         || (!strict_null && !is_constant(&expression, types, resolver))
     {
         return Ok(expression);
@@ -418,12 +493,16 @@ fn composite_constant_field(
 }
 
 /// Strict comparisons discard nonconstant siblings when an input is constant NULL, just as strict functions do. Compound predicates expose their individual comparisons before this pass.
-fn strict_null_expression(expression: &ScalarExpr) -> bool {
+fn strict_null_expression(expression: &ScalarExpr) -> Result<bool, SQLError> {
     use uqa_sql::ast::BinaryOp;
     let null = |argument: &ScalarExpr| {
-        literal_value(argument).is_some_and(|value| matches!(value, Value::Null))
+        Ok::<_, SQLError>(
+            literal_value(argument)?
+                .as_deref()
+                .is_some_and(|value| matches!(value, Value::Null)),
+        )
     };
-    match expression {
+    Ok(match expression {
         ScalarExpr::Func {
             name,
             binding,
@@ -433,9 +512,9 @@ fn strict_null_expression(expression: &ScalarExpr) -> bool {
             if name.eq_ignore_ascii_case("nullif")
                 && binding.as_ref().is_none_or(|binding| binding.builtin)
                 && args.len() == 2
-                && null(&args[0])
+                && null(&args[0])?
             {
-                return true;
+                return Ok(true);
             }
             // A strict set-returning call with a NULL input returns no rows, not one NULL value.
             uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len())
@@ -443,7 +522,9 @@ fn strict_null_expression(expression: &ScalarExpr) -> bool {
                 && !uqa_sql::semantics::sets::validation::builtin_returns_set(
                     &uqa_sql::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase()),
                 )
-                && args.iter().any(null)
+                && args.iter().try_fold(false, |found, argument| {
+                    Ok::<_, SQLError>(found || null(argument)?)
+                })?
         }
         ScalarExpr::Binary {
             op:
@@ -455,9 +536,9 @@ fn strict_null_expression(expression: &ScalarExpr) -> bool {
                 | BinaryOp::GreaterEqual,
             lhs,
             rhs,
-        } => null(lhs) || null(rhs),
+        } => null(lhs)? || null(rhs)?,
         _ => false,
-    }
+    })
 }
 
 /// `PostgreSQL` evaluates a whole call when a strict input is a NULL constant or every input is constant; otherwise it inlines the SQL-language `substring(text, text, text)` and folds a constant `similar_to_escape` in its body. The planner keeps the call and checks only that translation, so its errors still surface before any row is read.
@@ -488,10 +569,10 @@ pub(super) fn check_inlined_similar_substring(
     let [_, pattern, escape] = args.as_slice() else {
         return Ok(());
     };
-    let (Some(pattern), Some(escape)) = (literal_value(pattern), literal_value(escape)) else {
+    let (Some(pattern), Some(escape)) = (literal_value(pattern)?, literal_value(escape)?) else {
         return Ok(());
     };
-    if strict_null_expression(expression) || is_constant(expression, types, resolver) {
+    if strict_null_expression(expression)? || is_constant(expression, types, resolver) {
         return Ok(());
     }
     // `inline_function` declines a routine the caller cannot execute; execution then reports the privilege error.
@@ -499,7 +580,7 @@ pub(super) fn check_inlined_similar_substring(
         return Ok(());
     }
     uqa_sql::expr::check_constant_similar_translation(
-        &[pattern.clone(), escape.clone()],
+        &[pattern.into_owned(), escape.into_owned()],
         &uqa_core::memory::ProductionControl::uncontrolled(),
     )
 }

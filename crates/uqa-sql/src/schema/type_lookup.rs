@@ -34,6 +34,7 @@ pub trait ScalarTypeSchema {
     /// Observe the analyzed result selection or a direct input reference without repeating type input, evaluation or collation derivation.
     fn input_collation(&self, expression: &crate::ScalarExpr) -> Option<u32> {
         match expression {
+            crate::ScalarExpr::RetainedLiteral(literal) => literal.collation_oid,
             crate::ScalarExpr::TypedLiteral { collation_oid, .. } => *collation_oid,
             crate::ScalarExpr::Collated { collation, .. } => Some(collation.oid()),
             crate::ScalarExpr::Func {
