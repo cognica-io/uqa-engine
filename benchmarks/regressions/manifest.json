@@ -17595,6 +17595,32 @@
       "workload": "Self-referencing ordinary and PERIOD foreign keys, a trigger-suppressed child, savepoint recovery, replacement parent coverage, complete deletion and persistent reopen on four providers.",
       "invariant": "Selection, SQLSTATE 23503, deferred repair and durable empty results match independent PostgreSQL 18.4 under 64KiB work_mem.",
       "capability": "Bounded DELETE identity ownership"
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "private_snapshot_read_scopes_reuse_blocks_and_release_the_last_cache_owner",
+      "source": "crates/uqa-storage/src/mvcc/overlay/read_scope/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Scoped private-snapshot read caching",
+      "workload": "Thirty-two repeated reads of one spilled record, with no scope, overlapping scopes and final scope release.",
+      "invariant": "Cold reads decode 32 entry blocks; warmed scoped reads perform no additional entry or value file I/O. The final scope releases cached bytes while the immutable snapshot remains."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "private_snapshot_read_scopes_preserve_frozen_visibility_and_failed_admission",
+      "source": "crates/uqa-storage/src/mvcc/overlay/read_scope/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Scoped private-snapshot read caching",
+      "workload": "A frozen spilled view, failed zero-byte scope admission, a later writer replacement, owner drop and cancellation.",
+      "invariant": "Failed admission preserves active readers and releases partial ownership; the frozen view still returns its original bytes, cancellation propagates and final ownership releases every charged byte."
     }
   ]
 }

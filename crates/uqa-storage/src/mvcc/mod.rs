@@ -64,7 +64,7 @@ pub use occurrence::{
 pub use outcome::{TransactionCompletionError, TransactionOutcome, TransactionOutcomeId};
 pub use overlay::{
     PrivateRecordChanges, PrivateRecordCursor, PrivateRecordEntry, PrivateRecordKey,
-    PrivateRecordRevision, PrivateRecordSnapshot, PrivateRevisionScope,
+    PrivateRecordReadScope, PrivateRecordRevision, PrivateRecordSnapshot, PrivateRevisionScope,
 };
 pub use persistence::{
     resolve_prepared_receipt, CommitErrorOutcome, CommitFailure, CommitFingerprint, CommitReceipt,
