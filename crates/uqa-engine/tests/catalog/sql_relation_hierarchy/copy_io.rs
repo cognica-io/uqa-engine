@@ -14,6 +14,372 @@ fn copy_to_string(engine: &Engine, statement: &str) -> String {
     String::from_utf8(output).unwrap()
 }
 
+fn copy_engine(provider: usize, path: &std::path::Path) -> Engine {
+    match provider {
+        0 => Engine::new(),
+        1 => Engine::open(path).unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn copy_spilled_returning_preserves_values_and_row_images(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("returning-spill.db");
+    let engine = copy_engine(provider, &path);
+    exec(
+        &engine,
+        "CREATE TABLE returning_spill (id INTEGER PRIMARY KEY, body TEXT)",
+    );
+    engine.set_query_memory_limit(Some(1024));
+    let body = "x".repeat(4096);
+    let inserted = copy_to_string(&engine, "COPY (INSERT INTO returning_spill SELECT n, repeat('x', 4096) FROM generate_series(1, 8) AS s(n) RETURNING id AS item, body AS item) TO STDOUT WITH (FORMAT csv, HEADER)");
+    let mut expected = String::from("item,item\n");
+    for id in 1..=8 {
+        use std::fmt::Write;
+        writeln!(expected, "{id},{body}").unwrap();
+    }
+    assert_eq!(inserted, expected);
+    assert_eq!(copy_to_string(&engine, "COPY (WITH changed AS (UPDATE returning_spill SET body = body RETURNING id AS item, body AS item) SELECT * FROM changed ORDER BY 1) TO STDOUT WITH (FORMAT csv, HEADER)"), expected);
+    let updated = copy_to_string(&engine, "COPY (UPDATE returning_spill SET body = body || '!' RETURNING old.body AS item, new.body AS item) TO STDOUT WITH (FORMAT csv)");
+    assert_eq!(updated, format!("{body},{body}!\n").repeat(8));
+    let from = copy_to_string(&engine, "COPY (UPDATE returning_spill AS t SET body = body || '?' FROM (VALUES (1)) AS s(id) WHERE t.id = s.id RETURNING old.body, new.body) TO STDOUT WITH (FORMAT csv)");
+    assert_eq!(from, format!("{body}!,{body}!?\n"));
+    let merged = copy_to_string(&engine, "COPY (MERGE INTO returning_spill AS t USING (VALUES (1), (9)) AS s(id) ON t.id = s.id WHEN MATCHED THEN UPDATE SET body = 'merged' WHEN NOT MATCHED THEN INSERT VALUES (s.id, repeat('y', 4096)) RETURNING merge_action(), old.body, new.body) TO STDOUT WITH (FORMAT csv)");
+    let mut actual = merged.lines().collect::<Vec<_>>();
+    actual.sort_unstable();
+    assert_eq!(
+        actual,
+        [
+            format!("INSERT,,{}", "y".repeat(4096)),
+            format!("UPDATE,{body}!?,merged")
+        ]
+    );
+    let deleted = copy_to_string(&engine, "COPY (DELETE FROM returning_spill AS t USING (VALUES (9)) AS s(id) WHERE t.id = s.id RETURNING old.body, new.body) TO STDOUT WITH (FORMAT csv)");
+    assert_eq!(deleted, format!("{},\n", "y".repeat(4096)));
+    assert_eq!(copy_to_string(&engine, "COPY (DELETE FROM returning_spill WHERE id < 0 RETURNING id AS item, body AS item) TO STDOUT WITH (FORMAT csv, HEADER)"), "item,item\n");
+    drop(engine);
+    if provider != 0 {
+        let reopened = copy_engine(provider, &path);
+        assert_eq!(
+            reopened
+                .sql("SELECT body FROM returning_spill WHERE id = 1", &[])
+                .unwrap()
+                .rows[0]["body"],
+            Value::Str("merged".into())
+        );
+        assert_eq!(
+            reopened
+                .sql("SELECT * FROM returning_spill", &[])
+                .unwrap()
+                .rows
+                .len(),
+            8
+        );
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn copy_rule_returning_keeps_source_context_and_rolls_back_failed_delivery(
+    #[case] provider: usize,
+) {
+    struct FailedFlush;
+    impl std::io::Write for FailedFlush {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("rule output closed"))
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("rule-returning.db");
+    let engine = copy_engine(provider, &path);
+    exec(
+        &engine,
+        "CREATE TABLE rule_bounded_event(id INTEGER PRIMARY KEY, body TEXT);
+        CREATE TABLE rule_bounded_target(id INTEGER PRIMARY KEY, body TEXT);
+        INSERT INTO rule_bounded_event VALUES (1, repeat('x', 4096)), (2, repeat('x', 4096));
+        INSERT INTO rule_bounded_target VALUES (1, 'target-before'), (2, 'target-before');
+        CREATE RULE redirect AS ON UPDATE TO rule_bounded_event DO INSTEAD
+          UPDATE rule_bounded_target SET body = NEW.body || '-action'
+          WHERE rule_bounded_target.id = OLD.id RETURNING rule_bounded_target.*",
+    );
+    engine.set_query_memory_limit(Some(1024));
+    let copy = "COPY (UPDATE rule_bounded_event AS e SET body=e.body || '-new'
+        FROM (VALUES (1, 'source-one'), (2, 'source-two')) AS s(id,label) WHERE e.id=s.id
+        RETURNING e.id AS item, old.body AS item, new.body AS item, s.label AS item)
+        TO STDOUT WITH (FORMAT csv, HEADER)";
+    assert_eq!(
+        engine
+            .copy_to(copy, &mut FailedFlush)
+            .unwrap_err()
+            .sqlstate(),
+        Some("58030")
+    );
+    let before = engine
+        .sql("SELECT body FROM rule_bounded_target ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(before.rows.len(), 2);
+    assert!(before
+        .rows
+        .iter()
+        .all(|row| row["body"] == Value::Str("target-before".into())));
+
+    let output = copy_to_string(&engine, copy);
+    let mut lines = output.lines();
+    assert_eq!(lines.next(), Some("item,item,item,item"));
+    let mut actual = lines.collect::<Vec<_>>();
+    actual.sort_unstable();
+    let body = format!("{}-new-action", "x".repeat(4096));
+    assert_eq!(
+        actual,
+        [
+            format!("1,target-before,{body},source-one"),
+            format!("2,target-before,{body},source-two")
+        ]
+    );
+    assert!(engine
+        .sql("SELECT body FROM rule_bounded_event", &[])
+        .unwrap()
+        .rows
+        .iter()
+        .all(|row| row["body"] == Value::Str("x".repeat(4096))));
+    drop(engine);
+    if provider != 0 {
+        let reopened = copy_engine(provider, &path);
+        let rows = reopened
+            .sql("SELECT body FROM rule_bounded_target ORDER BY id", &[])
+            .unwrap();
+        assert_eq!(rows.rows.len(), 2);
+        assert!(rows
+            .rows
+            .iter()
+            .all(|row| row["body"] == Value::Str(body.clone())));
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn copy_output_failure_rolls_back_the_implicit_mutation(#[case] provider: usize) {
+    struct Sink {
+        mode: &'static str,
+        token: uqa_core::CancellationToken,
+        writes: usize,
+        flushes: usize,
+        bytes: Vec<u8>,
+    }
+    impl std::io::Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.writes += 1;
+            if self.mode == "write" || (self.mode == "partial" && self.writes > 1) {
+                return Err(std::io::Error::other("closed COPY sink"));
+            }
+            let count = if self.mode == "partial" {
+                1
+            } else {
+                bytes.len()
+            };
+            self.bytes.extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            match self.mode {
+                "flush" => Err(std::io::Error::other("failed COPY flush")),
+                "cancel" => {
+                    self.token.cancel();
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("copy-output-failure.db");
+    let engine = copy_engine(provider, &path);
+    exec(
+        &engine,
+        "CREATE TABLE copy_atomic (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(&engine, "INSERT INTO copy_atomic VALUES (1, 10)");
+    let original = engine
+        .sql("SELECT * FROM copy_atomic ORDER BY id", &[])
+        .unwrap()
+        .rows;
+    for statement in [
+        "INSERT INTO copy_atomic VALUES (2, 20) RETURNING id, value",
+        "UPDATE copy_atomic SET value = 99 RETURNING id, value",
+        "DELETE FROM copy_atomic RETURNING id, value",
+        "WITH changed AS (INSERT INTO copy_atomic VALUES (2, 20) RETURNING id, value) SELECT * FROM changed",
+    ] {
+        for mode in ["write", "partial", "flush", "cancel"] {
+            let mut sink = Sink {
+                mode,
+                token: engine.cancellation_token(),
+                writes: 0,
+                flushes: 0,
+                bytes: Vec::new(),
+            };
+            let error = engine.copy_to(&format!("COPY ({statement}) TO STDOUT"), &mut sink).unwrap_err();
+            assert_eq!(error.sqlstate(), Some(if mode == "cancel" { "57014" } else { "58030" }));
+            assert_eq!(sink.flushes, usize::from(matches!(mode, "flush" | "cancel")));
+            if mode == "partial" {
+                assert_eq!(sink.bytes.len(), 1);
+            }
+            engine.reset_cancellation();
+            assert_eq!(engine.sql("SELECT * FROM copy_atomic ORDER BY id", &[]).unwrap().rows, original, "{mode}: {statement}");
+        }
+    }
+    drop(engine);
+    let engine = if provider == 0 {
+        let engine = copy_engine(provider, &path);
+        exec(
+            &engine,
+            "CREATE TABLE copy_atomic (id INTEGER PRIMARY KEY, value INTEGER)",
+        );
+        exec(&engine, "INSERT INTO copy_atomic VALUES (1, 10)");
+        engine
+    } else {
+        let engine = copy_engine(provider, &path);
+        assert_eq!(
+            engine
+                .sql("SELECT * FROM copy_atomic ORDER BY id", &[])
+                .unwrap()
+                .rows,
+            original
+        );
+        engine
+    };
+    let mut sink = Sink {
+        mode: "success",
+        token: engine.cancellation_token(),
+        writes: 0,
+        flushes: 0,
+        bytes: Vec::new(),
+    };
+    assert_eq!(
+        engine
+            .copy_to(
+                "COPY (INSERT INTO copy_atomic VALUES (2, 20) RETURNING id, value) TO STDOUT",
+                &mut sink
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(sink.bytes, b"2\t20\n");
+    assert_eq!(sink.flushes, 1);
+    assert_eq!(
+        engine
+            .sql("SELECT * FROM copy_atomic", &[])
+            .unwrap()
+            .rows
+            .len(),
+        2
+    );
+    drop(engine);
+    if provider != 0 {
+        assert_eq!(
+            copy_engine(provider, &path)
+                .sql("SELECT * FROM copy_atomic", &[])
+                .unwrap()
+                .rows
+                .len(),
+            2
+        );
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn copy_spooled_query_preserves_values_and_statement_snapshot(#[case] provider: usize) {
+    struct UpdatingSink<'a> {
+        writer: Option<&'a Engine>,
+        bytes: Vec<u8>,
+        updated: bool,
+        flushes: usize,
+    }
+    impl std::io::Write for UpdatingSink<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if !self.updated {
+                if let Some(writer) = self.writer {
+                    exec(writer, "UPDATE copy_snapshot SET value = 'after'");
+                }
+                self.updated = true;
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let engine = copy_engine(provider, &directory.path().join("copy-snapshot.db"));
+    exec(
+        &engine,
+        "CREATE TABLE copy_snapshot (id INTEGER PRIMARY KEY, value TEXT)",
+    );
+    exec(&engine, "INSERT INTO copy_snapshot VALUES (1, 'before')");
+    engine.set_query_memory_limit(Some(1024));
+    let writer = (provider != 0).then(|| engine.new_session().unwrap());
+    let mut sink = UpdatingSink {
+        writer: writer.as_ref(),
+        bytes: Vec::new(),
+        updated: false,
+        flushes: 0,
+    };
+    assert_eq!(engine.copy_to("COPY (SELECT value, n, n + 1 AS n FROM copy_snapshot CROSS JOIN generate_series(1, 2048) AS series(n) ORDER BY 2) TO STDOUT WITH (FORMAT csv, HEADER)", &mut sink).unwrap(), 2048);
+    let mut expected = String::from("value,n,n\n");
+    for n in 1..=2048 {
+        use std::fmt::Write;
+        writeln!(expected, "before,{n},{}", n + 1).unwrap();
+    }
+    assert_eq!(sink.bytes, expected.as_bytes());
+    assert_eq!(sink.flushes, 1);
+    assert_eq!(
+        engine
+            .sql("SELECT value FROM copy_snapshot", &[])
+            .unwrap()
+            .rows[0]["value"],
+        Value::Str(if provider == 0 { "before" } else { "after" }.into())
+    );
+    // Reuse cached plans and retain output metadata even when the spool has no rows.
+    for _ in 0..2 {
+        assert_eq!(copy_to_string(&engine, "COPY (SELECT id, value FROM copy_snapshot WHERE id < 0) TO STDOUT WITH (FORMAT csv, HEADER)"), "id,value\n");
+        assert_eq!(
+            copy_to_string(
+                &engine,
+                "COPY (SELECT 1 AS x UNION ALL SELECT 2 ORDER BY x DESC) TO STDOUT"
+            ),
+            "2\n1\n"
+        );
+    }
+}
+
 #[test]
 fn copy_output_preserves_session_style_duplicate_labels_and_mutation_returning() {
     let engine = Engine::new();

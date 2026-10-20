@@ -14,7 +14,7 @@ use uqa_sql::{
     expr::EngineHook,
     plan::{CommandPlan, QueryPlan},
     routines::RoutineResolution,
-    SQLError, SQLParam, SQLResult, ScalarExpr,
+    SQLError, SQLParam, ScalarExpr,
 };
 
 pub trait CteBodyExecutor<S: Clone>: Sync {
@@ -36,7 +36,7 @@ pub trait CteBodyExecutor<S: Clone>: Sync {
         command: &CommandPlan,
         params: &[SQLParam],
         ctes: &CteScope<S>,
-    ) -> Result<SQLResult, SQLError>;
+    ) -> Result<crate::mutation::output::MutationOutput, SQLError>;
     /// Fire the AFTER events that the commands of a statement queued, once the statement has finished.
     fn fire_after_triggers(
         &self,

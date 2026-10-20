@@ -83,6 +83,18 @@ impl<'a, 'c, W: Write + ?Sized> CopyEncoder<'a, 'c, W> {
         self.write(b"\n")
     }
 
+    /// Finish the sink while the producing statement can still fail and roll back.
+    pub fn finish(self) -> Result<(), SQLError> {
+        loop {
+            self.check()?;
+            match self.output.flush() {
+                Ok(()) => return self.check(),
+                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                Err(error) => return Err(write_error(error)),
+            }
+        }
+    }
+
     fn check(&self) -> Result<(), SQLError> {
         self.control.check()?;
         crate::expr::check_statement_cancellation()?;
@@ -272,7 +284,7 @@ pub fn write_copy_result<W: Write + ?Sized>(
             )
         }))?;
     }
-    Ok(())
+    encoder.finish()
 }
 
 #[cfg(test)]

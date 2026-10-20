@@ -14,6 +14,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reject oversized `lpad`, `rpad` and `repeat` output before allocation using PostgreSQL's integer-count and text-size limits, preserving empty-fill, NULL and memory-allowance behavior.
 
+- Keep rewrite-rule action output and captured current/OLD/NEW images in bounded spill storage, sharing the original source context without per-output copies while preserving assignment order, owner privileges, COPY failure rollback and durable results.
+
+- Accumulate mutation RETURNING values in bounded spill batches, detach unselected OLD/NEW payloads and pass ordinary mutation output directly to COPY and modifying CTE consumers. Preserve output positions and statement rollback; public SQL results still materialize their requested rows.
+
+- Deliver COPY SELECT rows through the bounded query spool and keep sink output and flush inside the statement transaction, preserving the selected rows and rolling back failed or cancelled mutating exports.
+
 - Reuse resolved builtin numeric row casts within their prepared expression and input schema, preserving current callbacks, cancellation, memory admission, rounding and overflow diagnostics.
 
 - Reuse compiled regular expressions by pattern, flags and collation in a bounded session cache. Charge retained state to its owning allowance, preserve invocation cancellation and scratch limits, and release memory on eviction and session destruction.
@@ -23,6 +29,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Remove the bundled SQLite process-wide page-cache memory-management mutex through the maintained rusqlite packages, preserving SQLCipher, connection-local cache release and database formats; direct Rust driver dependencies must use the maintained package identity.
 
 - Reuse the result schema produced by ordered statement input analysis, avoiding a second complete binding pass while preserving output types, collations, anonymous-record fields and procedural dependency scopes.
+
+- Reuse the source schema derived while binding executable FROM routines, avoiding another source-binding pass before query-block validation without changing privilege checks or physical source validation. Nested privilege analysis borrows outer column lineage instead of copying its maps at each level; authorization subjects and column checks remain unchanged. Correlated schemas retain their completed lookup indexes when attaching hidden virtual-column metadata.
 
 - Preserve every comma-separated input of UPDATE FROM and DELETE USING so empty or missing later sources cannot cause unintended row changes. Retain source order, aliases and LATERAL dependencies through the shared SQL source-list compiler.
 

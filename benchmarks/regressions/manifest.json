@@ -15871,6 +15871,252 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "output_completion_observes_flush_failure_cancellation_and_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/copy/output/tests.rs",
+      "capability": "COPY output completion",
+      "workload": "Empty output over failed, cancelled, interrupted and successful flush sinks under a zero-byte scratch allowance.",
+      "invariant": "Flush errors and current cancellation propagate; interruption retries and no scratch remains.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_output_failure_rolls_back_the_implicit_mutation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "COPY transaction publication",
+      "workload": "INSERT, UPDATE, DELETE RETURNING and modifying CTEs fail at first write, partial output, flush or cancellation across memory, native SQLite, SQLite K/V and redb.",
+      "invariant": "Every failed COPY restores the prior rows, durable reopen preserves rollback, and successful flushed COPY commits once.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "copy_spill_delivery_does_not_rematerialize_the_complete_result",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/copy/tests.rs",
+      "capability": "Bounded COPY query delivery",
+      "workload": "A 32MiB text result in a 64KiB query spool delivered to a hashing sink.",
+      "invariant": "Exact SHA-256 and byte/row counts; less than 512KiB peak output allocation; one flush and no retained scratch or temporary files.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "copy_spill_failure_and_cancellation_release_the_spool",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/copy/tests.rs",
+      "capability": "Bounded COPY query delivery",
+      "workload": "A spilled query fails after one output row or observes cancellation before its first row.",
+      "invariant": "The first I/O/cancellation error propagates without flushing, and spool files and scratch are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_spooled_query_preserves_values_and_statement_snapshot",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "COPY statement snapshot",
+      "workload": "A 2048-row query under 1KiB work memory across all four providers; the three persistent providers update the source through another session during output.",
+      "invariant": "Exact original values, order and duplicate labels remain in the spool; the independent update is visible afterward; empty and cached set-query output retains its metadata.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "returning_rows_spill_without_retaining_complete_output",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/returning/rows/tests.rs",
+      "capability": "Bounded RETURNING accumulation",
+      "workload": "A 32MiB RETURNING result produced and delivered through the actual COPY encoder under a 64KiB producer budget, with duplicate output labels.",
+      "invariant": "Exact encoded order, positions, count, bytes and SHA-256; combined producer/output peak allocation below 1MiB, one flush, no retained scratch and complete spill cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "returning_rows_detach_unselected_source_fragments",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/returning/rows/tests.rs",
+      "capability": "Bounded RETURNING accumulation",
+      "workload": "Sixty-four 1.05MiB OLD/NEW source fragments with only their integer output slot selected.",
+      "invariant": "Only selected values remain retained; all IDs survive and peak allocation remains below 3MiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "returning_rows_release_spills_after_cancellation_and_write_failure",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/returning/rows/tests.rs",
+      "capability": "Bounded RETURNING accumulation",
+      "workload": "Oversized RETURNING rows spill, then delivery is cancelled or spill creation fails.",
+      "invariant": "Cancellation preserves SQLSTATE 57014, the reader terminates, temporary files are removed and unrelated files remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_spilled_returning_preserves_values_and_row_images",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "Spilled mutation output",
+      "workload": "INSERT SELECT, UPDATE, UPDATE FROM, MERGE, DELETE USING and a modifying CTE return large text under 1KiB work memory across all four providers.",
+      "invariant": "Independent PostgreSQL 18.4 bytes, duplicate labels, OLD/NEW values, empty headers and persistent reopening are preserved.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_rule_images_spill_and_share_original_contexts_without_complete_output",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/returning/tests.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "48MiB of action OLD/NEW/current images with duplicate labels, 64KiB work memory and one shared 2.1MiB source context.",
+      "invariant": "Combined action production and captured image peak allocation stays below 2MiB; exact image order/content/count, shared original scope and complete source release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_rule_images_keep_positional_assignment_nulls_and_original_source_indices",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/returning/tests.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "Two action rows with numeric typmods, NULL images and reversed source indices under one-byte work memory.",
+      "invariant": "Positional assignment values and exact original source mapping remain unchanged across spill.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_rule_images_reject_invalid_source_indices_and_observe_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/returning/tests.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "Negative, absent, mistyped and out-of-range source indices; cancellation before reading a spilled action result.",
+      "invariant": "Invalid internal indices fail before projection and cancellation remains 57014; every source owner is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bounded_rule_output_keeps_owner_plan_identity_and_error_before_execution",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/statement/compiled/tests.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "A nested stored rule query rejected by its analyzer with an explicit owner and parameter.",
+      "invariant": "Stored relation identities and statement cancellation precede planning; rejected analysis never captures execution state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_rule_returning_keeps_source_context_and_rolls_back_failed_delivery",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "Rewrite-rule UPDATE FROM/COPY with duplicate labels, OLD/NEW and source columns under 1KiB work memory across four providers; failed sink flush and persistent reopening.",
+      "invariant": "Independent PostgreSQL 18.4 result namespaces are preserved; failed delivery rolls back rule actions and successful output survives reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "nested_privilege_analysis_does_not_copy_outer_column_lineage",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/semantics/privileges.rs",
+      "capability": "Borrowed correlated privilege lineage",
+      "workload": "Analyze a 1024-column relation through 24 nested scalar-query scopes, then authorize the selected outer column.",
+      "invariant": "Total allocations stay below 4MiB while the original ordered column privilege check is preserved; outer lineage maps are not copied per nested scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "test",
+      "test": "borrowed_privilege_scopes_preserve_correlated_and_join_requirements",
+      "cases": 1,
+      "source": "crates/uqa-sql/tests/semantics/privileges.rs",
+      "capability": "Nested privilege scope correctness",
+      "workload": "Correlated scalar queries, ON/USING joins and LATERAL with column grants and a denied nested column, independently checked on PostgreSQL18.4.",
+      "invariant": "Preserve the invoking role, ordered base-column authorization and nested42501 denial while borrowing immutable scopes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "correlated_scope_builds_lookup_maps_once_with_or_without_virtual_columns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/outer_scope/tests.rs",
+      "capability": "Single construction of correlated lookup maps",
+      "workload": "Overlay 1-, 64- and 1024-column scopes with and without a hidden virtual column and distinct inner/outer collations.",
+      "invariant": "Construct the composite lookup index once, preserving local shadowing, shifted outer slots, hidden-column typing and collations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unchanged_virtual_bindings_share_indexes_and_new_bindings_preserve_the_source",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/outer_scope/tests.rs",
+      "capability": "Immutable virtual-column metadata updates",
+      "workload": "Add empty, already visible and genuinely new virtual bindings to a collated row schema.",
+      "invariant": "No-op additions share the original index; real additions preserve source immutability, physical layout and existing collation without rebuilding lookup maps.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "impossible_admission_preserves_idle_patterns_under_shared_and_parent_pressure",
       "cases": 1,
       "case_names": [

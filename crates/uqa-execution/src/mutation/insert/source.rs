@@ -92,7 +92,7 @@ pub struct InsertSelectConsumerState<S: Clone + 'static> {
     pub prepared_buffer: Option<crate::SpillBuffer>,
     pub conflict_locks: Option<InsertConflictLocks>,
     pub affected: u64,
-    pub returning_rows: Vec<crate::OwnedPhysicalRow>,
+    pub returning_rows: crate::mutation::returning::ReturningRows,
     pub events: crate::mutation::events::MutationEventQueue,
     pub has_prepared_effect: bool,
     pub has_prepared_auto_identity: bool,
@@ -103,7 +103,7 @@ pub struct PreparedInsertSelect {
     pub rows: crate::SharedSpill,
     pub conflict_locks: InsertConflictLocks,
     pub affected: u64,
-    pub returning_rows: Vec<crate::OwnedPhysicalRow>,
+    pub returning_rows: crate::mutation::returning::ReturningRows,
     pub events: crate::mutation::events::MutationEventQueue,
     pub has_prepared_effect: bool,
     pub has_prepared_auto_identity: bool,
@@ -145,7 +145,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 )),
                 conflict_locks: Some(InsertConflictLocks::new(&services.rows.referential)),
                 affected: 0,
-                returning_rows: Vec::new(),
+                returning_rows: crate::mutation::returning::ReturningRows::new(services.runtime)?,
                 events: crate::mutation::events::MutationEventQueue::default(),
                 has_prepared_effect: false,
                 has_prepared_auto_identity: false,
@@ -457,7 +457,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             &mut prepared_conflict,
         )?;
         if let Some(row) = returning {
-            returning_rows.push(row);
+            returning_rows.push(row)?;
         }
         events.append_after_rows(row_after_events);
         supplied_identities.note(&target_table, &prepared_conflict);

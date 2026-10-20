@@ -6,12 +6,13 @@
 
 //! Resolve mutation execution paths using SQL view rewriting and execution-owned command loops.
 use super::{insert::table::InsertPlanning, views::commands::SourceOutputPruning};
+use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::MutationStatementContext;
 use crate::query::CteScope;
 use uqa_sql::{
     plan::{DeletePlan, InsertPlan, MergePlan, UpdatePlan},
     semantics::{view_privileges, view_rewrite},
-    SQLError, SQLParam, SQLResult,
+    SQLError, SQLParam,
 };
 
 pub fn run_insert<S: Clone + Send + Sync + 'static>(
@@ -20,7 +21,7 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
     stmt: &InsertPlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let rewrite = context.mutation.rules.views.rewrite;
     if let Some(kind) = rewrite.catalog.target_view_kind(&stmt.table)? {
         if kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
@@ -101,7 +102,7 @@ pub fn run_update<S: Clone + Send + Sync + 'static>(
     stmt: &UpdatePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let rewrite = context.mutation.rules.views.rewrite;
     if let Some(kind) = rewrite.catalog.target_view_kind(&stmt.table)? {
         if kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
@@ -149,7 +150,7 @@ pub fn run_delete<S: Clone + Send + Sync + 'static>(
     stmt: &DeletePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let rewrite = context.mutation.rules.views.rewrite;
     if let Some(kind) = rewrite.catalog.target_view_kind(&stmt.table)? {
         if kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
@@ -197,7 +198,7 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
     stmt: &MergePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<MutationOutput, SQLError> {
     let rewrite = context.mutation.rules.views.rewrite;
     if rewrite.catalog.target_view_kind(&stmt.target)?.is_some() {
         let scope = super::merge::analysis::merge_analysis_scope(

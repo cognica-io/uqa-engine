@@ -141,7 +141,7 @@ impl uqa_execution::mutation::entry::MutationCommandBoundary<StatementReadSnapsh
     fn with_command(
         &self,
         command: uqa_execution::mutation::entry::MutationCommand<'_, StatementReadSnapshot>,
-    ) -> Result<uqa_sql::SQLResult, SQLError> {
+    ) -> Result<uqa_execution::mutation::output::MutationOutput, SQLError> {
         crate::transactions::run_mutation_command(self, |engine| {
             command(&uqa_execution::mutation::entry::MutationCommandContext {
                 statement: engine.mutation_statement_context(),

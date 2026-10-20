@@ -5,7 +5,10 @@
 //
 
 //! Capabilities required to execute stored rewrite rules.
-use crate::{PhysicalRow, RowSchema};
+use crate::{
+    query::runtime::QueryMemorySettings, statement::plan_executor::StatementOutput, PhysicalRow,
+    RowSchema,
+};
 use uqa_core::Value;
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
@@ -13,7 +16,7 @@ use uqa_sql::{
     ast::Statement,
     plan::ExpressionPlan,
     semantics::{returning::ReturningAnalysisContext, rules::analysis::RuleAnalysisContext},
-    SQLError, SQLResult,
+    SQLError,
 };
 pub trait RuleSecurity {
     fn privilege_subject(&self, table: &str) -> Result<RoleReference, SQLError>;
@@ -23,7 +26,7 @@ pub trait RuleStatements {
         &self,
         statement: Statement,
         privilege_subject: &RoleReference,
-    ) -> Result<SQLResult, SQLError>;
+    ) -> Result<StatementOutput, SQLError>;
 }
 pub trait RuleExpressions {
     fn prepare_condition(&self, expression: &mut ExpressionPlan) -> Result<(), SQLError>;
@@ -37,6 +40,8 @@ pub trait RuleExpressions {
 }
 #[derive(Clone, Copy)]
 pub struct RuleContext<'a> {
+    pub memory: &'a dyn QueryMemorySettings,
+    pub cancellation: &'a uqa_core::CancellationToken,
     pub analysis: RuleAnalysisContext<'a>,
     pub binding: uqa_sql::binding::stored_routines::analysis::CatalogRoutineAnalysisContext<'a>,
     pub security: &'a dyn RuleSecurity,

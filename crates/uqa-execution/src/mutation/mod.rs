@@ -29,6 +29,7 @@ pub mod errors;
 
 pub mod conflict;
 
+pub mod output;
 pub mod returning;
 
 pub mod rules;

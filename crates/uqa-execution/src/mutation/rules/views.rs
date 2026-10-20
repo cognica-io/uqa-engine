@@ -6,6 +6,7 @@
 
 //! Automatic-view rewrite-rule projection, batching, and `RETURNING` capture.
 
+use crate::mutation::output::MutationOutput;
 use crate::{
     mutation::{
         returning::{DmlReturningShape, ReturningExecutionContext},
@@ -18,7 +19,7 @@ use std::collections::BTreeSet;
 use uqa_core::{DocId, Value};
 use uqa_sql::{
     plan::{ViewRuleInsertPlan, ViewRuleReturningPlan, ViewRuleUpdatePlan},
-    RowSchema, SQLError, SQLParam, SQLResult,
+    RowSchema, SQLError, SQLParam,
 };
 use uqa_storage::document_store::Document;
 #[derive(Clone)]
@@ -56,7 +57,7 @@ impl ViewRuleReturningCapture {
         params: &[SQLParam],
         ctes: &CteScope<S>,
         supplemental_schema: Option<&RowSchema>,
-    ) -> Result<SQLResult, SQLError> {
+    ) -> Result<MutationOutput, SQLError> {
         let mut returning_scope = ctes.clone();
         returning_scope
             .scalar_subqueries

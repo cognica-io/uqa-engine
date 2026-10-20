@@ -532,7 +532,13 @@ impl RowSchema {
         input: &Self,
         identities: &[(ColumnIdentity, Option<ColumnType>)],
     ) -> Self {
-        let mut binding_only = input.index.cold.binding_only.clone();
+        Self::with_owned_virtual_identities(input.clone(), identities)
+    }
+
+    pub(super) fn with_owned_virtual_identities(
+        mut input: Self,
+        identities: &[(ColumnIdentity, Option<ColumnType>)],
+    ) -> Self {
         for (identity, ty) in identities {
             let already_visible = match identity.qualifier() {
                 Some(qualifier) => input.has_qualified_column(qualifier, identity.column()),
@@ -544,34 +550,13 @@ impl RowSchema {
             if already_visible {
                 continue;
             }
-            binding_only
+            std::sync::Arc::make_mut(&mut input.index)
+                .cold
+                .binding_only
                 .entry(identity.clone())
                 .or_insert_with(|| ty.clone());
         }
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
-            input.columns().to_vec(),
-            input.identities().to_vec(),
-            input.column_types().to_vec(),
-            input.index.slots.to_vec(),
-            input.physical_width(),
-            SchemaBuildMetadata {
-                collations: input.index.cold.collations.clone(),
-                record_fields: input.index.cold.record_fields.clone(),
-                aliases: input.index.aliases.clone(),
-                alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.executor_attributes.clone(),
-                internal_types: input.index.cold.executor_attribute_types.clone(),
-                score_sources: input.index.cold.score_sources.clone(),
-                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
-                binding_only,
-                row_types: input.index.cold.row_types.clone(),
-                open_qualifiers: input.index.cold.open_qualifiers.clone(),
-                extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
-                extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
-                local_width: input.index.cold.local_width,
-                ..SchemaBuildMetadata::default()
-            },
-        )
+        input
     }
 
     /// Whether a column reference resolves to one of the schema's own columns rather than to an enclosing query's column overlaid by [`Self::with_outer_schema`], as `contain_vars_of_level(n, 0)` distinguishes them.
