@@ -24,7 +24,8 @@ use crate::{
     ScalarExpr, SharedExpressionEvaluator, SpillBuffer,
 };
 
-use canonical_index::{HybridHashIndex, MatchFlags, MemoryMatchSummary};
+use crate::spill::MatchFlags;
+use canonical_index::{HybridHashIndex, MemoryMatchSummary};
 use direct_index::{direct_unique_match, positional_key_hash, DirectHashIndex};
 use row_store::HybridRowStore;
 
@@ -811,7 +812,7 @@ impl PhysicalOperator for HashJoin<'_> {
         }
 
         let mut matched_right = matches!(self.kind, JoinKind::Right | JoinKind::Full)
-            .then(|| MatchFlags::new(right.len()))
+            .then(|| MatchFlags::new(right.len(), "join"))
             .transpose()?;
         let mut output = SpillBuffer::new(output_budget);
         let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);

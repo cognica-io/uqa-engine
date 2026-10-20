@@ -336,7 +336,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                 context.query.source.relational.runtime,
             )?;
             for (index, (old, source_context)) in pending.into_iter().enumerate() {
-                if rule_batch.suppresses(index) {
+                if rule_batch.suppresses(index)? {
                     continue;
                 }
                 if crate::mutation::triggers::fire_instead_of_row_triggers(

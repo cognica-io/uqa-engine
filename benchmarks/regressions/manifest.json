@@ -17265,6 +17265,97 @@
       "capability": "Bounded trigger transition capture",
       "workload": "Four providers with 32KiB rows, repeated row/statement transition reads, zero-row UPDATE, DELETE, transaction rollback and persistent reopen under 64KiB query memory.",
       "invariant": "Exact PostgreSQL18.4 OLD/NEW audit rows and surviving values match through repeat reads, rollback and reopen; empty events remain visible."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "uniform_rule_suppression_keeps_constant_metadata",
+      "source": "crates/uqa-execution/src/mutation/rules/suppression/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "A million-row event starts with no suppressed rows, then an unconditional rule suppresses all rows.",
+      "invariant": "Peak additional allocation stays below the fixed 128KiB ceiling; first/last and out-of-range decisions remain exact.",
+      "capability": "Bounded rewrite-rule suppression metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sparse_rule_suppression_bounds_metadata_and_preserves_union",
+      "source": "crates/uqa-execution/src/mutation/rules/suppression/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Two sparse rule selections with strides 257 and 509 are unioned over 1,048,576 events, then every decision is read.",
+      "invariant": "Peak additional allocation stays below the unchanged 128KiB ceiling and all original-row decisions equal the selection union.",
+      "capability": "Bounded rewrite-rule suppression metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rule_suppression_handles_all_override_empty_bounds_and_cancellation",
+      "source": "crates/uqa-execution/src/mutation/rules/suppression/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Empty and mixed decisions transition to all rows, followed by invalid ordinals and cancellation.",
+      "invariant": "All-row override preserves each decision, invalid writes fail and cancelled consumers return 57014.",
+      "capability": "Bounded rewrite-rule suppression metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "match_flags_cache_bounds_page_io_and_preserves_union",
+      "source": "crates/uqa-execution/src/spill/match_flags/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Two sequential marking passes and two full read passes cover three authenticated flag pages.",
+      "invariant": "Exact union decisions use at most 6 cache-page writes and 12 reads, independent of the number of flags per page.",
+      "capability": "Bounded rewrite-rule suppression metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "match_flags_preserve_random_probes_duplicates_and_bounds",
+      "source": "crates/uqa-execution/src/spill/match_flags/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Random and duplicate probes cross four flag pages including the short final page and invalid bounds.",
+      "invariant": "Cached decisions remain exact across page replacements; empty/out-of-range access fails.",
+      "capability": "Bounded rewrite-rule suppression metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "match_flags_do_not_turn_backing_read_errors_into_missing_matches",
+      "source": "crates/uqa-execution/src/spill/match_flags/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "The test truncates only its owned encrypted temporary flag file after flushing and replacing the first cached page.",
+      "invariant": "A read of a formerly marked uncached ordinal propagates the backing error instead of reporting false.",
+      "capability": "Bounded rewrite-rule suppression metadata"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nested_loop_outer_flags_preserve_matches_and_unmatched_rows",
+      "source": "crates/uqa-execution/src/join/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "RIGHT and FULL nested-loop joins run with one-byte and 64KiB work allowances over matched and unmatched source rows.",
+      "invariant": "Shared cached match flags preserve exactly the matched pair and required null-extended rows.",
+      "capability": "Bounded rewrite-rule suppression metadata"
     }
   ]
 }

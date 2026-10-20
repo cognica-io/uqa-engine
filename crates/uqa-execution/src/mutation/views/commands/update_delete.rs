@@ -673,7 +673,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 context.query.source.relational.runtime,
             )?;
             for (index, row) in pending.into_iter().enumerate() {
-                if rule_batch.suppresses(index) {
+                if rule_batch.suppresses(index)? {
                     continue;
                 }
                 let Some(final_new) = crate::mutation::triggers::fire_instead_of_row_triggers(

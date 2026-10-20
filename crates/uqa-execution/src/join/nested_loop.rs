@@ -144,7 +144,7 @@ impl PhysicalOperator for NestedLoopJoin<'_> {
         }
         self.right_input_spilled = right.has_spilled();
         let mut matched_right = matches!(self.kind, JoinKind::Right | JoinKind::Full)
-            .then(|| MatchFlags::new(right.len()))
+            .then(|| MatchFlags::new(right.len(), "join"))
             .transpose()?;
         let mut output = SpillBuffer::new(output_budget);
         let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);

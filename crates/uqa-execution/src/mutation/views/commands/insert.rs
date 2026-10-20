@@ -307,7 +307,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
             )?;
             for (index, row) in rule_rows.iter().enumerate() {
                 let row = row?;
-                if !rule_batch.suppresses(index) {
+                if !rule_batch.suppresses(index)? {
                     let mut document = row.new.ok_or_else(|| {
                         SQLError::Internal("view INSERT rule input lost its proposed row".into())
                     })?;
