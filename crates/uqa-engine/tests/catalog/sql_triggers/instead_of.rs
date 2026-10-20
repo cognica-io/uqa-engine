@@ -12,6 +12,9 @@ use uqa_engine::Engine;
 
 use super::{exec, strings};
 
+#[path = "instead_of/insert_order.rs"]
+mod insert_order;
+
 fn install_fixture(engine: &Engine) {
     for sql in [
         "CREATE TABLE view_base_items (id INTEGER PRIMARY KEY, value TEXT NOT NULL)",

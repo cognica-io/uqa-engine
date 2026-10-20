@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Evaluate unrewritten view INSERT inputs and INSTEAD OF row triggers in PostgreSQL order, preserving prior sequence effects on source errors and bounding input and RETURNING retention.
+
 - Bound command-overlay spill writes by combined row/index bytes and spill evaluated UPDATE actions before publication, preserving original retention allowances, row/key atomicity, writer admission, AFTER-trigger order and rollback.
 
 - Spill evaluated DELETE publication actions before writing and COPY delivery, sharing the existing MERGE codec while preserving original order, cancellation and statement rollback.
