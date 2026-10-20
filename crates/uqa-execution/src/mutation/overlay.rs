@@ -21,6 +21,7 @@ use crate::query::exact_lookup::FieldPresence;
 mod comparison;
 mod exact;
 mod expressions;
+mod matching;
 pub use expressions::CommandIndexProbe;
 mod keys;
 mod spilled;
@@ -466,74 +467,43 @@ impl CommandMutationOverlay {
         control: &StorageReadControl,
         catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
     ) -> Result<BudgetedVec<DocId>, SQLError> {
-        if fields.len() != values.len() {
-            return Err(SQLError::Internal(
-                "command-overlay exact lookup has mismatched fields and values".into(),
-            ));
-        }
-        control.check().map_err(resource_error)?;
         let mut found = BudgetedVec::new(control.memory());
-        if overlays.iter().all(|overlay| !overlay.holds(table)) {
-            return Ok(found);
-        }
-        if values.iter().any(uqa_sql::expr::value_comparison_can_fail)
-            || overlays.iter().any(|overlay| {
-                overlay
-                    .table(table)
-                    .is_some_and(|table| table.has_fallible_comparison)
-            })
-        {
-            return comparison::matches(overlays, table, fields, values, kind, control, catalog);
-        }
-        let (fields, key) = keys::lookup_parts(fields, values, control)?;
-        for overlay in overlays.iter_mut() {
-            if let Some(rows) = overlay.bind(control)?.get_mut(table) {
-                rows.prepare_index(kind, &fields, control)?;
-            }
-        }
-        for (position, overlay) in overlays.iter().enumerate().rev() {
-            let Some(rows) = overlay.table(table) else {
-                continue;
-            };
-            let newer = &overlays[position + 1..];
-            let index = rows
-                .indexes(kind)
-                .get(fields.values())
-                .expect("prepared exact index");
-            for (&id, ()) in index.candidates(key.bytes()).into_iter().flatten() {
-                control.check().map_err(resource_error)?;
-                if !Self::stages(newer, table, id, control)? {
-                    found.push(id).map_err(resource_error)?;
-                }
-            }
-            let Some(spilled) = &rows.rows.spilled else {
-                continue;
-            };
-            let mut after = None;
-            loop {
-                let page = spilled::index_page(
-                    spilled.view(),
-                    index.ordinal(),
-                    key.bytes(),
-                    after,
-                    control,
-                )
-                .map_err(storage_error)?;
-                for (id, _) in page.rows.iter().copied() {
-                    control.check().map_err(resource_error)?;
-                    if rows.rows.memory.get(&id).is_none()
-                        && !Self::stages(newer, table, id, control)?
-                    {
-                        found.push(id).map_err(resource_error)?;
-                    }
-                }
-                match page.resume {
-                    Some(resume) => after = Some(resume),
-                    None => break,
-                }
-            }
-        }
+        matching::visit_matches(
+            overlays,
+            table,
+            matching::MatchKeys {
+                fields,
+                values,
+                kind,
+            },
+            control,
+            catalog,
+            &mut |id| found.push(id).map_err(resource_error),
+        )?;
         Ok(found)
+    }
+
+    pub fn visit_matches_with_catalog(
+        overlays: &mut [Self],
+        table: &str,
+        fields: &[String],
+        values: &[Value],
+        control: &StorageReadControl,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        matching::visit_matches(
+            overlays,
+            table,
+            matching::MatchKeys {
+                fields,
+                values,
+                kind: KeyKind::Columns,
+            },
+            control,
+            catalog,
+            visit,
+        )
     }
 }
 

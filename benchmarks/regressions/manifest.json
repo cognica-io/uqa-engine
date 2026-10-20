@@ -18100,6 +18100,45 @@
       "capability": "Native equality snapshot preservation",
       "workload": "Committed equality hits combined with private insertions, key replacements, unsupported comparison domains, early stop and savepoint undo.",
       "invariant": "Exact sorted identities match the selected private view, the first consumer stop is final, unsupported private domains emit no partial results, and rollback restores the original keys."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "equality_bucket_visits_keep_constant_workspace_and_typed_consumer_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/index/value/tests.rs",
+      "capability": "Bounded cached equality candidates",
+      "workload": "16,384 equal cached index keys and a failing identity consumer.",
+      "invariant": "The ordered bucket is borrowed under a fixed 4KiB allocation ceiling; an absent key emits nothing and the consumer 53200 error stops after exactly three identities."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "indexed_reference_candidates_spill_without_copying_complete_postings",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/referential/snapshots/tests.rs",
+      "capability": "Bounded referential index identities",
+      "workload": "16,384 current index candidates plus duplicate staged matches under 64KiB work memory.",
+      "invariant": "Exact sorted deduplicated identities replay without document enumeration or payload reads under a fixed 512KiB allocation ceiling."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "reference_identity_pages_preserve_fixed_changes_and_early_stop",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/referential/snapshots/tests.rs",
+      "capability": "Bounded referential fallback identities",
+      "workload": "Fixed/latest/private identity reconciliation plus 16,384 paged identities, forced spill, seven-row consumer stop and cancellation.",
+      "invariant": "Private deletions and replacements mask the latest view; exact ordered identities stay under a fixed 512KiB allocation ceiling, stop once requested and preserve 57014."
     }
   ]
 }

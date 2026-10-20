@@ -97,6 +97,44 @@ impl crate::Engine {
         self.value_index_scan_state(table, &state, field, predicate, None)
     }
 
+    pub(crate) fn visit_value_index_equal(
+        &self,
+        table: &str,
+        field: &ValueIndexKey,
+        value: &Value,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        let state = self.require_table(table)?;
+        if !state.value_indexes.read().contains_key(field) {
+            let selected = self
+                .value_index_probe_backend(table, &state, field)
+                .map_err(|error| {
+                    uqa_execution::storage_errors::storage_error(
+                        "select stored value index",
+                        &error,
+                    )
+                })?;
+            if let Some((name, backend)) = selected {
+                if uqa_execution::catalog::index::value::visit_durable_equality(
+                    backend,
+                    &name,
+                    field,
+                    &Predicate::Equals(value.clone()),
+                    visit,
+                )? {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(self
+            .read_value_index_state(table, &state, field, |index| {
+                Ok(index
+                    .visit_equal_with_catalog(value, Some(self), visit)?
+                    .then_some(()))
+            })?
+            .is_some())
+    }
+
     pub(crate) fn value_index_query_scan(
         &self,
         table: &str,
@@ -154,6 +192,20 @@ impl crate::Engine {
         field: &ValueIndexKey,
         predicate: &Predicate,
     ) -> StorageBackendResult<Option<PostingList>> {
+        let Some((name, backend)) = self.value_index_probe_backend(table, state, field)? else {
+            return Ok(None);
+        };
+        uqa_execution::catalog::index::value::probe_durable_equality(
+            backend, &name, field, predicate,
+        )
+    }
+
+    fn value_index_probe_backend(
+        &self,
+        table: &str,
+        state: &std::sync::Arc<TableState>,
+        field: &ValueIndexKey,
+    ) -> StorageBackendResult<Option<(String, &dyn uqa_storage::PersistentStorageBackend)>> {
         let Some(backend) = self.persistent_value_index_backend(state) else {
             return Ok(None);
         };
@@ -177,9 +229,7 @@ impl crate::Engine {
         {
             return Ok(None);
         }
-        uqa_execution::catalog::index::value::probe_durable_equality(
-            backend, &name, field, predicate,
-        )
+        Ok(Some((name, backend)))
     }
 
     /// Read an accelerator belonging to the caller's selected table, hydrating

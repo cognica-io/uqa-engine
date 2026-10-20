@@ -19,6 +19,13 @@ pub use uqa_sql::semantics::constraint_catalog::ConstraintCatalog;
 /// Mutation-visible row images and the identities changed by an active command overlay.
 pub trait MutationRead {
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError>;
+    fn table_doc_id_page(
+        &self,
+        table: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError>;
     fn live_table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError>;
     fn live_table_doc_id_page(
         &self,
@@ -53,6 +60,13 @@ pub trait MutationIndexRead {
         columns: &[String],
         values: &[Value],
     ) -> Result<Vec<DocId>, SQLError>;
+    fn visit_staged_matches(
+        &self,
+        table: &str,
+        columns: &[String],
+        values: &[Value],
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError>;
     /// Probe already evaluated physical tuple keys and retain only the command rows that mask the mutation-visible stored index.
     fn staged_expression_matches(
         &self,
@@ -66,6 +80,14 @@ pub trait MutationIndexRead {
         key: &ValueIndexKey,
         predicate: &Predicate,
     ) -> Result<Option<PostingList>, SQLError>;
+    /// Capture ordered identities without loading documents inside the retained index read.
+    fn visit_value_index_equal(
+        &self,
+        table: &str,
+        key: &ValueIndexKey,
+        value: &Value,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError>;
 }
 pub trait ConstraintTransactions {
     fn foreign_key_is_deferred(&self, table: &str, key: &ForeignKey) -> Result<bool, SQLError>;

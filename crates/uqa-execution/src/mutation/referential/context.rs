@@ -17,6 +17,13 @@ use uqa_sql::{ast::ForeignKey, SQLError};
 /// Retained latest row images used only for referential checks under a fixed transaction snapshot.
 pub trait ReferentialReadSnapshot {
     fn doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError>;
+    fn doc_id_page(
+        &self,
+        table: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError>;
     /// Probe the same retained row generation used by this snapshot's document reads.
     fn value_index_scan_key(
         &self,
@@ -24,6 +31,13 @@ pub trait ReferentialReadSnapshot {
         key: &uqa_storage::ValueIndexKey,
         predicate: &uqa_core::Predicate,
     ) -> Result<Option<uqa_core::PostingList>, SQLError>;
+    fn visit_value_index_equal(
+        &self,
+        table: &str,
+        key: &uqa_storage::ValueIndexKey,
+        value: &uqa_core::Value,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError>;
     fn document(
         &self,
         table: &str,

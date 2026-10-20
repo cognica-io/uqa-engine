@@ -73,16 +73,8 @@ pub fn probe_durable_equality(
     field: &uqa_storage::ValueIndexKey,
     predicate: &Predicate,
 ) -> uqa_storage::StorageBackendResult<Option<PostingList>> {
-    let value = match predicate {
-        Predicate::Equals(
-            value @ (Value::Bool(_)
-            | Value::Int(_)
-            | Value::Str(_)
-            | Value::Bytes(_)
-            | Value::Row(_)),
-        ) => value,
-        Predicate::Equals(value @ Value::Float(number)) if !number.is_nan() => value,
-        _ => return Ok(None),
+    let Some(value) = durable_equality_value(predicate) else {
+        return Ok(None);
     };
     let Some(ids) = backend.probe_btree_index_equal(table, field, value)? else {
         return Ok(None);
@@ -90,7 +82,74 @@ pub fn probe_durable_equality(
     Ok(Some(posting_list_from_sorted_ids(ids.into_iter())))
 }
 
+fn durable_equality_value(predicate: &Predicate) -> Option<&Value> {
+    match predicate {
+        Predicate::Equals(
+            value @ (Value::Bool(_)
+            | Value::Int(_)
+            | Value::Str(_)
+            | Value::Bytes(_)
+            | Value::Row(_)),
+        ) => Some(value),
+        Predicate::Equals(value @ Value::Float(number)) if !number.is_nan() => Some(value),
+        _ => None,
+    }
+}
+
+/// The callback retains only identities and must not reenter the provider. Preserve its typed SQL error separately from provider diagnostics.
+pub fn visit_durable_equality(
+    backend: &dyn uqa_storage::PersistentStorageBackend,
+    table: &str,
+    field: &uqa_storage::ValueIndexKey,
+    predicate: &Predicate,
+    visit: &mut dyn FnMut(DocId) -> Result<(), uqa_sql::SQLError>,
+) -> Result<bool, uqa_sql::SQLError> {
+    let Some(value) = durable_equality_value(predicate) else {
+        return Ok(false);
+    };
+    let mut failure = None;
+    let result = backend.visit_btree_index_equal(table, field, value, &mut |id| match visit(id) {
+        Ok(()) => true,
+        Err(error) => {
+            failure = Some(error);
+            false
+        }
+    });
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    result.map_err(|error| crate::storage_errors::storage_error("visit stored value index", &error))
+}
+
 impl ColumnValueIndex {
+    /// Visit exact equality candidates without copying their bucket or decorating identities with empty posting payloads. SQL-dependent comparison keeps its original ordered value evaluation.
+    pub fn visit_equal_with_catalog(
+        &self,
+        value: &Value,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+        visit: &mut dyn FnMut(DocId) -> Result<(), uqa_sql::SQLError>,
+    ) -> Result<bool, uqa_sql::SQLError> {
+        let Some(index) = &self.index else {
+            return Ok(false);
+        };
+        let predicate = Predicate::Equals(value.clone());
+        if comparison::needs_sql_comparison(&predicate, self.comparison.can_fail()) {
+            for (&id, value) in &self.values {
+                if comparison::matches(value, &predicate, catalog)? {
+                    visit(id)?;
+                }
+            }
+            return Ok(true);
+        }
+        if !self.supports(&predicate) {
+            return Ok(false);
+        }
+        for &id in index.equality_ids(value) {
+            visit(id)?;
+        }
+        Ok(true)
+    }
+
     /// Borrow the key evaluated for the stored row, without reevaluating an index expression against a newer routine definition.
     pub fn stored_value(&self, doc_id: DocId) -> Option<&Value> {
         self.values.get(&doc_id)

@@ -8,7 +8,7 @@
 
 use super::*;
 use std::sync::Arc;
-use uqa_core::{Payload, PostingEntry, PostingList};
+use uqa_core::{Payload, PostingEntry, PostingList, Predicate};
 use uqa_storage::{read_control::StorageReadControl, DocumentMetadata, ValueIndexKey};
 
 #[derive(Default)]
@@ -18,6 +18,27 @@ struct Source {
 }
 
 impl Source {
+    fn page(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
+        assert!(
+            self.indexed.is_none(),
+            "indexed reference enumerated documents"
+        );
+        control.cancellation().check()?;
+        let mut page = uqa_core::memory::BudgetedVec::new(control.memory());
+        let start = after.map_or(0, |after| self.staged.partition_point(|id| *id <= after));
+        for &id in self.staged.iter().skip(start).take(limit) {
+            page.push(id).map_err(|error| {
+                crate::storage_errors::storage_error("test identity page", &error.into())
+            })?;
+        }
+        Ok(page)
+    }
+
     fn posting(&self) -> Option<PostingList> {
         self.indexed.as_ref().map(|ids| {
             PostingList::from_unsorted(
@@ -39,6 +60,15 @@ impl MutationRead for Source {
     fn live_table_doc_ids(&self, _: &str) -> Result<Vec<DocId>, SQLError> {
         unreachable!()
     }
+    fn table_doc_id_page(
+        &self,
+        _: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
+        self.page(after, limit, control)
+    }
     fn live_table_doc_id_page(
         &self,
         _: &str,
@@ -48,8 +78,12 @@ impl MutationRead for Source {
     ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
         unreachable!()
     }
-    fn get_document(&self, _: &str, _: DocId) -> Result<Option<Document>, SQLError> {
-        panic!("candidate lookup read a full payload")
+    fn get_document(&self, _: &str, id: DocId) -> Result<Option<Document>, SQLError> {
+        assert!(
+            self.indexed.is_none(),
+            "indexed candidate lookup read a full payload"
+        );
+        Ok(self.staged.contains(&id).then(Document::new))
     }
     fn raw_document(&self, _: &str, _: DocId) -> Result<Option<Document>, SQLError> {
         unreachable!()
@@ -71,6 +105,18 @@ impl MutationIndexRead for Source {
     fn staged_matches(&self, _: &str, _: &[String], _: &[Value]) -> Result<Vec<DocId>, SQLError> {
         Ok(self.staged.clone())
     }
+    fn visit_staged_matches(
+        &self,
+        _: &str,
+        _: &[String],
+        _: &[Value],
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        for &id in &self.staged {
+            visit(id)?;
+        }
+        Ok(())
+    }
     fn staged_expression_matches(
         &self,
         _: &str,
@@ -78,6 +124,21 @@ impl MutationIndexRead for Source {
         _: &[Value],
     ) -> Result<crate::mutation::overlay::CommandIndexProbe, SQLError> {
         unreachable!()
+    }
+    fn visit_value_index_equal(
+        &self,
+        _: &str,
+        _: &ValueIndexKey,
+        _: &Value,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        let Some(ids) = &self.indexed else {
+            return Ok(false);
+        };
+        for &id in ids {
+            visit(id)?;
+        }
+        Ok(true)
     }
     fn value_index_scan_key(
         &self,
@@ -90,8 +151,33 @@ impl MutationIndexRead for Source {
 }
 
 impl ReferentialReadSnapshot for Source {
+    fn doc_id_page(
+        &self,
+        _: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
+        self.page(after, limit, control)
+    }
+
     fn doc_ids(&self, _: &str) -> Result<Vec<DocId>, SQLError> {
         panic!("indexed reference enumerated latest documents")
+    }
+    fn visit_value_index_equal(
+        &self,
+        _: &str,
+        _: &ValueIndexKey,
+        _: &Value,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        let Some(ids) = &self.indexed else {
+            return Ok(false);
+        };
+        for &id in ids {
+            visit(id)?;
+        }
+        Ok(true)
     }
     fn value_index_scan_key(
         &self,
@@ -159,12 +245,7 @@ fn indexed_current_rows_mask_deleted_and_rekeyed_commands() {
         table: "child".into(),
         changes: changes(),
     };
-    assert_eq!(
-        table
-            .indexed_doc_ids(&["parent_id".into()], &[Value::Str("wanted".into())])
-            .unwrap(),
-        Some(vec![3, 4, 5])
-    );
+    assert_eq!(selected(&table).unwrap(), Some(vec![3, 4, 5]));
 }
 
 #[test]
@@ -185,12 +266,7 @@ fn latest_index_adds_commits_and_preserves_only_own_snapshot_rows() {
         table: "child".into(),
         changes: changes(),
     };
-    assert_eq!(
-        table
-            .indexed_doc_ids(&["parent_id".into()], &[Value::Str("wanted".into())])
-            .unwrap(),
-        Some(vec![3, 5, 6])
-    );
+    assert_eq!(selected(&table).unwrap(), Some(vec![3, 5, 6]));
     assert_eq!(
         table.check_visible(6).unwrap_err().sqlstate(),
         Some("40001")
@@ -217,9 +293,126 @@ fn missing_index_in_either_generation_requires_the_existing_scan() {
             table: "child".into(),
             changes: DocumentChanges::default(),
         };
-        assert!(table
-            .indexed_doc_ids(&["parent_id".into()], &[Value::Str("wanted".into())])
-            .unwrap()
-            .is_none());
+        assert!(selected(&table).unwrap().is_none());
     }
+}
+
+fn selected(table: &ReferenceTableSnapshot<'_>) -> Result<Option<Vec<DocId>>, SQLError> {
+    table
+        .indexed_doc_ids(
+            &["parent_id".into()],
+            &[Value::Str("wanted".into())],
+            64 * 1024,
+            &CancellationToken::new(),
+        )?
+        .map(|ids| {
+            let mut found = Vec::new();
+            ids.visit(&mut |_, id| {
+                found.push(id);
+                Ok(true)
+            })?;
+            Ok(found)
+        })
+        .transpose()
+}
+
+#[test]
+fn indexed_reference_candidates_spill_without_copying_complete_postings() {
+    let count = 16_384;
+    let source = Source {
+        indexed: Some((0..count).collect()),
+        staged: (0..count).step_by(17).collect(),
+    };
+    let table = ReferenceTableSnapshot {
+        current: &source,
+        indexes: &source,
+        snapshots: &source,
+        latest: None,
+        table: "child".into(),
+        changes: DocumentChanges::default(),
+    };
+    let allocated = allocation_counter::measure(|| {
+        let ids = table
+            .indexed_doc_ids(
+                &["parent_id".into()],
+                &[Value::Int(1)],
+                64 * 1024,
+                &CancellationToken::new(),
+            )
+            .unwrap()
+            .unwrap();
+        let mut next = 0;
+        ids.visit(&mut |table, id| {
+            assert!(table.is_empty());
+            assert_eq!(id, next);
+            next += 1;
+            Ok(true)
+        })
+        .unwrap();
+        assert_eq!(next, count);
+    });
+    assert!(allocated.bytes_max < 512 * 1024, "{allocated:?}");
+}
+
+#[test]
+fn reference_identity_pages_preserve_fixed_changes_and_early_stop() {
+    let current = Source {
+        indexed: None,
+        staged: vec![3, 5],
+    };
+    let latest = Source {
+        indexed: None,
+        staged: vec![1, 2, 6],
+    };
+    let table = ReferenceTableSnapshot {
+        current: &current,
+        indexes: &current,
+        snapshots: &current,
+        latest: Some(&latest),
+        table: "child".into(),
+        changes: changes(),
+    };
+    let mut found = Vec::new();
+    table
+        .visit_doc_ids(0, &CancellationToken::new(), &mut |id| {
+            found.push(id);
+            Ok(true)
+        })
+        .unwrap();
+    assert_eq!(found, [3, 5, 6]);
+    let current = Source {
+        indexed: None,
+        staged: (0..16_384).collect(),
+    };
+    let table = ReferenceTableSnapshot {
+        current: &current,
+        indexes: &current,
+        snapshots: &current,
+        latest: None,
+        table: "child".into(),
+        changes: DocumentChanges::default(),
+    };
+    let allocated = allocation_counter::measure(|| {
+        let mut next = 0;
+        table
+            .visit_doc_ids(64 * 1024, &CancellationToken::new(), &mut |id| {
+                assert_eq!(id, next);
+                next += 1;
+                Ok(next < 7)
+            })
+            .unwrap();
+        assert_eq!(next, 7);
+    });
+    assert!(allocated.bytes_max < 512 * 1024, "{allocated:?}");
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    assert_eq!(
+        table
+            .visit_doc_ids(0, &cancel, &mut |_| {
+                panic!("cancelled reference scan delivered a candidate")
+            })
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014"),
+    );
 }

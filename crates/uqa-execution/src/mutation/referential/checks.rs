@@ -405,37 +405,47 @@ fn period_key_referenced<S: Clone + 'static>(
         &key.constraint_table,
     )? {
         let rows = snapshot.table(&table)?;
-        for doc_id in rows.doc_ids()? {
-            let Some(document) = rows.document(doc_id)? else {
-                continue;
-            };
-            let Some(lookup) = foreign_key_lookup_values(
-                context.constraints.partitions.catalog,
-                &table,
-                foreign_key,
-                &document,
-            )?
-            else {
-                continue;
-            };
-            if !super::references::normalized_keys_equal(
-                context.constraints.values,
-                &lookup.values[..ordinary],
-                &expected[..ordinary],
-            )? {
-                continue;
-            }
-            if !period_foreign_key_coverage(
-                context.constraints,
-                foreign_key,
-                &lookup.values,
-                &[],
-                None,
-            )?
-            .0
-            {
-                return Ok(true);
-            }
+        let mut referenced = false;
+        rows.visit_doc_ids(
+            context.constraints.memory.work_mem_bytes()?,
+            context.triggers.runtime.cancellation,
+            &mut |doc_id| {
+                let Some(document) = rows.document(doc_id)? else {
+                    return Ok(true);
+                };
+                let Some(lookup) = foreign_key_lookup_values(
+                    context.constraints.partitions.catalog,
+                    &table,
+                    foreign_key,
+                    &document,
+                )?
+                else {
+                    return Ok(true);
+                };
+                if !super::references::normalized_keys_equal(
+                    context.constraints.values,
+                    &lookup.values[..ordinary],
+                    &expected[..ordinary],
+                )? {
+                    return Ok(true);
+                }
+                if !period_foreign_key_coverage(
+                    context.constraints,
+                    foreign_key,
+                    &lookup.values,
+                    &[],
+                    None,
+                )?
+                .0
+                {
+                    referenced = true;
+                    return Ok(false);
+                }
+                Ok(true)
+            },
+        )?;
+        if referenced {
+            return Ok(true);
         }
     }
     Ok(false)

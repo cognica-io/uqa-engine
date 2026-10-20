@@ -232,45 +232,50 @@ fn defer_period_key_checks<S: Clone + 'static>(
         key.constraint_table,
     )? {
         let rows = snapshot.table(&physical_table)?;
-        for child_id in rows.doc_ids()? {
-            if (key.root_deletes)(&physical_table, child_id)? {
-                continue;
-            }
-            let Some(child_document) = rows.document(child_id)? else {
-                continue;
-            };
-            let Some(child_lookup) = foreign_key_lookup_values(
-                context.constraints.partitions.catalog,
-                &physical_table,
-                key.foreign_key,
-                &child_document,
-            )?
-            else {
-                continue;
-            };
-            if child_lookup.values[..ordinary_len] != key.expected[..ordinary_len] {
-                continue;
-            }
-            if crate::mutation::constraints::period::period_foreign_key_coverage_excluding(
-                context.constraints,
-                key.foreign_key,
-                &child_lookup.values,
-                excluded_parents,
-                replacement,
-            )?
-            .0
-            {
-                continue;
-            }
-            context.deferrals.defer_foreign_key_check(
-                key.constraint_table,
-                key.firing_relation,
-                &physical_table,
-                child_id,
-                key.foreign_key,
-                key.derived,
-            )?;
-        }
+        rows.visit_doc_ids(
+            context.constraints.memory.work_mem_bytes()?,
+            context.triggers.runtime.cancellation,
+            &mut |child_id| {
+                if (key.root_deletes)(&physical_table, child_id)? {
+                    return Ok(true);
+                }
+                let Some(child_document) = rows.document(child_id)? else {
+                    return Ok(true);
+                };
+                let Some(child_lookup) = foreign_key_lookup_values(
+                    context.constraints.partitions.catalog,
+                    &physical_table,
+                    key.foreign_key,
+                    &child_document,
+                )?
+                else {
+                    return Ok(true);
+                };
+                if child_lookup.values[..ordinary_len] != key.expected[..ordinary_len] {
+                    return Ok(true);
+                }
+                if crate::mutation::constraints::period::period_foreign_key_coverage_excluding(
+                    context.constraints,
+                    key.foreign_key,
+                    &child_lookup.values,
+                    excluded_parents,
+                    replacement,
+                )?
+                .0
+                {
+                    return Ok(true);
+                }
+                context.deferrals.defer_foreign_key_check(
+                    key.constraint_table,
+                    key.firing_relation,
+                    &physical_table,
+                    child_id,
+                    key.foreign_key,
+                    key.derived,
+                )?;
+                Ok(true)
+            },
+        )?;
     }
     Ok(())
 }
