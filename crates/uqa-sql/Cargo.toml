@@ -42,6 +42,7 @@ errno = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+allocation-counter = "=0.8.1"
 proptest = { workspace = true }
 
 [[test]]
