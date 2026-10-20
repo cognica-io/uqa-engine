@@ -28,7 +28,7 @@ pub use keys::{
     lock_document_key_dependencies, validate_key_constraints,
     validate_key_constraints_with_previous, without_overlaps_conflict,
 };
-use period::period_foreign_key_coverage;
+use period::{period_foreign_key_is_covered, PeriodParentIds};
 pub use routing::{partition_insert_target, validate_partition_constraint};
 pub use statement::{statement_relation, ConstraintStatement};
 use uqa_core::{DocId, Value};
@@ -318,7 +318,7 @@ pub(crate) fn require_foreign_key_parent(
 ) -> Result<(), SQLError> {
     if fk.period {
         let (covered, parent_ids) =
-            period_foreign_key_coverage(context, fk, &lookup.values, &[], None)?;
+            period::period_foreign_key_parent_rows(context, fk, &lookup.values)?;
         if !covered {
             return Err(referencing_row_violation(
                 context,
@@ -328,7 +328,14 @@ pub(crate) fn require_foreign_key_parent(
                 document,
             )?);
         }
-        for parent in parent_ids {
+        for parent in parent_ids
+            .as_ref()
+            .map(PeriodParentIds::read)
+            .transpose()?
+            .into_iter()
+            .flatten()
+        {
+            let parent = parent?;
             let _target = lock_mutation_target(
                 context.locks,
                 &parent.table,

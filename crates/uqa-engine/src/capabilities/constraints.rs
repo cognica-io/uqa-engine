@@ -37,6 +37,7 @@ impl Engine {
             partitions: self.partition_context(),
             diagnostics: self,
             memory: self.session.as_ref(),
+            cancellation: self.query_runtime_view().cancellation,
         }
     }
 }

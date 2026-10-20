@@ -8,7 +8,7 @@
 use super::{
     dml_storage_error, find_exact_foreign_key_parent, foreign_key_comparison_types,
     foreign_key_lookup_values, foreign_key_parent_index, foreign_key_relation_name,
-    foreign_key_values, period_foreign_key_coverage, ConstraintContext, ForeignKey,
+    foreign_key_values, period_foreign_key_is_covered, ConstraintContext, ForeignKey,
     ForeignKeyComparison, SQLError, Value,
 };
 
@@ -70,15 +70,13 @@ pub fn validate_deferred_foreign_key_checks(
             else {
                 continue;
             };
-            if period_foreign_key_coverage(
+            if period_foreign_key_is_covered(
                 context,
                 &validation.foreign_key,
                 &lookup.values,
                 &[],
                 None,
-            )?
-            .0
-            {
+            )? {
                 continue;
             }
         } else {

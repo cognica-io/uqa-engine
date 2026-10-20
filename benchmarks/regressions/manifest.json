@@ -18152,6 +18152,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "temporal_parent_union_preserves_coverage_gaps_and_overlap",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/constraints/period/ranges/tests.rs",
+      "capability": "Bounded PERIOD foreign-key parents",
+      "workload": "Fourteen independent PostgreSQL 18.4 interval cases over all six built-in range subtypes, reversed duplicate parents, zero and 64KiB work allowances.",
+      "invariant": "Coverage and overlap preserve gaps, adjacency, open/closed endpoints, infinity and timezone-equivalent bounds; an empty parent stream remains uncovered.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "temporal_parent_union_spills_without_retaining_all_ranges",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/constraints/period/ranges/tests.rs",
+      "capability": "Bounded PERIOD foreign-key parents",
+      "workload": "16,384 adjacent parent ranges presented in reverse order under a 64KiB allowance; the former complete accumulator is retained as a negative control.",
+      "invariant": "Complete coverage and overlap pass the unchanged 512KiB peak allocation ceiling, while the former accumulator exceeds it.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "temporal_parent_union_retains_cancellation_and_subtype_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/constraints/period/ranges/tests.rs",
+      "capability": "Bounded PERIOD foreign-key parents",
+      "workload": "A mismatched parent subtype followed by cancellation of a valid populated range spool.",
+      "invariant": "Subtype mismatch is rejected and cancellation retains SQLSTATE 57014.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
