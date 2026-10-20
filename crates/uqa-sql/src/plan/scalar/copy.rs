@@ -29,6 +29,26 @@ impl ScalarExpr {
 }
 
 impl Lowering<'_> {
+    pub(super) fn copy_retained_literal(
+        &mut self,
+        literal: &crate::ir::RetainedScalarLiteral,
+    ) -> Result<Box<crate::ir::RetainedScalarLiteral>> {
+        self.boxed(|this| {
+            Ok(crate::ir::RetainedScalarLiteral {
+                value: literal.value.clone(),
+                declaration: literal
+                    .declaration
+                    .as_deref()
+                    .map(|name| this.copy_text(name))
+                    .transpose()?,
+                ty: this
+                    .scalar_type_copy(Some(&literal.ty))?
+                    .expect("selected retained literal type"),
+                collation_oid: literal.collation_oid,
+            })
+        })
+    }
+
     pub(super) fn scalar_type_copy(
         &mut self,
         ty: Option<&crate::ast::ColumnType>,
@@ -61,20 +81,7 @@ impl Lowering<'_> {
             },
             ScalarExpr::Literal(value) => ScalarExpr::Literal(self.value(Source::Borrowed(value))?),
             ScalarExpr::RetainedLiteral(literal) => {
-                ScalarExpr::RetainedLiteral(self.boxed(|this| {
-                    Ok(crate::ir::RetainedScalarLiteral {
-                        value: literal.value.clone(),
-                        declaration: literal
-                            .declaration
-                            .as_deref()
-                            .map(|name| this.copy_text(name))
-                            .transpose()?,
-                        ty: this
-                            .scalar_type_copy(Some(&literal.ty))?
-                            .expect("selected retained literal type"),
-                        collation_oid: literal.collation_oid,
-                    })
-                })?)
+                ScalarExpr::RetainedLiteral(self.copy_retained_literal(literal)?)
             }
             ScalarExpr::TypedLiteral {
                 value,

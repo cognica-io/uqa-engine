@@ -132,7 +132,11 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
         Expr::QualifiedStar(qualifier) => r
             .rewrite_qualified_whole_row(qualifier)?
             .unwrap_or_else(|| expr.clone()),
-        Expr::Default | Expr::Literal(_) | Expr::TypedLiteral { .. } | Expr::Star => expr.clone(),
+        Expr::Default
+        | Expr::Literal(_)
+        | Expr::TypedLiteral { .. }
+        | Expr::RetainedLiteral(_)
+        | Expr::Star => expr.clone(),
         Expr::Func {
             order_syntax,
             name,

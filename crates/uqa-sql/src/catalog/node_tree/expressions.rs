@@ -110,6 +110,7 @@ impl ExpressionContext<'_> {
                 Self::variable(self.schema.whole_row_reference(qualifier)?)
             }
             Expr::Literal(value) => self.literal(expression, value, expected)?,
+            Expr::RetainedLiteral(literal) => self.encode(&literal.materialize()?, expected)?,
             Expr::TypedLiteral {
                 value,
                 ty,

@@ -39,7 +39,8 @@ impl<T: RuleRowValues + ?Sized> RuleRowValues for &T {
 
 mod actions;
 pub use actions::{
-    bind_insert_values_action, bind_insert_values_action_from_rows, bind_set_oriented_action,
+    bind_insert_values_action, bind_insert_values_action_from_rows,
+    bind_insert_values_action_from_rows_with_storage, bind_set_oriented_action,
     BoundSetOrientedAction, RetainedRuleInput,
 };
 

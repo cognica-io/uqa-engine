@@ -393,6 +393,9 @@ pub enum Expr {
         body: Box<SelectStmt>,
         negated: bool,
     },
+    /// An evaluated builtin datum whose encoded payload is owned by the invoking statement.
+    #[serde(untagged, skip_deserializing)]
+    RetainedLiteral(Box<super::RetainedInputLiteral>),
 }
 
 impl Expr {
@@ -527,6 +530,7 @@ impl Expr {
             | Self::InternalColumn(_)
             | Self::Literal(_)
             | Self::TypedLiteral { .. }
+            | Self::RetainedLiteral(_)
             | Self::Param(_) => {}
         }
         crate::type_resolution::between::restore_ast_node(self) | changed
@@ -628,6 +632,7 @@ impl Expr {
             | Self::InternalColumn(_)
             | Self::Literal(_)
             | Self::TypedLiteral { .. }
+            | Self::RetainedLiteral(_)
             | Self::Param(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => false,

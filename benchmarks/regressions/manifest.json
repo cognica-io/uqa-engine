@@ -17918,6 +17918,58 @@
       "capability": "Bounded AFTER event retention",
       "workload": "A valid prefix followed by corrupt or trailing event bytes in forced-spill storage.",
       "invariant": "Malformed event records return an error without advancing past the failed event or silently accepting trailing bytes."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_input_cloning_and_lowering_share_payloads_with_admitted_metadata",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/ast/retained_literal/tests.rs",
+      "capability": "Retained rule input payloads",
+      "workload": "A 1MiB frozen input cloned into 256 plans and lowered through a borrowed admitted path, followed by a 1-byte allowance and cancellation.",
+      "invariant": "No clone or lowering decodes the shared value; live allocation remains below 256KiB and failed admission/cancellation preserve their typed errors."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_input_preserves_serialization_type_collation_and_value_representation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/ast/retained_literal/tests.rs",
+      "capability": "Retained rule input payloads",
+      "workload": "Typed and untyped Unicode text through AST serialization, scalar lowering and evaluation.",
+      "invariant": "Original JSON encoding, values, declared type and selected collation survive retained input storage."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_input_keeps_catalog_types_and_inline_literals_on_existing_paths",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/ast/retained_literal/tests.rs",
+      "capability": "Retained rule input payloads",
+      "workload": "A named text domain and inline integer/NULL values.",
+      "invariant": "Catalog-defined values and inline literals preserve their existing AST representation and observation boundary."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "suppressed_view_insert_reuses_bounded_rule_images_for_condition_and_action_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_rules/bounded_events.rs",
+      "capability": "Retained rule input payloads",
+      "workload": "512 32KiB INSERT values, two conditional ALSO rules and an unconditional INSTEAD NOTHING rule under 64KiB query memory.",
+      "invariant": "Peak live allocation stays below the unchanged 8MiB ceiling, the base remains empty, and both action groups contain exactly the independently verified PostgreSQL counts/sums/lengths."
     }
   ]
 }

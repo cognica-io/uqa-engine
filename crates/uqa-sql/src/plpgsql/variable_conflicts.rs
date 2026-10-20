@@ -170,15 +170,16 @@ fn ambiguous_variable_error(reference: &Expr) -> SQLError {
 }
 
 /// The typed parameter that stands for a site's value while the binder resolves the statement.
-pub(super) fn site_parameter(binding: &Expr, resolver: &dyn VariableResolver) -> SQLParam {
-    match binding {
+pub(super) fn site_parameter(binding: &Expr, resolver: &dyn VariableResolver) -> Result<SQLParam> {
+    Ok(match binding {
         Expr::TypedLiteral { value, ty, .. } => resolver.parameter_type(ty).map_or_else(
             || SQLParam::scalar(value.clone()),
             |ty| SQLParam::typed_scalar(value.clone(), ty),
         ),
         Expr::Literal(value) => SQLParam::scalar(value.clone()),
+        Expr::RetainedLiteral(literal) => return site_parameter(&literal.materialize()?, resolver),
         _ => SQLParam::scalar(Value::Null),
-    }
+    })
 }
 
 /// The name a site is written with, as the binder reads it.
@@ -253,7 +254,7 @@ pub(super) fn statement_variable_names(
         sites
             .iter()
             .map(|site| site_parameter(&site.binding, resolver))
-            .collect(),
+            .collect::<Result<_>>()?,
         sites
             .iter()
             .map(|site| site_name(&site.reference))
@@ -292,7 +293,7 @@ pub fn bind_expression_variables(
         sites
             .iter()
             .map(|site| site_parameter(&site.binding, resolver))
-            .collect(),
+            .collect::<Result<_>>()?,
         sites
             .iter()
             .map(|site| site_name(&site.reference))

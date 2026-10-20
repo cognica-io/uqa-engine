@@ -29,6 +29,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             "DEFAULT reached scalar expression evaluation without a mutation target".into(),
         )),
         Expr::Literal(v) => Ok(v.clone()),
+        Expr::RetainedLiteral(literal) => eval(&literal.materialize()?, ctx),
         Expr::TypedLiteral { value, ty, .. } => {
             Ok(super::composites::literal::evaluate_with_control(
                 value,
@@ -383,6 +384,11 @@ fn explicit_expr_type(expr: &Expr) -> Option<&str> {
             binding: crate::ast::CompositeRowBinding { ty, .. },
             ..
         } => Some(ty),
+        Expr::RetainedLiteral(literal) => literal.0.declaration.as_deref().or(match literal.0.ty {
+            crate::ast::ColumnType::Bytea => Some("bytea"),
+            crate::ast::ColumnType::Bit(_) => Some("bit"),
+            _ => None,
+        }),
         Expr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
         Expr::Literal(Value::Int(_)) => Some("bigint"),
         Expr::Literal(Value::Bytes(_)) => Some("bytea"),

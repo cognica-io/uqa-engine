@@ -162,6 +162,7 @@ fn collect_references<'a>(expression: &'a crate::ast::Expr, output: &mut Referen
         | Expr::InternalColumn(_)
         | Expr::Literal(_)
         | Expr::TypedLiteral { .. }
+        | Expr::RetainedLiteral(_)
         | Expr::Param(_)
         | Expr::ScalarSubquery(_)
         | Expr::Exists { .. } => {}

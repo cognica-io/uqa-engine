@@ -21,6 +21,14 @@ impl<'a> Walker<'a> {
                 self.text(column)?;
             }
             Expr::Literal(value) => self.value(value)?,
+            Expr::RetainedLiteral(literal) => {
+                // The shared constant source already retains its bounded payload owner.
+                self.charge(size_of::<crate::ast::RetainedInputLiteral>())?;
+                self.node(Node::Type(&literal.0.ty))?;
+                if let Some(declaration) = &literal.0.declaration {
+                    self.text(declaration)?;
+                }
+            }
             Expr::TypedLiteral {
                 value,
                 ty,

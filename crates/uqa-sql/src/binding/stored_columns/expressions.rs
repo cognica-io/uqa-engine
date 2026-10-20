@@ -140,6 +140,7 @@ impl StoredColumnBinder<'_> {
             | Expr::InternalColumn(_)
             | Expr::Literal(_)
             | Expr::TypedLiteral { .. }
+            | Expr::RetainedLiteral(_)
             | Expr::Param(_) => Ok(()),
         }
     }

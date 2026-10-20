@@ -250,7 +250,6 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
     ctes: &CteScope<S>,
 ) -> Result<MutationOutput, SQLError> {
     let snapshot = ctes.returning_statement_snapshot_scope();
-    let mut cached_rows = Vec::with_capacity(stmt.rows.len());
     for expressions in &stmt.rows {
         if expressions.len() > columns.len()
             || (!implicit_columns && expressions.len() != columns.len())
@@ -261,24 +260,18 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
                 columns.len()
             )));
         }
-        let values = vec![None; target.columns.len()];
-        cached_rows.push(values);
     }
-    let rule_rows = cached_rows
-        .iter()
-        .map(|values| {
+    let rule_rows = crate::mutation::rules::RuleRows::from_rows(
+        stmt.rows.iter().map(|_| {
             Ok(crate::mutation::rules::RuleRowImage {
-                old_storage_table: None,
-                old_doc_id: None,
-                old: None,
-                new_storage_table: None,
-                new_doc_id: None,
-                new: Some(cached_view_document(target, values)?),
-                context: None,
+                new: Some(Document::new()),
+                ..crate::mutation::rules::RuleRowImage::empty()
             })
-        })
-        .collect::<Result<Vec<_>, SQLError>>()?;
-    let mut rule_batch = crate::mutation::rules::prepare_rule_batch_with_projection(
+        }),
+        rules.memory.work_mem_bytes()?,
+        rules.cancellation.clone(),
+    )?;
+    let mut rule_batch = crate::mutation::rules::prepare_retained_rule_batch_with_projection(
         rules,
         &target.canonical_name,
         uqa_sql::ast::RuleEvent::Insert,
@@ -291,9 +284,9 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
                 .rows
                 .get(row_index)
                 .ok_or_else(|| SQLError::Internal("view rule INSERT lost its input row".into()))?;
-            let values = cached_rows
-                .get_mut(row_index)
-                .ok_or_else(|| SQLError::Internal("view rule INSERT lost its cached row".into()))?;
+            // The rule owner retains completed condition fields between rule passes.
+            // This callback receives only fields absent from that retained image.
+            let mut values = vec![None; target.columns.len()];
             let projected = required
                 .iter()
                 .map(|column| {
@@ -304,7 +297,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
                         columns,
                         expressions,
                         column,
-                        values,
+                        &mut values,
                         params,
                         &snapshot,
                     )
@@ -324,41 +317,27 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
         },
     )?;
     let action_columns = rule_batch.missing_action_row_columns()?;
-    for ((expressions, values), columns_required) in stmt
-        .rows
-        .iter()
-        .zip(&mut cached_rows)
-        .zip(action_columns.reader()?)
-    {
-        let [_, required] = columns_required?;
-        evaluate_insert_rule_columns(
-            read_assignment,
-            target,
-            positions,
-            columns,
-            expressions,
-            &required,
-            values,
-            params,
-            &snapshot,
-        )?;
-    }
-    rule_batch.supplement_rows(
-        cached_rows
-            .iter()
-            .map(|values| {
-                Ok(crate::mutation::rules::RuleRowImage {
-                    old_storage_table: None,
-                    old_doc_id: None,
-                    old: None,
-                    new_storage_table: None,
-                    new_doc_id: None,
-                    new: Some(cached_view_document(target, values)?),
-                    context: None,
-                })
+    rule_batch.supplement_rows_from_iter(stmt.rows.iter().zip(action_columns.reader()?).map(
+        |(expressions, columns_required)| {
+            let [_, required] = columns_required?;
+            let mut values = vec![None; target.columns.len()];
+            evaluate_insert_rule_columns(
+                read_assignment,
+                target,
+                positions,
+                columns,
+                expressions,
+                &required,
+                &mut values,
+                params,
+                &snapshot,
+            )?;
+            Ok(crate::mutation::rules::RuleRowImage {
+                new: Some(cached_view_document(target, &values)?),
+                ..crate::mutation::rules::RuleRowImage::empty()
             })
-            .collect::<Result<Vec<_>, SQLError>>()?,
-    )?;
+        },
+    ))?;
     let outcome = rule_batch.execute_actions_with_affected(
         rules,
         crate::mutation::rules::RuleReturningRequest::from_plan(

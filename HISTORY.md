@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain wide lazy rule inputs and VALUES constants once through shared immutable handles, preserving demand order and typed observations.
+
 - Bound command and statement AFTER-trigger event retention with ordered spill replay, preserving transition-table visibility and reentrant cascades.
 
 - Resolve scalar-subquery correlation against retained CTE and trigger transition relation descriptors, preserving local aliases and genuine outer dependencies.

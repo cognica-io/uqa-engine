@@ -42,7 +42,7 @@ pub use inputs::RuleInputProjection;
 pub use crate::mutation::row_images::RuleRowImage;
 use returning::capture_rule_returning_result;
 pub use returning::RuleReturningResult;
-use uqa_sql::semantics::rules::binding::bind_insert_values_action_from_rows;
+use uqa_sql::semantics::rules::binding::bind_insert_values_action_from_rows_with_storage;
 pub use uqa_sql::semantics::rules::returning::RuleReturningRequest;
 pub use uqa_sql::semantics::rules::validate_rule_returning_contract;
 use uqa_sql::semantics::rules::{
@@ -303,10 +303,11 @@ impl PreparedRuleBatch {
                     && matches!(action, Statement::Insert(insert) if !insert.rows.is_empty())
                 {
                     (
-                        bind_insert_values_action_from_rows(
+                        bind_insert_values_action_from_rows_with_storage(
                             matching_rows.reader()?.map(|index| rows.get(index?)),
                             &columns,
                             &bind_action,
+                            Some(&crate::scalar::RetainedConstants::new(self.work_mem)),
                         )?,
                         None,
                         None,
