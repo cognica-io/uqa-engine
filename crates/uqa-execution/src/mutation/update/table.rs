@@ -376,7 +376,10 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             };
             let snapshot_ctes = ctes.returning_statement_snapshot_scope();
             let overlay = MutationOverlayScope::new(context.mutation.state);
-            let mut pending_updates = Vec::new();
+            let mut pending_updates = crate::mutation::rules::RuleRowBuffer::new(
+                context.mutation.rules.rules.memory.work_mem_bytes()?,
+                context.mutation.rules.rules.cancellation.clone(),
+            );
             let mut prepared_updates = Vec::new();
             let mut events = crate::mutation::events::MutationEventQueue::default();
             let mut locked_ids = BTreeSet::new();
@@ -574,15 +577,19 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     }
                 }
                 if has_any_update_rules {
-                    pending_updates.push(MutationRewriteCandidate {
-                        identity: PhysicalDocumentIdentity {
-                            table: storage_table,
-                            doc_id,
-                        },
-                        old_document: original_doc,
-                        proposed_document: doc,
-                        context: (),
-                    });
+                    pending_updates.push(
+                        crate::mutation::rules::RuleRowImage::from_rewrite_candidate(
+                            MutationRewriteCandidate {
+                                identity: PhysicalDocumentIdentity {
+                                    table: storage_table,
+                                    doc_id,
+                                },
+                                old_document: original_doc,
+                                proposed_document: doc,
+                                context: None,
+                            },
+                        ),
+                    )?;
                 } else if let Some(prepared) = crate::mutation::update::prepare_update_row(
                     context.mutation.preparation,
                     stmt,
@@ -608,18 +615,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             let published = overlay.finish();
             let mut rule_published = None;
             let (view_rule_returning, rule_returning) = if has_any_update_rules {
-                let rule_rows = pending_updates
-                    .iter()
-                    .map(|candidate| crate::mutation::rules::RuleRowImage {
-                        old_storage_table: Some(candidate.identity.table.clone()),
-                        old_doc_id: Some(candidate.identity.doc_id),
-                        old: Some(candidate.old_document.clone()),
-                        new_storage_table: Some(candidate.identity.table.clone()),
-                        new_doc_id: Some(candidate.identity.doc_id),
-                        new: Some(candidate.proposed_document.clone()),
-                        context: None,
-                    })
-                    .collect::<Vec<_>>();
+                let rule_rows = pending_updates.finish();
                 let mut view_rule_batches =
                     crate::mutation::rules::views::prepare_view_rule_batches(
                         crate::mutation::rules::views::ViewRuleBatchRequest {
@@ -641,14 +637,15 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     .collect::<Vec<_>>();
                 let mut rule_batch = (has_update_rules && view_original_query)
                     .then(|| {
-                        crate::mutation::rules::prepare_rule_batch(
+                        crate::mutation::rules::prepare_retained_rule_batch(
                             context.mutation.rules.rules,
                             &stmt.table,
                             uqa_sql::ast::RuleEvent::Update,
-                            base_rule_indices
-                                .iter()
-                                .filter_map(|index| rule_rows.get(*index).cloned())
-                                .collect(),
+                            rule_rows.select(
+                                &base_rule_indices,
+                                context.mutation.rules.rules.memory.work_mem_bytes()?,
+                                context.mutation.rules.rules.cancellation.clone(),
+                            )?,
                         )
                     })
                     .transpose()?;
@@ -705,10 +702,11 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     )?;
                 }
                 let overlay = MutationOverlayScope::new(context.mutation.state);
-                for (index, candidate) in pending_updates.into_iter().enumerate() {
-                    if view_rule_batches.suppresses(index) || base_rule_suppressed[index] {
+                for (index, base_suppressed) in base_rule_suppressed.iter().copied().enumerate() {
+                    if view_rule_batches.suppresses(index) || base_suppressed {
                         continue;
                     }
+                    let candidate = rule_rows.get(index)?.into_rewrite_candidate()?;
                     if let Some(prepared) = crate::mutation::update::prepare_update_row(
                         context.mutation.preparation,
                         stmt,

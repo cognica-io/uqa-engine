@@ -173,11 +173,15 @@ struct ViewRuleDocumentProjection<'a, S: Clone + 'static> {
     scope: &'a CteScope<S>,
 }
 
-pub struct ViewRuleBatchRequest<'a, S: Clone + 'static> {
+pub struct ViewRuleBatchRequest<
+    'a,
+    S: Clone + 'static,
+    R: super::RuleEventSource + ?Sized = [super::RuleRowImage],
+> {
     pub context: ViewRuleContext<'a, S>,
     pub relations: &'a [String],
     pub event: uqa_sql::ast::RuleEvent,
-    pub rows: &'a [crate::mutation::rules::RuleRowImage],
+    pub rows: &'a R,
     pub params: &'a [SQLParam],
     pub scope: &'a CteScope<S>,
     pub insert_plans: &'a [ViewRuleInsertPlan],
@@ -386,8 +390,8 @@ fn project_view_rule_row_sides<S: Clone + 'static>(
     clippy::too_many_lines,
     reason = "preserves view qualifier and row identity"
 )]
-pub fn prepare_view_rule_batches<S: Clone + 'static>(
-    request: ViewRuleBatchRequest<'_, S>,
+pub fn prepare_view_rule_batches<S: Clone + 'static, R: super::RuleEventSource + ?Sized>(
+    request: ViewRuleBatchRequest<'_, S, R>,
 ) -> Result<PreparedViewRuleBatches, SQLError> {
     let ViewRuleBatchRequest {
         context,
@@ -401,9 +405,9 @@ pub fn prepare_view_rule_batches<S: Clone + 'static>(
         document_relation,
     } = request;
     if relations.is_empty() {
-        return Ok(PreparedViewRuleBatches::empty(rows.len(), event));
+        return Ok(PreparedViewRuleBatches::empty(rows.event_count(), event));
     }
-    let mut prepared = PreparedViewRuleBatches::empty(rows.len(), event);
+    let mut prepared = PreparedViewRuleBatches::empty(rows.event_count(), event);
     for relation in relations {
         let required_columns = BTreeSet::new();
         let insert_plan = insert_plans.iter().find(|plan| plan.relation == *relation);
@@ -418,19 +422,18 @@ pub fn prepare_view_rule_batches<S: Clone + 'static>(
             params,
             scope,
         };
-        let row_indices = (0..rows.len())
+        let row_indices = (0..rows.event_count())
             .filter(|index| !prepared.suppress_original[*index])
             .collect::<Vec<_>>();
-        let view_rows = row_indices
-            .iter()
-            .map(|index| {
-                let row = rows.get(*index).ok_or_else(|| {
-                    SQLError::Internal("automatic-view rule lost its event row".into())
-                })?;
-                project_view_rule_row(&projection, row)
-            })
-            .collect::<Result<Vec<_>, SQLError>>()?;
-        let mut batch = crate::mutation::rules::prepare_rule_batch_with_projection(
+        let view_rows = super::RuleRows::from_rows(
+            row_indices.iter().map(|index| {
+                let row = rows.event_row(*index)?;
+                project_view_rule_row(&projection, &row)
+            }),
+            context.rules.memory.work_mem_bytes()?,
+            context.rules.cancellation.clone(),
+        )?;
+        let mut batch = crate::mutation::rules::prepare_retained_rule_batch_with_projection(
             context.rules,
             relation,
             event,
@@ -439,9 +442,7 @@ pub fn prepare_view_rule_batches<S: Clone + 'static>(
                 let row_index = row_indices.get(local_index).copied().ok_or_else(|| {
                     SQLError::Internal("automatic-view rule lost its event row".into())
                 })?;
-                let row = rows.get(row_index).ok_or_else(|| {
-                    SQLError::Internal("automatic-view rule lost its event row".into())
-                })?;
+                let row = rows.event_row(row_index)?;
                 let (storage_table, doc_id, document, input_document) = match side {
                     crate::mutation::rules::RuleRowSide::Old => (
                         row.old_storage_table.as_deref(),
@@ -492,17 +493,13 @@ pub fn prepare_view_rule_batches<S: Clone + 'static>(
             .iter()
             .any(|(old, new)| !old.is_empty() || !new.is_empty())
         {
-            let supplemental_rows = row_indices
-                .iter()
-                .zip(action_columns)
-                .map(|(index, (old_columns, new_columns))| {
-                    let row = rows.get(*index).ok_or_else(|| {
-                        SQLError::Internal("automatic-view rule lost its event row".into())
-                    })?;
-                    project_view_rule_row_sides(&projection, row, &old_columns, &new_columns)
-                })
-                .collect::<Result<Vec<_>, SQLError>>()?;
-            batch.supplement_rows(supplemental_rows)?;
+            let supplemental_rows = row_indices.iter().zip(action_columns).map(
+                |(index, (old_columns, new_columns))| {
+                    let row = rows.event_row(*index)?;
+                    project_view_rule_row_sides(&projection, &row, &old_columns, &new_columns)
+                },
+            );
+            batch.supplement_rows_from_iter(supplemental_rows)?;
         }
         for (local_index, row_index) in row_indices.iter().copied().enumerate() {
             if batch.suppresses(local_index) {

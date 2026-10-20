@@ -6,6 +6,7 @@
 
 //! Ordered event images retain one complete source schema and bounded encoded rows.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -76,8 +77,16 @@ impl RuleRowBuffer {
         Ok(())
     }
 
+    pub fn len(&self) -> usize {
+        usize::try_from(self.rows.len()).expect("push checks the addressable row count")
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn finish(self) -> RuleRows {
-        let len = usize::try_from(self.rows.len()).expect("push checks the addressable row count");
+        let len = self.len();
         RuleRows(Arc::new(RuleRowsInner {
             rows: Mutex::new(self.rows),
             context_schema: self.context_schema,
@@ -97,6 +106,41 @@ struct RuleRowsInner {
 /// Shared immutable event ownership; callbacks never run while its positional reader is locked.
 #[derive(Clone)]
 pub struct RuleRows(Arc<RuleRowsInner>);
+
+/// Original ordered event access, independent of an upstream producer's storage representation.
+pub trait RuleEventSource {
+    fn event_count(&self) -> usize;
+    fn event_row(&self, index: usize) -> Result<Cow<'_, RuleRowImage>, SQLError>;
+}
+
+impl RuleEventSource for RuleRows {
+    fn event_count(&self) -> usize {
+        self.len()
+    }
+    fn event_row(&self, index: usize) -> Result<Cow<'_, RuleRowImage>, SQLError> {
+        self.get(index).map(Cow::Owned)
+    }
+}
+
+impl RuleEventSource for [RuleRowImage] {
+    fn event_count(&self) -> usize {
+        self.len()
+    }
+    fn event_row(&self, index: usize) -> Result<Cow<'_, RuleRowImage>, SQLError> {
+        self.get(index)
+            .map(Cow::Borrowed)
+            .ok_or_else(|| invalid("source index is outside the event row set"))
+    }
+}
+
+impl RuleEventSource for Vec<RuleRowImage> {
+    fn event_count(&self) -> usize {
+        self.len()
+    }
+    fn event_row(&self, index: usize) -> Result<Cow<'_, RuleRowImage>, SQLError> {
+        self.as_slice().event_row(index)
+    }
+}
 
 impl RuleRows {
     pub fn from_rows(
@@ -135,6 +179,23 @@ impl RuleRows {
 
     pub fn iter(&self) -> impl Iterator<Item = Result<RuleRowImage, SQLError>> + '_ {
         (0..self.len()).map(|index| self.get(index))
+    }
+
+    pub fn select(
+        &self,
+        indices: &[usize],
+        bytes: usize,
+        cancellation: CancellationToken,
+    ) -> Result<Self, SQLError> {
+        cancellation.check()?;
+        if indices.len() == self.len() && indices.iter().copied().eq(0..self.len()) {
+            return Ok(self.clone());
+        }
+        Self::from_rows(
+            indices.iter().map(|index| self.get(*index)),
+            bytes,
+            cancellation,
+        )
     }
 }
 

@@ -70,6 +70,7 @@ rusqlite = { package = "uqa-rusqlite", version = "=0.39.1", default-features = f
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Threading"] }
 
 [dev-dependencies]
+allocation-counter = "=0.8.1"
 regex = { workspace = true }
 rstest = { workspace = true }
 uqa-storage-redb = { workspace = true }

@@ -16675,6 +16675,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "suppressed_rule_updates_do_not_retain_complete_candidate_documents",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_rules/bounded_events.rs",
+      "capability": "Bounded rewrite-rule update candidates",
+      "workload": "512 rows with 32KiB text, ordinary UPDATE, UPDATE FROM and a view whose rules suppress publication, under 64KiB query work memory.",
+      "invariant": "Analysis and every candidate image together retain less than 2MiB live allocation, rather than the complete 32MiB OLD/NEW set; all 512 original values remain unchanged.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
