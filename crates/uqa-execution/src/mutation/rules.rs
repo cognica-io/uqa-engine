@@ -9,7 +9,7 @@
 mod returning;
 mod row_source;
 mod rows;
-pub use rows::{RuleRowBuffer, RuleRows};
+pub use rows::{RuleEventSource, RuleRowBuffer, RuleRows};
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -137,11 +137,29 @@ impl PreparedRuleBatch {
                 "rewrite-rule supplemental row count changed after qualification".into(),
             ));
         }
+        self.supplement_rows_from_iter(rows.into_iter().map(Ok))
+    }
+
+    pub fn supplement_rows_from_iter(
+        &mut self,
+        rows: impl IntoIterator<Item = Result<RuleRowImage, SQLError>>,
+    ) -> Result<(), SQLError> {
+        let mut rows = rows.into_iter();
         let mut output = RuleRowBuffer::new(self.work_mem, self.cancellation.clone());
-        for (target, supplemental) in self.rows.iter().zip(rows) {
+        for target in self.rows.iter() {
+            let supplemental = rows.next().ok_or_else(|| {
+                SQLError::Internal(
+                    "rewrite-rule supplemental row count changed after qualification".into(),
+                )
+            })??;
             let mut target = target?;
             target.supplement_documents(supplemental);
             output.push(target)?;
+        }
+        if rows.next().transpose()?.is_some() {
+            return Err(SQLError::Internal(
+                "rewrite-rule supplemental row count changed after qualification".into(),
+            ));
         }
         self.rows = output.finish();
         Ok(())
@@ -439,6 +457,49 @@ pub fn prepare_rule_batch_with_projection<F>(
     table: &str,
     event: RuleEvent,
     rows: Vec<RuleRowImage>,
+    project: F,
+) -> Result<PreparedRuleBatch, SQLError>
+where
+    F: FnMut(usize, RuleRowSide, &BTreeSet<String>) -> Result<RuleInputProjection, SQLError>,
+{
+    prepare_rule_input(
+        context,
+        table,
+        event,
+        |bytes, cancellation| RuleRows::from_rows(rows.into_iter().map(Ok), bytes, cancellation),
+        project,
+    )
+}
+
+pub fn prepare_retained_rule_batch(
+    context: RuleContext<'_>,
+    table: &str,
+    event: RuleEvent,
+    rows: RuleRows,
+) -> Result<PreparedRuleBatch, SQLError> {
+    prepare_retained_rule_batch_with_projection(context, table, event, rows, |_, _, _| {
+        Ok(RuleInputProjection::default())
+    })
+}
+
+pub fn prepare_retained_rule_batch_with_projection<F>(
+    context: RuleContext<'_>,
+    table: &str,
+    event: RuleEvent,
+    rows: RuleRows,
+    project: F,
+) -> Result<PreparedRuleBatch, SQLError>
+where
+    F: FnMut(usize, RuleRowSide, &BTreeSet<String>) -> Result<RuleInputProjection, SQLError>,
+{
+    prepare_rule_input(context, table, event, |_, _| Ok(rows), project)
+}
+
+fn prepare_rule_input<F>(
+    context: RuleContext<'_>,
+    table: &str,
+    event: RuleEvent,
+    input: impl FnOnce(usize, uqa_core::CancellationToken) -> Result<RuleRows, SQLError>,
     mut project: F,
 ) -> Result<PreparedRuleBatch, SQLError>
 where
@@ -455,7 +516,7 @@ where
     }
     let work_mem = context.memory.work_mem_bytes()?;
     let cancellation = context.cancellation.clone();
-    let mut rows = RuleRows::from_rows(rows.into_iter().map(Ok), work_mem, cancellation.clone())?;
+    let mut rows = input(work_mem, cancellation.clone())?;
     if rules.is_empty() {
         return Ok(PreparedRuleBatch {
             table,

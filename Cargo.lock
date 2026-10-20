@@ -3836,6 +3836,7 @@ name = "uqa-engine"
 version = "0.6.0"
 dependencies = [
  "ahash",
+ "allocation-counter",
  "arrow-array",
  "arrow-ipc",
  "arrow-schema",

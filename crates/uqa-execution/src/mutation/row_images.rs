@@ -38,6 +38,45 @@ impl RuleRowImage {
         supplement_document(&mut self.old, supplemental.old);
         supplement_document(&mut self.new, supplemental.new);
     }
+
+    pub(crate) fn from_rewrite_candidate(
+        candidate: super::candidate::MutationRewriteCandidate<Option<OwnedPhysicalRow>>,
+    ) -> Self {
+        Self {
+            old_storage_table: Some(candidate.identity.table.clone()),
+            old_doc_id: Some(candidate.identity.doc_id),
+            old: Some(candidate.old_document),
+            new_storage_table: Some(candidate.identity.table),
+            new_doc_id: Some(candidate.identity.doc_id),
+            new: Some(candidate.proposed_document),
+            context: candidate.context,
+        }
+    }
+
+    pub(crate) fn into_rewrite_candidate(
+        self,
+    ) -> Result<
+        super::candidate::MutationRewriteCandidate<Option<OwnedPhysicalRow>>,
+        uqa_sql::SQLError,
+    > {
+        let invalid = || {
+            uqa_sql::SQLError::Internal(
+                "rewrite-rule event lost its original update candidate".into(),
+            )
+        };
+        if self.old_storage_table != self.new_storage_table || self.old_doc_id != self.new_doc_id {
+            return Err(invalid());
+        }
+        Ok(super::candidate::MutationRewriteCandidate {
+            identity: super::candidate::PhysicalDocumentIdentity {
+                table: self.old_storage_table.ok_or_else(invalid)?,
+                doc_id: self.old_doc_id.ok_or_else(invalid)?,
+            },
+            old_document: self.old.ok_or_else(invalid)?,
+            proposed_document: self.new.ok_or_else(invalid)?,
+            context: self.context,
+        })
+    }
 }
 
 fn supplement_document(target: &mut Option<Document>, supplemental: Option<Document>) {
