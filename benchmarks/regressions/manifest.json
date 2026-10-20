@@ -14863,7 +14863,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -16946,6 +16946,45 @@
       "workload": "128 rows of 128KiB pass through an INSTEAD OF trigger and COPY RETURNING with 512KiB query memory and 4MiB native SQLite session retention.",
       "invariant": "Both source forms keep additional peak allocation below the fixed 8MiB ceiling, emit all exact 16MiB bytes and preserve the trigger-only empty base table.",
       "capability": "Trigger-view INSERT order and bounded input"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "insert_candidates_preserve_full_width_identities_with_bounded_payload_retention",
+      "source": "crates/uqa-execution/src/mutation/insert/pending.rs",
+      "workload": "512 lazy 32KiB documents with absent and full-width prepared identities, two positional reads and a 64KiB allowance.",
+      "invariant": "The complete 16MiB payload stays below 2MiB additional peak allocation while preserving exact document bytes, order, identity width and supplied flags.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded original INSERT candidates"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "insert_candidates_keep_cancellation_and_reject_invalid_identity_records",
+      "source": "crates/uqa-execution/src/mutation/insert/pending.rs",
+      "workload": "An empty candidate, a malformed identity tuple and cancellation before reading or appending.",
+      "invariant": "Malformed records fail explicitly; cancellation retains 57014 and does not append a candidate.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded original INSERT candidates"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "rule_values_insert_does_not_retain_complete_candidate_images",
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/publication.rs",
+      "workload": "128 VALUES expressions produce 16MiB under 256KiB query work memory and 4MiB native SQLite session retention, with an INSERT rewrite rule.",
+      "invariant": "Additional peak allocation stays below the unchanged 8MiB ceiling; all 128 target rows and 128 rule outputs match independent PostgreSQL 18 output.",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded original INSERT candidates"
     }
   ]
 }

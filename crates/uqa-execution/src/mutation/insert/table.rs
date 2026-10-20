@@ -11,6 +11,7 @@ use super::{
         push_prepared_insert_spill_row, PreparedInsertSpillRow,
     },
     known_new::KnownNewInserts,
+    pending::{PendingInsertRow, PendingInsertRows},
     rows::prepare_values_insert_row,
     source::{
         insert_source_expression_rows, InsertSelectConsumer, InsertSelectIdentity,
@@ -492,7 +493,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             let mut events = crate::mutation::events::MutationEventQueue::default();
             let mut has_prepared_effect = false;
             let mut has_prepared_auto_identity = false;
-            let mut pending_rule_rows = Vec::with_capacity(input_rows.len());
+            let work_mem = prepared_rows.budget_bytes();
+            let mut pending_rule_rows = PendingInsertRows::new(work_mem, cancel.clone());
             let discarded_identities = super::identity_targets::user_value_identity_columns(
                 mutation.identities,
                 stmt,
@@ -574,7 +576,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     }
                 }
                 if has_any_insert_rules {
-                    pending_rule_rows.push(document);
+                    pending_rule_rows.push(document, None)?;
                     continue;
                 }
                 apply_missing_column_defaults(assignment, &stmt.table, &mut document, params)?;
@@ -647,11 +649,13 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     )?;
                 }
             }
-            let mut view_rule_rows = Vec::with_capacity(pending_rule_rows.len());
-            for document in &pending_rule_rows {
+            let mut view_rule_rows =
+                crate::mutation::rules::RuleRowBuffer::new(work_mem, cancel.clone());
+            for index in 0..pending_rule_rows.len() {
+                let document = pending_rule_rows.get(index)?.document;
                 let rule_doc_id = crate::mutation::identity::supplied_document_identity(
                     identity_source,
-                    document,
+                    &document,
                     &id_column,
                 )?;
                 view_rule_rows.push(crate::mutation::rules::RuleRowImage {
@@ -660,10 +664,11 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     old: None,
                     new_storage_table: None,
                     new_doc_id: rule_doc_id,
-                    new: Some(document.clone()),
+                    new: Some(document),
                     context: None,
-                });
+                })?;
             }
+            let view_rule_rows = view_rule_rows.finish();
             let view_rule_batches = crate::mutation::rules::views::prepare_view_rule_batches(
                 crate::mutation::rules::views::ViewRuleBatchRequest {
                     context: mutation.rules,
@@ -677,11 +682,12 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     document_relation: None,
                 },
             )?;
-            let mut pending_base_rows = Vec::with_capacity(pending_rule_rows.len());
-            for (index, mut document) in pending_rule_rows.into_iter().enumerate() {
+            let mut pending_base_rows = PendingInsertRows::new(work_mem, cancel.clone());
+            for index in 0..pending_rule_rows.len() {
                 if view_rule_batches.suppresses(index) {
                     continue;
                 }
+                let mut document = pending_rule_rows.get(index)?.document;
                 apply_missing_column_defaults(assignment, &stmt.table, &mut document, params)?;
                 let prepared_auto_identity = prepare_auto_increment_identity(
                     mutation.identities,
@@ -694,14 +700,13 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     "prepare INSERT identity",
                 )?;
                 has_prepared_auto_identity |= prepared_auto_identity.is_some();
-                pending_base_rows.push((document, prepared_auto_identity));
+                pending_base_rows.push(document, prepared_auto_identity)?;
             }
             let rule_batch = (has_insert_rules && view_original_query)
                 .then(|| {
-                    let rule_rows = pending_base_rows
-                        .iter()
-                        .map(|(document, _)| {
-                            let mut rule_document = document.clone();
+                    let rule_rows = crate::mutation::rules::RuleRows::from_rows(
+                        (0..pending_base_rows.len()).map(|index| {
+                            let mut rule_document = pending_base_rows.get(index)?.document;
                             crate::mutation::assignment::refresh_stored_generated_columns(
                                 assignment,
                                 &stmt.table,
@@ -722,9 +727,11 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                                 new: Some(rule_document),
                                 context: None,
                             })
-                        })
-                        .collect::<Result<Vec<_>, SQLError>>()?;
-                    crate::mutation::rules::prepare_rule_batch(
+                        }),
+                        work_mem,
+                        cancel.clone(),
+                    )?;
+                    crate::mutation::rules::prepare_retained_rule_batch(
                         mutation.rules.rules,
                         &stmt.table,
                         uqa_sql::ast::RuleEvent::Insert,
@@ -733,15 +740,17 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 })
                 .transpose()?;
             if has_any_insert_rules {
-                for (rule_index, (mut document, prepared_auto_identity)) in
-                    pending_base_rows.into_iter().enumerate()
-                {
+                for rule_index in 0..pending_base_rows.len() {
                     if rule_batch
                         .as_ref()
                         .is_some_and(|rule_batch| rule_batch.suppresses(rule_index))
                     {
                         continue;
                     }
+                    let PendingInsertRow {
+                        mut document,
+                        identity: prepared_auto_identity,
+                    } = pending_base_rows.get(rule_index)?;
                     let target_table = partition_insert_target(
                         preparation.referential.constraints,
                         statement,
