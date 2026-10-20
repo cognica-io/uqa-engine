@@ -11,6 +11,7 @@ mod binary_oid;
 mod bit_string;
 mod legacy_vector;
 pub(crate) mod numeric;
+pub(crate) mod resolved;
 mod temporal;
 
 use super::conversion::value_to_string_with_control;
@@ -660,19 +661,31 @@ fn cast_text(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {
     if source == Some("\"char\"") {
+        return cast_text_from_type(value, Some(&crate::ColumnType::InternalChar), control);
+    }
+    if let (Value::Float(_), Some(source)) = (value, source) {
+        let source = crate::ast::ColumnType::from_sql_name_with_control(source, control);
+        match source {
+            Ok(source) => return cast_text_from_type(value, Some(&source), control),
+            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+            _ => {}
+        }
+    }
+    cast_text_from_type(value, None, control)
+}
+
+fn cast_text_from_type(
+    value: &Value,
+    source: Option<&crate::ColumnType>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    if matches!(source, Some(crate::ColumnType::InternalChar)) {
         let byte = super::internal_char::value_byte(value)
             .ok_or_else(|| SQLError::Internal("invalid internal char carrier".into()))?;
         return Ok(super::internal_char::output_with_control(byte, control)?);
     }
-    if let (Value::Float(value), Some(source)) = (value, source) {
-        let source = crate::ast::ColumnType::from_sql_name_with_control(source, control);
-        match source {
-            Ok(source) if matches!(&*source, crate::ast::ColumnType::Real) => {
-                return super::floating::format_real_with_control(*value as f32, control)
-            }
-            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
-            _ => {}
-        }
+    if let (Value::Float(value), Some(crate::ColumnType::Real)) = (value, source) {
+        return super::floating::format_real_with_control(*value as f32, control);
     }
     value_to_string_with_control(value, control)
 }

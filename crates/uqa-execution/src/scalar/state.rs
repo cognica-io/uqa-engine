@@ -33,11 +33,11 @@ pub(crate) enum ConstantCast {
     PerEvaluation,
 }
 
-/// Numeric conversions are retained for the same immutable execution schema; all other casts keep their live catalog path.
+/// Selected builtin scalar conversions are retained for the same immutable execution schema; catalog-defined and session-dependent casts keep their live path.
 #[derive(Debug)]
 pub(crate) enum RowCast {
-    Numeric {
-        conversion: uqa_sql::expr::NumericCast,
+    Resolved {
+        conversion: uqa_sql::expr::ResolvedCast,
         source: Produced<String>,
         schema: Option<RowSchema>,
     },

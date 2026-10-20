@@ -16584,6 +16584,58 @@
       "capability": "Bounded set-oriented rule inputs",
       "workload": "Set-oriented INSERT SELECT rule over eight 4KiB events, two action rows per event, added composite fields and one-kilobyte work memory.",
       "invariant": "Outputs match independent PostgreSQL 18.4; empty inputs add nothing, transaction rollback restores both relations and persistent providers reopen identically."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_scalar_kernels_preserve_postgresql_values_and_named_casts",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/casting/resolved/tests.rs",
+      "capability": "Resolved scalar cast execution",
+      "workload": "Real and double text, Unicode character modifiers, fixed padding, booleans, internal char, UUID, JSON and numeric input.",
+      "invariant": "Resolved kernels preserve independent PostgreSQL values, NULL behavior and ordinary named-cast results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_scalar_kernels_keep_resource_errors_and_exclude_live_type_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/casting/resolved/tests.rs",
+      "capability": "Resolved scalar cast execution",
+      "workload": "Zero allowance and cancelled output; temporal, OID, record, array and catalog-defined types.",
+      "invariant": "Output admission and cancellation remain live; session-sensitive and catalog-sensitive identities are never selected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_row_casts_resolve_types_once_without_reusing_row_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/scalar_casts.rs",
+      "capability": "Resolved scalar cast execution",
+      "workload": "10,000 changing real-to-varchar input values with counting source inference and catalog callbacks.",
+      "invariant": "Exactly one source-type selection and two catalog name lookups; 10,000 current callbacks and exact single-precision output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_scalar_casts_keep_current_callbacks_and_admitted_output",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/scalar_casts.rs",
+      "capability": "Resolved scalar cast execution",
+      "workload": "Retained varchar conversion under output allowances, changing callback failure and invoking cancellation.",
+      "invariant": "Only the source name remains charged between rows; callback failure precedes output allocation failure, and cancellation prevents callbacks.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -17,7 +17,7 @@ use uqa_core::ArrayValue;
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::expr::{
-    cast_value_with_numeric_resolution_with_control, eval_binary_values_with_engine,
+    cast_value_with_resolution_with_control, eval_binary_values_with_engine,
     negate_value_with_control, truthy,
 };
 
@@ -254,7 +254,7 @@ fn row_cast(
     control: &ProductionControl<'_>,
     slot: &OnceLock<RowCast>,
 ) -> Result<Produced<Value>, SQLError> {
-    if let Some(RowCast::Numeric {
+    if let Some(RowCast::Resolved {
         conversion,
         source,
         schema,
@@ -270,6 +270,7 @@ fn row_cast(
             return conversion.evaluate_with_catalog(
                 &value,
                 source,
+                ty,
                 context.function_hook(),
                 control,
             );
@@ -278,16 +279,16 @@ fn row_cast(
     let CastEvaluation {
         source,
         value: converted,
-        numeric,
+        resolved,
     } = convert(expr, ty, context, control)?;
     if slot.get().is_none() {
         // An unqualified source or target can resolve differently after a session search_path change. Only explicit builtin identities are reusable.
-        let state = match (source, numeric) {
+        let state = match (source, resolved) {
             (Some(source), Some(conversion))
                 if uqa_sql::type_resolution::pg_catalog_builtin_type(ty).is_some()
                     && uqa_sql::type_resolution::pg_catalog_builtin_type(&source).is_some() =>
             {
-                RowCast::Numeric {
+                RowCast::Resolved {
                     conversion,
                     source,
                     schema: context.row_schema().cloned(),
@@ -303,7 +304,7 @@ fn row_cast(
 struct CastEvaluation {
     source: Option<Produced<String>>,
     value: Produced<Value>,
-    numeric: Option<uqa_sql::expr::NumericCast>,
+    resolved: Option<uqa_sql::expr::ResolvedCast>,
 }
 
 fn convert(
@@ -323,7 +324,7 @@ fn convert(
         )
     })?;
     let value = eval_scalar_inner(expr, context, control)?;
-    let (converted, numeric) = cast_value_with_numeric_resolution_with_control(
+    let (converted, resolved) = cast_value_with_resolution_with_control(
         &value,
         source_ty.as_deref().map(String::as_str),
         ty,
@@ -333,7 +334,7 @@ fn convert(
     Ok(CastEvaluation {
         source: source_ty,
         value: converted,
-        numeric,
+        resolved,
     })
 }
 
