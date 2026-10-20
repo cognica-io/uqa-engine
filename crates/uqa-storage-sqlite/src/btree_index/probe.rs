@@ -35,6 +35,7 @@ impl EqualityProbe {
         Ok(equality::key(value, control)?.map(|key| *key == *self.key))
     }
 
+    #[cfg(test)]
     pub(crate) fn read(
         &self,
         connection: &Connection,
@@ -42,18 +43,35 @@ impl EqualityProbe {
         field: ValueRef<'_>,
         control: &StorageReadControl,
     ) -> Result<Option<BudgetedVec<DocId>>> {
+        let mut ids = BudgetedVec::new(control.memory());
+        let supported = self.visit(connection, table, field, control, &mut |id| {
+            ids.push(id)?;
+            Ok(true)
+        })?;
+        Ok(supported.then_some(ids))
+    }
+
+    pub(crate) fn visit(
+        &self,
+        connection: &Connection,
+        table: &str,
+        field: ValueRef<'_>,
+        control: &StorageReadControl,
+        visit: &mut dyn FnMut(DocId) -> Result<bool>,
+    ) -> Result<bool> {
         if !super::coverage::complete(connection, table, field)?
             || !supported_domain(connection, table, field, control)?
         {
-            return Ok(None);
+            return Ok(false);
         }
-        let mut ids = BudgetedVec::new(control.memory());
         let mut statement = connection.prepare_cached("SELECT doc_id FROM _btree_equality_keys WHERE table_name = ?1 AND field = ?2 AND equality_key = ?3 ORDER BY doc_id")?;
         control.check()?;
         let mut rows = statement.query(params![table, ToSqlOutput::Borrowed(field), &*self.key])?;
         while let Some(row) = rows.next()? {
             control.check()?;
-            ids.push(decode_doc_id(row.get(0)?)?)?;
+            if !visit(decode_doc_id(row.get(0)?)?)? {
+                break;
+            }
         }
         drop(rows);
         #[cfg(test)]
@@ -61,7 +79,7 @@ impl EqualityProbe {
             PROBE_VM_STEPS.get()
                 + statement.reset_status(rusqlite::StatementStatus::VmStep) as usize,
         );
-        Ok(Some(ids))
+        Ok(true)
     }
 }
 

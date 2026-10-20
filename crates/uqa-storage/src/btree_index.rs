@@ -102,6 +102,11 @@ impl BTreeIndex {
         &self.field
     }
 
+    /// Borrow one exact bucket in increasing, unique document order.
+    pub fn equality_ids(&self, value: &Value) -> &[DocId] {
+        self.entries.get(value).map_or(&[], Vec::as_slice)
+    }
+
     pub fn insert(&mut self, doc_id: DocId, value: Value) {
         let bucket = self.entries.entry(value).or_default();
         if let Err(pos) = bucket.binary_search(&doc_id) {

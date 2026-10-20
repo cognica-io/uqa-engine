@@ -152,6 +152,134 @@ fn equality_probe_keys_and_candidates_keep_the_original_allowance_and_cancellati
 }
 
 #[test]
+fn equality_candidate_visitors_keep_fixed_memory_and_stop_at_the_consumer() {
+    let count = 8192;
+    let values: Vec<_> = (1..=count).map(|id| (id, Value::Int(1))).collect();
+    let (connection, _) = fixture(&values);
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let control = StorageReadControl::with_limit(256);
+    let probe = EqualityProbe::new(&Value::Int(1), &control)
+        .unwrap()
+        .unwrap();
+    let mut next = 1;
+    connection
+        .record_connection()
+        .with(|sqlite| {
+            assert!(probe.visit(
+                sqlite,
+                "items",
+                ValueRef::Text(b"key"),
+                &control,
+                &mut |id| {
+                    assert_eq!(id, next);
+                    next += 1;
+                    Ok(true)
+                }
+            )?);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(next, count + 1);
+    assert!(control.memory().used() <= 256);
+    PROBE_VM_STEPS.set(0);
+    next = 1;
+    connection
+        .record_connection()
+        .with(|sqlite| {
+            assert!(probe.visit(
+                sqlite,
+                "items",
+                ValueRef::Text(b"key"),
+                &control,
+                &mut |id| {
+                    assert_eq!(id, next);
+                    next += 1;
+                    Ok(id < 7)
+                }
+            )?);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(next, 8);
+    assert!(PROBE_VM_STEPS.get() < 400);
+    control.cancellation().cancel();
+    assert!(connection
+        .record_connection()
+        .with(|sqlite| {
+            probe.visit(
+                sqlite,
+                "items",
+                ValueRef::Text(b"key"),
+                &control,
+                &mut |_| panic!("cancelled index read delivered a candidate"),
+            )
+        })
+        .is_err());
+}
+
+#[test]
+fn native_equality_visitors_merge_private_keys_and_decline_before_delivery() {
+    let (connection, index) =
+        fixture(&[(1, Value::Int(1)), (3, Value::Int(1)), (5, Value::Int(2))]);
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let check = |expected: &[DocId]| {
+        let mut found = Vec::new();
+        assert!(index
+            .visit_equal("items", &"key".into(), &Value::Int(1), &mut |id| {
+                found.push(id);
+                true
+            })
+            .unwrap());
+        assert_eq!(found, expected);
+    };
+    check(&[1, 3]);
+    connection.begin_transaction().unwrap();
+    connection.savepoint("original").unwrap();
+    index
+        .apply_write("items", 1, Some(&[("key".into(), Value::Int(2))].into()))
+        .unwrap();
+    index
+        .apply_write("items", 5, Some(&[("key".into(), Value::Int(1))].into()))
+        .unwrap();
+    let mut documents = SQLiteDocumentStore::new(connection.clone(), "items");
+    documents
+        .put(2, [("key".into(), Value::Int(1))].into())
+        .unwrap();
+    index
+        .apply_write("items", 2, Some(&[("key".into(), Value::Int(1))].into()))
+        .unwrap();
+    check(&[2, 3, 5]);
+    let mut found = Vec::new();
+    assert!(index
+        .visit_equal("items", &"key".into(), &Value::Int(1), &mut |id| {
+            found.push(id);
+            false
+        })
+        .unwrap());
+    assert_eq!(found, [2]);
+    index
+        .apply_write(
+            "items",
+            3,
+            Some(&[("key".into(), Value::FixedChar("x".into()))].into()),
+        )
+        .unwrap();
+    assert!(!index
+        .visit_equal("items", &"key".into(), &Value::Int(1), &mut |_| {
+            panic!("unsupported private comparison delivered a partial result")
+        })
+        .unwrap());
+    connection.rollback_to_savepoint("original").unwrap();
+    check(&[1, 3]);
+    connection.rollback_transaction().unwrap();
+    check(&[1, 3]);
+}
+
+#[test]
 fn scalar_probes_preserve_cross_numeric_equality_and_signed_zero() {
     let values = [
         Value::Null,
