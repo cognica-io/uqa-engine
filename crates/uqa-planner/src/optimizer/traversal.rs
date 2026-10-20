@@ -204,6 +204,7 @@ pub(super) fn optimize_source(
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
     match source {
+        SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join {
             left,
             right,

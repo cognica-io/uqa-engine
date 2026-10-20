@@ -105,6 +105,7 @@ fn validate_source(
     source: &SourcePlan,
 ) -> Result<(), SQLError> {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => Ok(()),
         SourcePlan::Subquery { body, .. } => validate_query(context, body, false),
         SourcePlan::Join { left, right, .. } => {
             validate_source(context, left)?;

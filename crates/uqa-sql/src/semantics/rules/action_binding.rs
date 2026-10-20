@@ -664,6 +664,7 @@ fn bind_from(
     context: &RuleBindingContext<'_>,
 ) -> Result<FromClause, SQLError> {
     Ok(match from {
+        crate::ast::FromClause::RetainedRows(_) => from.clone(),
         FromClause::Table { .. } => from.clone(),
         FromClause::Join { .. } => bind_join_from(from, resolver, inherited, context)?,
         FromClause::Values {

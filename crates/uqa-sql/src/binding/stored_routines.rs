@@ -595,6 +595,7 @@ fn mark_query_relations_bound(query: &mut QueryPlan) {
 
 fn mark_source_relations_bound(source: &mut SourcePlan) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join { left, right, .. } => {
             mark_source_relations_bound(left);
             mark_source_relations_bound(right);

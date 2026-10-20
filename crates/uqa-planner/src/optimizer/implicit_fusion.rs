@@ -137,6 +137,7 @@ fn relational_contains_implicit_hybrid_fusion(plan: &RelationalPlan) -> bool {
 
 fn source_contains_implicit_hybrid_fusion(source: &SourcePlan) -> bool {
     match source {
+        SourcePlan::RetainedRows(_) => false,
         SourcePlan::Join { left, right, .. } => {
             source_contains_implicit_hybrid_fusion(left)
                 || source_contains_implicit_hybrid_fusion(right)

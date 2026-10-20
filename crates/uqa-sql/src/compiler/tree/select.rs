@@ -243,6 +243,7 @@ fn reduce_null_rejected_outer_joins(from: &mut FromClause, predicate: &Expr) -> 
 
 fn collect_visible_qualifiers(from: &FromClause, names: &mut std::collections::BTreeSet<String>) {
     match from {
+        crate::ast::FromClause::RetainedRows(_) => {}
         FromClause::Table {
             name,
             qualifier,

@@ -63,6 +63,7 @@ fn rewrite_layer_source_scalar(
 
 fn source_plan_declares_qualifier(source: &SourcePlan, qualifier: &str) -> bool {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => false,
         SourcePlan::Table {
             qualifier: source_qualifier,
             alias,
@@ -95,6 +96,7 @@ fn source_plan_declares_qualifier(source: &SourcePlan, qualifier: &str) -> bool 
 
 fn rename_source_plan_qualifier(source: &mut SourcePlan, qualifier: &str, replacement: &str) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table {
             qualifier: source_qualifier,
             alias,
@@ -161,6 +163,7 @@ fn rename_source_plan_scalar_qualifiers(
     replacement: &str,
 ) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table { .. } | SourcePlan::Subquery { .. } => {}
         SourcePlan::Join {
             left, right, on, ..
@@ -199,6 +202,7 @@ fn rename_source_plan_subqueries(
     inherited: bool,
 ) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join { left, right, .. } => {
             rename_source_plan_subqueries(left, qualifier, replacement, inherited);
             rename_source_plan_subqueries(right, qualifier, replacement, inherited);
@@ -405,6 +409,7 @@ fn collect_source_qualifiers(source: &SourcePlan, qualifiers: &mut BTreeSet<Stri
         qualifiers.insert(qualifier.to_string());
     }
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join { left, right, .. } => {
             collect_source_qualifiers(left, qualifiers);
             collect_source_qualifiers(right, qualifiers);
@@ -456,6 +461,7 @@ fn rewrite_layer_source_plan(
         );
     };
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table { .. } => {}
         SourcePlan::Join {
             left, right, on, ..

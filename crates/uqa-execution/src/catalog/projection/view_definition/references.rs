@@ -157,6 +157,7 @@ impl Deparser<'_> {
         references: &mut QueryReferences,
     ) -> Result<(), SQLError> {
         match source {
+            SourcePlan::RetainedRows(_) => {}
             SourcePlan::Table { name, .. } => {
                 if super::sources::cte_source_columns(scope, name).is_none() {
                     references.relations.push(name.clone());

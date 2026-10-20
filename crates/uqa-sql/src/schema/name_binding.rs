@@ -11,6 +11,18 @@ use crate::ast::{ColumnType, InternalColumnRef};
 use super::{ColumnIdentity, RowSchema, SchemaBuildMetadata, ScoreSource, NULL_SLOT};
 
 impl RowSchema {
+    /// Whether this schema exposes any SQL name or whole-row namespace, including hidden aliases and names without physical slots.
+    pub(crate) fn has_sql_bindings(&self) -> bool {
+        !self.index.columns.is_empty()
+            || !self.index.aliases.is_empty()
+            || !self.index.ambiguous_unqualified.is_empty()
+            || !self.index.ambiguous_qualified.is_empty()
+            || !self.index.cold.binding_only.is_empty()
+            || !self.index.cold.open_qualifiers.is_empty()
+            || self.index.cold.row_types.qualifiers().next().is_some()
+            || !self.index.cold.score_sources.is_empty()
+    }
+
     /// Bind every SQL-visible column to one relation qualifier while preserving executor-only internal attributes and rebinding carried retrieval scores to the same relation boundary.
     pub fn with_relation_qualifier(input: &Self, qualifier: &str) -> Self {
         let identities = input

@@ -148,6 +148,7 @@ pub(super) fn rewrite_source_scalars(
     rewrite: &mut dyn FnMut(&mut ScalarExpr),
 ) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table { .. } => {}
         SourcePlan::Join {
             left, right, on, ..

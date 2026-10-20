@@ -330,7 +330,7 @@ fn lock_source_plan_relations<S: Clone + Send + Sync + 'static>(
             }
             Ok(())
         }
-        SourcePlan::Values { .. } => Ok(()),
+        SourcePlan::RetainedRows(_) | SourcePlan::Values { .. } => Ok(()),
     }
 }
 
@@ -481,7 +481,8 @@ fn validate_source_row_locks<S: Clone + Send + Sync + 'static>(
         SourcePlan::Subquery { body, .. } => {
             validate_query_plan_row_locks(context, body, params, ctes)
         }
-        SourcePlan::Table { .. }
+        SourcePlan::RetainedRows(_)
+        | SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
         | SourcePlan::FunctionGroup { .. } => Ok(()),
@@ -620,7 +621,8 @@ fn source_contains_join_alias(source: &SourcePlan, target: &str) -> bool {
                 || source_contains_join_alias(left, target)
                 || source_contains_join_alias(right, target)
         }
-        SourcePlan::Table { .. }
+        SourcePlan::RetainedRows(_)
+        | SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
         | SourcePlan::FunctionGroup { .. }

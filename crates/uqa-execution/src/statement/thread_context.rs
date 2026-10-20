@@ -11,6 +11,8 @@ use super::thread_scope::StatementThreadScope;
 /// The temporal input, cancellation and retained regex cache a statement's expressions use. A statement enters the context it runs under for its analysis, planning and execution; work dispatched to another thread captures the dispatching thread's context and enters it on that thread.
 #[derive(Clone)]
 pub struct StatementThreadContext {
+    /// SQL-invisible immutable row sources owned by this invocation, also shared by its workers.
+    pub retained_rows: crate::query::sources::retained_source::RetainedRowContext,
     /// The session-owned compiled-pattern allowance, or `None` outside a session.
     pub regex_cache: Option<std::sync::Arc<uqa_sql::expr::RegexCache>>,
     pub temporal_input: uqa_sql::expr::TemporalInputContext,
@@ -23,6 +25,7 @@ impl StatementThreadContext {
     #[must_use]
     pub fn current() -> Self {
         Self {
+            retained_rows: crate::query::sources::retained_source::RetainedRowContext::current(),
             regex_cache: uqa_sql::expr::current_regex_cache(),
             temporal_input: uqa_sql::expr::TemporalInputContext::current(),
             cancellation: uqa_sql::expr::statement_cancellation(),

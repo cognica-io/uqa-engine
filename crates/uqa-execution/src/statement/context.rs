@@ -105,6 +105,7 @@ pub(super) fn statement_thread_scope<S: Clone + 'static>(
     cancellation: &uqa_core::CancellationToken,
 ) -> super::thread_scope::StatementThreadScope {
     super::thread_context::StatementThreadContext {
+        retained_rows: crate::query::sources::retained_source::RetainedRowContext::current(),
         regex_cache: statements.regex_cache(),
         temporal_input: uqa_sql::expr::TemporalInputContext {
             transaction_clock_micros: statements

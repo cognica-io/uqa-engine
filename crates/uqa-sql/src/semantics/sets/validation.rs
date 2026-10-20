@@ -678,6 +678,7 @@ fn validate_source_set_contexts(
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join {
             left, right, on, ..
         } => {
@@ -729,6 +730,7 @@ pub fn validate_source_set_contexts_before_build(
         return Ok(());
     }
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => Ok(()),
         SourcePlan::Join {
             left,
             right,

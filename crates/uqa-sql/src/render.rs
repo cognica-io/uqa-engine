@@ -191,6 +191,11 @@ fn select_body_sql(statement: &SelectStmt) -> Result<String, SQLError> {
 )]
 fn from_sql(source: &FromClause) -> Result<String, SQLError> {
     Ok(match source {
+        crate::ast::FromClause::RetainedRows(_) => {
+            return Err(SQLError::Internal(
+                "retained row source has no persistent SQL representation".into(),
+            ))
+        }
         FromClause::Table {
             name,
             alias,

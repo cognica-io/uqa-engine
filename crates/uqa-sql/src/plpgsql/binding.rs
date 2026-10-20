@@ -456,6 +456,7 @@ pub fn bind_select(stmt: &SelectStmt, r: &mut dyn VariableResolver) -> Result<Se
 
 pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Result<FromClause> {
     Ok(match from {
+        crate::ast::FromClause::RetainedRows(_) => from.clone(),
         FromClause::Table { .. } => from.clone(),
         FromClause::Join {
             left,

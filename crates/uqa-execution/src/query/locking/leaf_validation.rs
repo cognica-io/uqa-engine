@@ -57,6 +57,14 @@ pub(super) fn collect_source_leaves<S: Clone + Send + Sync + 'static>(
     ctes: &CteScope<S>,
 ) -> Result<Vec<LockLeaf>, SQLError> {
     match source {
+        SourcePlan::RetainedRows(_) => Ok(vec![LockLeaf {
+            names: Vec::new(),
+            qualifier: String::new(),
+            storage_name: String::new(),
+            display_name: "retained rows".into(),
+            kind: LockLeafKind::Values,
+            nullable,
+        }]),
         SourcePlan::Table {
             name,
             qualifier,
@@ -189,7 +197,8 @@ pub(super) fn collect_source_leaf_plans<'a>(
             collect_source_leaf_plans(right, path, leaves);
             path.pop();
         }
-        SourcePlan::Table { .. }
+        SourcePlan::RetainedRows(_)
+        | SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
         | SourcePlan::FunctionGroup { .. }
@@ -208,6 +217,9 @@ pub(super) fn copy_recheck_source_row<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<(RowSchema, PhysicalRow), SQLError> {
+    if let SourcePlan::RetainedRows(source) = source {
+        return copy_retained_source_row(source, candidate_schema, candidate);
+    }
     let (schema, slots) = if qualifier.is_empty() {
         let source_schema = bind_source_plan_schema(context.catalog, source, params, ctes, None)?;
         let slots = source_schema
@@ -255,6 +267,36 @@ pub(super) fn copy_recheck_source_row<S: Clone + Send + Sync + 'static>(
         .project_with_values(slots.into_iter().map(RowProjectionValue::InputSlot))
         .without_lock_origins();
     Ok((schema, row))
+}
+
+fn copy_retained_source_row(
+    source: &uqa_sql::ast::RetainedRowSource,
+    candidate_schema: &RowSchema,
+    candidate: &PhysicalRow,
+) -> Result<(RowSchema, PhysicalRow), SQLError> {
+    let available = candidate_schema.internal_columns_with_types();
+    let slots = (0..source.schema().physical_width())
+        .map(|position| {
+            let column = source.relation().column(position);
+            available
+                .binary_search_by_key(&column, |(found, _, _)| *found)
+                .ok()
+                .map(|index| {
+                    let (_, slot, _) = available[index];
+                    slot.map_or_else(
+                        || RowProjectionValue::Owned(uqa_core::Value::Null),
+                        RowProjectionValue::InputSlot,
+                    )
+                })
+                .ok_or_else(|| {
+                    SQLError::Internal("row-lock recheck lost a retained source attribute".into())
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((
+        source.schema().clone(),
+        candidate.project_with_values(slots).without_lock_origins(),
+    ))
 }
 
 pub(super) fn classify_table_leaf<S: Clone + Send + Sync + 'static>(
@@ -397,7 +439,8 @@ pub(super) fn validate_propagated_source<S: Clone + Send + Sync + 'static>(
         SourcePlan::Subquery { body, .. } => {
             validate_propagated_query(context, body, strength, nullable, false)
         }
-        SourcePlan::Values { .. }
+        SourcePlan::RetainedRows(_)
+        | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
         | SourcePlan::FunctionGroup { .. } => Ok(()),
     }
@@ -408,3 +451,6 @@ pub(super) fn push_unique(names: &mut Vec<String>, name: &str) {
         names.push(name.to_string());
     }
 }
+
+#[cfg(test)]
+mod tests;

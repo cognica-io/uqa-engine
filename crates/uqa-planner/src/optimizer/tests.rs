@@ -10,6 +10,8 @@ use uqa_sql::compile;
 
 use super::*;
 
+mod retained_rows;
+
 fn optimized(sql: &str) -> UnifiedPlan {
     let mut statements = compile(sql).expect("SQL compiles");
     optimize(
@@ -100,7 +102,8 @@ fn source_aliases(source: &SourcePlan) -> BTreeSet<String> {
             aliases.extend(source_aliases(right));
             aliases
         }
-        SourcePlan::Values { .. }
+        SourcePlan::RetainedRows(_)
+        | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
         | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => BTreeSet::new(),
@@ -123,7 +126,8 @@ fn source_predicate_count(source: &SourcePlan) -> usize {
                 + source_predicate_count(right)
                 + on.as_ref().map_or(0, conjunct_count)
         }
-        SourcePlan::Table { .. }
+        SourcePlan::RetainedRows(_)
+        | SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
         | SourcePlan::FunctionGroup { .. }
@@ -143,7 +147,8 @@ fn source_hash_join_count(source: &SourcePlan) -> usize {
                 + source_hash_join_count(left)
                 + source_hash_join_count(right)
         }
-        SourcePlan::Table { .. }
+        SourcePlan::RetainedRows(_)
+        | SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
         | SourcePlan::FunctionGroup { .. }

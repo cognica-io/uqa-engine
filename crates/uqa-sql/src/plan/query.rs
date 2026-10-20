@@ -414,6 +414,7 @@ impl SourcePlan {
     #[must_use]
     pub fn visible_qualifier(&self) -> Option<&str> {
         match self {
+            crate::plan::SourcePlan::RetainedRows(_) => None,
             Self::Table {
                 qualifier, alias, ..
             } => Some(alias.as_deref().unwrap_or(qualifier)),
@@ -450,6 +451,7 @@ impl SourcePlan {
         subqueries: &mut Vec<QueryPlan>,
     ) -> Self {
         match source {
+            FromClause::RetainedRows(source) => Self::RetainedRows(source),
             FromClause::Table {
                 name,
                 qualifier,
@@ -575,6 +577,7 @@ impl SourcePlan {
     /// Append scalar inputs owned by this source, including JOIN predicates; nested query bodies retain their own expression scope.
     pub fn push_expressions<'a>(&'a self, output: &mut Vec<&'a ScalarExpr>) {
         match self {
+            crate::plan::SourcePlan::RetainedRows(_) => {}
             Self::Table { .. } | Self::Subquery { .. } => {}
             Self::Join {
                 left, right, on, ..
@@ -601,6 +604,7 @@ impl SourcePlan {
 
     pub fn collect_tables(&self, output: &mut Vec<(String, Option<String>)>) {
         match self {
+            crate::plan::SourcePlan::RetainedRows(_) => {}
             Self::Table {
                 name,
                 qualifier,

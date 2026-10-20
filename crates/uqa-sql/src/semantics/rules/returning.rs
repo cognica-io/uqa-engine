@@ -203,6 +203,7 @@ impl RuleReturningRequest {
         inherited: &BTreeSet<String>,
     ) {
         match source {
+            crate::plan::SourcePlan::RetainedRows(_) => {}
             SourcePlan::Table { .. } => {}
             SourcePlan::Join {
                 left,

@@ -89,6 +89,7 @@ impl SourceColumns {
         source: &SourcePlan,
     ) -> Result<(), SQLError> {
         match source {
+            SourcePlan::RetainedRows(_) => {}
             SourcePlan::Table {
                 name,
                 qualifier,

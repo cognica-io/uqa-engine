@@ -173,6 +173,7 @@ fn single_local_table_metadata_binding(
         relations: &mut BTreeSet<(String, String)>,
     ) -> Result<(), SQLError> {
         match source {
+            SourcePlan::RetainedRows(_) => {}
             SourcePlan::Table {
                 name,
                 qualifier,
@@ -220,6 +221,7 @@ fn single_local_table_metadata_binding(
 
 fn source_contains_join_alias(source: &SourcePlan) -> bool {
     match source {
+        SourcePlan::RetainedRows(_) => false,
         SourcePlan::Join {
             left, right, alias, ..
         } => {
@@ -240,6 +242,7 @@ fn collect_join_binding_prune_columns(
     prune: &mut ColumnPrune,
 ) -> Result<(), SQLError> {
     match from {
+        SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join {
             left,
             right,
@@ -290,6 +293,7 @@ fn add_all_source_columns_to_prune(
     prune: &mut ColumnPrune,
 ) -> Result<(), SQLError> {
     match source {
+        SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table {
             name,
             qualifier,
@@ -457,6 +461,7 @@ fn collect_from_prune_columns(
     valid: &mut bool,
 ) {
     match from {
+        SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join {
             left, right, on, ..
         } => {
