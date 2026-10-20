@@ -157,6 +157,7 @@ fn bind_source_targets<E>(
     resolve: &mut impl FnMut(&str, bool) -> Result<String, E>,
 ) -> Result<(), E> {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table {
             name,
             qualifier,
@@ -229,6 +230,7 @@ pub fn source_plan_references_relation(
     ctes: &std::collections::BTreeSet<String>,
 ) -> bool {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => false,
         crate::plan::SourcePlan::Table { name, .. } => {
             let is_cte = RelationIdentity::parse_reference(name)
                 .is_ok_and(|(schema, relation)| schema.is_none() && ctes.contains(&relation));
@@ -324,6 +326,7 @@ fn function_binding_needs_object_identity(binding: &FunctionBinding) -> bool {
 
 fn source_plan_has_legacy_routine_identity(source: &SourcePlan) -> bool {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => false,
         SourcePlan::Table { .. } | SourcePlan::Values { .. } => false,
         SourcePlan::Join { left, right, .. } => {
             source_plan_has_legacy_routine_identity(left)
@@ -428,6 +431,7 @@ pub fn query_plan_has_legacy_routine_identity_with_types(
 
 fn source_plan_references_function(source: &SourcePlan, target: &FunctionBinding) -> bool {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => false,
         SourcePlan::Table { .. } | SourcePlan::Values { .. } => false,
         SourcePlan::Join { left, right, .. } => {
             source_plan_references_function(left, target)
@@ -507,6 +511,7 @@ fn rewrite_source_plan_routine_identity(
     new_name: &str,
 ) -> bool {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => false,
         SourcePlan::Table { .. } | SourcePlan::Values { .. } => false,
         SourcePlan::Join { left, right, .. } => {
             rewrite_source_plan_routine_identity(left, target, new_name)

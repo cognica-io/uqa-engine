@@ -19,6 +19,7 @@ use crate::routines::RoutineResolution;
 use crate::RelationIdentity;
 
 mod collations;
+mod retained_sources;
 
 struct EmptyRoutineResolution;
 

@@ -142,6 +142,7 @@ pub(in crate::compiler) fn compile_with_clause(
 fn select_references_relation(statement: &SelectStmt, name: &str) -> bool {
     fn from_references_relation(from: &FromClause, name: &str) -> bool {
         match from {
+            crate::ast::FromClause::RetainedRows(_) => false,
             FromClause::Table { name: table, .. } => table == name,
             FromClause::Join { left, right, .. } => {
                 from_references_relation(left, name) || from_references_relation(right, name)

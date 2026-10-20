@@ -54,6 +54,7 @@ fn collect_cte_body_names(body: &crate::plan::CtePlanBody, names: &mut BTreeSet<
 
 pub fn collect_source_query_cte_names(source: &SourcePlan, names: &mut BTreeSet<String>) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join { left, right, .. } => {
             collect_source_query_cte_names(left, names);
             collect_source_query_cte_names(right, names);

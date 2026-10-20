@@ -146,6 +146,7 @@ pub fn from_qualifiers(from: &SourcePlan) -> BTreeSet<String> {
 
 pub fn collect_from_qualifiers(from: &SourcePlan, out: &mut BTreeSet<String>) {
     match from {
+        SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join {
             left, right, alias, ..
         } => {

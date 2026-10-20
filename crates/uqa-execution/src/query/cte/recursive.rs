@@ -375,7 +375,8 @@ fn recursive_reference_qualifier(source: &SourcePlan, cte_name: &str) -> Option<
         }
         SourcePlan::Join { left, right, .. } => recursive_reference_qualifier(left, cte_name)
             .or_else(|| recursive_reference_qualifier(right, cte_name)),
-        SourcePlan::Table { .. }
+        SourcePlan::RetainedRows(_)
+        | SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
         | SourcePlan::FunctionGroup { .. }

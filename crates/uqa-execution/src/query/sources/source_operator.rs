@@ -63,9 +63,11 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync +
             source.schema,
             vec![source.row],
         ));
-        if matches!(from, SourcePlan::Values { .. })
-            || qualifier_filter(filters, &source.qualifier)
-                .is_some_and(|predicate| uqa_sql::semantics::contains_retrieval(&predicate))
+        if matches!(
+            from,
+            SourcePlan::Values { .. } | SourcePlan::RetainedRows(_)
+        ) || qualifier_filter(filters, &source.qualifier)
+            .is_some_and(|predicate| uqa_sql::semantics::contains_retrieval(&predicate))
         {
             return Ok(scan);
         }
@@ -80,6 +82,9 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync +
     }
 
     match from {
+        SourcePlan::RetainedRows(source) => Ok(Box::new(
+            super::retained_source::build_retained_source(source)?,
+        )),
         SourcePlan::Table { .. } => {
             build_table_source_operator(context, from, params, ctes, prune, filters)
         }

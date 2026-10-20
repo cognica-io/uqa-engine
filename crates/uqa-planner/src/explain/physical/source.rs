@@ -24,6 +24,7 @@ impl Collector<'_> {
         path: &str,
     ) -> Result<(), SQLError> {
         match source {
+            SourcePlan::RetainedRows(_) => Ok(()),
             SourcePlan::Table { .. } => self.table_source(source, filters, scope, path),
             SourcePlan::Join { left, right, .. } => {
                 self.source(left, filters, scope, &format!("{path}/Left"))?;

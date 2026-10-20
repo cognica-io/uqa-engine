@@ -227,6 +227,11 @@ impl<'a> PlanCostEstimator<'a> {
                 cost
             }
             SourcePlan::Values { rows, .. } => self.values(rows),
+            SourcePlan::RetainedRows(source) => PlanCost {
+                rows: source.rows() as f64,
+                execution: self.unary(OperatorKind::TableScan, source.rows() as f64),
+                relations: 0,
+            },
             SourcePlan::Subquery { body, .. } => self.query(body, scope),
             SourcePlan::Join {
                 left,

@@ -530,6 +530,7 @@ impl SchemaScope {
                 let schema = self.bind_values_schema(routines, rows, subqueries, outer, params)?;
                 Ok(rename_schema(&schema, column_aliases, alias.as_deref()))
             }
+            SourcePlan::RetainedRows(source) => Ok(source.schema().clone()),
             SourcePlan::Function {
                 name,
                 binding,

@@ -612,6 +612,7 @@ fn source_may_mutate_engine(
     classification: MutabilityClassification,
 ) -> Result<bool, SQLError> {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => Ok(false),
         crate::plan::SourcePlan::Function {
             name,
             binding,

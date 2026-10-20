@@ -393,6 +393,11 @@ fn source_scope(
     ctes: &BTreeMap<String, RelationColumns>,
 ) -> Result<QueryScope, SQLError> {
     match source {
+        crate::plan::SourcePlan::RetainedRows(source) => Ok(QueryScope {
+            qualifiers: BTreeSet::new(),
+            internal_relations: [source.relation()].into_iter().collect(),
+            columns: RelationColumns::empty_known(),
+        }),
         SourcePlan::Table {
             bound_columns,
             name,
@@ -645,6 +650,7 @@ fn source_has_external_reference(
     scopes: &mut Vec<QueryScope>,
 ) -> Result<bool, SQLError> {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => Ok(false),
         SourcePlan::Join {
             left, right, on, ..
         } => Ok(source_has_external_reference(context, left, scopes)?

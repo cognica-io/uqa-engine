@@ -271,6 +271,7 @@ pub(in crate::compiler) fn resolve_named_windows_in_select(
 
 fn resolve_named_windows_in_from(from: &mut FromClause, windows: &mut NamedWindows) -> Result<()> {
     match from {
+        crate::ast::FromClause::RetainedRows(_) => {}
         FromClause::Table { .. } | FromClause::Subquery { .. } => {}
         FromClause::Join {
             left, right, on, ..

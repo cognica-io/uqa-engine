@@ -281,6 +281,7 @@ fn count_source_cte_references(
     counts: &mut BTreeMap<String, usize>,
 ) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table { name, .. } => {
             if let Some(name) = cte_reference_name(name).filter(|name| targets.contains(name)) {
                 *counts.entry(name).or_default() += 1;
@@ -347,6 +348,7 @@ fn collect_target_cte_references_from_source(
     references: &mut BTreeSet<String>,
 ) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table { name, .. } => {
             if let Some(name) = cte_reference_name(name)
                 .filter(|name| targets.contains(name) && !shadowed.contains(name))

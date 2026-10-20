@@ -72,6 +72,11 @@ impl Deparser<'_> {
         scope: &Scope,
     ) -> Result<Vec<Column>, SQLError> {
         let (names, qualifier, rendered, aliases) = match source {
+            SourcePlan::RetainedRows(_) => {
+                return Err(SQLError::Internal(
+                    "retained row source cannot be rendered as a view definition".into(),
+                ))
+            }
             SourcePlan::Table {
                 name,
                 qualifier,
@@ -217,6 +222,9 @@ impl Deparser<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
         match source {
+            SourcePlan::RetainedRows(_) => Err(SQLError::Internal(
+                "retained row source cannot be rendered as a view definition".into(),
+            )),
             SourcePlan::Table {
                 name,
                 alias,

@@ -516,6 +516,7 @@ fn analyze_source_lineage(
     required: &mut BTreeSet<BaseColumn>,
 ) -> Result<SourceLineage, SQLError> {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => Ok(SourceLineage::default()),
         SourcePlan::Table {
             name,
             qualifier,

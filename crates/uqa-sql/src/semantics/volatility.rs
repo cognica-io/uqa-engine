@@ -487,6 +487,7 @@ fn source_contains_volatile_function(
     visiting_views: &mut BTreeSet<String>,
 ) -> Result<bool, SQLError> {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => Ok(false),
         SourcePlan::Table { name, .. } => {
             let key = name.to_ascii_lowercase();
             if !visiting_views.insert(key.clone()) {

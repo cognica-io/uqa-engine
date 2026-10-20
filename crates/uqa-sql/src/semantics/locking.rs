@@ -61,6 +61,7 @@ fn relational_has_row_locks(plan: &RelationalPlan) -> bool {
 
 fn source_plan_has_row_locks(source: &SourcePlan) -> bool {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => false,
         SourcePlan::Join { left, right, .. } => {
             source_plan_has_row_locks(left) || source_plan_has_row_locks(right)
         }
@@ -101,6 +102,7 @@ fn apply_propagated_lock_to_subqueries(
     wait: LockWait,
 ) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join { left, right, .. } => {
             apply_propagated_lock_to_subqueries(left, strength, wait);
             apply_propagated_lock_to_subqueries(right, strength, wait);

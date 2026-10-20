@@ -471,6 +471,7 @@ impl SchemaScope {
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         match source {
+            crate::plan::SourcePlan::RetainedRows(_) => Ok(()),
             SourcePlan::Join {
                 left,
                 right,

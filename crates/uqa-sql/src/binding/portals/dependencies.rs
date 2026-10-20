@@ -353,6 +353,7 @@ pub fn collect_session_portal_source_dependencies(
     visiting_routines: &mut std::collections::BTreeSet<String>,
 ) -> Result<(), SQLError> {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => Ok(()),
         SourcePlan::Table {
             name,
             include_descendants,

@@ -300,6 +300,11 @@ where
             visit(source)?;
         }
         match source {
+            crate::ast::FromClause::RetainedRows(_) => {
+                return Err(SQLError::Internal(
+                    "retained row source cannot be stored in a catalog statement".into(),
+                ))
+            }
             FromClause::Table { name, .. } => {
                 (self.relation)(name)?;
             }

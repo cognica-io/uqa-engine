@@ -148,6 +148,7 @@ fn collect_relational_source_routine_dependencies(
 
 fn collect_source_routine_dependencies(source: &SourcePlan, dependencies: &mut RuleDependencies) {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table { .. } | SourcePlan::Values { .. } => {}
         SourcePlan::Join { left, right, .. } => {
             collect_source_routine_dependencies(left, dependencies);
@@ -190,6 +191,7 @@ fn collect_source_relation_dependencies(
     visible_ctes: &BTreeSet<String>,
 ) -> Result<(), SQLError> {
     match source {
+        crate::plan::SourcePlan::RetainedRows(_) => {}
         SourcePlan::Table { name, .. } => {
             if crate::binding::view_dependencies::canonical_virtual_relation_reference(name)
                 .is_some()

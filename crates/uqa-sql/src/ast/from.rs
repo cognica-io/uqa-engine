@@ -10,6 +10,10 @@ use super::{Expr, FunctionBinding, InternalRelationId, SelectStmt};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FromClause {
+    /// Execution-scoped rows with an opaque identity and no SQL-visible names.
+    #[serde(skip)]
+    #[doc(hidden)]
+    RetainedRows(super::RetainedRowSource),
     /// `FROM <table> [AS <alias>]`.
     Table {
         /// Durable catalog identity, including an explicit schema when present.
@@ -177,6 +181,7 @@ impl FromClause {
     /// order. Used by the compiler to resolve unqualified column refs.
     pub fn collect_tables(&self, out: &mut Vec<(String, Option<String>)>) {
         match self {
+            FromClause::RetainedRows(_) => {}
             FromClause::Table {
                 name,
                 qualifier,

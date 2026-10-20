@@ -80,6 +80,7 @@ pub(in crate::compiler) fn validate_select_locking(statement: &SelectStmt) -> Re
 
 fn contains_any_join_alias(from: &FromClause) -> bool {
     match from {
+        crate::ast::FromClause::RetainedRows(_) => false,
         FromClause::Join {
             left, right, alias, ..
         } => alias.is_some() || contains_any_join_alias(left) || contains_any_join_alias(right),
@@ -93,6 +94,7 @@ fn contains_any_join_alias(from: &FromClause) -> bool {
 
 fn contains_join_alias(from: &FromClause, target: &str) -> bool {
     match from {
+        crate::ast::FromClause::RetainedRows(_) => false,
         FromClause::Join {
             left, right, alias, ..
         } => {
@@ -173,6 +175,7 @@ fn apply_pushed_subquery_clauses(
     pushed: &mut [Vec<LockingClause>],
 ) -> Result<()> {
     match from {
+        crate::ast::FromClause::RetainedRows(_) => Ok(()),
         FromClause::Join { left, right, .. } => {
             apply_pushed_subquery_clauses(left, source_index, pushed)?;
             apply_pushed_subquery_clauses(right, source_index, pushed)
@@ -290,6 +293,7 @@ fn collect_lock_sources_matching<'a>(
     is_cte: &impl Fn(&str) -> bool,
 ) -> Vec<LockSource<'a>> {
     match from {
+        crate::ast::FromClause::RetainedRows(_) => Vec::new(),
         FromClause::Table {
             name,
             qualifier,

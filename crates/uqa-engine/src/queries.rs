@@ -91,6 +91,8 @@ impl Engine {
         &self,
     ) -> uqa_execution::statement::thread_context::StatementThreadContext {
         uqa_execution::statement::thread_context::StatementThreadContext {
+            retained_rows:
+                uqa_execution::query::sources::retained_source::RetainedRowContext::current(),
             regex_cache: Some(self.session_regex_cache()),
             temporal_input: uqa_sql::expr::TemporalInputContext {
                 transaction_clock_micros: self.session_transaction_clock_micros(),

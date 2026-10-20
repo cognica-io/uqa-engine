@@ -410,6 +410,7 @@ fn select_references_internal_relation(select: &SelectStmt, relation: InternalRe
 
 fn from_references_internal_relation(from: &FromClause, relation: InternalRelationId) -> bool {
     match from {
+        crate::ast::FromClause::RetainedRows(_) => false,
         FromClause::Table { .. } => false,
         FromClause::Join {
             left, right, on, ..

@@ -87,6 +87,7 @@ fn source_names(
     context: &RuleBindingContext<'_>,
 ) -> Result<RuleSourceNames, SQLError> {
     match from {
+        crate::ast::FromClause::RetainedRows(_) => Ok(RuleSourceNames::default()),
         FromClause::Table {
             name,
             qualifier,
