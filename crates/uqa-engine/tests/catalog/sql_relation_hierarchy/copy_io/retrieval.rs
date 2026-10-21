@@ -60,6 +60,15 @@ fn copy_text_matches_capture_scores_without_complete_posting_vectors() {
 
 #[test]
 fn copy_exact_text_fusion_does_not_retain_complete_signal_populations() {
+    verify_complete_fusion_memory("fuse_bayesian_evidence");
+}
+
+#[test]
+fn copy_positive_text_pool_does_not_retain_complete_signal_populations() {
+    verify_complete_fusion_memory("pool_positive_evidence");
+}
+
+fn verify_complete_fusion_memory(function: &str) {
     let engine = Engine::new();
     exec(
         &engine,
@@ -73,8 +82,10 @@ fn copy_exact_text_fusion_does_not_retain_complete_signal_populations() {
         assert_eq!(
             engine
                 .copy_to(
-                    "COPY (SELECT id FROM copy_search WHERE fuse_bayesian_evidence(
-                         bayesian_match(body,'alpha'),bayesian_match(body,'beta'))) TO STDOUT",
+                    &format!(
+                        "COPY (SELECT id FROM copy_search WHERE {function}(
+                         bayesian_match(body,'alpha'),bayesian_match(body,'beta'))) TO STDOUT"
+                    ),
                     &mut output,
                 )
                 .unwrap(),

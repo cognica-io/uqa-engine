@@ -12,6 +12,7 @@ use uqa_core::CancellationToken;
 
 mod filters;
 mod fusion;
+mod positive;
 #[cfg(test)]
 mod tests;
 mod tree;
@@ -58,6 +59,26 @@ impl PhysicalRetrievalDriver<'_> {
                 OperatorTree::BayesianEvidenceFusion { signals, base_rate } => {
                     self.capture_exact_fusion(signals, *base_rate, bytes)
                 }
+                OperatorTree::RobustPositiveEvidencePool {
+                    signals,
+                    alpha,
+                    gating,
+                    weights,
+                    logit_min,
+                    logit_max,
+                    adaptive_weights,
+                } => self.capture_positive_pool(
+                    super::PositiveEvidencePoolExecution {
+                        signals,
+                        alpha: *alpha,
+                        gating,
+                        weights: weights.as_deref(),
+                        logit_min: logit_min.as_deref(),
+                        logit_max: logit_max.as_deref(),
+                        adaptive_weights: *adaptive_weights,
+                    },
+                    bytes,
+                ),
                 _ => unreachable!("eligible complete retrieval leaf"),
             },
         )

@@ -30,6 +30,21 @@ impl PhysicalRetrievalDriver<'_> {
                 "BayesianEvidenceFusion requires at least one signal".into(),
             ));
         }
+        let inputs = self.capture_evidence_signals(signals, bytes)?;
+        fuse_captured(
+            inputs,
+            explicit_base_rate,
+            bytes,
+            self.context.runtime.cancellation_token(),
+            || self.bridge_context(),
+        )
+    }
+
+    pub(super) fn capture_evidence_signals(
+        &self,
+        signals: &[OperatorTree],
+        bytes: usize,
+    ) -> DriverResult<Vec<(CapturedScoredEntries, Option<f64>)>> {
         let branch_bytes = bytes / signals.len().saturating_add(2);
         let workers = signals
             .iter()
@@ -38,18 +53,10 @@ impl PhysicalRetrievalDriver<'_> {
             })
             .collect::<Vec<_>>();
         // All branches finish before the original first-error selection and prior validation.
-        let inputs = self
-            .parallel
+        self.parallel
             .execute_branches(&workers)
             .into_iter()
-            .collect::<DriverResult<Vec<_>>>()?;
-        fuse_captured(
-            inputs,
-            explicit_base_rate,
-            bytes,
-            self.context.runtime.cancellation_token(),
-            || self.bridge_context(),
-        )
+            .collect()
     }
 
     fn capture_fusion_signal(
@@ -129,7 +136,7 @@ fn fuse_captured<C>(
     let _context = bridge()?;
     let fusion = BayesianEvidenceFusion::new(base_rate)
         .map_err(|error| operator_execution_error("BayesianEvidenceFusion", error))?;
-    let mut output = ScoredEntryCapture::new(bytes / 2, cancellation)?;
+    let mut output = ScoredEntryCapture::new(bytes / inputs.len().saturating_add(2), cancellation)?;
     visit_exact_evidence(
         &fusion,
         inputs.len(),

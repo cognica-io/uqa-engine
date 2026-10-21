@@ -267,6 +267,33 @@ fn complete_exact_fusion_capture_keeps_typed_signal_boundaries() {
 }
 
 #[test]
+fn complete_positive_pool_capture_keeps_typed_signal_boundaries() {
+    let pool = |signals| OperatorTree::RobustPositiveEvidencePool {
+        signals,
+        alpha: 0.5,
+        gating: uqa_operators::GatingSpec::Softplus,
+        weights: None,
+        logit_min: None,
+        logit_max: None,
+        adaptive_weights: true,
+    };
+    assert!(tree::complete_scored_tree(&pool(vec![
+        term("one"),
+        pool(vec![term("two"), OperatorTree::Empty]),
+    ])));
+    assert!(!tree::complete_scored_tree(&pool(vec![
+        term("one"),
+        OperatorTree::CosineProbability(Box::new(term("two"))),
+    ])));
+    assert!(!tree::complete_scored_tree(&pool(vec![
+        OperatorTree::BayesianScore {
+            source: Box::new(term("one")),
+            field: Some("body".into()),
+        }
+    ])));
+}
+
+#[test]
 fn complete_text_capture_keeps_the_all_field_leaf_boundary() {
     let tree = OperatorTree::Term {
         field: None,

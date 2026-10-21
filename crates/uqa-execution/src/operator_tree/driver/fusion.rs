@@ -17,6 +17,17 @@ use super::{
     StaticPostingList, StorageBackendError, TextScoringMode, Value,
 };
 
+pub(super) fn lower_positive_gating(gating: &GatingSpec) -> uqa_fusion::LogitGating {
+    match gating {
+        GatingSpec::Softplus => uqa_fusion::LogitGating::Softplus,
+        GatingSpec::Pass => uqa_fusion::LogitGating::Pass,
+        GatingSpec::Sigmoid { .. } => uqa_fusion::LogitGating::Sigmoid,
+        GatingSpec::ReLU => uqa_fusion::LogitGating::ReLU,
+        GatingSpec::Swish => uqa_fusion::LogitGating::Swish,
+        GatingSpec::Gelu => uqa_fusion::LogitGating::Gelu,
+    }
+}
+
 impl PhysicalRetrievalDriver<'_> {
     fn text_retrieval_context(&self) -> crate::query::retrieval::context::TextRetrievalContext<'_> {
         crate::query::retrieval::context::TextRetrievalContext {
@@ -319,14 +330,7 @@ impl PhysicalRetrievalDriver<'_> {
                 signal_priors.push(prior);
             }
         }
-        let logit_gating = match gating {
-            GatingSpec::Softplus => uqa_fusion::LogitGating::Softplus,
-            GatingSpec::Pass => uqa_fusion::LogitGating::Pass,
-            GatingSpec::Sigmoid { .. } => uqa_fusion::LogitGating::Sigmoid,
-            GatingSpec::ReLU => uqa_fusion::LogitGating::ReLU,
-            GatingSpec::Swish => uqa_fusion::LogitGating::Swish,
-            GatingSpec::Gelu => uqa_fusion::LogitGating::Gelu,
-        };
+        let logit_gating = lower_positive_gating(gating);
         let mut operator =
             RobustPositiveEvidencePoolOperator::new(signal_ops, alpha).with_gating(logit_gating);
         if adaptive_weights {

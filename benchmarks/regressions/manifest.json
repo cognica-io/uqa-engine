@@ -20280,6 +20280,100 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_positive_pool_keeps_priors_empty_signals_and_score_bits",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Three spilled inputs with differing corpus priors and an empty middle signal.",
+      "invariant": "Average-logit prior combination and the complete signal denominator preserve exact scores.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_positive_pool_keeps_snapshot_configuration_probability_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Failed snapshot, invalid exponent and invalid probability.",
+      "invariant": "Snapshot acquisition precedes configuration validation, which precedes probability validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_positive_pool_keeps_cancellation_typed",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Cancellation after complete input capture and snapshot acquisition.",
+      "invariant": "SQLSTATE 57014 survives without successful output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_positive_pool_capture_keeps_typed_signal_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Nested complete score inputs and unsupported calibrated vector/score wrappers.",
+      "invariant": "Only supported complete carriers enter bounded pooling capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_positive_text_pool_does_not_retain_complete_signal_populations",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "32,768 matching rows, two Bayesian text signals, work_mem 64KiB and a validating discard sink.",
+      "invariant": "The exact ordered count passes the unchanged 2MiB peak allowance after a 9,320,997-byte baseline.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_positive_pool_keeps_native_bits_options_and_statement_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion/pooling.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "513 sparse matches, empty/nonempty signal changes, single/all-field calibration, configured weights/normalization, private updates, rollback, independent output-time commit and reopen on four providers.",
+      "invariant": "Native score bits, selected statement generation, overlays and persistence remain exact.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_positive_pool_failures_preserve_explicit_transaction_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion/pooling.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Cancelled and failed output sinks inside an explicit mutation transaction.",
+      "invariant": "Typed errors survive and rollback restores original data.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

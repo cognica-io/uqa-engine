@@ -12,7 +12,16 @@ use uqa_core::Value;
 use uqa_fusion::BayesianEvidenceFusion;
 use uqa_scoring::{EvidenceLogit, ScoringMode};
 
-fn native_scores(engine: &Engine, all_fields: bool, explicit: Option<f64>) -> BTreeMap<i64, u64> {
+#[path = "fusion/pooling.rs"]
+mod pooling;
+
+struct NativeSignals {
+    identities: BTreeMap<u64, i64>,
+    signals: [BTreeMap<u64, f64>; 3],
+    prior: f64,
+}
+
+fn native_signals(engine: &Engine, all_fields: bool) -> NativeSignals {
     let fields = if all_fields {
         &["body", "title"][..]
     } else {
@@ -35,7 +44,7 @@ fn native_scores(engine: &Engine, all_fields: bool, explicit: Option<f64>) -> BT
         .iter()
         .map(|field| engine.bayesian_params_for("copy_fusion", field).unwrap())
         .collect::<Vec<_>>();
-    let prior = explicit.unwrap_or_else(|| {
+    let prior = {
         if all_fields {
             uqa_scoring::sigmoid(
                 params
@@ -47,7 +56,7 @@ fn native_scores(engine: &Engine, all_fields: bool, explicit: Option<f64>) -> BT
         } else {
             params[0].base_rate
         }
-    });
+    };
     let signals = ["alpha", "absent", "beta"].map(|query| {
         let mut scores = BTreeMap::<u64, f64>::new();
         for (field, params) in fields.iter().zip(&params) {
@@ -69,7 +78,20 @@ fn native_scores(engine: &Engine, all_fields: bool, explicit: Option<f64>) -> BT
         }
         scores
     });
-    let fusion = BayesianEvidenceFusion::new(prior).unwrap();
+    NativeSignals {
+        identities,
+        signals,
+        prior,
+    }
+}
+
+fn native_scores(engine: &Engine, all_fields: bool, explicit: Option<f64>) -> BTreeMap<i64, u64> {
+    let NativeSignals {
+        identities,
+        signals,
+        prior,
+    } = native_signals(engine, all_fields);
+    let fusion = BayesianEvidenceFusion::new(explicit.unwrap_or(prior)).unwrap();
     signals
         .iter()
         .flat_map(|map| map.keys().copied())
