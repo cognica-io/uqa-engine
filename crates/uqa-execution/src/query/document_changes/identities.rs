@@ -211,6 +211,15 @@ pub struct ChangedIdentitiesView {
 }
 
 impl ChangedIdentitiesView {
+    pub(super) fn read_scope(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::mvcc::PrivateRecordReadScope> {
+        self.snapshot
+            .read_scope(control)
+            .map_err(VersionError::into_storage_error)
+    }
+
     pub fn counts(&self) -> ChangedRowCounts {
         self.counts
     }

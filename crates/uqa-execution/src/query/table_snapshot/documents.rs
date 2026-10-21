@@ -471,6 +471,18 @@ impl DocumentStore for RetainedDocuments {
     ) -> StorageBackendResult<Option<usize>> {
         let ids = self.id_page(after, limit)?;
         let mut visited = 0;
+        if fields.is_empty() {
+            for id in ids.iter().copied() {
+                self.0.control.check()?;
+                visited += 1;
+                let more = visitor(id, &[]);
+                self.0.control.check()?;
+                if !more {
+                    break;
+                }
+            }
+            return Ok(Some(visited));
+        }
         self.for_each_fields_multi_ref(&ids, fields, &mut |id, values| {
             visited += 1;
             visitor(id, values)

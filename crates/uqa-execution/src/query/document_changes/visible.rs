@@ -39,62 +39,58 @@ impl VisibleDocumentIds<'_> {
         if limit == 0 {
             return Ok(ids);
         }
+        let mut changes = self.changes.changes_after(after);
+        let mut private = changes.next().transpose()?;
         let mut base = BudgetedVec::new(control.memory());
+        let mut position = 0;
         let mut cursor = after;
-        while base.len() < limit {
-            control.check()?;
-            self.control.check()?;
-            let requested = (limit - base.len()).min(crate::DEFAULT_BATCH_SIZE);
-            if borrowed {
-                match self.append_borrowed_ids(cursor, requested, &mut base, control)? {
-                    BorrowedPage::Empty => break,
-                    BorrowedPage::Last(last) => {
-                        cursor = Some(last);
-                        continue;
-                    }
-                    BorrowedPage::Unsupported => {}
-                }
-            }
-            let page = read_document_ids(self.source, cursor, requested, control)?;
-            let Some(last) = page.last().copied() else {
-                break;
-            };
-            cursor = Some(last);
-            for id in page.iter().copied() {
-                control.check()?;
-                self.control.check()?;
-                if !self.changes.contains_change(id)? {
-                    base.push(id)?;
-                }
-            }
-        }
-        let mut private = BudgetedVec::new(control.memory());
-        for change in self.changes.changes_after(after) {
-            control.check()?;
-            self.control.check()?;
-            if private.len() == limit {
-                break;
-            }
-            let (id, present) = change?;
-            if present {
-                private.push(id)?;
-            }
-        }
-        let (base, _base_memory) = base.into_parts();
-        let mut base = base.into_iter().peekable();
-        let (private, _private_memory) = private.into_parts();
-        let mut private = private.into_iter().peekable();
+        let mut exhausted = false;
         while ids.len() < limit {
             control.check()?;
             self.control.check()?;
-            let id = match (base.peek(), private.peek()) {
-                (Some(left), Some(right)) if left < right => base.next(),
-                (_, Some(_)) => private.next(),
-                (Some(_), None) => base.next(),
+            if position == base.len() && !exhausted {
+                base = BudgetedVec::new(control.memory());
+                position = 0;
+                let requested = (limit - ids.len()).min(crate::DEFAULT_BATCH_SIZE);
+                let page = if borrowed {
+                    self.append_borrowed_ids(cursor, requested, &mut base, control)?
+                } else {
+                    BorrowedPage::Unsupported
+                };
+                match page {
+                    BorrowedPage::Empty => exhausted = true,
+                    BorrowedPage::Last(last) => cursor = Some(last),
+                    BorrowedPage::Unsupported => {
+                        base = read_document_ids(self.source, cursor, requested, control)?;
+                        if let Some(last) = base.last().copied() {
+                            cursor = Some(last);
+                        } else {
+                            exhausted = true;
+                        }
+                    }
+                }
+            }
+            let stored = base.get(position).copied();
+            match (stored, private) {
+                (Some(id), Some((changed, _))) if id < changed => {
+                    ids.push(id)?;
+                    position += 1;
+                }
+                (_, Some((id, present))) => {
+                    position += usize::from(stored == Some(id));
+                    if present {
+                        ids.push(id)?;
+                        if ids.len() == limit {
+                            break;
+                        }
+                    }
+                    private = changes.next().transpose()?;
+                }
+                (Some(id), None) => {
+                    ids.push(id)?;
+                    position += 1;
+                }
                 (None, None) => break,
-            };
-            if let Some(id) = id {
-                ids.push(id)?;
             }
         }
         control.check()?;
@@ -126,9 +122,7 @@ impl VisibleDocumentIds<'_> {
                 }
                 count += 1;
                 last = Some(id);
-                if !self.changes.contains_change(id)? {
-                    ids.push(id)?;
-                }
+                ids.push(id)?;
                 Ok(())
             })();
             if let Err(error) = result {

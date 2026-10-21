@@ -112,3 +112,69 @@ fn many_changes_spill_under_a_small_allowance() {
     drop((view, listed, identities));
     assert_eq!(control.memory().used(), held.bytes());
 }
+
+#[test]
+fn private_batch_reads_keep_charged_blocks_only_until_the_last_reader_finishes() {
+    use crate::query::document_changes::{layers::IdentityRows, DocumentChanges};
+    use uqa_storage::{DocumentStore, MemoryDocumentStore};
+
+    let control = StorageReadControl::with_limit(128 << 10);
+    let held = control.memory().reserve(72 << 10).unwrap();
+    let mut identities = ChangedIdentities::new(&control).unwrap();
+    for id in 0..2_000 {
+        identities
+            .note(&TABLE, id, true, id % 3 != 0, &control)
+            .unwrap();
+    }
+    let view = identities.view(&TABLE).unwrap().unwrap();
+    let changes = DocumentChanges::default()
+        .with_identity_layer(
+            view.clone(),
+            IdentityRows::Retained(MemoryDocumentStore::new().snapshot().unwrap()),
+            &control,
+        )
+        .unwrap();
+    let baseline = control.memory().used();
+    let invoking = StorageReadControl::with_limit(64 << 10);
+    let first = changes.read_scope(&invoking).unwrap();
+    let second = changes.read_scope(&invoking).unwrap();
+    assert_eq!(changes.change_presence(0).unwrap(), Some(false));
+    let cached = control.memory().used();
+    assert!(
+        cached > baseline,
+        "spilled identity blocks stay admitted during the batch"
+    );
+    for _ in 0..32 {
+        assert!(changes.contains_change(0).unwrap());
+        assert_eq!(changes.change_presence(0).unwrap(), Some(false));
+        assert_eq!(control.memory().used(), cached);
+    }
+    drop(first);
+    assert_eq!(control.memory().used(), cached);
+    drop(second);
+    assert_eq!(control.memory().used(), baseline);
+    assert_eq!(invoking.memory().used(), 0);
+
+    let first = changes.read_scope(&invoking).unwrap();
+    assert!(changes
+        .read_scope(&StorageReadControl::with_limit(0))
+        .is_err());
+    identities.note(&TABLE, 0, true, true, &control).unwrap();
+    assert_eq!(changes.change_presence(0).unwrap(), Some(false));
+    assert_eq!(
+        identities
+            .view(&TABLE)
+            .unwrap()
+            .unwrap()
+            .presence(0, &control)
+            .unwrap(),
+        Some(true)
+    );
+    invoking.cancellation().cancel();
+    assert!(changes.read_scope(&invoking).is_err());
+    control.cancellation().cancel();
+    assert!(changes.contains_change(0).is_err());
+    drop((first, changes, view, identities));
+    assert_eq!(control.memory().used(), held.bytes());
+    assert_eq!(invoking.memory().used(), 0);
+}

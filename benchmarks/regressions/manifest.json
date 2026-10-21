@@ -20509,6 +20509,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "private_batch_reads_keep_charged_blocks_only_until_the_last_reader_finishes",
+      "source": "crates/uqa-execution/src/query/document_changes/identities/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Spilled private identities under a 128KiB allowance, overlapping read scopes, cancellation and later writes.",
+      "invariant": "Decoded blocks remain charged during bounded reads, release with the final scope, and preserve frozen values and admission failure.",
+      "capability": "Bounded private identity reads"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "identity_only_retained_projection_never_reads_base_or_private_payloads",
+      "source": "crates/uqa-execution/src/query/table_snapshot/tests/retained/private.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Base and private rows, tombstones, early termination and cancellation in identity-only projection.",
+      "invariant": "Identity cursors perform zero base/private payload projections and release temporary memory after early stop or cancellation.",
+      "capability": "Bounded private identity reads"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "private_replacements_do_not_rescan_the_remaining_base_for_each_identity_page",
+      "source": "crates/uqa-execution/src/query/table_snapshot/tests/id_cursor.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "One-row identity pages when every base row has a private replacement.",
+      "invariant": "The complete ordered result reads each base identity once; per-page masking never rescans the unconsumed base suffix.",
+      "capability": "Bounded private identity reads"
     }
   ]
 }

@@ -21,6 +21,7 @@ impl RetainedDocuments {
         if ids.is_empty() {
             return Ok(());
         }
+        let _changes_read = self.0.changes.read_scope(&self.0.control)?;
         let base_projection = self.0.layout.projection(fields)?;
         let private_projection = self.0.private_layout.projection(fields)?;
         let mut nulls = BudgetedVec::new(self.0.control.memory());
