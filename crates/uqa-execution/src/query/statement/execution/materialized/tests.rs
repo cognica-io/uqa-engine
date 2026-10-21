@@ -174,7 +174,7 @@ fn public_result_collection_preserves_duplicate_slots_and_live_layouts() {
             ("missing".into(), "absent".into()),
         ],
     );
-    for batched in [false, true] {
+    for delivery in 0..3 {
         let result = super::collect::<()>(|mode| {
             let crate::query::consumer::QueryOutputMode::RowConsumer(consumer) =
                 bind_output_mode(None, mode, None)?
@@ -183,12 +183,12 @@ fn public_result_collection_preserves_duplicate_slots_and_live_layouts() {
             };
             assert!(!consumer.streams_set_inputs());
             consumer.begin(first.columns(), &first)?;
-            for schema in [&first, &second, &first] {
+            for (index, schema) in [&first, &second, &first].into_iter().enumerate() {
                 let row = PhysicalRow::from_values(vec![
                     Value::Str("left".into()),
                     Value::Str("right".into()),
                 ]);
-                let control = if batched {
+                let control = if delivery == 1 || (delivery == 2 && index % 2 == 0) {
                     consumer.consume_batch(Batch::from_physical_rows(schema.clone(), vec![row]))?
                 } else {
                     consumer.consume(OwnedPhysicalRow::new(schema.clone(), row))?

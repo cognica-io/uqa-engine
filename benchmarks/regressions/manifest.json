@@ -18032,6 +18032,19 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "materialized_batches_reuse_output_capacity_and_projection_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/output/tests.rs",
+      "capability": "Incremental public SQL materialization",
+      "workload": "64 batches of 128 nullary rows use both an identity layout and an empty projection over 64 physical slots; source batches and final output capacity are allocated before observation.",
+      "invariant": "All 8,192 rows survive and source owners release; additional allocation stays within 1KiB for one conversion layout instead of per-batch result vectors or repeated plans.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "ordered_document_batches_bound_wide_projection_and_resume_exactly",
       "cases": 1,
       "case_names": [
@@ -18300,7 +18313,7 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests.rs",
       "capability": "Incremental public SQL materialization",
-      "workload": "Row and batch delivery with duplicate labels, NULL slots and alternating immutable layouts.",
+      "workload": "Single-row, batched and alternating delivery project duplicate labels, missing slots and both collations across three changing layouts.",
       "invariant": "Named compatibility labels, distinct positional values, live row layouts and declared output collations are preserved.",
       "case_names": [
         ""

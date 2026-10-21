@@ -9,7 +9,7 @@ use crate::query::{
     collection::collect_query_operator, consumer::QueryOutputMode,
     relational::values::test_support::Services, runtime::QueryRuntimeView,
 };
-use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema, RowSchemaExecution, TableScan};
+use crate::{Batch, OwnedPhysicalRow, PhysicalRow, RowSchema, RowSchemaExecution, TableScan};
 use parking_lot::RwLock;
 use uqa_core::Value;
 use uqa_sql::plan::UnifiedPlan;
@@ -173,4 +173,47 @@ fn materialized_spill_batches_preserve_duplicate_positions_and_collations() {
         assert_eq!(named.get("x_1"), Some(&positional[1]));
     }
     check_schema(&result.row_schema(), &reference);
+}
+
+#[test]
+fn materialized_batches_reuse_output_capacity_and_projection_metadata() {
+    const BATCHES: usize = 64;
+    const ROWS: usize = 128;
+    let input = RowSchema::new((0..64).map(|column| format!("column_{column}")).collect());
+    for schema in [RowSchema::new(Vec::new()), RowSchema::select(&input, &[])] {
+        let values = std::sync::Arc::new(vec![Value::Null; schema.physical_width()]);
+        let slots: std::sync::Arc<[usize]> = (0..schema.physical_width()).collect();
+        let batches = (0..BATCHES)
+            .map(|_| {
+                Batch::from_physical_rows(
+                    schema.clone(),
+                    (0..ROWS)
+                        .map(|_| {
+                            PhysicalRow::from_shared_values(
+                                std::sync::Arc::clone(&values),
+                                std::sync::Arc::clone(&slots),
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut result = ResultRows::new(&[]);
+        result.named.reserve(BATCHES * ROWS);
+        let allocations = allocation_counter::measure(|| {
+            for batch in batches {
+                result.append(&[], batch);
+            }
+        });
+        assert_eq!(result.named.len(), BATCHES * ROWS);
+        assert!(result.named.iter().all(uqa_sql::ResultRow::is_empty));
+        assert!(result.positional.is_none());
+        assert_eq!(std::sync::Arc::strong_count(&values), 1);
+        // Output capacity and all input rows are already owned. Allow one 64-slot conversion plan, but no per-batch result buffer or repeated layout plan.
+        assert!(
+            allocations.bytes_total <= 1024,
+            "empty projection allocated {} bytes while appending to reserved output",
+            allocations.bytes_total
+        );
+    }
 }
