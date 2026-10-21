@@ -810,7 +810,7 @@ impl PhysicalRetrievalDriver<'_> {
     }
 }
 
-fn resolve_exact_signal_prior(priors: &[f64]) -> DriverResult<Option<f64>> {
+pub(super) fn resolve_exact_signal_prior(priors: &[f64]) -> DriverResult<Option<f64>> {
     let Some(first) = priors.first().copied() else {
         return Ok(None);
     };

@@ -23,6 +23,9 @@ pub(super) fn complete_scored_tree(tree: &OperatorTree) -> bool {
         OperatorTree::Union(children) | OperatorTree::Intersect(children) => {
             children.iter().all(complete_scored_tree)
         }
+        OperatorTree::BayesianEvidenceFusion { signals, .. } => {
+            signals.iter().all(complete_scored_tree)
+        }
         _ => false,
     }
 }
@@ -37,7 +40,8 @@ pub(super) fn capture(
         OperatorTree::Term { top_k: None, .. }
         | OperatorTree::Filter { .. }
         | OperatorTree::IndexScan { .. }
-        | OperatorTree::Complement(_) => leaf(tree, None, bytes),
+        | OperatorTree::Complement(_)
+        | OperatorTree::BayesianEvidenceFusion { .. } => leaf(tree, None, bytes),
         OperatorTree::Union(children) | OperatorTree::Intersect(children) => {
             // Every branch must run, including branches after an error or an empty intersection. Branch errors retain the same left-to-right precedence as the ordinary executor.
             let branch_bytes = bytes / children.len().saturating_add(2);

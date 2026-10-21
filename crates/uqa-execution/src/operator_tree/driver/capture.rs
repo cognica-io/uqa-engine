@@ -11,6 +11,7 @@ use crate::query::scored_input::{CapturedScoredEntries, ScoredEntryCapture};
 use uqa_core::CancellationToken;
 
 mod filters;
+mod fusion;
 #[cfg(test)]
 mod tests;
 mod tree;
@@ -54,6 +55,9 @@ impl PhysicalRetrievalDriver<'_> {
                     predicate,
                 } => self.capture_index_scan(index_name, field, predicate, bytes),
                 OperatorTree::Complement(source) => self.capture_complement(source, bytes),
+                OperatorTree::BayesianEvidenceFusion { signals, base_rate } => {
+                    self.capture_exact_fusion(signals, *base_rate, bytes)
+                }
                 _ => unreachable!("eligible complete retrieval leaf"),
             },
         )
@@ -84,11 +88,21 @@ impl PhysicalRetrievalDriver<'_> {
         bytes: usize,
     ) -> DriverResult<CapturedScoredEntries> {
         let mode = self.text_scoring_mode(field, scoring)?;
+        self.capture_mode_scores(field, query, &mode, bytes)
+    }
+
+    fn capture_mode_scores(
+        &self,
+        field: &str,
+        query: &str,
+        mode: &uqa_scoring::ScoringMode,
+        bytes: usize,
+    ) -> DriverResult<CapturedScoredEntries> {
         let mut entries =
             ScoredEntryCapture::new(bytes, self.context.runtime.cancellation_token())?;
         self.context
             .text
-            .visit_search_leaf(self.table, field, query, &mode, &mut |entry| {
+            .visit_search_leaf(self.table, field, query, mode, &mut |entry| {
                 entries.push(entry)
             })?;
         entries.finish()

@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound complete text-search and relational-filter inputs before COPY output, including AND/OR/NOT, exact Bayesian text fusion, all-field scoring and inherited or partitioned tables. Preserve exact scores, table-local identities, NULL behavior, command visibility, statement snapshots, cancellation and committed tuple rechecks.
+
 - Bound complete text-search and relational-filter inputs before COPY output, including AND/OR/NOT, all-field scoring and inherited or partitioned tables. Preserve exact scores, table-local identities, NULL behavior, command visibility, statement snapshots, cancellation and committed tuple rechecks.
 
 - Keep complete text-search scores bounded across inherited and partitioned relations during COPY, preserving physical table identities, deferred reads, statement generations and committed tuple rechecks.

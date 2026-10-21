@@ -58,6 +58,35 @@ fn copy_text_matches_capture_scores_without_complete_posting_vectors() {
     assert!(allocated.bytes_max < 2 * 1024 * 1024, "{allocated:?}");
 }
 
+#[test]
+fn copy_exact_text_fusion_does_not_retain_complete_signal_populations() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE copy_search(id INTEGER PRIMARY KEY, body TEXT);
+         INSERT INTO copy_search SELECT n,'alpha beta' FROM generate_series(1,32768) AS s(n);
+         CREATE INDEX copy_search_body ON copy_search USING gin(body);
+         SET work_mem='64kB'",
+    );
+    let mut output = Lines { count: 0, value: 0 };
+    let allocated = allocation_counter::measure(|| {
+        assert_eq!(
+            engine
+                .copy_to(
+                    "COPY (SELECT id FROM copy_search WHERE fuse_bayesian_evidence(
+                         bayesian_match(body,'alpha'),bayesian_match(body,'beta'))) TO STDOUT",
+                    &mut output,
+                )
+                .unwrap(),
+            32_768
+        );
+    });
+    assert_eq!(output.count, 32_768);
+    assert_eq!(output.value, 0);
+    // Two complete probability signals and their union must not remain in memory.
+    assert!(allocated.bytes_max < 2 * 1024 * 1024, "{allocated:?}");
+}
+
 #[rstest::rstest]
 #[case::memory(0)]
 #[case::sqlite(1)]

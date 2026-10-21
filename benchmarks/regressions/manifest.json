@@ -20134,6 +20134,100 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_exact_evidence_resolves_one_prior_and_preserves_score_bits",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/fusion/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Two fully spilled signals with inferred and explicit priors.",
+      "invariant": "The prior enters once and complete score bits survive capture and replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_exact_evidence_keeps_prior_snapshot_and_probability_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/fusion/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Conflicting priors, a failed snapshot, an invalid prior and invalid probabilities.",
+      "invariant": "Original prior-selection, snapshot and operator-validation ordering remains unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_exact_evidence_keeps_cancellation_typed",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/fusion/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Cancellation after retaining spilled inputs and their snapshot.",
+      "invariant": "The caller receives SQLSTATE 57014 without successful output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_exact_fusion_capture_keeps_typed_signal_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Nested exact score-only signals and unsupported BayesianScore/vector evidence boundaries.",
+      "invariant": "Only complete admitted signals use this capture; unrelated conversion boundaries keep their native owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_exact_text_fusion_does_not_retain_complete_signal_populations",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "32,768 matching rows and two Bayesian text signals at work_mem 64KiB with a validating discard sink.",
+      "invariant": "Exact ordered output remains complete and peak additional allocations stay below the original 2MiB ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_exact_text_fusion_preserves_native_bits_priors_and_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "513 sparse matches, one empty signal, one/all-field calibration, explicit/inferred priors, rollback, an output-time peer commit and durable reopen on four providers.",
+      "invariant": "Native score bits, original statement generation, prior conflict diagnostics, command overlays and committed results remain exact.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_exact_text_fusion_output_failures_keep_transaction_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "A complete text fusion with a cancelled or failed output sink inside an explicit mutation transaction.",
+      "invariant": "Cancellation and consumer errors retain their diagnostics and rollback restores the pre-command data.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -42,6 +42,9 @@ mod projection;
 #[path = "copy_io/retrieval.rs"]
 mod retrieval;
 
+#[path = "copy_io/fusion.rs"]
+mod fusion;
+
 #[path = "copy_io/rules.rs"]
 mod rules;
 
