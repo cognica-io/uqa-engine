@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reject distrusted emSign certificate chains by updating rustls-webpki and both bundled root-certificate packages to their patched releases.
+
 - Bound complete text-search and relational-filter inputs before COPY output, including AND/OR/NOT, exact Bayesian text fusion, robust positive-evidence pooling, all-field scoring and inherited or partitioned tables. Preserve exact scores, table-local identities, NULL behavior, command visibility, statement snapshots, cancellation and committed tuple rechecks.
 
 - Bound complete text-search and relational-filter inputs before COPY output, including AND/OR/NOT, exact Bayesian text fusion, all-field scoring and inherited or partitioned tables. Preserve exact scores, table-local identities, NULL behavior, command visibility, statement snapshots, cancellation and committed tuple rechecks.
