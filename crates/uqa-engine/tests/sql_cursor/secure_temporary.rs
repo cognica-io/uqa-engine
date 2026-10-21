@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLFunctionOptions, SQLFunctionVolatility};
+use uqa_execution::catalog::index::value::ValueIndexBuilder;
 use uqa_sql::SQLError;
 use uqa_storage::mvcc::VersionedPersistence;
 use uqa_storage::read_control::StorageReadControl;
@@ -90,6 +91,8 @@ fn retained_cursors(engine: &Engine, records: &dyn VersionedPersistence) -> u64 
         .unwrap();
     assert!(cursor.spilled_to_disk());
     drop(reader);
+    event("cursor-created");
+    assert_eq!(command(), "continue");
     let control = StorageReadControl::with_limit(1 << 20);
     let old = records.snapshot(&control).unwrap();
     engine
@@ -194,11 +197,31 @@ fn child(path: &Path, mode: usize) {
     let control = StorageReadControl::with_limit(1 << 20);
     let independent_reader = records.snapshot(&control).unwrap();
     setup(&engine);
+    // An independent retained cache shares the temporary directory, but outlives every cursor and mutation below.
+    let independent_cache = ValueIndexBuilder::from_values(
+        "secret",
+        false,
+        0,
+        [(1, Value::Str(SECRET.into()))],
+        &control,
+    )
+    .unwrap();
+    assert!(independent_cache.is_spilled());
+    event("independent-held");
+    assert_eq!(command(), "continue");
     let released_versions = retained_cursors(&engine, &*records);
     assert_eq!(released_versions, 0);
     cancelled_mutation(&engine);
     // Cursor release is not the final retention boundary. The independent reader pins earlier history, and the last Engine joins its automatic statistics worker before final reclamation.
     drop(engine);
+    assert_eq!(
+        independent_cache
+            .stored_value(1, &control)
+            .unwrap()
+            .as_deref(),
+        Some(&Value::Str(SECRET.into()))
+    );
+    drop(independent_cache);
     drop(independent_reader);
     let final_versions = records.reclaim_versions(&control).unwrap();
     assert!(final_versions > 0);

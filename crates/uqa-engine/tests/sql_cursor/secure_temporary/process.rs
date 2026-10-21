@@ -147,28 +147,55 @@ fn protected_files(directory: &Path) -> Vec<PathBuf> {
     paths
 }
 
+fn added_files(directory: &Path, before: &[PathBuf]) -> Vec<PathBuf> {
+    let added: Vec<_> = protected_files(directory)
+        .into_iter()
+        .filter(|path| !before.contains(path))
+        .collect();
+    assert!(!added.is_empty(), "the new owner must retain actual files");
+    added
+}
+
+fn assert_released(paths: &[PathBuf], event: &str, mode: usize) {
+    let remaining: Vec<_> = paths.iter().filter(|path| path.exists()).collect();
+    assert!(
+        remaining.is_empty(),
+        "temporary files survived {event} in provider mode {mode}: {remaining:?}"
+    );
+}
+
 pub(super) fn verify(mode: usize, kill: bool) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("database");
     let temporary = directory.path().join("temporary");
     std::fs::create_dir(&temporary).unwrap();
     let mut process = Process::start(&path, &temporary, mode);
-    for (held, released) in [
-        ("cursor-held", "cursor-released"),
-        ("portal-held", "portal-released"),
-    ] {
-        process.expect(held);
-        protected_files(&temporary);
-        process.command("continue");
-        process.expect(released);
-        assert!(
-            files(&temporary).is_empty(),
-            "temporary files survived {released} in provider mode {mode}"
-        );
-        process.command("continue");
-    }
+    process.expect("independent-held");
+    let independent = protected_files(&temporary);
+    process.command("continue");
+    process.expect("cursor-created");
+    let cursor = added_files(&temporary, &independent);
+    process.command("continue");
+    process.expect("cursor-held");
+    protected_files(&temporary);
+    assert!(cursor.iter().all(|path| path.exists()));
+    process.command("continue");
+    process.expect("cursor-released");
+    assert_released(&cursor, "cursor-released", mode);
+    assert!(independent.iter().all(|path| path.exists()));
+    // The intervening UPDATE may retain its own spilled value-index cache. Its lifetime is independent of the consumed cursor.
+    let before_portal = protected_files(&temporary);
+    process.command("continue");
+    process.expect("portal-held");
+    let portal = added_files(&temporary, &before_portal);
+    process.command("continue");
+    process.expect("portal-released");
+    assert_released(&portal, "portal-released", mode);
+    assert!(independent.iter().all(|path| path.exists()));
+    let before_mutation = protected_files(&temporary);
+    process.command("continue");
     process.expect("mutation-held");
-    let retained = protected_files(&temporary);
+    let retained = added_files(&temporary, &before_mutation);
     assert!(
         retained.iter().any(|path| path
             .file_name()
@@ -194,10 +221,9 @@ pub(super) fn verify(mode: usize, kill: bool) {
     } else {
         process.command("cancel");
         process.expect("mutation-released");
-        assert!(
-            files(&temporary).is_empty(),
-            "cancelled mutation retained temporary files in provider mode {mode}"
-        );
+        assert_released(&retained, "mutation-released", mode);
+        assert!(independent.iter().all(|path| path.exists()));
+        protected_files(&temporary);
         process.command("continue");
         process.expect("closed");
         process.finish(false);
