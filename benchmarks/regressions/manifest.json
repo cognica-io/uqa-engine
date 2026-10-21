@@ -20649,6 +20649,32 @@
         "case_3_redb::isolation_2___SERIALIZABLE__::finish_2___ROLLBACK__",
         "case_3_redb::isolation_2___SERIALIZABLE__::finish_3___ROLLBACKTObefore_foreignCOMMIT__"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_sizing_preserves_encoded_bytes_depth_and_overflow_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/format/binary/encode.rs",
+      "capability": "Exact spill sizing",
+      "workload": "Null, void, boolean, integer and floating-point values at valid and excessive depth and at counter overflow boundaries.",
+      "invariant": "Scalar sizing equals the actual encoded bytes and preserves tag/payload overflow and nesting-error order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_record_sizing_preserves_fragment_order_nulls_and_slot_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/format/binary/encode.rs",
+      "capability": "Exact spill sizing",
+      "workload": "Projected and concatenated rows with null slots, scalar and UTF-8 values, malformed widths and 128 physical fragments.",
+      "invariant": "Sequential sizing retains exact physical slot order, encoded bytes and existing missing/extra-slot errors.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

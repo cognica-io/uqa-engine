@@ -197,6 +197,13 @@ impl PhysicalRow {
         None
     }
 
+    /// Visit physical slots once in order, including absent values in malformed projections so the caller can preserve its slot diagnostic.
+    pub(crate) fn values(&self) -> impl Iterator<Item = Option<&Value>> {
+        self.fragments
+            .iter()
+            .flat_map(|fragment| (0..fragment.len()).map(move |slot| fragment.get(slot)))
+    }
+
     /// Re-express selected flattened slots as a compact positional row while
     /// sharing the underlying value vectors. Consecutive slots backed by the
     /// same source fragment share one projection fragment; no `Value` (and in
