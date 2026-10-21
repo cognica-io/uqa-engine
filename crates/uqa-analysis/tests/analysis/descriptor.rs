@@ -14,6 +14,8 @@ use uqa_analysis::{
 
 #[path = "descriptor/cache.rs"]
 mod cache;
+#[path = "descriptor/retained_unicode.rs"]
+mod retained_unicode;
 #[path = "descriptor/validation.rs"]
 mod validation;
 

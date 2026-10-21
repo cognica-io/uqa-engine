@@ -166,11 +166,7 @@ impl AnalyzerDescriptor {
         }
         Self::check_revision(&wire.descriptor)?;
         let config = config::restore(&wire.descriptor.pipeline, limits)?;
-        if RuntimeProfiles::resolve(&config)? != wire.descriptor.runtime_profiles {
-            return Err(invalid(
-                "runtime Unicode or regular-expression profile differs",
-            ));
-        }
+        wire.descriptor.runtime_profiles.validate(&config)?;
         Self::finish(wire.descriptor, limits)
     }
 
@@ -226,6 +222,10 @@ impl AnalyzerDescriptor {
     }
     pub fn canonical_json(&self) -> &str {
         self.wire.get()
+    }
+
+    pub(crate) fn unicode_profile(&self) -> AnalysisResult<crate::unicode::Profile> {
+        self.data.runtime_profiles.profile()
     }
 
     /// Return the resolved configuration for diagnostics or compatibility APIs. Execute a retained compiled handle when exact resource ownership is required.

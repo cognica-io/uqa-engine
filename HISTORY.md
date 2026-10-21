@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Preserve private foreign-table definitions and ownership across concurrent catalog refresh, including creation, alteration, rename, deletion, recreation and transaction undo.
 
+- Restore retained Unicode 17 analyzer descriptors with their original mappings, context properties and fingerprints alongside the pinned Unicode 16 profile, without rewriting existing indexes.
+
 - Prepare immutable transaction records outside the statement-snapshot gate while preserving writer exclusion, conflict checks and atomic data/metadata publication.
 
 - Avoid duplicate native commit verification payloads and redundant encrypted spill reads, and move file-pool WAL checkpoints to managed maintenance while retaining FULL commit synchronization.

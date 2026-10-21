@@ -191,3 +191,6 @@ fn long_ignorable_context_uses_bounded_forward_scans_and_interruptible_output() 
         }
     }
 }
+
+#[path = "tests/unicode_17.rs"]
+mod unicode_17;

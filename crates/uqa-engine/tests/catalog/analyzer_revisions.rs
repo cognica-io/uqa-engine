@@ -22,6 +22,8 @@ mod binding_parity;
 mod kuromoji_runtime;
 #[path = "analyzer_revisions/migration.rs"]
 mod migration;
+#[path = "analyzer_revisions/retained_unicode.rs"]
+mod retained_unicode;
 
 #[derive(Clone, Copy, Debug)]
 enum Backend {
