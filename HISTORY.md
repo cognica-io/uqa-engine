@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reject distrusted emSign certificate chains by updating rustls-webpki and both bundled root-certificate packages to their patched releases.
+
 - Bound complete text support in hybrid COPY with finite vector pools, preserving native calibration, exact score bits, selected generations and output-failure rollback.
 
 - Share immutable memory-vector roots across read and rollback snapshots, retaining complete payload admission and independent writes without copying the vector corpus on capture.
