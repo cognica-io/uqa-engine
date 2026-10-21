@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 // Generated from Unicode 16/17 UnicodeData.txt and unconditional SpecialCasing.txt.
 // See tests/fixtures/unicode-17-reference.md for sources, hashes and reproduction.
 // SPDX-License-Identifier: Unicode-3.0

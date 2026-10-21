@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use sha2::{Digest, Sha256};
 use uqa_analysis::{Analyzer, Tokenizer, TokenFilter};
 fn main() {
