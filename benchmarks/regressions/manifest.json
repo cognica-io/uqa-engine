@@ -18832,6 +18832,123 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_matches_resident_predicates_cardinality_and_full_identities",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_preserves_carried_values_and_eligibility_changes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_spills_growth_and_keeps_prior_snapshots_and_stored_keys",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_observes_before_reads_and_retains_consumer_and_cancellation_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_wide_population_keeps_bounded_build_and_lookup_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "More than 2MiB of keys retain at most 1536KiB peak allocated bytes through capture, sorting, publication and three exact lookups.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_keeps_identity_order_for_fallible_typed_comparison",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_rejects_duplicate_identities_without_publishing_an_owner",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_index_sort_keeps_core_order_and_opaque_values_across_merge_passes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/external_sort/tests/physical_keys.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_index_sort_validates_slots_and_preserves_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/external_sort/tests/physical_keys.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Keep physical index-key sorting separate from SQL ordering and bound evaluated-key capture under its original allowance.
+
 - Reuse validated immutable scan schema sizes between batches, avoiding repeated column-type serialization while preserving exact spill and lock-origin accounting.
 
 - Preserve declared fusion signal order during optimization, including exact score bits, positional pooling parameters and the first failing signal.

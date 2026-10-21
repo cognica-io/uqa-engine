@@ -85,7 +85,8 @@ impl IndexBuildKeys {
                         enums: catalog
                             .map(|catalog| catalog as &dyn uqa_sql::expr::SQLValueCatalog),
                         states: &[],
-                        equality_keys: false,
+                        domain: crate::relational::SortComparisonDomain::SqlOrdering,
+                        cancellation: None,
                     }
                     .compare_by(|index| {
                         (

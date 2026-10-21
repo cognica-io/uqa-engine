@@ -135,19 +135,28 @@ pub(crate) fn compare_sort_key_values_by<'a>(
         types: &[],
         enums: None,
         states: &[],
-        equality_keys: false,
+        domain: SortComparisonDomain::SqlOrdering,
+        cancellation: None,
     }
     .compare_by(values)
 }
 
 /// One ordering support call per key, retained across run generation, top-K selection and merge passes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SortComparisonDomain {
+    SqlOrdering,
+    Grouping,
+    Physical,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct SortComparison<'a> {
     pub(crate) keys: &'a [SortKey],
     pub(crate) types: &'a [Option<uqa_sql::ColumnType>],
     pub(crate) enums: Option<&'a dyn uqa_sql::expr::enums::EnumLabelCatalog>,
     pub(crate) states: &'a [uqa_sql::expr::enums::EnumComparisonState],
-    pub(crate) equality_keys: bool,
+    pub(crate) domain: SortComparisonDomain,
+    pub(crate) cancellation: Option<&'a uqa_core::CancellationToken>,
 }
 
 impl SortComparison<'_> {
@@ -156,8 +165,18 @@ impl SortComparison<'_> {
         mut values: impl FnMut(usize) -> (&'v Value, &'v Value),
     ) -> ExecResult<std::cmp::Ordering> {
         use std::cmp::Ordering;
+        if let Some(cancellation) = self.cancellation {
+            cancellation.check().map_err(uqa_sql::SQLError::Cancelled)?;
+        }
         for (i, k) in self.keys.iter().enumerate() {
             let (a, b) = values(i);
+            if self.domain == SortComparisonDomain::Physical {
+                let order = a.cmp(b);
+                if !order.is_eq() {
+                    return Ok(order);
+                }
+                continue;
+            }
             let a_null = matches!(a, Value::Null);
             let b_null = matches!(b, Value::Null);
             let nulls_first = k.nulls_first.unwrap_or(k.descending);
@@ -180,7 +199,7 @@ impl SortComparison<'_> {
                 }
                 continue;
             }
-            let ord = if self.equality_keys {
+            let ord = if self.domain == SortComparisonDomain::Grouping {
                 uqa_sql::expr::compare_selected_grouping_values_with_catalog(
                     a,
                     b,
