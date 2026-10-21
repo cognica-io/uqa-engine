@@ -76,9 +76,13 @@ fn copy_boolean_text_capture_preserves_scores_and_statement_generation(#[case] p
     verify_text_capture(provider, true);
 }
 
-fn native_text_score_bits(engine: &Engine, boolean: bool) -> std::collections::BTreeMap<i64, u64> {
+fn native_text_score_bits(
+    engine: &Engine,
+    table: &str,
+    boolean: bool,
+) -> std::collections::BTreeMap<i64, u64> {
     let ids = engine
-        .sql("SELECT id,_doc_id FROM copy_search", &[])
+        .sql(&format!("SELECT id,_doc_id FROM ONLY {table}"), &[])
         .unwrap();
     let ids = ids
         .rows
@@ -101,7 +105,7 @@ fn native_text_score_bits(engine: &Engine, boolean: bool) -> std::collections::B
     for query in terms {
         for entry in engine
             .search(
-                "copy_search",
+                table,
                 "body",
                 query,
                 &uqa_scoring::ScoringMode::BM25(uqa_scoring::BM25Params::default()),
@@ -160,7 +164,7 @@ fn verify_text_capture(provider: usize, boolean: bool) {
         SET work_mem='64kB'"
         ),
     );
-    let expected = native_text_score_bits(&engine, boolean);
+    let expected = native_text_score_bits(&engine, "copy_search", boolean);
     let writer = (provider != 0).then(|| engine.new_session().unwrap());
     let mut output = Interleave {
         writer: writer.as_ref(),
@@ -369,5 +373,136 @@ fn copy_all_field_text_capture_preserves_max_scores_and_generation(#[case] provi
             engine.sql(sql, &[]).unwrap().rows[0]["n"],
             uqa_core::Value::Int(512)
         );
+    }
+}
+
+#[test]
+fn copy_inherited_text_scores_do_not_retain_physical_table_populations() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE copy_search(id INTEGER, body TEXT);
+        CREATE TABLE copy_child() INHERITS (copy_search);
+        INSERT INTO copy_search SELECT n,'alpha beta' FROM generate_series(1,16384) AS s(n);
+        INSERT INTO copy_child SELECT n,'alpha beta' FROM generate_series(16385,32768) AS s(n);
+        CREATE INDEX copy_search_body ON copy_search USING gin(body);
+        CREATE INDEX copy_child_body ON copy_child USING gin(body);
+        SET work_mem='64kB'",
+    );
+    let mut output = Lines { count: 0, value: 0 };
+    let allocated = allocation_counter::measure(|| {
+        assert_eq!(engine.copy_to("COPY (SELECT id FROM copy_search WHERE text_match(body,'alpha beta alpha')) TO STDOUT", &mut output).unwrap(), 32_768);
+    });
+    assert_eq!(output.count, 32_768);
+    assert_eq!(output.value, 0);
+    assert!(allocated.bytes_max < 2 * 1024 * 1024, "{allocated:?}");
+}
+
+struct HierarchySink<'a> {
+    writer: Option<&'a Engine>,
+    bytes: Vec<u8>,
+}
+
+impl std::io::Write for HierarchySink<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if let Some(writer) = self.writer.take() {
+            exec(
+                writer,
+                "UPDATE copy_search SET body='changed' WHERE id IN (1,512);
+                DELETE FROM copy_search WHERE id=513;
+                INSERT INTO copy_high VALUES(514,'alpha')",
+            );
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn create_text_hierarchy(engine: &Engine, partitioned: bool) {
+    if partitioned {
+        exec(
+            engine,
+            "CREATE TABLE copy_search(id INTEGER, body TEXT) PARTITION BY RANGE(id);
+            CREATE TABLE copy_low PARTITION OF copy_search FOR VALUES FROM (0) TO (257);
+            CREATE TABLE copy_high PARTITION OF copy_search DEFAULT",
+        );
+    } else {
+        exec(
+            engine,
+            "CREATE TABLE copy_search(id INTEGER, body TEXT);
+            CREATE TABLE copy_low() INHERITS(copy_search);
+            CREATE TABLE copy_high() INHERITS(copy_search)",
+        );
+    }
+    exec(
+        engine,
+        "INSERT INTO copy_low SELECT n,'alpha alpha beta' FROM generate_series(1,256) AS s(n);
+        INSERT INTO copy_high SELECT n,'alpha beta' FROM generate_series(257,513) AS s(n);
+        CREATE INDEX copy_search_body ON copy_search USING gin(body);
+        CREATE INDEX copy_low_body ON copy_low USING gin(body);
+        CREATE INDEX copy_high_body ON copy_high USING gin(body);
+        SET work_mem='64kB'",
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn copy_hierarchy_text_capture_keeps_physical_scores_and_generations(#[case] provider: usize) {
+    for partitioned in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("hierarchy-copy.db");
+        let engine = copy_engine(provider, &path);
+        create_text_hierarchy(&engine, partitioned);
+        let mut expected = native_text_score_bits(&engine, "copy_low", false);
+        expected.extend(native_text_score_bits(&engine, "copy_high", false));
+        assert_eq!(expected.len(), 513);
+        let writer = (provider != 0).then(|| engine.new_session().unwrap());
+        let mut output = HierarchySink {
+            writer: writer.as_ref(),
+            bytes: Vec::new(),
+        };
+        assert_eq!(engine.copy_to("COPY (SELECT id,_score,tableoid::regclass::text FROM copy_search WHERE text_match(body,'alpha beta alpha')) TO STDOUT", &mut output).unwrap(), 513);
+        let text = String::from_utf8(output.bytes).unwrap();
+        let actual = text
+            .lines()
+            .map(|line| {
+                let fields = line.split('\t').collect::<Vec<_>>();
+                assert_eq!(fields.len(), 3);
+                let id = fields[0].parse::<i64>().unwrap();
+                assert_eq!(fields[2], if id < 257 { "copy_low" } else { "copy_high" });
+                (id, fields[1].parse::<f64>().unwrap().to_bits())
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(actual, expected);
+        let sql = "SELECT count(*) AS n FROM copy_search WHERE text_match(body,'alpha')";
+        assert_eq!(
+            engine.sql(sql, &[]).unwrap().rows[0]["n"],
+            uqa_core::Value::Int(if provider == 0 { 513 } else { 511 })
+        );
+        assert_eq!(
+            engine
+                .sql(
+                    "SELECT count(*) AS n FROM ONLY copy_search WHERE text_match(body,'alpha')",
+                    &[]
+                )
+                .unwrap()
+                .rows[0]["n"],
+            uqa_core::Value::Int(0)
+        );
+        drop(writer);
+        drop(engine);
+        if provider != 0 {
+            let engine = copy_engine(provider, &path);
+            assert_eq!(
+                engine.sql(sql, &[]).unwrap().rows[0]["n"],
+                uqa_core::Value::Int(511)
+            );
+        }
     }
 }

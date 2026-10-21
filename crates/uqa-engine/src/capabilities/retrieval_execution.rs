@@ -101,6 +101,15 @@ impl uqa_execution::query::block::context::RelationRetrieval for Engine {
         self.retrieval_query_context()
             .optimized(table, predicate, params)
     }
+    fn captured(
+        &self,
+        table: &str,
+        predicate: Option<&ScalarExpr>,
+        params: &[SQLParam],
+    ) -> Result<Option<uqa_execution::query::scored_input::ProducedScoredEntries>, SQLError> {
+        self.retrieval_query_context()
+            .captured(table, predicate, params)
+    }
     fn function(
         &self,
         table: &str,

@@ -39,4 +39,14 @@ pub trait RetrievalAccess: Sync {
         params: &[SQLParam],
         committed: bool,
     ) -> Result<Option<Vec<ScoredEntry>>, SQLError>;
+    fn retrieval_input(
+        &self,
+        table: &str,
+        predicate: &ScalarExpr,
+        params: &[SQLParam],
+        committed: bool,
+    ) -> Result<Option<crate::query::scored_input::ProducedScoredEntries>, SQLError> {
+        self.retrieval_entries(table, predicate, params, committed)
+            .map(|entries| entries.map(Into::into))
+    }
 }

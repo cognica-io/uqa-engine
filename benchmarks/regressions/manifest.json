@@ -19867,6 +19867,48 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_hierarchy_input_preserves_deferred_errors_and_committed_recheck_pins",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_sources/hierarchy/tests.rs",
+      "capability": "Deferred captured hierarchy inputs",
+      "workload": "Zero-allowance spilled input, unconsumed open/close, normal or committed tuple pins, and selected producer errors.",
+      "invariant": "No retrieval runs before demand; original schema/score and selected tuple image survive; failure does not replay input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_inherited_text_scores_do_not_retain_physical_table_populations",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded inherited text COPY",
+      "workload": "Cold 32,768-row text output split between an ordinary parent and child, under 64KiB work memory with a validating discard sink.",
+      "invariant": "Every ID appears once in the original order and peak additional allocation remains below the unchanged 2MiB ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_hierarchy_text_capture_keeps_physical_scores_and_generations",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Hierarchy text score and snapshot ownership",
+      "workload": "Inheritance and range partitions on four providers with repeated-term scores, physical table identities, concurrent updates/deletion/insertion during output and durable reopen.",
+      "invariant": "Exact native per-table score bits and tableoid survive the complete original generation; later queries and reopen see committed changes, and ONLY excludes descendants.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

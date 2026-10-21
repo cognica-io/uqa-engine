@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Keep complete text-search scores bounded across inherited and partitioned relations during COPY, preserving physical table identities, deferred reads, statement generations and committed tuple rechecks.
+
 - Bound complete all-field text-search score capture before COPY document reads, retaining the original per-document maximum across fields, exact score bits and statement snapshots.
 
 - Bound complete text-search AND/OR score capture before COPY document reads, preserving exact score addition, branch error precedence and statement snapshots.

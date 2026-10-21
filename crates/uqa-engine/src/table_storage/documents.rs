@@ -136,20 +136,25 @@ impl Engine {
         predicate: &uqa_execution::ScalarExpr,
         params: &[uqa_sql::SQLParam],
     ) -> Result<Option<Vec<crate::ScoredEntry>>, SQLError> {
+        self.with_committed_retrieval(table, |session| {
+            crate::operator_tree_bridge::run_optimised(session, table, Some(predicate), params)
+        })
+    }
+
+    pub(crate) fn with_committed_retrieval<R>(
+        &self,
+        table: &str,
+        read: impl FnOnce(&Engine) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
         if self.storage.provider.is_none() {
-            return crate::operator_tree_bridge::run_optimised(
-                self,
-                table,
-                Some(predicate),
-                params,
-            );
+            return read(self);
         }
         let session = self.new_internal_read_session().map_err(|error| {
             SQLError::Internal(format!(
                 "open independent session to recheck retrieval on `{table}`: {error}"
             ))
         })?;
-        crate::operator_tree_bridge::run_optimised(&session, table, Some(predicate), params)
+        read(&session)
     }
 
     /// Execute one raw KNN leaf against the latest committed vector-index state for a tuple-local hierarchy recheck.

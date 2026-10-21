@@ -31,6 +31,7 @@ impl TableRead for Table {
 struct Retrieval {
     committed: Mutex<Vec<bool>>,
     fail: bool,
+    capture: bool,
 }
 
 impl RetrievalAccess for Retrieval {
@@ -66,6 +67,32 @@ impl RetrievalAccess for Retrieval {
             doc_id: 1,
             score: 0.75,
         }]))
+    }
+    fn retrieval_input(
+        &self,
+        table: &str,
+        predicate: &ScalarExpr,
+        params: &[SQLParam],
+        committed: bool,
+    ) -> Result<Option<crate::query::scored_input::ProducedScoredEntries>, SQLError> {
+        let entries = self.retrieval_entries(table, predicate, params, committed)?;
+        entries
+            .map(|entries| {
+                if !self.capture {
+                    return Ok(entries.into());
+                }
+                let mut capture = crate::query::scored_input::ScoredEntryCapture::new(
+                    0,
+                    uqa_core::CancellationToken::new(),
+                )?;
+                for entry in entries {
+                    capture.push(entry)?;
+                }
+                capture
+                    .finish()
+                    .map(crate::query::scored_input::ProducedScoredEntries::Captured)
+            })
+            .transpose()
     }
 }
 
@@ -168,6 +195,42 @@ fn demanded_retrieval_preserves_schema_scores_and_current_recheck_pins_without_r
                 assert!(source.next().unwrap().is_none());
             }
             source.close().unwrap();
+            assert_eq!(*retrieval.committed.lock(), vec![recheck]);
+        }
+    }
+}
+
+#[test]
+fn captured_hierarchy_input_preserves_deferred_errors_and_committed_recheck_pins() {
+    for recheck in [false, true] {
+        for fail in [false, true] {
+            let retrieval = Retrieval {
+                capture: true,
+                fail,
+                ..Retrieval::default()
+            };
+            let mut unconsumed = source(&retrieval, recheck, true);
+            unconsumed.open().unwrap();
+            unconsumed.close().unwrap();
+            assert!(retrieval.committed.lock().is_empty());
+            let mut rows = source(&retrieval, recheck, true);
+            let schema = rows.row_schema().clone();
+            rows.open().unwrap();
+            assert!(retrieval.committed.lock().is_empty());
+            if fail {
+                let error = rows.next().unwrap_err();
+                assert!(error.to_string().contains("selected retrieval failure"));
+                assert!(rows.next().is_err());
+            } else {
+                let batch = rows.next().unwrap().unwrap();
+                assert_eq!(batch.schema, schema);
+                let result = batch.into_result_rows();
+                assert_eq!(result.len(), 1);
+                assert_eq!(result[0]["id"], Value::Int(if recheck { 2 } else { 1 }));
+                assert_eq!(result[0]["_score"], Value::Float(0.75));
+                assert!(rows.next().unwrap().is_none());
+            }
+            rows.close().unwrap();
             assert_eq!(*retrieval.committed.lock(), vec![recheck]);
         }
     }

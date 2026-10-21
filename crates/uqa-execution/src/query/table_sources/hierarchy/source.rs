@@ -11,7 +11,7 @@ use super::{
 };
 use crate::query::{
     deferred::DeferredOperator,
-    scored_input::{HierarchyScoredDocumentSource, ScoredDocumentSource},
+    scored_input::{HierarchyScoredDocumentSource, ProducedScoredEntries, ScoredDocumentSource},
     table_sources::retrieval::RetrievalAccess,
 };
 use crate::{RowSchema, RowSource};
@@ -40,57 +40,43 @@ fn evaluate(
     params: &[SQLParam],
     sources: Vec<ScoredDocumentSource>,
 ) -> Result<Box<dyn RowSource>, SQLError> {
-    for target in &mut physical {
-        target.entries = if let Some(DirectVectorRetrieval::Calibrated {
-            field,
-            query_vector,
-            top_k,
-            ..
-        }) = &direct
-        {
-            retrieval.knn_entries(
-                &target.table_name,
-                field,
-                query_vector,
-                *top_k,
-                target.recheck_pins.is_some(),
-            )?
-        } else {
-            retrieval
-                .retrieval_entries(
-                    &target.table_name,
-                    &predicate,
-                    params,
-                    target.recheck_pins.is_some(),
-                )?
-                .ok_or_else(|| {
-                    SQLError::Unsupported(
-                        "retrieval predicate cannot be represented by the shared operator IR"
-                            .into(),
-                    )
-                })?
-        };
-    }
-    match &direct {
-        Some(DirectVectorRetrieval::Knn { top_k }) => {
-            retain_global_top_k(&mut physical, *top_k);
-        }
-        Some(DirectVectorRetrieval::Calibrated {
-            top_k, threshold, ..
-        }) => {
-            retain_global_top_k(&mut physical, *top_k);
-            calibrate_global_vector_pool(&mut physical, *threshold)?;
-        }
-        None => {}
-    }
-    let estimated_cardinality = physical.iter().map(|target| target.entries.len()).sum();
+    let inputs = if let Some(direct) = direct.as_ref() {
+        evaluate_vector(retrieval, &mut physical, direct, &predicate, params)?;
+        physical
+            .iter_mut()
+            .map(|target| std::mem::take(&mut target.entries).into())
+            .collect()
+    } else {
+        physical
+            .iter()
+            .map(|target| {
+                retrieval
+                    .retrieval_input(
+                        &target.table_name,
+                        &predicate,
+                        params,
+                        target.recheck_pins.is_some(),
+                    )?
+                    .ok_or_else(unrepresentable_predicate)
+            })
+            .collect::<Result<Vec<_>, SQLError>>()?
+    };
+    let estimated_cardinality = inputs
+        .iter()
+        .map(ProducedScoredEntries::estimated_cardinality)
+        .sum();
     let mut sources = sources
         .into_iter()
         .zip(physical)
-        .map(|(source, target)| {
-            source
-                .with_retrieval_entries(target.entries)
-                .with_recheck_pins(target.recheck_pins)
+        .zip(inputs)
+        .map(|((source, target), input)| {
+            let source = match input {
+                ProducedScoredEntries::Materialized(entries) => {
+                    source.with_retrieval_entries(entries)
+                }
+                ProducedScoredEntries::Captured(entries) => source.with_captured_entries(entries),
+            };
+            source.with_recheck_pins(target.recheck_pins)
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
     let source: Box<dyn RowSource> = if sources.len() == 1 {
@@ -106,4 +92,57 @@ fn evaluate(
         )?)
     };
     Ok(source)
+}
+
+fn unrepresentable_predicate() -> SQLError {
+    SQLError::Unsupported(
+        "retrieval predicate cannot be represented by the shared operator IR".into(),
+    )
+}
+
+fn evaluate_vector(
+    retrieval: &dyn RetrievalAccess,
+    physical: &mut [PhysicalRetrieval],
+    direct: &DirectVectorRetrieval,
+    predicate: &ScalarExpr,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    for target in physical.iter_mut() {
+        target.entries = if let DirectVectorRetrieval::Calibrated {
+            field,
+            query_vector,
+            top_k,
+            ..
+        } = direct
+        {
+            retrieval.knn_entries(
+                &target.table_name,
+                field,
+                query_vector,
+                *top_k,
+                target.recheck_pins.is_some(),
+            )?
+        } else {
+            retrieval
+                .retrieval_entries(
+                    &target.table_name,
+                    predicate,
+                    params,
+                    target.recheck_pins.is_some(),
+                )?
+                .ok_or_else(unrepresentable_predicate)?
+        };
+    }
+    match direct {
+        DirectVectorRetrieval::Knn { top_k } => {
+            retain_global_top_k(physical, *top_k);
+        }
+        DirectVectorRetrieval::Calibrated {
+            top_k, threshold, ..
+        } => {
+            retain_global_top_k(physical, *top_k);
+            calibrate_global_vector_pool(physical, *threshold)?;
+        }
+    }
+    Ok(())
 }

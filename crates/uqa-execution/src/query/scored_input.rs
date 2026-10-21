@@ -27,6 +27,15 @@ pub enum ProducedScoredEntries {
     Captured(CapturedScoredEntries),
 }
 
+impl ProducedScoredEntries {
+    pub(crate) fn estimated_cardinality(&self) -> usize {
+        match self {
+            Self::Materialized(entries) => entries.len(),
+            Self::Captured(entries) => entries.estimated_cardinality(),
+        }
+    }
+}
+
 impl From<Vec<ScoredEntry>> for ProducedScoredEntries {
     fn from(entries: Vec<ScoredEntry>) -> Self {
         Self::Materialized(entries)

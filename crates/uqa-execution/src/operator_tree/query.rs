@@ -119,4 +119,20 @@ impl<'a> RetrievalQueryContext<'a> {
             )
         })))
     }
+
+    /// Preserve the ordinary predicate's lowering and optimizer boundary while retaining complete text scores in bounded storage.
+    pub fn captured(
+        &self,
+        table: &str,
+        where_expr: Option<&ScalarExpr>,
+        params: &[SQLParam],
+    ) -> Result<Option<crate::query::scored_input::ProducedScoredEntries>, SQLError> {
+        let Some(expr) = where_expr else {
+            return Ok(None);
+        };
+        let Some(tree) = self.lower_relation_where(table, expr, params)? else {
+            return Ok(None);
+        };
+        super::runtime::execute_captured_tree(&self.trees, table, params, &tree).map(Some)
+    }
 }

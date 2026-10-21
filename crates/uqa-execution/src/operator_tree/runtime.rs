@@ -72,7 +72,24 @@ pub fn execute_preoptimized_tree(
     execute_physical_tree(context, table, signal_table, params, tree)
 }
 
-/// Consume a complete retrieval leaf into its bounded SQL input owner when the leaf has a direct score cursor.
+/// Optimize a relation-local tree at its ordinary active-statement boundary and capture eligible complete text scores before row delivery.
+pub(super) fn execute_captured_tree(
+    context: &TreeExecutionContext<'_>,
+    table: &str,
+    params: &[SQLParam],
+    tree: &OperatorTree,
+) -> DriverResult<crate::query::scored_input::ProducedScoredEntries> {
+    if context.transaction.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
+        return Err(SQLError::Internal(
+            "calibrating operator execution requires an active statement transaction".into(),
+        ));
+    }
+    validate_text_top_k_placement(tree)?;
+    let optimized = context.optimizer.optimize(table, tree)?;
+    capture_scored_entries(context, table, table, params, &optimized, true)
+}
+
+/// Consume complete retrieval into its bounded SQL input owner when its score-only tree has direct cursors.
 pub(super) fn execute_preoptimized_scored_entries(
     context: &TreeExecutionContext<'_>,
     table: &str,
@@ -86,6 +103,24 @@ pub(super) fn execute_preoptimized_scored_entries(
             "calibrating operator execution requires an active statement transaction".into(),
         ));
     }
+    capture_scored_entries(
+        context,
+        table,
+        signal_table,
+        params,
+        tree,
+        capture_complete_scores,
+    )
+}
+
+fn capture_scored_entries(
+    context: &TreeExecutionContext<'_>,
+    table: &str,
+    signal_table: &str,
+    params: &[SQLParam],
+    tree: &OperatorTree,
+    capture_complete_scores: bool,
+) -> DriverResult<crate::query::scored_input::ProducedScoredEntries> {
     validate_text_top_k_placement(tree)?;
     let driver = PhysicalRetrievalDriver::new(context.driver, table, signal_table, params);
     if capture_complete_scores {

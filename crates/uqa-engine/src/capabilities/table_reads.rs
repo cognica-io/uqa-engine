@@ -213,6 +213,28 @@ impl RetrievalAccess for Engine {
             crate::operator_tree_bridge::run_optimised(self, table, Some(predicate), params)
         }
     }
+    fn retrieval_input(
+        &self,
+        table: &str,
+        predicate: &ScalarExpr,
+        params: &[SQLParam],
+        committed: bool,
+    ) -> Result<Option<uqa_execution::query::scored_input::ProducedScoredEntries>, SQLError> {
+        let read = |session: &Engine| {
+            uqa_execution::query::block::where_filter::capture_typed_retrieval(
+                &session.source_execution_context(),
+                table,
+                Some(predicate),
+                params,
+                &crate::capabilities::query_scope::new_for_current_routine(session),
+            )
+        };
+        if committed {
+            self.with_committed_retrieval(table, read)
+        } else {
+            read(self)
+        }
+    }
 }
 
 impl uqa_execution::query::block::context::QueryDocumentRead for Engine {

@@ -325,6 +325,35 @@ pub fn execute_typed_retrieval<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
+    typed_retrieval_input(context, table, filter, params, ctes, false)?
+        .map(|entries| match entries {
+            crate::query::scored_input::ProducedScoredEntries::Materialized(entries) => Ok(entries),
+            crate::query::scored_input::ProducedScoredEntries::Captured(entries) => {
+                entries.collect()
+            }
+        })
+        .transpose()
+}
+
+/// Capture eligible complete text scores through the same SQL coercion, optimizer and fallback boundaries as ordinary relation-local retrieval.
+pub fn capture_typed_retrieval<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    table: &str,
+    filter: Option<&ScalarExpr>,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+) -> Result<Option<crate::query::scored_input::ProducedScoredEntries>, SQLError> {
+    typed_retrieval_input(context, table, filter, params, ctes, true)
+}
+
+fn typed_retrieval_input<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    table: &str,
+    filter: Option<&ScalarExpr>,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    capture: bool,
+) -> Result<Option<crate::query::scored_input::ProducedScoredEntries>, SQLError> {
     let Some(filter) = filter else {
         return Ok(None);
     };
@@ -336,16 +365,24 @@ pub fn execute_typed_retrieval<S: Clone + Send + Sync + 'static>(
         }
     });
     let filter = bind_table_filter(context, table, table, &filter, params, ctes)?;
-    if let Some(rows) = context
-        .relation_retrieval
-        .optimized(table, Some(&filter), params)?
-    {
+    let rows = if capture {
+        context
+            .relation_retrieval
+            .captured(table, Some(&filter), params)?
+    } else {
+        context
+            .relation_retrieval
+            .optimized(table, Some(&filter), params)?
+            .map(Into::into)
+    };
+    if let Some(rows) = rows {
         return Ok(Some(rows));
     }
     if !uqa_sql::semantics::contains_retrieval(&filter) {
         return Ok(None);
     }
-    execute_bound_mixed_where(context, table, table, table, &filter, params, ctes).map(Some)
+    execute_bound_mixed_where(context, table, table, table, &filter, params, ctes)
+        .map(|rows| Some(rows.into()))
 }
 
 fn execute_bound_mixed_where<S: Clone + Send + Sync + 'static>(

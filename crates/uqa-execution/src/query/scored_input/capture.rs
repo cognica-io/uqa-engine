@@ -78,6 +78,10 @@ pub struct CapturedScoredEntries {
 }
 
 impl CapturedScoredEntries {
+    pub(super) fn estimated_cardinality(&self) -> usize {
+        self.remaining
+    }
+
     fn read(&mut self) -> Result<ScoredEntry, SQLError> {
         self.cancellation.check()?;
         uqa_sql::expr::check_statement_cancellation()?;
