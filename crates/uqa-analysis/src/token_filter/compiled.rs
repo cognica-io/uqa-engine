@@ -8,7 +8,9 @@
 
 use std::{borrow::Cow, collections::BTreeSet};
 
-use super::{builtin_stop_words, validate_gram_bounds, TokenFilter};
+use super::{
+    builtin_stop_words, lowercase::prepare_with_profile, validate_gram_bounds, TokenFilter,
+};
 use crate::{AnalysisResult, AnalyzedText};
 
 mod lookup;
@@ -47,6 +49,13 @@ pub(crate) enum PreparedCommonFilter<'a> {
 
 impl TokenFilter {
     pub(crate) fn prepare(&self) -> AnalysisResult<PreparedTokenFilter<'_>> {
+        self.prepare_with_profile(crate::unicode::Profile::default())
+    }
+
+    pub(crate) fn prepare_with_profile(
+        &self,
+        profile: crate::unicode::Profile,
+    ) -> AnalysisResult<PreparedTokenFilter<'_>> {
         let filter = match self {
             #[cfg(feature = "kuromoji")]
             Self::KuromojiBaseForm(_)
@@ -97,7 +106,7 @@ impl TokenFilter {
                     "missing Unicode profile provider",
                 ));
             }
-            Self::Lowercase => PreparedCommonFilter::Lowercase(super::lowercase::prepare()),
+            Self::Lowercase => PreparedCommonFilter::Lowercase(prepare_with_profile(profile)),
             Self::Stop {
                 language,
                 custom_words,

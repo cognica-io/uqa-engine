@@ -24,6 +24,26 @@ pub(super) struct RuntimeProfiles {
 
 impl RuntimeProfiles {
     pub fn resolve(config: &Analyzer) -> AnalysisResult<Self> {
+        Self::resolve_with_profile(config, crate::unicode::Profile::default())
+    }
+
+    pub fn profile(&self) -> AnalysisResult<crate::unicode::Profile> {
+        crate::unicode::Profile::from_version(self.rust_unicode)
+    }
+
+    pub fn validate(&self, config: &Analyzer) -> AnalysisResult<()> {
+        if Self::resolve_with_profile(config, self.profile()?)? != *self {
+            return Err(super::invalid(
+                "runtime Unicode or regular-expression profile differs",
+            ));
+        }
+        Ok(())
+    }
+
+    fn resolve_with_profile(
+        config: &Analyzer,
+        profile: crate::unicode::Profile,
+    ) -> AnalysisResult<Self> {
         let mut expressions = Vec::new();
         for filter in &config.char_filters {
             let pattern = match filter {
@@ -61,7 +81,7 @@ impl RuntimeProfiles {
                 property_expression(crate::unicode::CASED),
                 property_expression(crate::unicode::CASE_IGNORABLE),
             ];
-            extend_lowercase_context(&mut expressions, crate::unicode::VERSION, context);
+            extend_lowercase_context(&mut expressions, profile.version(), context);
         }
         let normalization = config
             .token_filters
@@ -76,7 +96,7 @@ impl RuntimeProfiles {
                 .as_ref()
                 .is_some_and(crate::NormalizationConfig::width);
         Ok(Self {
-            rust_unicode: (rust_tokenizer || rust_lower).then_some(crate::unicode::VERSION),
+            rust_unicode: (rust_tokenizer || rust_lower).then_some(profile.version()),
             normalization_unicode: normalization.then_some(unicode_normalization::UNICODE_VERSION),
             expressions,
         })

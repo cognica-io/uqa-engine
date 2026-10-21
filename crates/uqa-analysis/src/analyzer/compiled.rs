@@ -63,6 +63,7 @@ impl CompiledAnalyzer {
         #[cfg(feature = "kuromoji")] kuromoji: crate::kuromoji::pipeline::ResolvedKuromojiPipeline,
     ) -> AnalysisResult<Self> {
         let config = descriptor.configuration()?;
+        let unicode_profile = descriptor.unicode_profile()?;
         let char_filters = config
             .char_filters
             .iter()
@@ -96,7 +97,9 @@ impl CompiledAnalyzer {
                 if let Some(filter) = kuromoji.filter(index, filter)? {
                     return Ok(PreparedTokenFilter::Kuromoji(filter));
                 }
-                filter.prepare().map(PreparedTokenFilter::into_owned)
+                filter
+                    .prepare_with_profile(unicode_profile)
+                    .map(PreparedTokenFilter::into_owned)
             })
             .collect::<AnalysisResult<_>>()?;
         let normalization = crate::normalization::PreparedNormalization::new(

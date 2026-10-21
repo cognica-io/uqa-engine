@@ -20792,6 +20792,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "every_scalar_preserves_historical_unicode_17_lowercase_and_whitespace",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/token_filter/lowercase/tests/unicode_17.rs",
+      "capability": "Retained Unicode profile compatibility",
+      "workload": "All scalars in three original-input sigma contexts and whitespace classifications.",
+      "invariant": "All 3,336,192 results match the historical implementation digest; every output reservation is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_unicode_17_preserves_raw_units_and_releases_failed_reservations",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/token_filter/lowercase/tests/unicode_17.rs",
+      "capability": "Retained Unicode profile compatibility",
+      "workload": "Unicode 17 mappings, full expansion and isolated UTF-16 units at every insufficient allowance.",
+      "invariant": "Exact scalar/raw output and unrelated reservations survive without exceeding the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_unicode_17_keeps_linear_context_work_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/token_filter/lowercase/tests/unicode_17.rs",
+      "capability": "Retained Unicode profile compatibility",
+      "workload": "Long ignored sigma context around Unicode 17 letters, cancelling at every poll.",
+      "invariant": "Bounded forward-only work, historical context output and complete cancellation cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "test",
+      "test": "historical_unicode_17_descriptors_restore_without_rewriting_or_cache_aliasing",
+      "cases": 1,
+      "source": "crates/uqa-analysis/tests/analysis/descriptor/retained_unicode.rs",
+      "capability": "Retained Unicode profile compatibility",
+      "workload": "Five historical descriptors and both retained profiles in one cache.",
+      "invariant": "Original wire fingerprints and profile-specific output remain exact; cache identities stay distinct.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "test",
+      "test": "historical_unicode_profiles_still_reject_unknown_or_mismatched_tables",
+      "cases": 1,
+      "source": "crates/uqa-analysis/tests/analysis/descriptor/retained_unicode.rs",
+      "capability": "Retained Unicode profile compatibility",
+      "workload": "Unsupported versions and changed context/normalization tables.",
+      "invariant": "Invalid profiles fail before cache publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "persisted_unicode_17_reopens_with_original_bindings_postings_and_new_writes",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/analyzer_revisions/retained_unicode.rs",
+      "capability": "Retained Unicode profile compatibility",
+      "workload": "SQLite native, SQLite KV and redb reopen historical descriptors and frozen field bindings.",
+      "invariant": "Old postings and new writes use retained mappings; named replacement and rollback preserve the binding.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

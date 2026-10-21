@@ -17,16 +17,32 @@ use crate::{term::TermBuffer, AnalysisError, AnalysisResult, TokenTerm};
 
 #[derive(Debug)]
 pub(crate) struct CaseProperties {
+    profile: crate::unicode::Profile,
     cased: CodePointSetDataBorrowed<'static>,
     ignorable: CodePointSetDataBorrowed<'static>,
 }
 
 pub(crate) fn prepare() -> &'static CaseProperties {
-    static PROPERTIES: CaseProperties = CaseProperties {
+    prepare_with_profile(crate::unicode::Profile::default())
+}
+
+pub(crate) fn prepare_with_profile(profile: crate::unicode::Profile) -> &'static CaseProperties {
+    use crate::unicode::Profile;
+    static UNICODE_16: CaseProperties = CaseProperties {
+        profile: Profile::Unicode16,
         cased: crate::unicode::CASED,
         ignorable: crate::unicode::CASE_IGNORABLE,
     };
-    &PROPERTIES
+    // Historical Rust 17 mappings used regex-syntax's Unicode 16 context classes.
+    static UNICODE_17: CaseProperties = CaseProperties {
+        profile: Profile::Unicode17,
+        cased: crate::unicode::CASED,
+        ignorable: crate::unicode::CASE_IGNORABLE,
+    };
+    match profile {
+        Profile::Unicode16 => &UNICODE_16,
+        Profile::Unicode17 => &UNICODE_17,
+    }
 }
 
 impl CaseProperties {
@@ -90,7 +106,7 @@ fn lower(
         {
             output.push(Ok('ς'))?;
         } else {
-            lower_character(character, &mut output)?;
+            lower_character(character, properties.profile, &mut output)?;
         }
         if !properties.ignorable(character) {
             preceded_cased = properties.cased(character);
@@ -99,7 +115,11 @@ fn lower(
     output.finish(poll)
 }
 
-fn lower_character(character: char, output: &mut TermBuffer) -> AnalysisResult<()> {
+fn lower_character(
+    character: char,
+    profile: crate::unicode::Profile,
+    output: &mut TermBuffer,
+) -> AnalysisResult<()> {
     // Stream full mappings (including expansions) into the caller's admitted buffer.
     struct Writer<'a> {
         output: &'a mut TermBuffer,
@@ -118,6 +138,9 @@ fn lower_character(character: char, output: &mut TermBuffer) -> AnalysisResult<(
     }
     if character.is_ascii() {
         return output.push(Ok(character.to_ascii_lowercase()));
+    }
+    if let Some(lower) = profile.lowercase_override(character) {
+        return output.push(Ok(lower));
     }
     let mut writer = Writer {
         output,

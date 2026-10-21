@@ -9,7 +9,7 @@ use uqa_analysis::{AnalysisError, AnalyzerFingerprint};
 
 use super::*;
 
-fn rehash(wire: &mut Value) -> String {
+pub(super) fn rehash(wire: &mut Value) -> String {
     fn canonical(value: &Value) -> Value {
         match value {
             Value::Object(object) => Value::Object(
