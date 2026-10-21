@@ -4,7 +4,22 @@ The initial source inspection for issue [#714](https://github.com/cognica-io/uqa
 
 ## Delivery checkpoint before the requested pause
 
-The current delivery sequence ends with transition-image capture #1171. The following actual Linux and macOS reports verify the stated source trees, registered source hashes and exact test identities. Every platform also passes eight independent-process correctness histories, with zero failures, errors or skips. These are deterministic work, memory and output results, not latency acceptance.
+On 2026-10-21 the maintainer requested completion of the current work followed by a pause, then directed one merge followed by final-main CI instead of waiting for each PR. PR #1221 integrates the already reviewed logical commits from #1216–#1221. The local evidence below is complete; pending pre-merge jobs are not passing evidence. Verify the actual final-main Linux/macOS work, memory and output results after the single merge, preserve any failures, and pause after delivery and branch cleanup. No new follow-up implementation is included in this boundary.
+
+| Included PR | Completed behavior | Local evidence |
+| --- | --- | --- |
+| #1216 | Cold value-index restoration and repeated consumers | 171 cases; strict five-crate Clippy |
+| #1217 | Cast metadata, borrowed blocks and clause-local bindings | 3,051 cases; strict five-crate Clippy |
+| #1218 | Scalar-filter candidates and exact ANALYZE | 116 cases; strict five-crate Clippy |
+| #1219–#1221 | Complete text, Bayesian/positive pooling and vector/hybrid producers | 139 distinct final composition cases; strict seven-crate Clippy |
+
+The final retrieval tests ran at `9c0407aaf`. The subsequent #1222 correction changes only Cargo.lock and HISTORY: rustls-webpki 0.103.16 and both root bundles 1.0.10 reject distrusted certificate chains. All 81 client cases pass at `f2236f74c`, local cargo-deny passes, and automatic dependency run 39541290146 succeeds. Product/test inputs are otherwise byte-identical. Installed-path evidence remains scoped to its recorded source; these checks do not claim complete #714 or controlled timing acceptance.
+
+Original #714, #1108, #1117 and #653 remain open for the obligations in the [current ledger](open-performance-corrections.md#delivery-ledger). The earlier checkpoint and subsequent implementation notes preserve evidence at their original sources; their then-pending delivery statements are historical.
+
+## Earlier transition-image checkpoint
+
+The earlier delivery sequence ended with transition-image capture #1171. The following actual Linux and macOS reports verify the stated source trees, registered source hashes and exact test identities. Every platform also passes eight independent-process correctness histories, with zero failures, errors or skips. These are deterministic work, memory and output results, not latency acceptance.
 
 | PR | Tested source | Automatic run | Checks / cases per platform | Delivery |
 | --- | --- | --- | --- | --- |
@@ -15,7 +30,7 @@ The current delivery sequence ends with transition-image capture #1171. The foll
 
 The #1167 table and #1168 view corrections close #1170; their completed branches are removed. The original #1169 macOS run 39408955894 was cancelled after an ancestry update and is not passing evidence; the table records its completed replacement. Final affected-input selectors require no FDW matrix for these four units. The final status-document update changes no product, test, fixture, dependency or workflow input.
 
-The maintainer requested a pause after this delivery. Source-scoped local suppression, column and ordinal metadata, DELETE identity/read-scope, candidate production, scalar WHERE and UPDATE locking corrections remain committed for later delivery. Other mutation/constraint owners, lazy input caches, AFTER event queues and complete installed COPY-path acceptance remain unfinished. #714, #1108, #1117 and #653 retain their original requirements. Earlier sections below retain the evidence recorded for each source; this checkpoint supersedes their earlier pending delivery status.
+At that earlier checkpoint, the maintainer requested a pause. Source-scoped local suppression, column and ordinal metadata, DELETE identity/read-scope, candidate production, scalar WHERE and UPDATE locking corrections remain committed for later delivery. Other mutation/constraint owners, lazy input caches, AFTER event queues and complete installed COPY-path acceptance remain unfinished. #714, #1108, #1117 and #653 retain their original requirements. Earlier sections below retain the evidence recorded for each source; this checkpoint supersedes their earlier pending delivery status.
 
 ## Delivery units
 

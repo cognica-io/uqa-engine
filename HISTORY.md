@@ -22,18 +22,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Bound complete text-search and relational-filter inputs before COPY output, including AND/OR/NOT, exact Bayesian text fusion, robust positive-evidence pooling, all-field scoring and inherited or partitioned tables. Preserve exact scores, table-local identities, NULL behavior, command visibility, statement snapshots, cancellation and committed tuple rechecks.
 
-- Bound complete text-search and relational-filter inputs before COPY output, including AND/OR/NOT, exact Bayesian text fusion, all-field scoring and inherited or partitioned tables. Preserve exact scores, table-local identities, NULL behavior, command visibility, statement snapshots, cancellation and committed tuple rechecks.
-
-- Bound complete text-search and relational-filter inputs before COPY output, including AND/OR/NOT, all-field scoring and inherited or partitioned tables. Preserve exact scores, table-local identities, NULL behavior, command visibility, statement snapshots, cancellation and committed tuple rechecks.
-
-- Keep complete text-search scores bounded across inherited and partitioned relations during COPY, preserving physical table identities, deferred reads, statement generations and committed tuple rechecks.
-
-- Bound complete all-field text-search score capture before COPY document reads, retaining the original per-document maximum across fields, exact score bits and statement snapshots.
-
-- Bound complete text-search AND/OR score capture before COPY document reads, preserving exact score addition, branch error precedence and statement snapshots.
-
-- Capture complete single-field text-search scores incrementally before SQL document reads, avoiding full posting/score vectors in COPY while preserving exact scores, document order, snapshot generation, cancellation and serializable observations.
-
 - Bound exact ANALYZE and cold memory-engine statistics collection with paged snapshots and spill-backed distribution input, preserving distinct/NULL counts, histogram boundaries, MCV frequencies and transaction publication.
 
 - Bound scalar-filter index candidate capture and replay, preserving command masks, tuple rechecks, residual predicates and snapshot results without a complete posting or identity vector.
