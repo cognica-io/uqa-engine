@@ -19909,6 +19909,45 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_field_projection_keeps_private_generated_values_and_tuple_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/document_projection/captured/tests.rs",
+      "capability": "Retained filter projection semantics",
+      "workload": "Persisted and private versions, virtual generated values and tuple xmin under forced spill.",
+      "invariant": "The chosen row generation and exact generated/metadata predicate results survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_field_projection_keeps_storage_and_private_phase_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/document_projection/captured/tests.rs",
+      "capability": "Retained projection error ordering",
+      "workload": "Late storage failure, division by zero and invalid private cast during virtual field evaluation.",
+      "invariant": "Complete raw reads precede generated evaluation; persisted projection precedes private projection with original SQLSTATEs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_field_projection_bounds_wide_values_and_releases_cancelled_input",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/document_projection/captured/tests.rs",
+      "capability": "Bounded retained filter projection",
+      "workload": "513 wide fields under 4KiB spill allowance and subsequent cancellation.",
+      "invariant": "Every ID survives below 512KiB additional allocation; cancellation returns 57014 and drops unfinished input.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

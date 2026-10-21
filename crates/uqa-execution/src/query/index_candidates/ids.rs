@@ -30,6 +30,36 @@ pub struct SelectedIds {
 }
 
 impl SelectedIds {
+    /// Classify the complete ordered input once before either output is read. `true` goes to the first set, `false` to the second, and `None` omits the identity.
+    pub(crate) fn partition(
+        &self,
+        bytes: usize,
+        mut select: impl FnMut(DocId) -> Result<Option<bool>, SQLError>,
+    ) -> Result<(Self, Self), SQLError> {
+        let mut first = IdentityBuilder::new(bytes / 2, &self.cancellation);
+        let mut second = IdentityBuilder::new(bytes / 2, &self.cancellation);
+        for id in self.cursor() {
+            let id = id?;
+            match select(id)? {
+                Some(true) => first.push(id)?,
+                Some(false) => second.push(id)?,
+                None => {}
+            }
+        }
+        Ok((first.finish(false)?, second.finish(false)?))
+    }
+
+    /// Freeze a callback-based producer before any consumer reads its identities.
+    pub(crate) fn capture_visit(
+        bytes: usize,
+        cancellation: &CancellationToken,
+        produce: impl FnOnce(&mut dyn FnMut(DocId) -> Result<(), SQLError>) -> Result<(), SQLError>,
+    ) -> Result<Self, SQLError> {
+        let mut builder = IdentityBuilder::new(bytes, cancellation);
+        produce(&mut |id| builder.push(id))?;
+        builder.finish(true)
+    }
+
     /// Capture all identities before consumption, using bounded memory and ascending, duplicate-free output.
     pub fn capture(
         ids: impl IntoIterator<Item = Result<DocId, SQLError>>,
