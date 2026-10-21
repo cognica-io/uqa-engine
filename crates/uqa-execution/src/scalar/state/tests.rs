@@ -495,6 +495,7 @@ fn search_path_or_failing_literal_casts_convert_at_every_evaluation() {
     assert_eq!(CAST_TYPE_RESOLUTIONS.with(std::cell::Cell::get), 3);
 }
 
+mod catalog_casts;
 mod numeric_casts;
 mod numeric_operators;
 mod scalar_casts;

@@ -19308,6 +19308,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_casts_reuse_source_inference_with_live_resolution_and_constraints",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts.rs",
+      "capability": "Catalog-sensitive cast source metadata",
+      "workload": "One thousand rows, a changing unqualified target, overflow and a later constraint failure.",
+      "invariant": "Source inference occurs once; all live type resolutions, callbacks, changed target widths and typed errors are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_cast_source_metadata_never_reuses_routine_results_or_type_resolution",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts.rs",
+      "capability": "Catalog-sensitive cast source metadata",
+      "workload": "One thousand invocations of a bound routine whose retained return-type spelling resolves through the current catalog.",
+      "invariant": "One source inference preserves all one thousand distinct routine results and callbacks and two thousand live type resolutions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_cast_source_retention_preserves_schema_identity_errors_and_owned_memory",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts.rs",
+      "capability": "Catalog-sensitive cast source metadata",
+      "workload": "Failed first evaluation, shared and different physical schemas, retained source capacity and invoking cancellation under 4096 bytes.",
+      "invariant": "Failed conversions retain nothing; schema changes infer independently, only original-schema metadata is reused, admitted bytes stay owned and cancellation precedes callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unknown_cast_sources_keep_per_value_conversion_without_reinferring_schema",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts.rs",
+      "capability": "Catalog-sensitive cast source metadata",
+      "workload": "One untyped physical schema supplies integer, float, text and NULL carriers to the same cast.",
+      "invariant": "Absent inferred metadata is reused without retaining a runtime carrier or descriptor; each current value and catalog callback is evaluated normally.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

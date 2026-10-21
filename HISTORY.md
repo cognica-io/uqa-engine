@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse fixed cast source metadata across physical rows while preserving live catalog resolution, routine execution, domain constraints and input schema changes.
+
 - Reuse successful WHERE/HAVING subquery bindings within the same condition while preserving correlated scopes, declared types, collations, record metadata and PostgreSQL diagnostic order.
 
 - Borrow unchanged execution query blocks instead of copying their complete expression and nested-plan payloads on every SELECT, derived-table or lateral invocation. Table-function identities, deferred DISTINCT slices and lateral grouping rewrites still use private mutable copies.

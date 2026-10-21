@@ -254,12 +254,8 @@ fn row_cast(
     control: &ProductionControl<'_>,
     slot: &OnceLock<RowCast>,
 ) -> Result<Produced<Value>, SQLError> {
-    if let Some(RowCast::Resolved {
-        conversion,
-        source,
-        schema,
-    }) = slot.get()
-    {
+    if let Some(state) = slot.get() {
+        let (RowCast::Resolved { schema, .. } | RowCast::Source { schema, .. }) = state;
         let same_schema = match (schema, context.row_schema()) {
             (None, None) => true,
             (Some(retained), Some(current)) => current.shares_index(retained),
@@ -267,13 +263,25 @@ fn row_cast(
         };
         if same_schema {
             let value = eval_scalar_inner(expr, context, control)?;
-            return conversion.evaluate_with_catalog(
-                &value,
-                source,
-                ty,
-                context.function_hook(),
-                control,
-            );
+            return match state {
+                RowCast::Resolved {
+                    conversion, source, ..
+                } => conversion.evaluate_with_catalog(
+                    &value,
+                    source,
+                    ty,
+                    context.function_hook(),
+                    control,
+                ),
+                RowCast::Source { source, .. } => cast_value_with_resolution_with_control(
+                    &value,
+                    source.as_deref().map(String::as_str),
+                    ty,
+                    context.function_hook(),
+                    control,
+                )
+                .map(|(value, _)| value),
+            };
         }
     }
     let CastEvaluation {
@@ -282,7 +290,7 @@ fn row_cast(
         resolved,
     } = convert(expr, ty, context, control)?;
     if slot.get().is_none() {
-        // An unqualified source or target can resolve differently after a session search_path change. Only explicit builtin identities are reusable.
+        // The operand and shared schema determine source spelling without consulting a catalog or executing a callback. Parameter-dependent roots have no slot. Only explicit builtin identities may also retain the conversion descriptor.
         let state = match (source, resolved) {
             (Some(source), Some(conversion))
                 if uqa_sql::type_resolution::pg_catalog_builtin_type(ty).is_some()
@@ -294,7 +302,10 @@ fn row_cast(
                     schema: context.row_schema().cloned(),
                 }
             }
-            _ => RowCast::PerEvaluation,
+            (source, _) => RowCast::Source {
+                source,
+                schema: context.row_schema().cloned(),
+            },
         };
         let _ = slot.set(state);
     }
