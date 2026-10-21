@@ -90,7 +90,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Bound projected ordered scan batches by work memory while preserving source order, metadata and NULL slots.
 
-- Collect complete SQL results incrementally without retaining a second population of physical batches or cloning each spilled batch before positional output.
+- Collect complete SQL results incrementally without retaining a second population of physical batches or cloning each spilled batch before positional output. Avoid recursive-copy overhead for fixed-width scalar values while preserving owned payloads and retained type metadata.
 
 - Bound UNION, INTERSECT and EXCEPT output batches by bytes while preserving row order and duplicate multiplicities across batch boundaries.
 
