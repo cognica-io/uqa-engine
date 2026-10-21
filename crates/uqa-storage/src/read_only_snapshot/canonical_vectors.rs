@@ -23,7 +23,7 @@ struct CanonicalVectors<T: ?Sized> {
 impl<T: VectorRead + 'static> ReadOnlySnapshot<T> {
     /// Expose canonical values from an already captured immutable owner without copying coordinates or its directory. Cache owners may remain unbound; each reader later binds its own cancellation. A supplied control admits the facet header, while None preserves the existing uncontrolled snapshot API. The unique view identity is conservative across independently captured equal corpora and stable across shared/nested readers.
     pub fn with_canonical_vectors(
-        mut self,
+        self,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<Self> {
         if let Some(control) = control {
@@ -37,10 +37,25 @@ impl<T: VectorRead + 'static> ReadOnlySnapshot<T> {
         let mut digest = Sha256::new();
         digest.update(b"uqa-immutable-vector-view-v1\0");
         digest.update(identity);
+        self.with_canonical_fingerprint(digest.finalize().into(), control)
+    }
+
+    /// Keep an existing content identity from an already captured owner. This does not accept user-supplied or physical-index lineage labels.
+    pub(crate) fn with_canonical_fingerprint(
+        mut self,
+        fingerprint: [u8; 32],
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<Self> {
+        if let Some(control) = control {
+            control.check()?;
+        }
+        if self.3.is_some() {
+            return Ok(self);
+        }
         // This clone has no canonical facet yet: the ownership graph remains acyclic.
         let source = CanonicalVectors {
             owner: self.clone(),
-            fingerprint: digest.finalize().into(),
+            fingerprint,
         };
         self.3 = Some(match control {
             Some(control) => {

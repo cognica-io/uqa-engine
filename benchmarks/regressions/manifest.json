@@ -20387,6 +20387,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "controlled_memory_snapshot_does_not_copy_the_complete_vector_corpus",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/memory_snapshot/tests.rs",
+      "capability": "Immutable memory-vector ownership",
+      "workload": "8,192 vectors of 128 dimensions with simultaneous read and writable snapshots and later mutations.",
+      "invariant": "Capture adds less than 64KiB live allocation while charging the full payload; independent values and canonical identity survive writes and final drop releases the lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "finite_memory_and_retained_knn_keep_only_selected_document_scores",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/memory_snapshot/tests.rs",
+      "capability": "Immutable memory-vector ownership",
+      "workload": "32,768 documents across mutable, immutable and retained exact readers with K 0, 1 and 8 and 32KiB additional selection space.",
+      "invariant": "Exact IDs, ties and score bits survive bounded selection; an unbounded requested result returns a typed memory error without changing the source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "shared_vector_retention_covers_spare_tensor_capacity_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/memory_snapshot/tests.rs",
+      "capability": "Immutable memory-vector ownership",
+      "workload": "A tensor retains spare outer and coordinate capacities before controlled snapshot admission.",
+      "invariant": "Small allowances reject complete retained capacity before publication; an admitted canonical facet retains and then releases the full payload lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "canonical_vector_exports_and_writable_copies_preserve_independent_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/memory_snapshot/tests.rs",
+      "capability": "Immutable memory-vector ownership",
+      "workload": "Explicit legacy BTreeMap export, invalid replacement, deep clone and shared writable snapshot over signed-zero tensors.",
+      "invariant": "The public concrete map type and all value bits remain stable; failed mutations preserve exports and later source/branch writes stay independent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "shared_canonical_identity_matches_owned_tensor_content_and_survives_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/memory_snapshot/tests.rs",
+      "capability": "Immutable memory-vector ownership",
+      "workload": "Shared memory and retained readers encode identical tensor content, followed by signed-zero replacement and boundary traversal.",
+      "invariant": "Content fingerprints agree with the existing retained encoding; old captures remain stable and changed coordinate bits produce a new identity.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

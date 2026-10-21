@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Share immutable memory-vector roots across read and rollback snapshots, retaining complete payload admission and independent writes without copying the vector corpus on capture.
+
 - Bound exact retained-vector top-K selection by its requested candidate count while preserving tensor cosine scores, ties and the original read allowance.
 
 - Bound complete text-search and relational-filter inputs before COPY output, including AND/OR/NOT, exact Bayesian text fusion, robust positive-evidence pooling, all-field scoring and inherited or partitioned tables. Preserve exact scores, table-local identities, NULL behavior, command visibility, statement snapshots, cancellation and committed tuple rechecks.
