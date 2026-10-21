@@ -12,6 +12,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reject distrusted emSign certificate chains by updating rustls-webpki and both bundled root-certificate packages to their patched releases.
+
+- Bound complete text support in hybrid COPY with finite vector pools, preserving native calibration, exact score bits, selected generations and output-failure rollback.
+
+- Share immutable memory-vector roots across read and rollback snapshots, retaining complete payload admission and independent writes without copying the vector corpus on capture.
+
+- Bound exact retained-vector top-K selection by its requested candidate count while preserving tensor cosine scores, ties and the original read allowance.
+
+- Bound complete text-search and relational-filter inputs before COPY output, including AND/OR/NOT, exact Bayesian text fusion, robust positive-evidence pooling, all-field scoring and inherited or partitioned tables. Preserve exact scores, table-local identities, NULL behavior, command visibility, statement snapshots, cancellation and committed tuple rechecks.
+
+- Bound exact ANALYZE and cold memory-engine statistics collection with paged snapshots and spill-backed distribution input, preserving distinct/NULL counts, histogram boundaries, MCV frequencies and transaction publication.
+
+- Bound scalar-filter index candidate capture and replay, preserving command masks, tuple rechecks, residual predicates and snapshot results without a complete posting or identity vector.
+
+- Reuse fixed cast source metadata across physical rows while preserving live catalog resolution, routine execution, domain constraints and input schema changes.
+
+- Reuse successful WHERE/HAVING subquery bindings within the same condition while preserving correlated scopes, declared types, collations, record metadata and PostgreSQL diagnostic order.
+
+- Borrow unchanged execution query blocks instead of copying their complete expression and nested-plan payloads on every SELECT, derived-table or lateral invocation. Table-function identities, deferred DISTINCT slices and lateral grouping rewrites still use private mutable copies.
+
+- Reuse builtin temporal cast type selection across rows while preserving live DateStyle, TimeZone, IntervalStyle, callbacks, precision and cancellation.
+
+- Bound cold value-index restoration, evaluated-key capture and repeatable probes; publish cache changes atomically while preserving stored expression keys, exact physical ordering, independent snapshots, cancellation and storage errors. Ordered construction reuses completed subtree metadata instead of rereading it.
+
 - Reuse validated immutable scan schema sizes between batches, avoiding repeated column-type serialization while preserving exact spill and lock-origin accounting.
 
 - Preserve declared fusion signal order during optimization, including exact score bits, positional pooling parameters and the first failing signal.

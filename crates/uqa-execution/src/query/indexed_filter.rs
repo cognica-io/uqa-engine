@@ -22,6 +22,14 @@ pub trait QueryIndexRead: Sync {
         field: &str,
         predicate: &Predicate,
     ) -> Result<Option<PostingList>, SQLError>;
+    /// Visit support without collecting a posting list, retaining the same selected snapshot and predicate observation. False means unsupported and must not follow any callback.
+    fn visit_value_index(
+        &self,
+        table: &str,
+        field: &str,
+        predicate: &Predicate,
+        visit: &mut dyn FnMut(uqa_core::DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError>;
     fn command_overlay_changes(&self, table: &str) -> Result<Option<DocumentChanges>, SQLError>;
     /// Capture command-only masks together with cached matches from the same frame stack.
     fn exact_command_matches(
@@ -30,6 +38,14 @@ pub trait QueryIndexRead: Sync {
         field: &str,
         value: &Value,
     ) -> Result<CommandIndexProbe, SQLError>;
+    /// Capture every cached command match before returning its exact frame mask. The callback captures identities and must not reenter the engine.
+    fn visit_exact_command_matches(
+        &self,
+        table: &str,
+        field: &str,
+        value: &Value,
+        visit: &mut dyn FnMut(uqa_core::DocId) -> Result<(), SQLError>,
+    ) -> Result<DocumentChanges, SQLError>;
 }
 
 pub fn scan(

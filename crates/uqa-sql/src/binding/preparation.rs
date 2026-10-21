@@ -67,6 +67,7 @@ pub(crate) fn read_prepared_inputs(
     scope.prepared_dependencies =
         Some(crate::prepared::dependencies::PreparedAnalysisDependencies::default());
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope: &mut scope,
         parameters: ParameterTypes::with_input_constants(
@@ -133,6 +134,7 @@ fn read_executable_inputs_inner(
     let mut scope = SchemaScope::for_analysis(binding)?;
     scope.prepared_dependencies = track_dependencies.then(Default::default);
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope: &mut scope,
         parameters: ParameterTypes::with_input_constants(
@@ -196,6 +198,7 @@ pub fn infer_prepared_parameter_types(
     ctes: &BindingContext,
 ) -> Result<Vec<Option<ColumnType>>, SQLError> {
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope: &mut SchemaScope::for_analysis(ctes)?,
         parameters: ParameterTypes::new(declared),
@@ -313,6 +316,7 @@ fn analyze_expression_inputs<'a>(
     schema_expression: Option<SchemaExpressionContext<'a>>,
 ) -> Result<Option<ColumnType>, SQLError> {
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope: &mut SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::with_input_constants(
@@ -342,6 +346,7 @@ struct Preparation<'a> {
     scope: &'a mut SchemaScope,
     parameters: ParameterTypes<'a>,
     schema_expression: Option<SchemaExpressionContext<'a>>,
+    bound_condition_queries: Option<&'a super::type_resolution::BoundConditionQueries<'a>>,
 }
 
 /// Share expression analysis with ordinary output binding while borrowing its lexical scope and fixed parameters.
@@ -354,6 +359,7 @@ pub(super) fn projection_metadata(
     params: &[crate::SQLParam],
 ) -> Result<super::projection::ProjectionMetadata, SQLError> {
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope,
         parameters: ParameterTypes::fixed(params),
@@ -393,6 +399,7 @@ pub(crate) fn assign_stored_input_collations(
     binding: &BindingContext<'_>,
 ) -> Result<(), SQLError> {
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope: &mut SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::fixed(&[]).with_call_collations(),
@@ -412,6 +419,7 @@ pub fn assign_stored_query_input_collations(
     binding: &BindingContext<'_>,
 ) -> Result<(), SQLError> {
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope: &mut SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::fixed(&[]).with_call_collations(),
@@ -435,6 +443,7 @@ pub(super) fn call_input_collation(
     params: &[crate::SQLParam],
 ) -> Result<Option<crate::catalog::collations::CollationSelection>, SQLError> {
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope,
         parameters: ParameterTypes::fixed(params),
@@ -449,11 +458,11 @@ pub(super) fn condition_metadata(
     routines: &dyn RoutineResolution,
     expression: &ScalarExpr,
     construct: &str,
-    input: &RowSchema,
-    subqueries: &[QueryPlan],
     params: &[crate::SQLParam],
+    queries: &super::type_resolution::BoundConditionQueries<'_>,
 ) -> Result<(), SQLError> {
     let mut analysis = Preparation {
+        bound_condition_queries: Some(queries),
         routines,
         scope,
         parameters: ParameterTypes::fixed(params),
@@ -466,7 +475,7 @@ pub(super) fn condition_metadata(
         _ => analysis.scope.set_placement,
     };
     analysis.in_placement(placement, |analysis| {
-        analysis.boolean_expression(expression, input, subqueries, construct)
+        analysis.boolean_expression(expression, queries.input, queries.plans, construct)
     })?;
     analysis
         .scope
@@ -485,6 +494,7 @@ pub(super) fn values_metadata(
     params: &[crate::SQLParam],
 ) -> Result<RowSchema, SQLError> {
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope,
         parameters: ParameterTypes::fixed(params),
@@ -504,6 +514,7 @@ pub(super) fn set_metadata(
     params: &[crate::SQLParam],
 ) -> Result<RowSchema, SQLError> {
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope,
         parameters: ParameterTypes::fixed(params),
@@ -527,6 +538,7 @@ pub(super) fn block_metadata(
     params: &[crate::SQLParam],
 ) -> Result<RowSchema, SQLError> {
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope,
         parameters: ParameterTypes::fixed(params),

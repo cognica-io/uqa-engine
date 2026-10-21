@@ -20,7 +20,7 @@ use crate::expr::temporal_input::{
 
 use super::{canonical_cast_source_with_control, undefined_cast};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(super) enum TemporalCastTarget {
     Date,
     Time,
@@ -168,8 +168,12 @@ pub(super) fn cast_temporal(
 fn round_temporal(value: &mut Value, precision: &str) -> Result<()> {
     let precision = precision
         .parse::<u32>()
-        .map_err(|_| SQLError::TypeMismatch(format!("invalid temporal precision: {precision}")))?
-        .min(6);
+        .map_err(|_| SQLError::TypeMismatch(format!("invalid temporal precision: {precision}")))?;
+    round_temporal_precision(value, precision)
+}
+
+pub(super) fn round_temporal_precision(value: &mut Value, precision: u32) -> Result<()> {
+    let precision = precision.min(6);
     let Value::Temporal(value) = value else {
         return Ok(());
     };
@@ -208,7 +212,7 @@ pub(super) fn cast_interval(
     ty: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Value> {
-    let mut value = cast_temporal(
+    let value = cast_temporal(
         value,
         source_ty,
         TemporalCastTarget::Interval,
@@ -216,12 +220,20 @@ pub(super) fn cast_interval(
         control,
     )?;
     let column_type = ColumnType::from_sql_name_with_control(ty, control)?;
-    if matches!(&value, Value::Temporal(temporal) if !temporal.is_finite()) {
-        return Ok(value);
-    }
     let ColumnType::IntervalWithFields { fields, precision } = &*column_type else {
         return Ok(value);
     };
+    restrict_interval(value, *fields, *precision)
+}
+
+pub(super) fn restrict_interval(
+    mut value: Value,
+    fields: IntervalFields,
+    precision: Option<u32>,
+) -> Result<Value> {
+    if matches!(&value, Value::Temporal(temporal) if !temporal.is_finite()) {
+        return Ok(value);
+    }
     let Value::Temporal(TemporalValue::Interval {
         months,
         days,
@@ -254,7 +266,7 @@ pub(super) fn cast_interval(
         | IntervalFields::MinuteToSecond => {}
     }
     if let Some(precision) = precision {
-        round_temporal(&mut value, &control.format(format_args!("{precision}"))?)?;
+        round_temporal_precision(&mut value, precision)?;
     }
     Ok(value)
 }

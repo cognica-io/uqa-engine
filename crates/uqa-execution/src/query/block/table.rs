@@ -93,10 +93,18 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
             (score_top_k, stmt.r#where.as_ref())
         {
             Some(Box::new(move || {
-                retrieval.function(table, reference_name, name, args, params, Some(top_k))
+                retrieval
+                    .function(table, reference_name, name, args, params, Some(top_k))
+                    .map(Into::into)
             }))
         } else {
-            retrieval.prepare_accelerated(table, reference_name, predicate.as_ref(), params)?
+            retrieval.prepare_accelerated(
+                table,
+                reference_name,
+                predicate.as_ref(),
+                params,
+                post_retrieval_top_k.is_none(),
+            )?
         };
     let score_bearing_filter = stmt
         .r#where
@@ -126,6 +134,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
                                 params,
                                 ctes,
                             )
+                            .map(Into::into)
                         }));
                         ScoredInput::entries(
                             Vec::new(),
@@ -143,7 +152,9 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
                             && !expr_is_jsonpath_fts_match(filter_expr) =>
                     {
                         pending = Some(Box::new(move || {
-                            retrieval.function(table, reference_name, name, args, params, None)
+                            retrieval
+                                .function(table, reference_name, name, args, params, None)
+                                .map(Into::into)
                         }));
                         ScoredInput::entries(
                             Vec::new(),
@@ -290,16 +301,11 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
                 params,
                 command_visible: ctes.reads_command_overlay(),
                 cancellation: &context.scans.runtime.cancellation_token(),
+                bytes: context.scans.runtime.work_mem_bytes()?,
             })
             .select(filter)?
             {
-                scored = ScoredInput::entries(
-                    identities
-                        .into_iter()
-                        .map(|doc_id| uqa_core::ScoredEntry { doc_id, score: 0.0 })
-                        .collect(),
-                    false,
-                );
+                scored = ScoredInput::Candidates(identities);
             }
         }
     }
@@ -385,6 +391,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         metadata_projection,
     )
     .with_scan_batch_bytes(context.scans.runtime.work_mem_bytes()?)
+    .with_index_read_control(context.scans.tables.index_read_control()?)
     .with_index_only(index_only)
     .with_serializable_read(context.scans.tables.serializable_read(table)?)
     .with_table_oid(crate::catalog::projection::snapshot_table_relation_oid(

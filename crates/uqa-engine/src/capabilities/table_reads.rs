@@ -27,33 +27,30 @@ impl TableRead for TableState {
         &self,
         ids: &[uqa_core::DocId],
         fields: &[&str],
+        control: &uqa_storage::read_control::StorageReadControl,
         visitor: &mut dyn FnMut(uqa_core::DocId, bool, &[&uqa_core::Value]) -> bool,
-    ) -> Option<usize> {
+    ) -> Result<Option<usize>, uqa_sql::SQLError> {
         let indexes = self.value_indexes.read();
-        let columns = fields
+        let Some(columns) = fields
             .iter()
             .map(|field| indexes.get(&uqa_storage::ValueIndexKey::Column((*field).to_owned())))
-            .collect::<Option<Vec<_>>>()?;
-        // Every accelerator indexes every row, so without a field to project any of them tells whether a row exists.
-        let presence = match columns.first() {
-            Some(column) => *column,
-            None => indexes.values().next()?,
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Ok(None);
         };
-        let mut values = Vec::with_capacity(columns.len());
-        let mut visited = 0;
-        for &id in ids {
-            values.clear();
-            values.extend(columns.iter().map_while(|column| column.stored_value(id)));
-            let exists = values.len() == columns.len() && presence.contains(id);
-            if !exists {
-                values.clear();
-            }
-            visited += 1;
-            if !visitor(id, exists, &values) {
-                break;
-            }
-        }
-        Some(visited)
+        // Every accelerator indexes every row, so without a field to project any of them tells whether a row exists.
+        let presence = if let Some(column) = columns.first() {
+            *column
+        } else {
+            let Some(index) = indexes.values().next() else {
+                return Ok(None);
+            };
+            index
+        };
+        uqa_execution::catalog::index::value::visit_stored_fields(
+            &columns, presence, ids, control, visitor,
+        )
+        .map(Some)
     }
 }
 
@@ -81,6 +78,12 @@ impl Engine {
     }
 }
 impl QueryTableAccess for Engine {
+    fn index_read_control(
+        &self,
+    ) -> Result<uqa_storage::read_control::StorageReadControl, SQLError> {
+        self.query_retention_control()
+    }
+
     fn serializable_read(
         &self,
         name: &str,
@@ -105,6 +108,35 @@ impl QueryTableAccess for Engine {
     }
 }
 impl uqa_execution::query::indexed_filter::QueryIndexRead for Engine {
+    fn visit_value_index(
+        &self,
+        table: &str,
+        field: &str,
+        predicate: &uqa_core::Predicate,
+        visit: &mut dyn FnMut(uqa_core::DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        self.value_index_query_visit(table, field, predicate, visit)
+    }
+
+    fn visit_exact_command_matches(
+        &self,
+        table: &str,
+        field: &str,
+        value: &uqa_core::Value,
+        visit: &mut dyn FnMut(uqa_core::DocId) -> Result<(), SQLError>,
+    ) -> Result<uqa_execution::query::document_changes::DocumentChanges, SQLError> {
+        let table = self.command_overlay_table_name(table)?;
+        uqa_execution::mutation::overlay::CommandMutationOverlay::visit_column_matches_with_catalog(
+            &mut self.session.command_mutation_overlays.lock(),
+            &table,
+            &[field.to_owned()],
+            std::slice::from_ref(value),
+            &self.query_retention_control()?,
+            Some(self),
+            visit,
+        )
+    }
+
     fn value_index_scan(
         &self,
         table: &str,
@@ -179,6 +211,28 @@ impl RetrievalAccess for Engine {
             self.committed_retrieval_entries(table, predicate, params)
         } else {
             crate::operator_tree_bridge::run_optimised(self, table, Some(predicate), params)
+        }
+    }
+    fn retrieval_input(
+        &self,
+        table: &str,
+        predicate: &ScalarExpr,
+        params: &[SQLParam],
+        committed: bool,
+    ) -> Result<Option<uqa_execution::query::scored_input::ProducedScoredEntries>, SQLError> {
+        let read = |session: &Engine| {
+            uqa_execution::query::block::where_filter::capture_typed_retrieval(
+                &session.source_execution_context(),
+                table,
+                Some(predicate),
+                params,
+                &crate::capabilities::query_scope::new_for_current_routine(session),
+            )
+        };
+        if committed {
+            self.with_committed_retrieval(table, read)
+        } else {
+            read(self)
         }
     }
 }

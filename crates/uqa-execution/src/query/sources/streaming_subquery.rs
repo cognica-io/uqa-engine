@@ -7,8 +7,8 @@
 
 /// Build a single-consumer derived-table projection as a pull pipeline. Blocking operators inside the query block retain their own bounded state, but a second `SharedSpill` boundary would eagerly exhaust that pipeline before the parent can apply demand such as `LIMIT`.
 use super::{
-    bind_source_plan_schema_for_execution, build_join_operator_with_ctes, AccessPathPlan,
-    ComputePlan, CteScope, RelationalPlan, SQLError, SQLParam, SourceContext,
+    build_join_operator_with_ctes, AccessPathPlan, ComputePlan, CteScope, RelationalPlan, SQLError,
+    SQLParam, SourceContext,
 };
 use crate::query::row_at_a_time::RowAtATime;
 
@@ -30,7 +30,6 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
     let RelationalPlan::QueryBlock(block) = &body.root else {
         return Ok(None);
     };
-    let mut block = block.clone();
     // A block whose qualification calls a registered retrieval function (text_match, knn_match, graph_traverse, rpq, ...) executes it through the operator-tree bridge of the single-table executor; the residual scalar filter of a streamed block cannot evaluate such calls. Plain comparisons keep streaming so an outer LIMIT still bounds locking demand inside the derived table.
     if !matches!(block.compute, ComputePlan::Project)
         || matches!(block.access, AccessPathPlan::Hybrid)
@@ -57,21 +56,19 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
     let mut ctes = ctes.enter_scalar_subqueries(&block.subqueries);
     let ctes: &mut CteScope<S> = &mut ctes;
     let outer_row = ctes.row_lock_outer_row().cloned();
-    let source_schema = bind_source_plan_schema_for_execution(
+    let (block, source_schema) = crate::query::binding::bind_query_block_for_execution(
         context.ctes.routines,
-        block
-            .from
-            .as_mut()
-            .expect("derived-table FROM checked above"),
+        block,
         params,
         ctes,
         outer_row.as_ref().map(|row| &row.schema),
+        false,
     )?;
     let source_schema = uqa_sql::binding::overlay_outer_schema(
         &source_schema,
         outer_row.as_ref().map(|row| &row.schema),
     );
-    let block = &*block;
+    let block = block.as_ref();
     let from = block
         .from
         .as_ref()

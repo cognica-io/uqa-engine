@@ -15,7 +15,7 @@ use uqa_core::{
 
 use crate::read_control::StorageReadControl;
 use crate::vector_index::{
-    cosine_similarity, select_top_k_scored, validate_vector_values, VectorIndex,
+    cosine_similarity_controlled, query::TopK, validate_vector_values, VectorIndex,
 };
 use crate::{StorageBackendError, StorageBackendResult};
 use sha2::{Digest, Sha256};
@@ -68,26 +68,38 @@ impl RetainedVectorIndex {
         })
     }
 
-    fn scores(
+    fn visit_scores(
         &self,
         query: &[f32],
-        threshold: Option<f32>,
-    ) -> StorageBackendResult<BudgetedVec<(DocId, f32)>> {
-        let mut scores = BudgetedVec::new(self.control.memory());
+        mut visit: impl FnMut(DocId, f32) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
         for vectors in self.entries.chunk_by(|a, b| a.0 == b.0) {
             self.control.check()?;
-            let mut best = cosine_similarity(query, &vectors[0].2);
+            let mut best =
+                cosine_similarity_controlled(query, &vectors[0].2, || self.control.check())?;
             for (_, _, vector) in &vectors[1..] {
-                self.control.check()?;
-                let score = cosine_similarity(query, vector);
+                let score = cosine_similarity_controlled(query, vector, || self.control.check())?;
                 if score.total_cmp(&best).is_gt() {
                     best = score;
                 }
             }
-            if threshold.is_none_or(|threshold| best >= threshold) {
-                scores.push((vectors[0].0, best))?;
-            }
+            visit(vectors[0].0, best)?;
         }
+        self.control.check()
+    }
+
+    fn scores(
+        &self,
+        query: &[f32],
+        threshold: f32,
+    ) -> StorageBackendResult<BudgetedVec<(DocId, f32)>> {
+        let mut scores = BudgetedVec::new(self.control.memory());
+        self.visit_scores(query, |document, score| {
+            if score >= threshold {
+                scores.push((document, score))?;
+            }
+            Ok(())
+        })?;
         Ok(scores)
     }
 
@@ -142,11 +154,9 @@ impl VectorIndex for RetainedVectorIndex {
         if k == 0 {
             return Ok(PostingList::new());
         }
-        // The tuple drops score storage before its reservation on every return path.
-        let mut scores = self.scores(query, None)?.into_parts();
-        select_top_k_scored(&mut scores.0, k);
-        scores.0.sort_unstable_by_key(|(doc_id, _)| *doc_id);
-        self.postings(&scores.0)
+        let mut selected = TopK::new(k, &self.control);
+        self.visit_scores(query, |document, score| selected.offer_raw(document, score))?;
+        selected.finish(&self.control)
     }
     fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
         self.control.check()?;
@@ -156,7 +166,7 @@ impl VectorIndex for RetainedVectorIndex {
                 "vector similarity threshold must be finite, got {threshold}"
             )));
         }
-        let scores = self.scores(query, Some(threshold))?;
+        let scores = self.scores(query, threshold)?;
         self.postings(&scores)
     }
     fn count(&self) -> StorageBackendResult<usize> {

@@ -5,6 +5,47 @@
 //
 
 use super::*;
+use uqa_fusion::RobustPositiveEvidencePool;
+
+// Retain the original map-based spread calculation as an independent regression oracle.
+pub(super) fn adaptive_signal_weights(
+    fuser: &RobustPositiveEvidencePool,
+    score_maps: &[BTreeMap<DocId, f64>],
+) -> Option<Vec<f64>> {
+    let spreads: Vec<f64> = score_maps
+        .iter()
+        .map(|scores| {
+            if scores.len() < 2 {
+                return 0.0;
+            }
+            let logits: Vec<f64> = scores
+                .values()
+                .map(|probability| fuser.gated_logit(*probability))
+                .collect();
+            let mean = logits.iter().sum::<f64>() / logits.len() as f64;
+            let variance = logits
+                .iter()
+                .map(|logit| {
+                    let difference = logit - mean;
+                    difference * difference
+                })
+                .sum::<f64>()
+                / logits.len() as f64;
+            variance.sqrt()
+        })
+        .collect();
+    let total: f64 = spreads.iter().sum();
+    if total <= f64::EPSILON {
+        return None;
+    }
+    let uniform = 0.5 / score_maps.len() as f64;
+    Some(
+        spreads
+            .iter()
+            .map(|spread| uniform + 0.5 * spread / total)
+            .collect(),
+    )
+}
 
 struct LiteralOperator(Vec<(DocId, f64)>);
 
@@ -58,6 +99,35 @@ fn exact_bayesian_operator_rejects_invalid_priors_and_signal_scores() {
 }
 
 #[test]
+fn exact_bayesian_operator_validates_prior_then_children_then_probabilities() {
+    struct FailingSignal(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    impl Operator for FailingSignal {
+        fn execute(&self, _context: &ExecutionContext) -> OperatorResult {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(StorageBackendError::Other("child failure".into()))
+        }
+        fn cost_estimate(&self, _stats: &IndexStats) -> f64 {
+            1.0
+        }
+    }
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let signals: Vec<Arc<dyn Operator>> = vec![
+        Arc::new(LiteralOperator(vec![(1, f64::NAN)])),
+        Arc::new(FailingSignal(Arc::clone(&calls))),
+    ];
+    let error = BayesianEvidenceFusionOperator::new(signals.clone(), 0.0)
+        .execute(&ExecutionContext::new())
+        .unwrap_err();
+    assert!(error.to_string().contains("base_rate"));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    let error = BayesianEvidenceFusionOperator::new(signals, 0.5)
+        .execute(&ExecutionContext::new())
+        .unwrap_err();
+    assert_eq!(error.to_string(), "child failure");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[test]
 fn adaptive_weights_favor_the_discriminating_signal() {
     let fuser = RobustPositiveEvidencePool::new(0.5).expect("test alpha is valid");
     let flat: BTreeMap<DocId, f64> = [(1, 0.7), (2, 0.7), (3, 0.7)].into_iter().collect();
@@ -72,6 +142,26 @@ fn adaptive_weights_favor_the_discriminating_signal() {
     assert!(
         adaptive_signal_weights(&fuser, &[flat.clone(), flat]).is_none(),
         "all-flat signals fall back to the unweighted mean"
+    );
+    let mut replay = |signal| {
+        Ok::<_, ()>(
+            [(0.7, 0.9), (0.7, 0.5), (0.7, 0.1)]
+                .into_iter()
+                .enumerate()
+                .map(move |(i, values)| {
+                    Ok(uqa_core::ScoredEntry {
+                        doc_id: i as u64,
+                        score: if signal == 0 { values.0 } else { values.1 },
+                    })
+                }),
+        )
+    };
+    let actual = positive::adaptive_weights(&fuser, 2, &mut replay)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+        weights.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
     );
 }
 

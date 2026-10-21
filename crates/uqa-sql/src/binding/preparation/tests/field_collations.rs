@@ -138,6 +138,7 @@ fn anonymous_fields_distinguish_parameter_assignment_from_casts() {
         };
         let binding = crate::binding::fixture::empty_binding_context();
         let mut preparation = Preparation {
+            bound_condition_queries: None,
             routines: &Types,
             scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
             parameters: ParameterTypes::new(&[declared]),

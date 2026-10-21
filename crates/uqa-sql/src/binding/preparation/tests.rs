@@ -406,6 +406,7 @@ fn merge_action_scope_is_restored_after_returning_analysis() {
     let context = assignment_context();
     let mut scope = SchemaScope::for_analysis(&context).unwrap();
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines: &NoRoutines,
         scope: &mut scope,
         parameters: ParameterTypes::new(&[]),

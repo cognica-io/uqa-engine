@@ -54,6 +54,28 @@ fn range_function_can_reference_left_from_item_without_lateral_keyword() {
     assert_eq!(rows, vec![(1, 0), (1, 1), (2, 0), (2, 1), (2, 2)]);
 }
 
+#[test]
+fn unchanged_execution_blocks_preserve_postgresql_lateral_and_slice_results() {
+    let oracle: serde_json::Value =
+        serde_json::from_str(include_str!("sql_lateral/execution_binding.json")).unwrap();
+    assert!(oracle["postgresql_version"]
+        .as_str()
+        .unwrap()
+        .starts_with("PostgreSQL 18.4"));
+    let engine = Engine::new();
+    for _ in 0..3 {
+        for case in oracle["cases"].as_array().unwrap() {
+            let sql = case["sql"].as_str().unwrap();
+            let result = engine.sql(sql, &[]).unwrap();
+            assert_eq!(
+                serde_json::to_value(&result.rows).unwrap(),
+                case["rows"],
+                "{sql}",
+            );
+        }
+    }
+}
+
 fn int_pairs(result: &uqa_engine::SQLResult, left: &str, right: &str) -> Vec<(i64, i64)> {
     result
         .rows

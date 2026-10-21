@@ -100,6 +100,7 @@ fn domain_cast_collations_match_postgresql_for_literals_columns_and_identity_cas
             panic!("query")
         };
         let mut preparation = Preparation {
+            bound_condition_queries: None,
             routines: &Domains,
             scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
             parameters: ParameterTypes::new(&[]),
@@ -197,6 +198,7 @@ fn domain_and_unknown_common_types_match_postgresql() {
             panic!("query")
         };
         let mut preparation = Preparation {
+            bound_condition_queries: None,
             routines: &Domains,
             scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
             parameters: ParameterTypes::new(&[]),
@@ -234,6 +236,7 @@ fn domain_and_unknown_common_types_match_postgresql() {
 fn common_type_selection_keeps_native_deferred_outputs_distinct_from_unknown() {
     let binding = crate::binding::fixture::empty_binding_context();
     let mut preparation = Preparation {
+        bound_condition_queries: None,
         routines: &Domains,
         scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
         parameters: ParameterTypes::new(&[]),

@@ -23,6 +23,7 @@ use uqa_operators::{
 };
 use uqa_sql::ast::{BinaryOp, Expr};
 
+pub mod analyze;
 mod ast_helpers;
 mod config;
 mod cross_paradigm;

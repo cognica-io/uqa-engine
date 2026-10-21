@@ -9,6 +9,9 @@
 use super::{numeric::NumericCast, Produced, ProductionControl, Result, SQLError, Value};
 use crate::{expr::EngineHook, ColumnType};
 
+mod temporal;
+use temporal::TemporalCast;
+
 /// A conversion's immutable selection, without retaining a row value or a catalog decision.
 #[derive(Clone, Debug)]
 pub struct ResolvedCast {
@@ -22,6 +25,7 @@ enum Source {
     Real,
     InternalChar,
     Scalar,
+    Temporal,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -34,6 +38,7 @@ enum Target {
     Boolean,
     Uuid,
     Json { binary: bool },
+    Temporal(TemporalCast),
 }
 
 impl Target {
@@ -48,12 +53,13 @@ impl Target {
             Self::Uuid => ColumnType::Uuid,
             Self::Json { binary: false } => ColumnType::Json,
             Self::Json { binary: true } => ColumnType::JsonB,
+            Self::Temporal(cast) => cast.column_type(),
         }
     }
 }
 
 impl ResolvedCast {
-    /// Select builtin scalar kernels whose identities do not depend on a live catalog or session setting. The caller still invokes current domain adapters and value production on every row.
+    /// Select builtin scalar kernels whose identities do not depend on a live catalog or session setting. Temporal conversions still consult live settings on every row.
     pub fn select(source: &ColumnType, target: &ColumnType) -> Option<Self> {
         let source = scalar_source(source)?;
         let target = match target {
@@ -65,8 +71,26 @@ impl ResolvedCast {
             ColumnType::Uuid => Target::Uuid,
             ColumnType::Json => Target::Json { binary: false },
             ColumnType::JsonB => Target::Json { binary: true },
-            _ => Target::Numeric(NumericCast::select(target, target)?),
+            _ => match TemporalCast::select(target) {
+                Some(cast) => Target::Temporal(cast),
+                None if !matches!(source, Source::Temporal) => {
+                    Target::Numeric(NumericCast::select(target, target)?)
+                }
+                None => return None,
+            },
         };
+        if matches!(source, Source::Temporal)
+            && !matches!(
+                target,
+                Target::Temporal(_)
+                    | Target::Text
+                    | Target::Varchar(_)
+                    | Target::Character(_)
+                    | Target::Bpchar
+            )
+        {
+            return None;
+        }
         Some(Self { source, target })
     }
 
@@ -93,6 +117,7 @@ impl ResolvedCast {
                 | Value::Json(_)
                 | Value::JsonB(_)
         ) || (self.numeric().is_some() && matches!(value, Value::Datum(_)))
+            || (matches!(self.source, Source::Temporal) && matches!(value, Value::Temporal(_)))
     }
 
     /// Reuse only type selection. The original source and target spellings must identify this selection; borrowing them preserves fallback callback/error order without constructing another name. Current callbacks, cancellation, values and allocation admission remain part of each evaluation.
@@ -114,20 +139,27 @@ impl ResolvedCast {
                 control,
             );
         }
-        if let Some(engine) = engine {
-            if let Some(output) =
-                engine.cast_domain(value, Some(source_name), &self.target.column_type())?
-            {
-                return Ok(control.retain_external_value(output)?);
-            }
-        }
-        self.evaluate(value, control)
+        super::super::context::evaluate_selected_cast(self, value, source_name, engine, control)
+    }
+
+    pub(crate) fn target_type(&self) -> ColumnType {
+        self.target.column_type()
     }
 
     /// Run after the ordinary catalog checks, using the same scalar value constructors as named casts.
+    #[cfg(test)]
     pub(crate) fn evaluate(
         &self,
         value: &Value,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        self.evaluate_from(value, None, control)
+    }
+
+    pub(crate) fn evaluate_from(
+        &self,
+        value: &Value,
+        source_name: Option<&str>,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Value>> {
         control.check()?;
@@ -157,6 +189,7 @@ impl ResolvedCast {
             Target::Json { binary } => {
                 super::super::json::cast_json_value_with_control(value, binary, control)
             }
+            Target::Temporal(cast) => cast.evaluate(value, source_name, control),
             Target::Numeric(_) => unreachable!("numeric conversion already executed"),
         }
     }
@@ -165,7 +198,7 @@ impl ResolvedCast {
         let source = match self.source {
             Source::Real => Some(ColumnType::Real),
             Source::InternalChar => Some(ColumnType::InternalChar),
-            Source::Numeric | Source::Scalar => None,
+            Source::Numeric | Source::Scalar | Source::Temporal => None,
         };
         let text = match (self.target, value) {
             (Target::Bpchar, Value::FixedChar(text)) => control.copy_text(text)?,
@@ -206,6 +239,7 @@ fn scalar_source(source: &ColumnType) -> Option<Source> {
         | ColumnType::Json
         | ColumnType::JsonB
         | ColumnType::Bytea => Source::Scalar,
+        temporal if TemporalCast::select(temporal).is_some() => Source::Temporal,
         _ => return None,
     })
 }

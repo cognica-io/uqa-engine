@@ -130,6 +130,20 @@ impl PhysicalRetrievalDriver<'_> {
         self.with_vector_diagnostics(context)
     }
 
+    pub(super) fn bridge_score_context(
+        &self,
+    ) -> DriverResult<uqa_operators::base::ExecutionContext> {
+        if self.table.is_empty() {
+            return Ok(uqa_operators::base::ExecutionContext::new());
+        }
+        let context = self
+            .context
+            .snapshots
+            .snapshot_context_for_scores(self.table)?
+            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
+        self.with_vector_diagnostics(context)
+    }
+
     /// Build an operator context whose document snapshot materializes requested virtual generated columns and storage-owned tuple columns for only the candidate documents the consuming operator can visit.
     pub(super) fn bridge_context_for_projection(
         &self,

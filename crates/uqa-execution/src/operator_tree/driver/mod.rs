@@ -23,6 +23,7 @@ use uqa_operators::{
 use uqa_sql::{ast::ColumnType, SQLError, SQLParam};
 use uqa_storage::StorageBackendError;
 
+mod capture;
 pub mod context;
 mod deep_layers;
 mod dispatch;
@@ -201,28 +202,12 @@ impl<'a> PhysicalRetrievalDriver<'a> {
         scoring: Option<TextScoringMode>,
         top_k: Option<uqa_operators::TextTopKPlan>,
     ) -> DriverResult<PostingList> {
-        let scoring = scoring.ok_or_else(|| {
-            SQLError::Internal(
-                "OperatorTree::Term reached PhysicalRetrievalDriver without bound text scoring"
-                    .into(),
-            )
-        })?;
+        let scoring = Self::bound_text_scoring(scoring)?;
         if let Some(field) = field {
             self.context
                 .text
                 .validate_text_search_field(self.table, field)?;
-            let mode = match scoring {
-                TextScoringMode::BM25 => {
-                    uqa_scoring::ScoringMode::BM25(uqa_scoring::BM25Params::default())
-                }
-                TextScoringMode::BayesianBM25 => {
-                    uqa_scoring::ScoringMode::BayesianBM25(self.bayesian_params_for(field)?)
-                }
-                TextScoringMode::CustomBM25(params) => uqa_scoring::ScoringMode::BM25(params),
-                TextScoringMode::CustomBayesianBM25(params) => {
-                    uqa_scoring::ScoringMode::BayesianBM25(params)
-                }
-            };
+            let mode = self.text_scoring_mode(field, scoring)?;
             return self
                 .context
                 .text
@@ -241,37 +226,10 @@ impl<'a> PhysicalRetrievalDriver<'a> {
                 "physical text top-k requires one concrete field".into(),
             ));
         }
-        if matches!(
-            scoring,
-            TextScoringMode::CustomBM25(_) | TextScoringMode::CustomBayesianBM25(_)
-        ) {
-            return Err(SQLError::TypeMismatch(
-                "explicit text scoring parameters require one concrete field".into(),
-            ));
-        }
-        let fields = self.context.text.fts_fields_for_table(self.table)?;
-        if fields.is_empty() {
-            return Err(SQLError::TypeMismatch(format!(
-                "text search: table `{}` has no text-indexed columns",
-                self.table
-            )));
-        }
+        let fields = self.all_field_text_fields(scoring)?;
         let mut by_document = BTreeMap::<DocId, f64>::new();
         for field in fields {
-            let mode = match scoring {
-                TextScoringMode::BM25 => {
-                    uqa_scoring::ScoringMode::BM25(uqa_scoring::BM25Params::default())
-                }
-                TextScoringMode::BayesianBM25 => {
-                    uqa_scoring::ScoringMode::BayesianBM25(self.bayesian_params_for(&field)?)
-                }
-                TextScoringMode::CustomBM25(_) | TextScoringMode::CustomBayesianBM25(_) => {
-                    return Err(SQLError::Internal(
-                        "custom all-field scoring passed validation without a concrete field"
-                            .into(),
-                    ));
-                }
-            };
+            let mode = self.text_scoring_mode(&field, scoring)?;
             for entry in
                 self.context
                     .text

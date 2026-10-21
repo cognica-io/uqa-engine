@@ -48,6 +48,7 @@ fn prepared_outputs_retain_direct_and_explicit_collations_after_aliasing() {
             panic!("query")
         };
         let mut preparation = Preparation {
+            bound_condition_queries: None,
             routines: &NoRoutines,
             scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
             parameters: ParameterTypes::new(&[]),
@@ -69,6 +70,7 @@ fn assert_dml_collations(reference: &str) {
     for case in references.values().flatten() {
         let plan = UnifiedPlan::lower(crate::compile(&case.sql).unwrap().remove(0));
         let mut preparation = Preparation {
+            bound_condition_queries: None,
             routines: &NoRoutines,
             scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
             parameters: ParameterTypes::new(&[]),
@@ -165,6 +167,7 @@ pub(super) fn assert_collation_references(
             panic!("query")
         };
         let mut preparation = Preparation {
+            bound_condition_queries: None,
             routines,
             scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
             parameters: ParameterTypes::new(&[]),
@@ -239,6 +242,7 @@ fn computed_collations_keep_anonymous_record_field_metadata() {
         panic!("query")
     };
     let mut preparation = Preparation {
+        bound_condition_queries: None,
         routines: &NoRoutines,
         scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
         parameters: ParameterTypes::new(&[]),

@@ -24,8 +24,8 @@ use crate::batch::{Batch, PhysicalRow, RowSchema};
 use crate::physical::{
     order_expression_position, ExecError, ExecResult, PhysicalOperator, PhysicalOrder,
 };
-use crate::relational::SortComparison;
 use crate::relational::{SharedExpressionEvaluator, SortKey};
+use crate::relational::{SortComparison, SortComparisonDomain};
 use crate::spill::{EncodedBatchSizer, SpillBatchWriter, SpillBuffer, SpillDrain, SpillFileArena};
 
 mod comparison;
@@ -51,7 +51,9 @@ pub struct ExternalSort<'a> {
     evaluator: SharedExpressionEvaluator<'a>,
     comparison_states: Vec<EnumComparisonState>,
     key_types: Vec<Option<uqa_sql::ColumnType>>,
-    equality_keys: bool,
+    comparison_domain: SortComparisonDomain,
+    physical_key_slots: Vec<usize>,
+    cancellation: Option<uqa_core::CancellationToken>,
     keep: Option<usize>,
     work_mem_bytes: usize,
     spill_directory: Option<PathBuf>,
@@ -106,7 +108,9 @@ impl<'a> ExternalSort<'a> {
             },
             keys: crate::scalar::PreparedExpressions::sort_keys(keys),
             evaluator,
-            equality_keys: false,
+            comparison_domain: SortComparisonDomain::SqlOrdering,
+            physical_key_slots: Vec::new(),
+            cancellation: None,
             key_types: Vec::new(),
             keep,
             work_mem_bytes,
@@ -123,7 +127,7 @@ impl<'a> ExternalSort<'a> {
 
     /// Internal set grouping requires equality classes, without exposing this identity order as SQL ORDER BY.
     pub(crate) fn with_equality_keys(mut self) -> Self {
-        self.equality_keys = true;
+        self.comparison_domain = SortComparisonDomain::Grouping;
         self.comparison_states = Vec::new();
         self.ordering.clear();
         self
@@ -167,15 +171,7 @@ impl<'a> ExternalSort<'a> {
 
         while let Some(batch) = self.child.next()? {
             for row in batch.rows {
-                let mut key_values = Vec::with_capacity(self.keys.len());
-                for key in self.keys.iter() {
-                    key_values.push(self.evaluator.evaluate_physical_with_function_states(
-                        &key.expr,
-                        &batch.schema,
-                        &row,
-                        self.keys.calls(),
-                    )?);
-                }
+                let mut key_values = self.capture_keys(&batch.schema, &row)?;
                 let record_sequence = sequence;
                 key_values.push(Value::Bytes(record_sequence.to_be_bytes().to_vec()));
                 let record = DecoratedRow {
@@ -322,11 +318,17 @@ impl PhysicalOperator for ExternalSort<'_> {
 
     fn open(&mut self) -> ExecResult<()> {
         self.output = None;
-        self.key_types = self
-            .keys
-            .iter()
-            .map(|key| self.evaluator.expression_type(&key.expr, &self.schema))
-            .collect::<Result<_, _>>()?;
+        if let Some(cancellation) = &self.cancellation {
+            cancellation.check().map_err(uqa_sql::SQLError::Cancelled)?;
+        }
+        self.key_types = if self.comparison_domain == SortComparisonDomain::Physical {
+            Vec::new()
+        } else {
+            self.keys
+                .iter()
+                .map(|key| self.evaluator.expression_type(&key.expr, &self.schema))
+                .collect::<Result<_, _>>()?
+        };
         for state in &mut self.comparison_states {
             *state = EnumComparisonState::default();
         }
@@ -582,6 +584,7 @@ fn heap_pop(
 #[cfg(test)]
 mod tests {
     mod files;
+    mod physical_keys;
 
     mod enums;
     mod legacy_vectors;
@@ -797,7 +800,8 @@ mod tests {
                 types: &[],
                 enums: None,
                 states: &[],
-                equality_keys: false,
+                domain: SortComparisonDomain::SqlOrdering,
+                cancellation: None,
             },
             None,
             SpillBuffer::new(0),

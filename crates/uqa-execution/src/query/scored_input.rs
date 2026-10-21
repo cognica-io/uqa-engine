@@ -7,16 +7,40 @@
 //! Streaming scored-document input adapters.
 
 mod borrowed;
+mod capture;
 mod deferred;
 mod hierarchy;
+mod indexed;
 mod materialize;
 
+pub use capture::CapturedScoredEntries;
+pub(crate) use capture::ScoredEntryCapture;
 pub(in crate::query) use deferred::defer_entries;
 pub use hierarchy::HierarchyScoredDocumentSource;
 
 /// One execution of already-bound retrieval work under the retained statement inputs.
 pub type ScoredEntriesProducer<'a> =
-    Box<dyn FnOnce() -> Result<Vec<ScoredEntry>, SQLError> + Send + 'a>;
+    Box<dyn FnOnce() -> Result<ProducedScoredEntries, SQLError> + Send + 'a>;
+
+pub enum ProducedScoredEntries {
+    Materialized(Vec<ScoredEntry>),
+    Captured(CapturedScoredEntries),
+}
+
+impl ProducedScoredEntries {
+    pub(crate) fn estimated_cardinality(&self) -> usize {
+        match self {
+            Self::Materialized(entries) => entries.len(),
+            Self::Captured(entries) => entries.estimated_cardinality(),
+        }
+    }
+}
+
+impl From<Vec<ScoredEntry>> for ProducedScoredEntries {
+    fn from(entries: Vec<ScoredEntry>) -> Self {
+        Self::Materialized(entries)
+    }
+}
 
 use crate::{query::table_read::TableRead, row_locks::recheck::RecheckDoc, ExecResult};
 use std::sync::Arc;
@@ -34,6 +58,7 @@ use uqa_sql::{
 
 pub enum ScoredInput {
     All,
+    Candidates(super::SelectedIds),
     Entries {
         entries: Vec<ScoredEntry>,
         score_bearing: bool,
@@ -213,6 +238,7 @@ impl ScoredInput {
 }
 
 pub struct ScoredDocumentSource {
+    index_read_control: uqa_storage::read_control::StorageReadControl,
     serializable: crate::serializable::SerializableScan,
     scan_batch_bytes: usize,
     batch_layout: crate::spill::EncodedBatchLayout,
@@ -243,6 +269,8 @@ pub struct ScoredDocumentSource {
 pub enum ScoredInputCursor {
     All { after: Option<DocId> },
     Entries(std::vec::IntoIter<ScoredEntry>),
+    Captured(Box<CapturedScoredEntries>),
+    Candidates(Box<super::SelectedIdCursor>),
 }
 
 #[derive(Clone, Copy, Default)]
@@ -404,6 +432,20 @@ impl ScoredDocumentSource {
                     .collect(),
                 true,
             ),
+            ScoredInput::Candidates(ids) => (
+                ScoredInputCursor::Candidates(Box::new(ids.cursor())),
+                ScoreOrigin::Unscored,
+                ordered_primary_key
+                    .into_iter()
+                    .map(|position| crate::PhysicalOrder {
+                        position,
+                        descending: false,
+                        nulls_first: None,
+                        nullable: false,
+                    })
+                    .collect(),
+                false,
+            ),
             ScoredInput::Entries {
                 entries,
                 score_bearing,
@@ -527,6 +569,9 @@ impl ScoredDocumentSource {
         Self {
             scan_batch_bytes: 64 * 1024 * 1024,
             batch_layout: crate::spill::EncodedBatchLayout::default(),
+            index_read_control: uqa_storage::read_control::StorageReadControl::with_limit(
+                64 * 1024,
+            ),
             shared_page_rows: 1,
             table_name: table_name.to_string(),
             table,
@@ -560,6 +605,16 @@ impl ScoredDocumentSource {
         self
     }
 
+    pub(in crate::query) fn with_captured_entries(
+        mut self,
+        entries: CapturedScoredEntries,
+    ) -> Self {
+        self.input = ScoredInputCursor::Captured(Box::new(entries));
+        self.input_guarantees_presence = false;
+        self.ordering.clear();
+        self
+    }
+
     pub fn with_serializable_read(
         mut self,
         read: Option<crate::serializable::SerializableRelationRead>,
@@ -580,6 +635,14 @@ impl ScoredDocumentSource {
         self
     }
 
+    pub fn with_index_read_control(
+        mut self,
+        control: uqa_storage::read_control::StorageReadControl,
+    ) -> Self {
+        self.index_read_control = control;
+        self
+    }
+
     pub fn with_lock_origin(mut self, origin: Option<(Arc<str>, Arc<str>)>) -> Self {
         self.lock_origin = origin;
         self
@@ -591,30 +654,57 @@ impl ScoredDocumentSource {
     }
 
     /// Pin this scan to a tuple-local recheck candidate's tuples. A ranked input (retrieval predicate) was re-executed against the latest index state when the recheck rebuilt the scan, so a pinned tuple survives only if the retrieval still matches it, exactly like `PostgreSQL` re-evaluating the WHERE clause on the substituted tuple; its score is the re-executed retrieval score. A plain scan input keeps every pinned tuple and lets the residual predicates decide.
-    pub fn with_recheck_pins(mut self, pins: Option<Arc<Vec<RecheckDoc>>>) -> Self {
+    pub fn with_recheck_pins(
+        mut self,
+        pins: Option<Arc<Vec<RecheckDoc>>>,
+    ) -> Result<Self, SQLError> {
         let Some(pins) = pins else {
-            return self;
+            return Ok(self);
         };
-        let ranked: Option<std::collections::BTreeMap<DocId, f64>> = match &mut self.input {
-            ScoredInputCursor::Entries(entries) => Some(
-                entries
-                    .by_ref()
-                    .map(|entry| (entry.doc_id, entry.score))
-                    .collect(),
-            ),
-            ScoredInputCursor::All { .. } => None,
+        let mut selected = pins
+            .iter()
+            .map(|pin| (pin.doc_id, None))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let indexed = match &mut self.input {
+            ScoredInputCursor::Captured(entries) => {
+                for entry in entries.by_ref() {
+                    let entry = entry?;
+                    if let Some(score) = selected.get_mut(&entry.doc_id) {
+                        *score = Some(entry.score);
+                    }
+                }
+                true
+            }
+            ScoredInputCursor::Entries(entries) => {
+                for entry in entries.by_ref() {
+                    if let Some(score) = selected.get_mut(&entry.doc_id) {
+                        *score = Some(entry.score);
+                    }
+                }
+                true
+            }
+            ScoredInputCursor::Candidates(ids) => {
+                for id in ids.by_ref() {
+                    if let Some(score) = selected.get_mut(&id?) {
+                        *score = Some(0.0);
+                    }
+                }
+                true
+            }
+            ScoredInputCursor::All { .. } => false,
         };
         let entries = pins
             .iter()
-            .filter_map(|pin| match ranked.as_ref() {
-                Some(scores) => scores.get(&pin.doc_id).map(|score| ScoredEntry {
+            .filter_map(|pin| {
+                let score = if indexed {
+                    selected.get(&pin.doc_id).copied().flatten()
+                } else {
+                    Some(0.0)
+                };
+                score.map(|score| ScoredEntry {
                     doc_id: pin.doc_id,
-                    score: *score,
-                }),
-                None => Some(ScoredEntry {
-                    doc_id: pin.doc_id,
-                    score: 0.0,
-                }),
+                    score,
+                })
             })
             .collect::<Vec<_>>();
         if !entries
@@ -633,7 +723,7 @@ impl ScoredDocumentSource {
             .collect();
         self.recheck_pinned = true;
         self.input = ScoredInputCursor::Entries(entries.into_iter());
-        self
+        Ok(self)
     }
 
     /// Bind every visible column to its relation without changing public labels or copying values.
@@ -702,6 +792,24 @@ impl ScoredDocumentSource {
             return Ok(Vec::new());
         }
         match &mut self.input {
+            ScoredInputCursor::Captured(entries) => entries
+                .by_ref()
+                .take(max_rows)
+                .map(|entry| {
+                    let entry = entry?;
+                    self.serializable.observe_row(entry.doc_id)?;
+                    Ok(entry)
+                })
+                .collect(),
+            ScoredInputCursor::Candidates(ids) => ids
+                .by_ref()
+                .take(max_rows)
+                .map(|id| {
+                    let doc_id = id?;
+                    self.serializable.observe_row(doc_id)?;
+                    Ok(ScoredEntry { doc_id, score: 0.0 })
+                })
+                .collect(),
             ScoredInputCursor::Entries(entries) => {
                 for entry in entries.as_slice().iter().take(max_rows) {
                     self.serializable.observe_row(entry.doc_id)?;

@@ -48,6 +48,7 @@ pub(crate) fn prepare_routine_body_inputs(
         .map(|parameter| parameter.declared_scalar_type().cloned())
         .collect::<Vec<_>>();
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope: &mut SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::with_input_constants(
@@ -91,6 +92,7 @@ pub(crate) fn analyze_routine_body_argument(
         .map(|parameter| parameter.declared_scalar_type().cloned())
         .collect::<Vec<_>>();
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines,
         scope: &mut SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::with_input_constants(
@@ -145,6 +147,7 @@ pub(crate) fn prepare_procedure_call(
     scope.prepared_dependencies =
         Some(crate::prepared::dependencies::PreparedAnalysisDependencies::default());
     let mut analysis = Preparation {
+        bound_condition_queries: None,
         routines: context.routines,
         scope: &mut scope,
         parameters: ParameterTypes::with_input_constants(

@@ -62,7 +62,7 @@ impl RetainedValueIndex {
             source,
             previous: None,
         };
-        index.root = builder.build(count, 0)?;
+        index.root = builder.build(count, 0)?.0;
         if (builder.source)()?.is_some() {
             return Err(records::invalid("long ordered index input"));
         }

@@ -56,3 +56,56 @@ fn catalog_cast_qualification_matches_postgresql(#[case] provider: usize) {
         .retain(|case| case["reopen"] == true);
     crate::pg18_oracle::verify(&engine, &durable.to_string());
 }
+
+#[test]
+fn prepared_temporal_casts_keep_live_settings_and_rollback() {
+    use uqa_core::Value;
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE cast_rows(id integer, v text);
+             INSERT INTO cast_rows VALUES (1,'01/02/2020'), (2,'01/02/2020');
+             SET DateStyle = 'ISO, MDY'",
+            &[],
+        )
+        .unwrap();
+    let result = engine
+        .sql(
+            "SELECT id, set_config('DateStyle', CASE id WHEN 1 THEN 'ISO, MDY' ELSE 'ISO, DMY' END, false) AS setting,
+                    v::date - DATE '1970-01-01' AS day FROM cast_rows",
+            &[],
+        )
+        .unwrap();
+    let days = result
+        .rows
+        .iter()
+        .map(|row| (row["id"].clone(), row["day"].clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        days,
+        [
+            (Value::Int(1), Value::Int(18_263)),
+            (Value::Int(2), Value::Int(18_293)),
+        ],
+    );
+    engine
+        .sql(
+            "SET DateStyle = 'ISO, MDY';
+             PREPARE cast_dates AS SELECT v::date - DATE '1970-01-01' AS day FROM cast_rows ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    for (setup, expected) in [
+        ("SELECT 1", 18_263),
+        ("BEGIN; SET LOCAL DateStyle = 'ISO, DMY'", 18_293),
+        ("ROLLBACK", 18_263),
+    ] {
+        engine.sql(setup, &[]).unwrap();
+        let result = engine.sql("EXECUTE cast_dates", &[]).unwrap();
+        assert_eq!(result.rows.len(), 2);
+        assert!(result
+            .rows
+            .iter()
+            .all(|row| row["day"] == Value::Int(expected)));
+    }
+}

@@ -499,7 +499,8 @@ fn sql_update_reports_stale_document_ids() {
             .write()
             .get_mut(&"id".into())
             .unwrap()
-            .insert(99, &s("1"));
+            .replace(99, Some(&s("1")), &eng.query_retention_control().unwrap())
+            .unwrap();
     }
 
     let error = eng
@@ -547,6 +548,26 @@ impl FailingPutStore {
 }
 
 impl DocumentStore for FailingPutStore {
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<DocId>> {
+        use std::ops::Bound::{Excluded, Unbounded};
+        control.check()?;
+        let mut ids = uqa_core::memory::BudgetedVec::new(control.memory());
+        for (&id, _) in self
+            .docs
+            .range((after.map_or(Unbounded, Excluded), Unbounded))
+            .take(limit)
+        {
+            control.check()?;
+            ids.push(id)?;
+        }
+        Ok(ids)
+    }
+
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
         let remaining = self.fail_budget.load(Ordering::SeqCst);
         if remaining > 0 {

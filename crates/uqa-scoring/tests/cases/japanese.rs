@@ -65,6 +65,20 @@ fn japanese_occurrences_score_exact_reference_frequencies_in_all_wand_paths() {
                 assert!((row.score - expected).abs() < 1e-12, "{}", case.id);
             }
         }
+        let mut visited = Vec::new();
+        assert!(uqa_scoring::visit_text_terms(
+            &index,
+            "body",
+            &terms,
+            &ScoringMode::BM25(BM25Params::default()),
+            &mut |entry| {
+                visited.push(entry.doc_id);
+                assert!((entry.score - expected).abs() < 1e-12, "{}", case.id);
+                true
+            },
+        )
+        .unwrap());
+        assert_eq!(visited, [7, 65_536]);
         for k in [1, 2] {
             let materialized = WANDQuery::new_keys(
                 index.get_posting_lists_keys_bulk("body", &terms).unwrap(),

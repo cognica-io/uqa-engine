@@ -323,19 +323,13 @@ impl Preparation<'_> {
             ScalarExpr::Exists {
                 subquery: index, ..
             } => {
-                let query = subqueries.get(*index).ok_or_else(|| {
-                    error("XX000", "scalar subquery slot is outside its plan".into())
-                })?;
-                self.query(query, Some(input))?;
+                self.scalar_query_schema(*index, input, subqueries)?;
                 ExpressionType::resolved(Some(ColumnType::Boolean))
             }
             ScalarExpr::InSubquery { expr, subquery, .. } => {
                 let calls = self.set_calls();
                 let mut value = self.expression(expr, input, subqueries)?;
-                let query = subqueries.get(*subquery).ok_or_else(|| {
-                    error("XX000", "scalar subquery slot is outside its plan".into())
-                })?;
-                let schema = self.query(query, Some(input))?;
+                let schema = self.scalar_query_schema(*subquery, input, subqueries)?;
                 let mut result = ExpressionType::resolved(schema.column_type(0).cloned());
                 if let Some(oid) = schema.column_collation(0) {
                     result.derivation = Derivation::implicit(i64::from(oid));

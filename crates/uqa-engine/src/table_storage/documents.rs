@@ -136,20 +136,25 @@ impl Engine {
         predicate: &uqa_execution::ScalarExpr,
         params: &[uqa_sql::SQLParam],
     ) -> Result<Option<Vec<crate::ScoredEntry>>, SQLError> {
+        self.with_committed_retrieval(table, |session| {
+            crate::operator_tree_bridge::run_optimised(session, table, Some(predicate), params)
+        })
+    }
+
+    pub(crate) fn with_committed_retrieval<R>(
+        &self,
+        table: &str,
+        read: impl FnOnce(&Engine) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
         if self.storage.provider.is_none() {
-            return crate::operator_tree_bridge::run_optimised(
-                self,
-                table,
-                Some(predicate),
-                params,
-            );
+            return read(self);
         }
         let session = self.new_internal_read_session().map_err(|error| {
             SQLError::Internal(format!(
                 "open independent session to recheck retrieval on `{table}`: {error}"
             ))
         })?;
-        crate::operator_tree_bridge::run_optimised(&session, table, Some(predicate), params)
+        read(&session)
     }
 
     /// Execute one raw KNN leaf against the latest committed vector-index state for a tuple-local hierarchy recheck.
@@ -686,7 +691,7 @@ impl Engine {
         if existed {
             uqa_execution::serializable::observe_row_write(self, &table_name, doc_id)?;
         }
-        let old_indexed = Self::value_indexes_old_values(&t, doc_id);
+        let old_indexed = self.value_indexes_old_values(&t, doc_id)?;
         self.observe_value_index_write(
             &table_name,
             &t,
@@ -711,8 +716,8 @@ impl Engine {
             .delete(doc_id)
             .map_err(|err| document_store_write_error(&err))?;
         self.persist_value_indexes_apply_write(&table_name, doc_id, None, None)?;
-        if let Some(old) = old_indexed.as_ref() {
-            Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
+        if old_indexed.is_some() {
+            self.value_indexes_apply_write(&t, doc_id, None)?;
         }
         drop(store);
         if index_text {

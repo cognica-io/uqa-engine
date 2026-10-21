@@ -82,7 +82,15 @@ pub(super) fn visit<S: Clone + Send + Sync + 'static>(
             source.maps_integer_keys(),
             |name| name,
         ),
-    );
+    )
+    .map(|ids| {
+        crate::query::SelectedIds::from_sorted(
+            ids,
+            context.scans.runtime.work_mem_bytes()?,
+            context.scans.runtime.cancellation,
+        )
+    })
+    .transpose()?;
     if candidates.is_none() {
         candidates = crate::query::index_candidates::IndexCandidates {
             reads: context.scans.tables,
@@ -92,6 +100,7 @@ pub(super) fn visit<S: Clone + Send + Sync + 'static>(
             params,
             command_visible: ctes.reads_command_overlay(),
             cancellation: context.scans.runtime.cancellation,
+            bytes: context.scans.runtime.work_mem_bytes()?,
         }
         .select(filter)?;
     }

@@ -275,6 +275,7 @@ fn expression_value(
 }
 
 mod comparison;
+pub mod hydration;
 pub mod rebuild;
 mod update;
 

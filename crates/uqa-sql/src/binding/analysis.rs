@@ -10,6 +10,8 @@ mod calls;
 mod functions;
 mod query_sources;
 mod references;
+#[cfg(test)]
+mod tests;
 mod windows;
 
 pub(super) use calls::validate_call;
@@ -91,15 +93,7 @@ impl SchemaScope {
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         if let Some(predicate) = block.r#where.as_ref() {
-            self.validate_expression_references(
-                engine,
-                predicate,
-                source,
-                None,
-                &block.subqueries,
-                params,
-            )?;
-            self.validate_condition(
+            self.validate_condition_references(
                 engine,
                 predicate,
                 "WHERE",
@@ -131,15 +125,14 @@ impl SchemaScope {
             )?;
         }
         if let Some(having) = block.having.as_ref() {
-            self.validate_expression_references(
+            self.validate_condition_references(
                 engine,
                 having,
+                "HAVING",
                 source,
-                None,
                 &block.subqueries,
                 params,
             )?;
-            self.validate_condition(engine, having, "HAVING", source, &block.subqueries, params)?;
         }
         self.validate_output_references(engine, block, output, source, params)?;
         let enclosing = outer.cloned().unwrap_or_default();
@@ -277,7 +270,52 @@ impl SchemaScope {
     ) -> Result<(), SQLError> {
         let schema = self.with_stored_outer_internal_aliases(schema);
         super::preparation::condition_metadata(
-            self, engine, condition, construct, &schema, subqueries, params,
+            self,
+            engine,
+            condition,
+            construct,
+            params,
+            &super::type_resolution::BoundConditionQueries {
+                plans: subqueries,
+                input: &schema,
+                schemas: None,
+            },
+        )
+    }
+
+    /// Reuse only successful subquery bindings from this condition's reference check. Its Boolean coercion still follows reference errors, and no result leaves this lexical scope.
+    fn validate_condition_references(
+        &mut self,
+        engine: &dyn RoutineResolution,
+        condition: &ScalarExpr,
+        construct: &str,
+        schema: &RowSchema,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+    ) -> Result<(), SQLError> {
+        let schema = self.with_stored_outer_internal_aliases(schema);
+        let resolver =
+            self.query_function_type_resolver(engine, condition, &schema, subqueries, params)?;
+        Self::validate_expression_references_with_resolver(
+            self.rule_condition_event,
+            engine,
+            condition,
+            &schema,
+            None,
+            params,
+            &resolver,
+        )?;
+        super::preparation::condition_metadata(
+            self,
+            engine,
+            condition,
+            construct,
+            params,
+            &super::type_resolution::BoundConditionQueries {
+                plans: subqueries,
+                input: &schema,
+                schemas: resolver.scalar_subquery_schemas.as_deref(),
+            },
         )
     }
 

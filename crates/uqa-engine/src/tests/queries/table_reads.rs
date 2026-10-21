@@ -71,7 +71,8 @@ fn recheck_pins_clear_primary_key_ordering_when_their_order_is_not_ascending() {
             doc_id: 1,
             document: None,
         },
-    ])));
+    ])))
+    .unwrap();
 
     assert_eq!(source.output_ordering().len(), 0);
 }

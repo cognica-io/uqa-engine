@@ -33,7 +33,7 @@ pub(crate) enum ConstantCast {
     PerEvaluation,
 }
 
-/// Selected builtin scalar conversions are retained for the same immutable execution schema; catalog-defined and session-dependent casts keep their live path.
+/// Catalog-free source inference is retained for the same immutable execution schema. Explicit builtin conversions can also retain their descriptor; other casts resolve their source and target names against the invoking catalog on every evaluation.
 #[derive(Debug)]
 pub(crate) enum RowCast {
     Resolved {
@@ -41,7 +41,10 @@ pub(crate) enum RowCast {
         source: Produced<String>,
         schema: Option<RowSchema>,
     },
-    PerEvaluation,
+    Source {
+        source: Option<Produced<String>>,
+        schema: Option<RowSchema>,
+    },
 }
 
 /// A fixed numeric overload tied to the immutable schema that selected it.

@@ -33,6 +33,7 @@ pub trait RelationRetrieval: Sync {
         signal_table: &'a str,
         predicate: Option<&ScalarExpr>,
         params: &'a [SQLParam],
+        capture_complete_scores: bool,
     ) -> Result<Option<crate::query::scored_input::ScoredEntriesProducer<'a>>, SQLError>;
     fn optimized(
         &self,
@@ -40,6 +41,15 @@ pub trait RelationRetrieval: Sync {
         predicate: Option<&ScalarExpr>,
         params: &[SQLParam],
     ) -> Result<Option<Vec<ScoredEntry>>, SQLError>;
+    fn captured(
+        &self,
+        table: &str,
+        predicate: Option<&ScalarExpr>,
+        params: &[SQLParam],
+    ) -> Result<Option<crate::query::scored_input::ProducedScoredEntries>, SQLError> {
+        self.optimized(table, predicate, params)
+            .map(|entries| entries.map(Into::into))
+    }
     fn function(
         &self,
         table: &str,

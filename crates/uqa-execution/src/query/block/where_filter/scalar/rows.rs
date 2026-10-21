@@ -24,7 +24,7 @@ pub(super) struct ScalarRows<'a> {
     changes: DocumentChanges,
     control: StorageReadControl,
     serializable: SerializableScan,
-    candidates: Option<std::vec::IntoIter<DocId>>,
+    candidates: Option<crate::query::SelectedIdCursor>,
     after: Option<DocId>,
     page: BudgetedVec<DocId>,
     position: usize,
@@ -49,7 +49,7 @@ impl<'a> ScalarRows<'a> {
         projected: bool,
         metadata: bool,
         table_oid: Option<Value>,
-        candidates: Option<Vec<DocId>>,
+        candidates: Option<crate::query::SelectedIds>,
         command_visible: bool,
     ) -> Result<Self, SQLError> {
         // Identity and provider decode scratch have a fixed allowance independent of relation cardinality and projected row width.
@@ -73,7 +73,7 @@ impl<'a> ScalarRows<'a> {
             page: BudgetedVec::new(control.memory()),
             control,
             serializable: SerializableScan::new(context.scans.tables.serializable_read(table)?),
-            candidates: candidates.map(Vec::into_iter),
+            candidates: candidates.map(|ids| ids.cursor()),
             after: None,
             position: 0,
             columns,
@@ -90,6 +90,7 @@ impl<'a> ScalarRows<'a> {
             .map_err(|error| storage_error("read WHERE candidates", &error))?;
         if let Some(candidates) = &mut self.candidates {
             for id in candidates {
+                let id = id?;
                 self.control
                     .check()
                     .map_err(|error| storage_error("read WHERE indexed candidates", &error))?;

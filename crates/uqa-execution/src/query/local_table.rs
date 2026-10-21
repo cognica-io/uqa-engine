@@ -38,8 +38,8 @@ pub struct LocalTableRowSource {
     recheck_pins: Option<Arc<Vec<crate::row_locks::recheck::RecheckDoc>>>,
     recheck_cursor: usize,
     /// The only identities the scan's filter admits, in ascending order, and the position of the next of them.
-    candidates: Option<Arc<[uqa_core::DocId]>>,
-    candidate_cursor: usize,
+    candidates: Option<super::SelectedIds>,
+    candidate_cursor: Option<super::SelectedIdCursor>,
     command_changes: Option<super::document_changes::DocumentChanges>,
     command_change_after: Option<uqa_core::DocId>,
     /// The next changes of the command scan after `command_change_after`, read a page at a time.
@@ -142,7 +142,7 @@ pub struct LocalTableScanConfig {
     pub lock_origin: Option<SharedLockOrigin>,
     pub recheck_pins: Option<Arc<Vec<crate::row_locks::recheck::RecheckDoc>>>,
     /// The only identities the scan's filter admits, in ascending order.
-    pub candidates: Option<Arc<[uqa_core::DocId]>>,
+    pub candidates: Option<super::SelectedIds>,
     pub command_changes: Option<super::document_changes::DocumentChanges>,
 }
 
@@ -170,7 +170,7 @@ impl LocalTableRowSource {
             command_changes: config.command_changes,
             after: None,
             recheck_cursor: 0,
-            candidate_cursor: 0,
+            candidate_cursor: None,
             command_change_after: None,
             command_change_page: std::collections::VecDeque::new(),
             command_changes_exhausted: false,

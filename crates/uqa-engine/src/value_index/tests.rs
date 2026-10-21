@@ -141,6 +141,20 @@ impl DocumentStore for MissingProjectionStore {
         Ok(vec![1])
     }
 
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<DocId>> {
+        control.check()?;
+        let mut ids = uqa_core::memory::BudgetedVec::new(control.memory());
+        if limit != 0 && after.is_none_or(|after| after < 1) {
+            ids.push(1)?;
+        }
+        Ok(ids)
+    }
+
     fn len(&self) -> StorageBackendResult<usize> {
         Ok(1)
     }
@@ -476,3 +490,4 @@ fn rollbacks_leave_the_rows_they_undo_out_of_every_lookup() {
 }
 
 mod comparison_capture;
+mod retained_cache;

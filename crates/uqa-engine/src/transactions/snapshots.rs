@@ -19,9 +19,7 @@ impl Engine {
             {
                 continue;
             }
-            // Capture an already-writable deep copy once. Calling `snapshot`
-            // and then probing `writable_snapshot` would allocate and discard
-            // a second database-sized clone before the statement even starts.
+            // Capture an independent writable view once. Its storage owner may share an immutable root until mutation; probing a separate read snapshot first would duplicate retention or copying before the statement starts.
             let document_store: std::sync::Arc<dyn uqa_storage::DocumentStore> =
                 std::sync::Arc::from(table.document_store.read().writable_snapshot().map_err(
                     |err| Self::storage_tx_error("snapshot writable document store", &err),

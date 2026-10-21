@@ -139,7 +139,8 @@ fn ordering_call_state_is_private_while_tie_equality_reads_raw_oids() {
         types: &[],
         enums: Some(&catalog),
         states: &states,
-        equality_keys: false,
+        domain: SortComparisonDomain::SqlOrdering,
+        cancellation: None,
     };
     let first_left = physical(5);
     let first_right = physical(4);

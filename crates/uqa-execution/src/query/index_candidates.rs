@@ -6,13 +6,18 @@
 
 //! Scalar access candidates preserve the whole residual predicate and source column mapping.
 
-use super::indexed_filter::{self, QueryIndexRead};
-use uqa_core::{CancellationToken, DocId};
+use super::indexed_filter::QueryIndexRead;
+use uqa_core::CancellationToken;
 use uqa_sql::{
     ast::ColumnDef,
     retrieval::{RetrievalConstants, RetrievalExpr},
     SQLError, SQLParam, ScalarExpr,
 };
+
+mod capture;
+mod ids;
+pub(crate) use capture::capture_predicate;
+pub use ids::{SelectedIdCursor, SelectedIds};
 
 pub(crate) struct IndexCandidates<'a> {
     pub reads: &'a dyn QueryIndexRead,
@@ -23,10 +28,11 @@ pub(crate) struct IndexCandidates<'a> {
     pub params: &'a [SQLParam],
     pub command_visible: bool,
     pub cancellation: &'a CancellationToken,
+    pub bytes: usize,
 }
 
 impl IndexCandidates<'_> {
-    pub(crate) fn select(&self, filter: &ScalarExpr) -> Result<Option<Vec<DocId>>, SQLError> {
+    pub(crate) fn select(&self, filter: &ScalarExpr) -> Result<Option<SelectedIds>, SQLError> {
         self.cancellation.check()?;
         if let ScalarExpr::And(parts) = filter {
             // One answerable conjunct bounds the scan. The whole filter remains a residual, including other conjuncts and comparisons that can fail.
@@ -69,21 +75,7 @@ impl IndexCandidates<'_> {
         else {
             return Ok(None);
         };
-        let indexed = if self.command_visible {
-            indexed_filter::scan(
-                self.reads,
-                self.table,
-                &column.name,
-                &predicate,
-                self.cancellation,
-            )
-        } else {
-            self.reads
-                .value_index_scan(self.table, &column.name, &predicate)
-        };
-        indexed.map(|result| {
-            result.map(|posting| posting.entries().iter().map(|entry| entry.doc_id).collect())
-        })
+        capture::capture(self, &column.name, &predicate)
     }
 }
 

@@ -6,7 +6,9 @@
 
 //! Defer scored row production until the consumer requests rows.
 
-use super::{RecheckDoc, ScoredDocumentSource, ScoredEntriesProducer, ScoredInput};
+use super::{
+    ProducedScoredEntries, RecheckDoc, ScoredDocumentSource, ScoredEntriesProducer, ScoredInput,
+};
 use crate::query::deferred::DeferredOperator;
 use crate::{PhysicalOperator, RowSource, TableScan};
 use std::sync::Arc;
@@ -20,7 +22,7 @@ pub(in crate::query) fn defer_entries<'a>(
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     let Some(pending) = pending else {
         return Ok(Box::new(TableScan::new(Box::new(
-            source.with_recheck_pins(pins),
+            source.with_recheck_pins(pins)?,
         ))));
     };
     let schema = source
@@ -30,7 +32,22 @@ pub(in crate::query) fn defer_entries<'a>(
     Ok(Box::new(DeferredOperator::from_rows(
         schema,
         Box::new(move || {
-            let mut input = ScoredInput::entries(pending()?, true);
+            let entries = match pending()? {
+                ProducedScoredEntries::Materialized(entries) => entries,
+                ProducedScoredEntries::Captured(entries) => {
+                    if top_k.is_some() {
+                        return Err(SQLError::Internal(
+                            "complete retrieval capture cannot apply a score cutoff".into(),
+                        ));
+                    }
+                    return Ok(Box::new(
+                        source
+                            .with_captured_entries(entries)
+                            .with_recheck_pins(pins)?,
+                    ) as Box<dyn RowSource>);
+                }
+            };
+            let mut input = ScoredInput::entries(entries, true);
             if let Some(top_k) = top_k {
                 input.retain_top_scores_with_ties(top_k);
             }
@@ -40,7 +57,7 @@ pub(in crate::query) fn defer_entries<'a>(
             Ok(Box::new(
                 source
                     .with_retrieval_entries(entries)
-                    .with_recheck_pins(pins),
+                    .with_recheck_pins(pins)?,
             ))
         }),
     )))

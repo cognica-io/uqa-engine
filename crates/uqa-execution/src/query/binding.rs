@@ -301,6 +301,24 @@ pub fn bind_source_plan_schema_for_execution<S: Clone>(
     )
 }
 
+pub fn bind_query_block_for_execution<'a, S: Clone>(
+    routines: &dyn RoutineResolution,
+    block: &'a QueryBlockPlan,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    outer: Option<&RowSchema>,
+    defer_distinct_limit: bool,
+) -> Result<(std::borrow::Cow<'a, QueryBlockPlan>, RowSchema), SQLError> {
+    uqa_sql::binding::bind_query_block_for_execution(
+        routines,
+        block,
+        params,
+        &binding_context(ctes)?,
+        outer,
+        defer_distinct_limit,
+    )
+}
+
 pub use uqa_sql::binding::{
     extend_cte_generated_schema, overlay_outer_schema, with_query_table_pseudo_columns,
 };

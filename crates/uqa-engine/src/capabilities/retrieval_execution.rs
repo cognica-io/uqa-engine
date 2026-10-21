@@ -81,10 +81,16 @@ impl uqa_execution::query::block::context::RelationRetrieval for Engine {
         signal_table: &'a str,
         predicate: Option<&ScalarExpr>,
         params: &'a [SQLParam],
+        capture_complete_scores: bool,
     ) -> Result<Option<uqa_execution::query::scored_input::ScoredEntriesProducer<'a>>, SQLError>
     {
-        self.retrieval_query_context()
-            .prepare_accelerated(table, signal_table, predicate, params)
+        self.retrieval_query_context().prepare_accelerated(
+            table,
+            signal_table,
+            predicate,
+            params,
+            capture_complete_scores,
+        )
     }
     fn optimized(
         &self,
@@ -94,6 +100,15 @@ impl uqa_execution::query::block::context::RelationRetrieval for Engine {
     ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
         self.retrieval_query_context()
             .optimized(table, predicate, params)
+    }
+    fn captured(
+        &self,
+        table: &str,
+        predicate: Option<&ScalarExpr>,
+        params: &[SQLParam],
+    ) -> Result<Option<uqa_execution::query::scored_input::ProducedScoredEntries>, SQLError> {
+        self.retrieval_query_context()
+            .captured(table, predicate, params)
     }
     fn function(
         &self,

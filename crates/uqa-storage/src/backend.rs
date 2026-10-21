@@ -527,14 +527,16 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(None)
     }
 
-    /// Visit every previously evaluated entry in increasing identity order on one retained read boundary. False, without callbacks, declines an unbuilt index or an unsupported provider. A callback may capture values but must not reenter persistence. Consumer errors stop before the next entry and must propagate unchanged.
+    /// Visit every previously evaluated entry in increasing identity order on one retained read boundary. False, without callbacks, means the index is unbuilt. Providers retaining B-tree indexes must implement this operation; silently declining an unsupported reader would reevaluate previously stored expression keys. A callback may capture values but must not reenter persistence. Consumer errors stop before the next entry and must propagate unchanged.
     fn visit_btree_index_entries(
         &self,
         _table: &str,
         _field: &crate::ValueIndexKey,
         _visit: &mut dyn FnMut(DocId, Value) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<bool> {
-        Ok(false)
+        Err(StorageBackendError::Other(
+            "persistent provider does not support ordered stored-key reads".into(),
+        ))
     }
 
     fn btree_index_fields(&self, _table: &str) -> StorageBackendResult<Vec<crate::ValueIndexKey>> {

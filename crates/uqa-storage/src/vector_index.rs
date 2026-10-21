@@ -10,10 +10,9 @@
 //! `QueryPoolVectorScoreOperator`) depend only on this trait. IVF and HNSW
 //! backends slot in by implementing the same surface.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use uqa_core::{DocId, Payload, PostingEntry, PostingList};
+use uqa_core::{DocId, PostingList};
 
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -21,7 +20,10 @@ mod canonical;
 mod collection;
 mod config;
 mod cosine;
+mod memory;
 mod memory_snapshot;
+mod memory_state;
+pub use memory::MemoryVectorIndex;
 pub mod query;
 pub use query::statistics::{DiskANNExecutionRoute, DiskANNExecutionStats, VectorQueryResult};
 pub(crate) mod retained;
@@ -83,12 +85,8 @@ pub fn validate_vector_values_controlled(
     Ok(())
 }
 
-fn checked_vector_count(counts: impl IntoIterator<Item = usize>) -> StorageBackendResult<usize> {
-    counts.into_iter().try_fold(0_usize, |total, count| {
-        total
-            .checked_add(count)
-            .ok_or_else(|| StorageBackendError::Other("vector count overflow".into()))
-    })
+fn checked_vector_count(count: u128) -> StorageBackendResult<usize> {
+    usize::try_from(count).map_err(|_| StorageBackendError::Other("vector count overflow".into()))
 }
 
 pub(crate) fn validate_threshold(threshold: f32) -> StorageBackendResult<()> {
@@ -316,146 +314,6 @@ pub trait VectorIndex: Send + Sync {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct MemoryVectorIndex {
-    dimensions: u32,
-    vectors: BTreeMap<DocId, Vec<Vec<f32>>>,
-}
-
-impl MemoryVectorIndex {
-    pub fn new(dimensions: u32) -> Self {
-        Self {
-            dimensions,
-            vectors: BTreeMap::new(),
-        }
-    }
-
-    pub fn vectors(&self) -> &BTreeMap<DocId, Vec<Vec<f32>>> {
-        &self.vectors
-    }
-}
-
-impl VectorIndex for MemoryVectorIndex {
-    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
-        Ok(self.vectors.contains_key(&doc_id))
-    }
-
-    fn dimensions(&self) -> u32 {
-        self.dimensions
-    }
-
-    fn index_kind(&self) -> &'static str {
-        "memory-bruteforce"
-    }
-
-    fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
-        self.validate_dimensions(&vector)?;
-        self.vectors.insert(doc_id, vec![vector]);
-        Ok(())
-    }
-
-    fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()> {
-        for vector in &vectors {
-            self.validate_dimensions(vector)?;
-        }
-        if vectors.is_empty() {
-            self.vectors.remove(&doc_id);
-        } else {
-            self.vectors.insert(doc_id, vectors);
-        }
-        Ok(())
-    }
-
-    fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.vectors.remove(&doc_id);
-        Ok(())
-    }
-
-    fn clear(&mut self) -> StorageBackendResult<()> {
-        self.vectors.clear();
-        Ok(())
-    }
-
-    /// Brute-force top-k by cosine similarity, descending.
-    fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList> {
-        self.validate_dimensions(query)?;
-        if k == 0 || self.vectors.is_empty() {
-            return Ok(PostingList::new());
-        }
-        let mut scored: Vec<(DocId, f32)> = self
-            .vectors
-            .iter()
-            .filter_map(|(&doc_id, vectors)| best_vector_score(query, vectors).map(|s| (doc_id, s)))
-            .collect();
-        select_top_k_scored(&mut scored, k);
-        // The output of `top_k` is re-sorted by doc_id ascending so the
-        // posting list invariant holds; the score lives in the payload.
-        scored.sort_by_key(|(id, _)| *id);
-        let entries = scored
-            .into_iter()
-            .map(|(doc_id, sim)| PostingEntry::new(doc_id, Payload::with_score(f64::from(sim))))
-            .collect::<Vec<_>>();
-        Ok(PostingList::from_sorted_unchecked(entries))
-    }
-
-    /// Brute-force threshold scan: keep all docs with `cosine >= threshold`.
-    fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
-        self.validate_dimensions(query)?;
-        validate_threshold(threshold)?;
-        let mut entries: Vec<PostingEntry> = self
-            .vectors
-            .iter()
-            .filter_map(|(&doc_id, vectors)| {
-                let sim = best_vector_score(query, vectors)?;
-                if sim >= threshold {
-                    Some(PostingEntry::new(
-                        doc_id,
-                        Payload::with_score(f64::from(sim)),
-                    ))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        // The BTreeMap iteration is already doc_id-ascending, so the
-        // filter preserves the invariant.
-        entries.sort_by_key(|e| e.doc_id);
-        Ok(PostingList::from_sorted_unchecked(entries))
-    }
-
-    fn count(&self) -> StorageBackendResult<usize> {
-        checked_vector_count(self.vectors.values().map(Vec::len))
-    }
-
-    fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        Ok(Arc::new(self.clone()))
-    }
-
-    fn snapshot_with_control(
-        &self,
-        control: &crate::read_control::StorageReadControl,
-    ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        memory_snapshot::capture(self, control)
-    }
-
-    fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn VectorIndex>> {
-        Ok(Box::new(self.clone()))
-    }
-}
-
-impl MemoryVectorIndex {
-    fn validate_dimensions(&self, vector: &[f32]) -> StorageBackendResult<()> {
-        validate_vector_values(self.dimensions, vector)
-    }
-}
-
-fn best_vector_score(query: &[f32], vectors: &[Vec<f32>]) -> Option<f32> {
-    vectors
-        .iter()
-        .map(|vector| cosine_similarity(query, vector))
-        .max_by(f32::total_cmp)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,7 +354,7 @@ mod tests {
 
     #[test]
     fn vector_count_overflow_is_reported() {
-        let error = checked_vector_count([usize::MAX, 1]).unwrap_err();
+        let error = checked_vector_count(usize::MAX as u128 + 1).unwrap_err();
         assert!(error.to_string().contains("vector count overflow"));
     }
 

@@ -244,6 +244,33 @@ fn retained_value_index_failure_and_early_stop_preserve_prior_roots() {
 }
 
 #[test]
+fn retained_value_index_ordered_build_does_not_reread_completed_subtrees() {
+    let control = StorageReadControl::with_limit(64 * 1024);
+    for allowance in [0, 64 * 1024] {
+        for count in [31, 128] {
+            let expected = (0..count)
+                .map(|id| (id as u64, Value::Int((id / 3) as i64)))
+                .collect::<BTreeMap<_, _>>();
+            let mut rows = expected.clone().into_iter();
+            records::NODE_READS.with(|reads| reads.set(0));
+            let index = RetainedValueIndex::from_ordered(
+                allowance,
+                count,
+                &mut || Ok(rows.next()),
+                &control,
+            )
+            .unwrap();
+            let reads = records::NODE_READS.with(std::cell::Cell::get);
+            assert!(
+                reads <= count,
+                "{reads} metadata reads for {count} ordered keys; only duplicate-identity probes are needed"
+            );
+            validate(&index, &expected, &control);
+        }
+    }
+}
+
+#[test]
 fn retained_value_index_ordered_build_rejects_invalid_sources_without_publishing() {
     let control = StorageReadControl::with_limit(64 * 1024);
     for (count, rows) in [

@@ -43,16 +43,42 @@ pub trait RetrievalRelations: Sync {
     fn has_table(&self, table: &str) -> StorageBackendResult<bool>;
     fn column_type(&self, table: &str, field: &str) -> StorageBackendResult<Option<ColumnType>>;
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError>;
+    fn table_doc_id_page(
+        &self,
+        table: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError>;
     fn get_document_fields(
         &self,
         table: &str,
         ids: &[DocId],
         field: &str,
     ) -> Result<BTreeMap<DocId, Value>, SQLError>;
+    /// Retain the selected projection context and its original read/evaluation ordering while capturing complete filter support.
+    fn capture_document_filter(
+        &self,
+        table: &str,
+        ids: &crate::query::SelectedIds,
+        field: &str,
+        predicate: &uqa_core::Predicate,
+        bytes: usize,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<crate::query::scored_input::CapturedScoredEntries, SQLError> {
+        super::filter::capture(self, table, field, predicate, ids, bytes, cancellation)
+    }
 }
 
 pub trait RetrievalSnapshots: Sync {
     fn snapshot_context(&self, table: &str) -> Result<Option<ExecutionContext>, SQLError>;
+    /// Retain the relation boundary for already evaluated score signals. Fusion does not read vector indexes; adapters can omit their physical snapshots.
+    fn snapshot_context_for_scores(
+        &self,
+        table: &str,
+    ) -> Result<Option<ExecutionContext>, SQLError> {
+        self.snapshot_context(table)
+    }
     fn snapshot_context_with_document_store(
         &self,
         table: &str,
@@ -97,6 +123,14 @@ pub trait PhysicalTextRetrieval: Sync {
         limit: usize,
         top_k: Option<TextTopKPlan>,
     ) -> Result<Vec<ScoredEntry>, SQLError>;
+    fn visit_search_leaf(
+        &self,
+        table: &str,
+        field: &str,
+        query: &str,
+        mode: &ScoringMode,
+        visitor: &mut dyn FnMut(ScoredEntry) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError>;
 }
 
 pub trait PhysicalVectorRetrieval: Sync {

@@ -13,8 +13,8 @@ mod tests;
 use super::analyze_helpers::ColumnAnalyzeValues;
 use super::{
     build_histogram, build_mcv, collect_analyze_values, distinct_count, Arc, BTreeMap,
-    CatalogFacade, ColumnStatsInput, DocId, Engine, Ordering, StorageBackendError,
-    StorageBackendResult, TableState, Value,
+    CatalogFacade, ColumnStatsInput, Engine, Ordering, StorageBackendError, StorageBackendResult,
+    TableState, Value,
 };
 
 struct HierarchyAnalyzeInputs {
@@ -244,13 +244,11 @@ impl Engine {
         }
         // Read before the sample, which reads at this sequence or a later one.
         let sampled_at = self.statistics_sample_sequence();
-        let inputs = self.collect_hierarchy_analyze_inputs(
+        let (stats_out, row_count) = self.collect_hierarchy_analyze_statistics(
             canonical_table_name,
             &columns,
             include_descendants,
         )?;
-        let row_count = inputs.row_count;
-        let stats_out = build_analyze_stats(&columns, inputs)?;
 
         let stats_out = if requested_columns.is_some() {
             let mut combined = t.column_stats.read().clone();
@@ -284,71 +282,58 @@ impl Engine {
         Ok(())
     }
 
-    fn collect_hierarchy_analyze_inputs(
+    fn collect_hierarchy_analyze_statistics(
         &self,
         canonical_table_name: &str,
         columns: &[String],
         include_descendants: bool,
-    ) -> StorageBackendResult<HierarchyAnalyzeInputs> {
-        let mut col_values = columns
-            .iter()
-            .map(|column| (column.clone(), ColumnAnalyzeValues::default()))
-            .collect::<BTreeMap<_, _>>();
-        let mut col_nulls = columns
-            .iter()
-            .map(|column| (column.clone(), 0_u64))
-            .collect::<BTreeMap<_, _>>();
+    ) -> StorageBackendResult<(crate::ColumnStatsMap, u64)> {
         let members = self
             .hierarchy_scan_tables(canonical_table_name, include_descendants)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        let mut n = 0_u64;
-        for member_name in members {
-            let member = self.try_table(&member_name)?.ok_or_else(|| {
+        let snapshots = members.iter().map(|member_name| {
+            let member = self.try_table(member_name)?.ok_or_else(|| {
                 StorageBackendError::Other(format!(
                     "ANALYZE hierarchy member `{member_name}` does not exist"
                 ))
             })?;
             let snapshot = member.document_store.read().snapshot()?;
-            let mut doc_ids: Vec<DocId> = snapshot.doc_ids()?;
-            doc_ids.sort_unstable();
-            n = n
-                .checked_add(u64::try_from(doc_ids.len()).map_err(|_| {
-                    StorageBackendError::Other("ANALYZE document count exceeds u64".into())
-                })?)
-                .ok_or_else(|| {
-                    StorageBackendError::Other("ANALYZE hierarchy row count overflow".into())
-                })?;
-            let (mut member_values, member_nulls) =
-                collect_analyze_values(snapshot.as_ref(), &doc_ids, columns)?;
-            for column in columns {
-                col_values
-                    .get_mut(column)
-                    .ok_or_else(|| {
-                        StorageBackendError::Other(format!(
-                            "ANALYZE lost the value buffer for column `{column}`"
-                        ))
-                    })?
-                    .extend(member_values.remove(column).unwrap_or_default());
-                let null_count = member_nulls.get(column).copied().ok_or_else(|| {
-                    StorageBackendError::Other(format!(
-                        "ANALYZE lost the null counter for column `{column}`"
-                    ))
-                })?;
-                let total = col_nulls.get_mut(column).ok_or_else(|| {
-                    StorageBackendError::Other(format!(
-                        "ANALYZE lost the null counter for column `{column}`"
-                    ))
-                })?;
-                *total = total.checked_add(null_count).ok_or_else(|| {
-                    StorageBackendError::Other("ANALYZE null count overflow".into())
-                })?;
-            }
-        }
-        Ok(HierarchyAnalyzeInputs {
-            row_count: n,
-            values: col_values,
-            null_counts: col_nulls,
-        })
+            Ok(snapshot)
+        });
+        let workspace = self
+            .work_mem_bytes()
+            .map_err(|error| StorageBackendError::backend("ANALYZE workspace", error))?;
+        let inputs = uqa_execution::maintenance::analyze::values::collect_values(
+            snapshots,
+            columns,
+            workspace,
+            &self.runtime.cancellation,
+            crate::statistics::value_size::accepts,
+        )
+        .map_err(|error| StorageBackendError::backend("ANALYZE value collection", error))?;
+        let counts = inputs
+            .counts
+            .iter()
+            .map(
+                |count| uqa_planner::cardinality::analyze::ColumnObservationCounts {
+                    nulls: count.nulls,
+                    omitted: count.omitted,
+                    comparable: count.comparable,
+                },
+            )
+            .collect::<Vec<_>>();
+        let stats = uqa_planner::cardinality::analyze::collect_statistics(
+            inputs.row_count,
+            &counts,
+            inputs.values,
+            crate::statistics::value_size::HISTOGRAM_VALUES,
+            crate::statistics::value_size::MCV_VALUES,
+        )
+        .map_err(|error| StorageBackendError::backend("ANALYZE distributions", error))?;
+        Ok((
+            columns.iter().cloned().zip(stats).collect(),
+            inputs.row_count,
+        ))
     }
 
     /// `sampled_at` is the commit sequence the statistics were sampled at, or `None` when it is not known.

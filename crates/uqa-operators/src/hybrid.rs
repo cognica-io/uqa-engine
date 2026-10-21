@@ -15,9 +15,8 @@ use uqa_core::{
 };
 use uqa_fusion::{
     AdaptivePositiveEvidencePool as AdaptivePositiveEvidenceFuser, BayesianEvidenceFusion,
-    LogitGating, ProbabilisticBoolean, RobustPositiveEvidencePool, SignalQuality,
+    LogitGating, ProbabilisticBoolean, SignalQuality,
 };
-use uqa_scoring::EvidenceLogit;
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 use crate::base::{
@@ -25,6 +24,9 @@ use crate::base::{
 };
 use crate::primitive::TermOperator;
 use crate::vector::VectorSimilarityOperator;
+
+pub mod evidence;
+pub mod positive;
 
 /// Default probability for documents missing from a signal, interpolated
 /// by the signal's coverage (Section 5, Paper 3 / Section 4, Paper 4):
@@ -50,56 +52,6 @@ fn validate_probability_postings(
         require_probability(entry.payload.score, operation)?;
     }
     Ok(())
-}
-
-/// Share of the adaptive weight mass distributed by gated-evidence
-/// spread; the remainder stays uniform so no matching signal is ever
-/// silenced entirely.
-const ADAPTIVE_SPREAD_SHARE: f64 = 0.5;
-
-/// Discrimination-based per-signal weights: each signal's weight blends
-/// a uniform share with its share of the total gated-evidence spread
-/// across its own matches. A signal that assigns every candidate the
-/// same evidence carries no ranking information and sinks toward the
-/// uniform floor. Returns `None` when no signal has measurable spread,
-/// falling back to the unweighted mean.
-fn adaptive_signal_weights(
-    fuser: &RobustPositiveEvidencePool,
-    score_maps: &[BTreeMap<DocId, f64>],
-) -> Option<Vec<f64>> {
-    let spreads: Vec<f64> = score_maps
-        .iter()
-        .map(|scores| {
-            if scores.len() < 2 {
-                return 0.0;
-            }
-            let logits: Vec<f64> = scores
-                .values()
-                .map(|probability| fuser.gated_logit(*probability))
-                .collect();
-            let mean = logits.iter().sum::<f64>() / logits.len() as f64;
-            let variance = logits
-                .iter()
-                .map(|logit| {
-                    let difference = logit - mean;
-                    difference * difference
-                })
-                .sum::<f64>()
-                / logits.len() as f64;
-            variance.sqrt()
-        })
-        .collect();
-    let total: f64 = spreads.iter().sum();
-    if total <= f64::EPSILON {
-        return None;
-    }
-    let uniform = (1.0 - ADAPTIVE_SPREAD_SHARE) / score_maps.len() as f64;
-    Some(
-        spreads
-            .iter()
-            .map(|spread| uniform + ADAPTIVE_SPREAD_SHARE * spread / total)
-            .collect(),
-    )
 }
 
 /// `Hybrid_{t, q, theta} = T(t) AND V_theta(q)` (Definition 3.3.1).
@@ -168,7 +120,7 @@ impl Operator for SemanticFilterOperator {
 /// Exact Bayesian fusion of signed prior-free evidence.
 ///
 /// Each present score is interpreted as a prior-free probability-like evidence
-/// value and converted to a signed [`EvidenceLogit`]. Missing signals contribute
+/// value and converted to a signed [`uqa_scoring::EvidenceLogit`]. Missing signals contribute
 /// the additive identity zero. The configured corpus prior enters exactly once,
 /// after which the operator computes
 /// `sigmoid(logit(base_rate) + sum(evidence_i))` without gating, confidence
@@ -208,42 +160,31 @@ impl Operator for BayesianEvidenceFusionOperator {
             .iter()
             .map(|signal| signal.execute(ctx))
             .collect::<StorageBackendResult<_>>()?;
-        for posting_list in &posting_lists {
-            validate_probability_postings(posting_list, "Bayesian evidence fusion")?;
-        }
-
-        let mut all_doc_ids = std::collections::BTreeSet::new();
-        let score_maps: Vec<BTreeMap<DocId, f64>> = posting_lists
-            .iter()
-            .map(|posting_list| {
-                let mut scores = BTreeMap::new();
-                for entry in posting_list {
-                    scores.insert(entry.doc_id, entry.payload.score);
-                    all_doc_ids.insert(entry.doc_id);
-                }
-                scores
-            })
-            .collect();
-        if all_doc_ids.is_empty() {
-            return Ok(PostingList::new());
-        }
-
-        let mut entries = Vec::with_capacity(all_doc_ids.len());
-        for doc_id in all_doc_ids {
-            let evidence: Vec<EvidenceLogit> = score_maps
-                .iter()
-                .filter_map(|scores| scores.get(&doc_id).copied())
-                .map(EvidenceLogit::from_prior_free_probability)
-                .collect::<Result<_, _>>()
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            let posterior = fusion
-                .fuse(&evidence)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            entries.push(PostingEntry::new(
-                doc_id,
-                Payload::with_score(posterior.value()),
-            ));
-        }
+        let mut entries = Vec::new();
+        evidence::visit_exact_evidence(
+            &fusion,
+            posting_lists.len(),
+            |signal| {
+                Ok::<_, StorageBackendError>(posting_lists[signal].entries().iter().map(|entry| {
+                    Ok(uqa_core::ScoredEntry {
+                        doc_id: entry.doc_id,
+                        score: entry.payload.score,
+                    })
+                }))
+            },
+            |entry| {
+                entries.push(PostingEntry::new(
+                    entry.doc_id,
+                    Payload::with_score(entry.score),
+                ));
+                Ok(())
+            },
+        )
+        .map_err(|error| match error {
+            evidence::EvidenceVisitError::Input(error)
+            | evidence::EvidenceVisitError::Output(error)
+            | evidence::EvidenceVisitError::Fusion(error) => error,
+        })?;
         let result = PostingList::from_sorted_unchecked(entries);
         Ok(match self.top_k {
             Some(k) => result.ranked().select_top_k(k),
@@ -337,95 +278,46 @@ impl RobustPositiveEvidencePoolOperator {
 
 impl Operator for RobustPositiveEvidencePoolOperator {
     fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
-        if self.signals.is_empty() {
-            return Err(StorageBackendError::Other(
-                "positive-evidence pool requires at least one signal".to_string(),
-            ));
-        }
-        if !self.alpha.is_finite() || !(0.0..=1.0).contains(&self.alpha) {
-            return Err(StorageBackendError::Other(format!(
-                "positive-evidence pool alpha must be finite and in [0, 1], got {}",
-                self.alpha
-            )));
-        }
-        if let Some(base_rate) = self.base_rate {
-            if !base_rate.is_finite() || base_rate <= 0.0 || base_rate >= 1.0 {
-                return Err(StorageBackendError::Other(format!(
-                    "positive-evidence pool base_rate must be finite and in (0, 1), got {base_rate}"
-                )));
-            }
-        }
-        let mut fuser = RobustPositiveEvidencePool::new(self.alpha)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?
-            .with_logit_gating(self.gating);
-        if let Some(base_rate) = self.base_rate {
-            fuser = fuser
-                .with_base_rate(base_rate)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        }
-        fuser
-            .validate_configuration(
-                self.signals.len(),
-                self.weights.as_deref(),
-                self.logit_min.as_deref(),
-                self.logit_max.as_deref(),
-            )
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        let pool = positive::PreparedPositiveEvidencePool::new(
+            positive::PositiveEvidencePoolOptions {
+                alpha: self.alpha,
+                gating: self.gating,
+                base_rate: self.base_rate,
+                weights: self.weights.as_deref(),
+                adaptive_weights: self.adaptive_weights,
+                logit_min: self.logit_min.as_deref(),
+                logit_max: self.logit_max.as_deref(),
+            },
+            self.signals.len(),
+        )?;
         let posting_lists: Vec<PostingList> = self
             .signals
             .iter()
             .map(|sig| sig.execute(ctx))
             .collect::<StorageBackendResult<_>>()?;
-        for posting_list in &posting_lists {
-            validate_probability_postings(posting_list, "positive-evidence pool")?;
-        }
-
-        // Build per-signal score maps and the universal doc id set.
-        let mut all_doc_ids: std::collections::BTreeSet<DocId> = std::collections::BTreeSet::new();
-        let score_maps: Vec<BTreeMap<DocId, f64>> = posting_lists
-            .iter()
-            .map(|pl| {
-                let mut smap = BTreeMap::new();
-                for entry in pl {
-                    smap.insert(entry.doc_id, entry.payload.score);
-                    all_doc_ids.insert(entry.doc_id);
-                }
-                smap
-            })
-            .collect();
-
-        if all_doc_ids.is_empty() {
-            return Ok(PostingList::new());
-        }
-
-        // A signal with no matches still contributes neutral evidence to
-        // every document: the declared signal count governs `n^alpha`
-        // and the uniform denominator, so a document's fused score
-        // cannot depend on whether another signal happened to match
-        // elsewhere (Lucene PR 16410 semantics).
-        let weights = self.weights.clone().or_else(|| {
-            if self.adaptive_weights {
-                adaptive_signal_weights(&fuser, &score_maps)
-            } else {
-                None
-            }
-        });
-        let mut entries = Vec::with_capacity(all_doc_ids.len());
-        for doc_id in &all_doc_ids {
-            let probabilities: Vec<Option<f64>> = score_maps
-                .iter()
-                .map(|scores| scores.get(doc_id).copied())
-                .collect();
-            let fused_score = fuser
-                .fuse_configured(
-                    &probabilities,
-                    weights.as_deref(),
-                    self.logit_min.as_deref(),
-                    self.logit_max.as_deref(),
-                )
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            entries.push(PostingEntry::new(*doc_id, Payload::with_score(fused_score)));
-        }
+        let mut entries = Vec::new();
+        pool.visit(
+            |signal| {
+                Ok::<_, StorageBackendError>(posting_lists[signal].entries().iter().map(|entry| {
+                    Ok(uqa_core::ScoredEntry {
+                        doc_id: entry.doc_id,
+                        score: entry.payload.score,
+                    })
+                }))
+            },
+            |entry| {
+                entries.push(PostingEntry::new(
+                    entry.doc_id,
+                    Payload::with_score(entry.score),
+                ));
+                Ok(())
+            },
+        )
+        .map_err(|error| match error {
+            evidence::EvidenceVisitError::Input(error)
+            | evidence::EvidenceVisitError::Output(error)
+            | evidence::EvidenceVisitError::Fusion(error) => error,
+        })?;
         let result = PostingList::from_sorted_unchecked(entries);
         Ok(match self.top_k {
             Some(k) => result.ranked().select_top_k(k),

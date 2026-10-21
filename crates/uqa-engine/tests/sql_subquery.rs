@@ -10,6 +10,8 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_subquery/condition_binding.rs"]
+mod condition_binding;
 #[path = "sql_subquery/runtime_schema.rs"]
 mod runtime_schema;
 

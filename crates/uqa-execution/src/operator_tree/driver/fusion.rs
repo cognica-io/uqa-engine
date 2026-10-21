@@ -17,6 +17,17 @@ use super::{
     StaticPostingList, StorageBackendError, TextScoringMode, Value,
 };
 
+pub(super) fn lower_positive_gating(gating: &GatingSpec) -> uqa_fusion::LogitGating {
+    match gating {
+        GatingSpec::Softplus => uqa_fusion::LogitGating::Softplus,
+        GatingSpec::Pass => uqa_fusion::LogitGating::Pass,
+        GatingSpec::Sigmoid { .. } => uqa_fusion::LogitGating::Sigmoid,
+        GatingSpec::ReLU => uqa_fusion::LogitGating::ReLU,
+        GatingSpec::Swish => uqa_fusion::LogitGating::Swish,
+        GatingSpec::Gelu => uqa_fusion::LogitGating::Gelu,
+    }
+}
+
 impl PhysicalRetrievalDriver<'_> {
     fn text_retrieval_context(&self) -> crate::query::retrieval::context::TextRetrievalContext<'_> {
         crate::query::retrieval::context::TextRetrievalContext {
@@ -220,6 +231,15 @@ impl PhysicalRetrievalDriver<'_> {
         field: &str,
         predicate: &uqa_core::Predicate,
     ) -> DriverResult<PostingList> {
+        self.require_index_scan(index_name, field)?;
+        self.value_index_scan(field, predicate)?.ok_or_else(|| {
+            SQLError::Unsupported(format!(
+                "index {index_name:?} cannot evaluate predicate {predicate:?}"
+            ))
+        })
+    }
+
+    pub(super) fn require_index_scan(&self, index_name: &str, field: &str) -> DriverResult<()> {
         self.require_column(field)?;
         let index = self
             .context
@@ -261,11 +281,7 @@ impl PhysicalRetrievalDriver<'_> {
                 "index {index_name:?} does not cover leading field {field:?}"
             )));
         }
-        self.value_index_scan(field, predicate)?.ok_or_else(|| {
-            SQLError::Unsupported(format!(
-                "index {index_name:?} cannot evaluate predicate {predicate:?}"
-            ))
-        })
+        Ok(())
     }
 
     pub(super) fn execute_vector_exclusion(
@@ -314,14 +330,7 @@ impl PhysicalRetrievalDriver<'_> {
                 signal_priors.push(prior);
             }
         }
-        let logit_gating = match gating {
-            GatingSpec::Softplus => uqa_fusion::LogitGating::Softplus,
-            GatingSpec::Pass => uqa_fusion::LogitGating::Pass,
-            GatingSpec::Sigmoid { .. } => uqa_fusion::LogitGating::Sigmoid,
-            GatingSpec::ReLU => uqa_fusion::LogitGating::ReLU,
-            GatingSpec::Swish => uqa_fusion::LogitGating::Swish,
-            GatingSpec::Gelu => uqa_fusion::LogitGating::Gelu,
-        };
+        let logit_gating = lower_positive_gating(gating);
         let mut operator =
             RobustPositiveEvidencePoolOperator::new(signal_ops, alpha).with_gating(logit_gating);
         if adaptive_weights {
@@ -805,7 +814,7 @@ impl PhysicalRetrievalDriver<'_> {
     }
 }
 
-fn resolve_exact_signal_prior(priors: &[f64]) -> DriverResult<Option<f64>> {
+pub(super) fn resolve_exact_signal_prior(priors: &[f64]) -> DriverResult<Option<f64>> {
     let Some(first) = priors.first().copied() else {
         return Ok(None);
     };

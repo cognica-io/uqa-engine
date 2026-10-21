@@ -16605,8 +16605,8 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/expr/casting/resolved/tests.rs",
       "capability": "Resolved scalar cast execution",
-      "workload": "Zero allowance and cancelled output; temporal, OID, record, array and catalog-defined types.",
-      "invariant": "Output admission and cancellation remain live; session-sensitive and catalog-sensitive identities are never selected.",
+      "workload": "Zero allowance and cancelled output; OID, record, array and catalog-defined types.",
+      "invariant": "Output admission and cancellation remain live; catalog-sensitive identities are never selected.",
       "case_names": [
         ""
       ]
@@ -18829,6 +18829,1683 @@
       "capability": "Exact batch schema invalidation",
       "workload": "Equal-width schemas with different qualifiers/types and a wider schema, followed by the original schema.",
       "invariant": "Only identical immutable schemas share sizing; every changed schema yields its exact native byte count.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_matches_resident_predicates_cardinality_and_full_identities",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_preserves_carried_values_and_eligibility_changes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_spills_growth_and_keeps_prior_snapshots_and_stored_keys",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_observes_before_reads_and_retains_consumer_and_cancellation_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_wide_population_keeps_bounded_build_and_lookup_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "More than 2MiB of keys retain at most 1536KiB peak allocated bytes through capture, sorting, publication and three exact lookups.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_keeps_identity_order_for_fallible_typed_comparison",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_rejects_duplicate_identities_without_publishing_an_owner",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_index_sort_keeps_core_order_and_opaque_values_across_merge_passes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/external_sort/tests/physical_keys.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_index_sort_validates_slots_and_preserves_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/external_sort/tests/physical_keys.rs",
+      "capability": "Bounded evaluated-key cache",
+      "workload": "Resident and forced-spill key capture, exact predicate and identity replay, snapshot edits, opaque typed keys and failure boundaries.",
+      "invariant": "Stored representations, physical ordering, SQL eligibility, cardinality, cancellation and first-error boundaries remain identical across the two backing modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_ordered_build_does_not_reread_completed_subtrees",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Bounded retained value indexes",
+      "workload": "Ordered inputs of 31 and 128 keys with zero and 64KiB spill thresholds.",
+      "invariant": "At most one metadata read per input key for duplicate-identity validation; complete values, ordering and balanced heights remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cold_index_capture_reconciles_stale_and_missing_ids_without_reevaluating_stored_keys",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/hydration/tests.rs",
+      "capability": "Bounded cold index capture and reconciliation",
+      "workload": "Stored keys with stale/missing identities, empty/unbuilt markers, complete identity capture, 259 expression rows, delayed errors and 2MiB of missing keys.",
+      "invariant": "Previously evaluated keys are retained; complete 256-row capture precedes expressions and diagnostics, document guards are released before callbacks and cancellation is typed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cold_index_expression_capture_preserves_batch_boundary_and_releases_document_guards",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/hydration/tests.rs",
+      "capability": "Bounded cold index capture and reconciliation",
+      "workload": "Stored keys with stale/missing identities, empty/unbuilt markers, complete identity capture, 259 expression rows, delayed errors and 2MiB of missing keys.",
+      "invariant": "Previously evaluated keys are retained; complete 256-row capture precedes expressions and diagnostics, document guards are released before callbacks and cancellation is typed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cold_index_capture_preserves_later_read_errors_before_validation_or_evaluation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/hydration/tests.rs",
+      "capability": "Bounded cold index capture and reconciliation",
+      "workload": "Stored keys with stale/missing identities, empty/unbuilt markers, complete identity capture, 259 expression rows, delayed errors and 2MiB of missing keys.",
+      "invariant": "Previously evaluated keys are retained; complete 256-row capture precedes expressions and diagnostics, document guards are released before callbacks and cancellation is typed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cold_index_capture_handles_empty_markers_cancellation_and_provider_contract_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/hydration/tests.rs",
+      "capability": "Bounded cold index capture and reconciliation",
+      "workload": "Stored keys with stale/missing identities, empty/unbuilt markers, complete identity capture, 259 expression rows, delayed errors and 2MiB of missing keys.",
+      "invariant": "Previously evaluated keys are retained; complete 256-row capture precedes expressions and diagnostics, document guards are released before callbacks and cancellation is typed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cold_index_capture_bounds_wide_missing_key_population_before_cache_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/hydration/tests.rs",
+      "capability": "Bounded cold index capture and reconciliation",
+      "workload": "Stored keys with stale/missing identities, empty/unbuilt markers, complete identity capture, 259 expression rows, delayed errors and 2MiB of missing keys.",
+      "invariant": "Capture, projection and cache publication remain within a fixed 1536KiB peak allocation ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_prepares_all_fields_before_publishing_a_row",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests/publication.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "Resident and spilled first keys followed by a second key that cannot reserve its nested traversal.",
+      "invariant": "Every cached field remains unchanged on failed preparation; successful replacement and deletion preserve prior snapshots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_projection_keeps_null_presence_early_stop_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests/publication.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "Mixed resident/carried and spilled values, absent rows, scalar NULL, zero-column output and cancellation.",
+      "invariant": "One-row stored projections preserve presence, early stop and SQLSTATE 57014 without a fallback after failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "index_only_reentrant_projection_captures_all_reads_with_bounded_payload",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/indexed.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "256 stored 8KiB keys captured under 64KiB query work memory before a reentrant consumer.",
+      "invariant": "Complete source reads precede consumer invocation; index guards are released and exact output stays below a fixed 512KiB peak ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "index_only_reentrant_projection_keeps_late_read_errors_before_consumers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/indexed.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "A source visits full-width identities and then reports a typed resource failure.",
+      "invariant": "No consumer executes before a later source read error; SQLSTATE 53200 is preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cold_value_cache_keeps_bounded_payload_and_transaction_snapshots",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/value_index/tests/retained_cache.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "256 indexed 8KiB values, persistent reopen, cold hydration under 64KiB query work memory, mutation, savepoint and rollback.",
+      "invariant": "Cold retained-key construction stays below a fixed 1536KiB peak ceiling; previous snapshots and transaction-visible results remain exact.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cold_value_cache_preserves_persisted_expression_values_after_routine_replacement",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/value_index/tests/retained_cache.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "An immutable expression is replaced after eight wide keys are stored; reopen and cold hydration force retained storage.",
+      "invariant": "The cache preserves every stored key representation instead of recomputing keys using the newer routine definition.",
+      "case_names": [
+        "case_1_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cold_detached_value_cache_reads_its_selected_document_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/value_index/tests/retained_cache.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "A detached cold table generation outlives a live UPDATE and DELETE on each provider.",
+      "invariant": "Hydration reads the selected snapshot, retaining the original value and NULL identity instead of consulting the live backend.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "temporal_row_casts_resolve_once_and_keep_live_input_settings",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/scalar_casts/temporal.rs",
+      "capability": "Resolved temporal cast execution",
+      "workload": "1,000 text-to-date conversions with alternating live MDY/DMY settings.",
+      "invariant": "One source selection and two catalog name resolutions; all 1,000 settings reads, callbacks and PostgreSQL dates remain live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "temporal_descriptors_keep_live_zone_date_output_and_interval_input",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/scalar_casts/temporal.rs",
+      "capability": "Resolved temporal cast execution",
+      "workload": "Repeated timestamp-to-date, date-to-varchar and text-to-interval conversions with alternating session settings.",
+      "invariant": "One descriptor per expression preserves independent PostgreSQL dates, output style and interval sign rules.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "temporal_descriptor_failures_preserve_callbacks_and_current_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/scalar_casts/temporal.rs",
+      "capability": "Resolved temporal cast execution",
+      "workload": "Success followed by malformed input, callback failure, zero allowance and invoking cancellation.",
+      "invariant": "No failure is cached; 22007, 23514, 53200 and 57014 retain the current evaluation order and no scratch remains charged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_temporal_modifiers_preserve_postgresql_rounding_and_field_rules",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/casting/resolved/tests.rs",
+      "capability": "Resolved temporal cast execution",
+      "workload": "Typed timestamp, time and interval precision/field modifiers and NULL values.",
+      "invariant": "Independent PostgreSQL rounding and interval field results use the existing conversion kernels without type-name parsing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "prepared_temporal_casts_keep_live_settings_and_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/catalog_cast_qualification.rs",
+      "capability": "Resolved temporal cast execution",
+      "workload": "Per-row set_config and prepared date casts before, during and after SET LOCAL rollback.",
+      "invariant": "Returned dates match PostgreSQL and descriptor retention does not retain a previous row or session setting.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "execution_binding_does_not_copy_unchanged_query_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests.rs",
+      "capability": "Immutable execution block syntax",
+      "workload": "Sixteen executions bind a block containing a 256KiB literal and an unchanged VALUES source.",
+      "invariant": "Total allocation remains below 128KiB; unchanged syntax is borrowed while each execution still binds its source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "execution_binding_isolates_distinct_slices_and_function_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests.rs",
+      "capability": "Immutable execution block syntax",
+      "workload": "Repeated table-function binding with and without DISTINCT slice deferral.",
+      "invariant": "Selected builtin identity and types are retained in an owned execution block; original syntax and limit/offset remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "borrowed_execution_binding_keeps_live_parameters_and_outer_types",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests.rs",
+      "capability": "Immutable execution block syntax",
+      "workload": "One borrowed plan binds under changing correlated row types and typed parameters.",
+      "invariant": "Each invocation uses its current outer schema and parameter type without reusing previous metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "borrowed_execution_binding_preserves_missing_relation_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests.rs",
+      "capability": "Immutable execution block syntax",
+      "workload": "An unchanged comma-join source names two absent relations.",
+      "invariant": "The first source still reports the original UnknownTable diagnostic before later binding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "unchanged_execution_blocks_preserve_postgresql_lateral_and_slice_results",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_lateral.rs",
+      "capability": "Immutable execution block syntax",
+      "workload": "Five independent PostgreSQL 18.4 cases cover nested VALUES, DISTINCT slicing, lateral projection, grouped name precedence and ROWS FROM ordinality; each is repeated three times.",
+      "invariant": "Public Engine execution preserves every ordered value and NULL across reused plans.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "clause_reference_and_boolean_checks_bind_each_subquery_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/analysis/tests.rs",
+      "capability": "Clause subquery binding work",
+      "workload": "Scalar, EXISTS, IN and HAVING conditions referencing one scalar-query arena.",
+      "invariant": "Reference validation and Boolean metadata inspection perform exactly one subquery block analysis per condition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "condition_binding_keeps_parameters_outer_types_and_error_order_live",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/analysis/tests.rs",
+      "capability": "Clause subquery binding semantics",
+      "workload": "The same condition with Boolean/integer outer columns and typed parameters, plus an invalid column reference.",
+      "invariant": "Current types and parameters determine success or SQLSTATE; prior successful metadata cannot hide a later invalid condition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "condition_subquery_results_require_the_original_arena_and_complete_outer_schema",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/analysis/tests.rs",
+      "capability": "Clause subquery binding lifetime",
+      "workload": "Identical and separately cloned query arenas, changed input types and qualifiers, and an invalid slot.",
+      "invariant": "Only the original arena and complete equal lexical schema reuse the immutable result descriptor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "repeated_condition_binding_preserves_postgresql_scopes_types_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_subquery/condition_binding.rs",
+      "capability": "Public clause subquery binding",
+      "workload": "Eleven independent PostgreSQL 18.4 results and diagnostics repeated three times, plus changing prepared Boolean parameters.",
+      "invariant": "Exact columns, formatted values and SQLSTATE/messages preserve correlation, CTE shadowing, collation, record comparisons and diagnostic precedence; prepared values remain live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_casts_reuse_source_inference_with_live_resolution_and_constraints",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts.rs",
+      "capability": "Catalog-sensitive cast source metadata",
+      "workload": "One thousand rows, a changing unqualified target, overflow and a later constraint failure.",
+      "invariant": "Source inference occurs once; all live type resolutions, callbacks, changed target widths and typed errors are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_cast_source_metadata_never_reuses_routine_results_or_type_resolution",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts.rs",
+      "capability": "Catalog-sensitive cast source metadata",
+      "workload": "One thousand invocations of a bound routine whose retained return-type spelling resolves through the current catalog.",
+      "invariant": "One source inference preserves all one thousand distinct routine results and callbacks and two thousand live type resolutions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_cast_source_retention_preserves_schema_identity_errors_and_owned_memory",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts.rs",
+      "capability": "Catalog-sensitive cast source metadata",
+      "workload": "Failed first evaluation, shared and different physical schemas, retained source capacity and invoking cancellation under 4096 bytes.",
+      "invariant": "Failed conversions retain nothing; schema changes infer independently, only original-schema metadata is reused, admitted bytes stay owned and cancellation precedes callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unknown_cast_sources_keep_per_value_conversion_without_reinferring_schema",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts.rs",
+      "capability": "Catalog-sensitive cast source metadata",
+      "workload": "One untyped physical schema supplies integer, float, text and NULL carriers to the same cast.",
+      "invariant": "Absent inferred metadata is reused without retaining a runtime carrier or descriptor; each current value and catalog callback is evaluated normally.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "indexed_scan_candidates_capture_large_support_without_posting_materialization",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/index_candidates/tests.rs",
+      "capability": "Bounded scalar index support",
+      "workload": "65,536 reverse-ordered matching identities, 64KiB work memory and complete sequential replay.",
+      "invariant": "Peak additional allocation stays below the unchanged 1MiB ceiling; candidates arrive once in ascending order without materializing a posting list.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_identity_capture_preserves_full_width_order_and_independent_cursors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/index_candidates/tests.rs",
+      "capability": "Frozen index candidate identities",
+      "workload": "Duplicate and unsigned-extreme identities with zero and 64KiB spill thresholds, two independent cursors and source-owner release.",
+      "invariant": "Complete unsigned identity order, uniqueness and frozen cursor lifetime are identical across resident and spilled sources.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_identity_capture_propagates_late_errors_and_cursor_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/index_candidates/tests.rs",
+      "capability": "Candidate capture errors",
+      "workload": "Late source XX001 and cursor cancellation after one emitted identity with resident and forced-spill capture.",
+      "invariant": "Late capture errors prevent a successful selection; 57014 propagates once and exhausted failed cursors do not resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "small_selected_identity_capture_does_not_allocate_spill_or_sort_buffers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/index_candidates/tests.rs",
+      "capability": "Small index candidate overhead",
+      "workload": "One matching identity under a 64MiB configured allowance.",
+      "invariant": "Total allocation stays below 4KiB without preallocating the allowance or opening sort/spill state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_index_candidates_freeze_newest_command_and_fixed_versions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/index_candidates/tests/commands.rs",
+      "capability": "Command-aware bounded index support",
+      "workload": "Two command frames over fixed replacements and deletions, equality/range/NULL predicates, frame rollback and frozen replay.",
+      "invariant": "Newest command masks take precedence over fixed and stored values; capture remains stable after frame changes and hidden command views return the original stored support.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_identity_rechecks_retain_only_pinned_support_and_preserve_pin_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/indexed.rs",
+      "capability": "Bounded indexed tuple rechecks",
+      "workload": "65,536 selected identities and three recheck pins including a missing identity and reverse pin order.",
+      "invariant": "Rechecks retain only matching pins below 512KiB additional allocation, preserve zero unscored values and clear incompatible ordering metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_identity_recheck_propagates_cursor_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/indexed.rs",
+      "capability": "Indexed tuple recheck errors",
+      "workload": "A cancelled spilled candidate source with a matching tuple pin.",
+      "invariant": "Recheck construction propagates 57014 instead of returning missing or partial support.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "btree_identity_visits_preserve_key_order_and_stop_at_the_selected_row",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index.rs",
+      "capability": "Borrowed B-tree candidate visitation",
+      "workload": "Repeated identities across physical keys, an unsigned-extreme ID and early stop.",
+      "invariant": "Physical key/bucket order and duplicates are preserved until the caller chooses set order; the visitor stops at the requested identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "reversed_between_bounds_have_empty_support_in_every_access_path",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index.rs",
+      "capability": "Reversed B-tree range bounds",
+      "workload": "A populated B-tree with an inclusive lower bound larger than its upper bound.",
+      "invariant": "Scans, estimates and borrowed visits return empty support without entering an invalid BTreeMap range.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "indexed_copy_candidates_keep_residuals_private_rows_and_durable_results",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/candidates.rs",
+      "capability": "Public indexed COPY candidate lifetime",
+      "workload": "257 rows and an indexed predicate with a scalar residual; private inserts, deletion and replacement, single-table/join scans, UPDATE, savepoint rollback and reopen on four providers.",
+      "invariant": "COPY results and changed-row counts match independent PostgreSQL 18.4 (87 rows, ID sum 12134), with the same results after rollback and durable reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "analyze_capture_bounds_complete_population_and_keeps_column_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/maintenance/analyze/values/tests.rs",
+      "capability": "Bounded exact statistics input",
+      "workload": "32,768 two-column observations with 64KiB input and merge workspace.",
+      "invariant": "Exact column/value order and row counts under a fixed 2MiB peak allocation ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "analyze_capture_preserves_hierarchy_null_and_omission_counts",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/maintenance/analyze/values/tests.rs",
+      "capability": "Bounded exact statistics input",
+      "workload": "Two retained hierarchy snapshots with NULL, omitted values and a newer live replacement.",
+      "invariant": "Full-width identities and the original value generation survive zero-budget spill; NULL and omission counts are exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "analyze_capture_checks_cancellation_before_snapshot_and_distribution_reads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/maintenance/analyze/values/tests.rs",
+      "capability": "Bounded exact statistics input",
+      "workload": "Cancel before snapshot acquisition and after the sorted distribution becomes available.",
+      "invariant": "57014 before acquiring a cancelled snapshot or reading the retained distribution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "sorted_statistics_preserve_complete_population_distributions",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests.rs",
+      "capability": "Bounded exact statistics distributions",
+      "workload": "Empty, singleton, repeated, mixed-representation, NULL and omitted populations.",
+      "invariant": "Distinct, bounds, histogram positions, MCV values and frequency bits match an independent legacy-distribution reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "sorted_statistics_reject_incomplete_and_out_of_order_input",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests.rs",
+      "capability": "Bounded exact statistics distributions",
+      "workload": "Incomplete counts and descending values.",
+      "invariant": "Invalid source observations cannot publish a partial distribution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "sorted_statistics_keep_only_bounded_distribution_outputs",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests.rs",
+      "capability": "Bounded exact statistics distributions",
+      "workload": "65,536 distinct sorted observations supplied by a lazy iterator.",
+      "invariant": "Exact distinct count and 101 histogram boundaries under a fixed 128KiB peak ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "explicit_analyze_bounds_exact_population_and_publishes_complete_statistics",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_analyze_persistence/bounded.rs",
+      "capability": "Bounded explicit ANALYZE",
+      "workload": "Public ANALYZE over 32,768 two-column rows with 64KiB work memory.",
+      "invariant": "Fixed 2MiB peak ceiling; exact distinct/NULL counts, scalar bounds, histogram positions and 0.75 MCV frequency.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "exhaustive_text_visitor_preserves_native_score_bits_and_duplicate_terms",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/text/exhaustive/tests.rs",
+      "capability": "Incremental exhaustive text scoring",
+      "workload": "Native BM25 and Bayesian BM25 with duplicate query terms.",
+      "invariant": "Visitor entries match the existing exhaustive scorer in document order and exact score bits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "exhaustive_text_visitor_stops_at_the_consumer_boundary",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/text/exhaustive/tests.rs",
+      "capability": "Incremental exhaustive text scoring",
+      "workload": "Stop the exhaustive visitor at its first output.",
+      "invariant": "The consumer stop is reported and no additional result is emitted.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "exhaustive_text_visitor_preserves_parameter_errors_before_output",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/text/exhaustive/tests.rs",
+      "capability": "Incremental exhaustive text scoring",
+      "workload": "Invalid native scoring parameters.",
+      "invariant": "The existing parameter error precedes any output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "exhaustive_text_visitor_borrows_large_term_support",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/text/exhaustive/tests.rs",
+      "capability": "Incremental exhaustive text scoring",
+      "workload": "65,536 memory-index postings streamed without retaining output.",
+      "invariant": "Exact complete count under a fixed 128KiB peak ceiling; no owned whole-population posting cursor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_scored_capture_spills_before_retaining_the_population",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Bounded complete retrieval capture",
+      "workload": "65,536 full-width IDs and floating-point score bit patterns under 64KiB workspace.",
+      "invariant": "Fixed 512KiB peak ceiling; every identity and score bit is preserved through spill.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scored_capture_preserves_duplicate_identity_order_and_score_bits",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Bounded complete retrieval capture",
+      "workload": "Duplicate IDs, signed zero and NaN payloads with zero and nonzero workspace.",
+      "invariant": "Exact sequence and score bits survive both in-memory and spilled capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scored_capture_cancelled_replay_releases_unread_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Bounded complete retrieval capture",
+      "workload": "Cancel after complete capture while records remain unread.",
+      "invariant": "57014 releases the unread spill and subsequent pulls end.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scored_capture_drop_removes_unread_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Bounded complete retrieval capture",
+      "workload": "Drop a completed capture without consuming it.",
+      "invariant": "Its temporary file is removed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_text_matches_capture_scores_without_complete_posting_vectors",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded public text COPY",
+      "workload": "Cold first text COPY of 32,768 matches under 64KiB work memory with a validating discard sink.",
+      "invariant": "Every ID is emitted exactly once in the original order under a fixed 2MiB peak allocation ceiling, without statistics warmup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_text_capture_preserves_scores_and_statement_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded public text COPY",
+      "workload": "513 text matches on memory, SQLite, SQLite K/V and redb with a writer interleaved at the first COPY output.",
+      "invariant": "Native score bits and the original statement generation survive UPDATE/DELETE/INSERT; later queries and durable reopen see committed changes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_text_boolean_fold_preserves_support_and_native_score_bits",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Ordered text score composition",
+      "workload": "Three overlapping score-only inputs with disjoint keys, zero, maximum u64 and a non-associative floating-point example.",
+      "invariant": "Union/intersection support and every score bit equal the original left-to-right posting fold.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_text_branches_all_run_before_the_first_error_is_reported",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Complete text branch error precedence",
+      "workload": "An empty intersection child followed by two failing text children, plus an empty union.",
+      "invariant": "Both failing children execute, the first typed error wins, and an empty union remains empty.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_text_capture_declines_non_score_and_limited_operands",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Text capture carrier eligibility",
+      "workload": "Nested text unions/intersections, a top-k term and a phrase carrier.",
+      "invariant": "Only complete score-only text operands enter this capture; unsupported payloads and limited candidates retain their original executor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_text_boolean_population_stays_within_its_shared_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Bounded Boolean text score population",
+      "workload": "Three 65,536-entry branches in a nested union/intersection under a shared 64KiB allowance.",
+      "invariant": "All ordered identities and exact score bits survive with peak allocation below 512KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "score_only_merge_releases_both_inputs_after_cancellation_or_empty_support",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Text merge spill cleanup",
+      "workload": "Two disjoint spilled inputs with normal completion or pre-requested cancellation.",
+      "invariant": "Both unread input files are removed; empty support remains empty and cancellation preserves SQLSTATE 57014.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_boolean_text_scores_do_not_retain_complete_child_postings",
+      "cases": 2,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded public Boolean text COPY",
+      "workload": "Cold 32,768-row text AND/OR output under work_mem 64KiB with a validating discard sink.",
+      "invariant": "Every ascending ID is emitted exactly once while peak additional allocation remains below 2MiB.",
+      "case_names": [
+        "case_1_intersection",
+        "case_2_union"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_boolean_text_capture_preserves_scores_and_statement_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Boolean text COPY provider snapshots",
+      "workload": "Partially overlapping alpha/beta scores on four providers; persistent peers replace/delete/insert during output and the database is reopened.",
+      "invariant": "Exact union score bits and statement-generation output match native leaf scoring; later queries and reopen observe only committed changes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_score_merge_preserves_native_maximum_and_unmatched_bits",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Exact all-field score fold",
+      "workload": "Three field populations with disjoint identities, finite overlaps, signed zeros, NaN and maximum document identity.",
+      "invariant": "Ordered merging preserves the original field-map maximum and every unmatched score bit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_text_capture_keeps_the_all_field_leaf_boundary",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "All-field retrieval capture boundary",
+      "workload": "An all-field term enters the complete score-only tree capture with its original query and scoring mode.",
+      "invariant": "One all-field leaf invocation retains its field inventory boundary and exact score.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_all_field_text_scores_do_not_retain_the_complete_population",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded public all-field text COPY",
+      "workload": "Cold 32,768-row output across two indexed fields under 64KiB work memory and a validating discard sink.",
+      "invariant": "Every ID is emitted once in order while peak additional allocation stays below the unchanged 2MiB ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_all_field_text_capture_preserves_max_scores_and_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "All-field text COPY provider snapshots",
+      "workload": "Repeated query terms, NULLs and overlapping/disjoint field scores on four providers; persistent peers update, delete and insert during output before reopen.",
+      "invariant": "Exact field-maximum score bits and the complete original statement generation survive; later queries and reopen see committed changes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_hierarchy_input_preserves_deferred_errors_and_committed_recheck_pins",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_sources/hierarchy/tests.rs",
+      "capability": "Deferred captured hierarchy inputs",
+      "workload": "Zero-allowance spilled input, unconsumed open/close, normal or committed tuple pins, and selected producer errors.",
+      "invariant": "No retrieval runs before demand; original schema/score and selected tuple image survive; failure does not replay input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_inherited_text_scores_do_not_retain_physical_table_populations",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded inherited text COPY",
+      "workload": "Cold 32,768-row text output split between an ordinary parent and child, under 64KiB work memory with a validating discard sink.",
+      "invariant": "Every ID appears once in the original order and peak additional allocation remains below the unchanged 2MiB ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_hierarchy_text_capture_keeps_physical_scores_and_generations",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Hierarchy text score and snapshot ownership",
+      "workload": "Inheritance and range partitions on four providers with repeated-term scores, physical table identities, concurrent updates/deletion/insertion during output and durable reopen.",
+      "invariant": "Exact native per-table score bits and tableoid survive the complete original generation; later queries and reopen see committed changes, and ONLY excludes descendants.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_field_projection_keeps_private_generated_values_and_tuple_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/document_projection/captured/tests.rs",
+      "capability": "Retained filter projection semantics",
+      "workload": "Persisted and private versions, virtual generated values and tuple xmin under forced spill.",
+      "invariant": "The chosen row generation and exact generated/metadata predicate results survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_field_projection_keeps_storage_and_private_phase_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/document_projection/captured/tests.rs",
+      "capability": "Retained projection error ordering",
+      "workload": "Late storage failure, division by zero and invalid private cast during virtual field evaluation.",
+      "invariant": "Complete raw reads precede generated evaluation; persisted projection precedes private projection with original SQLSTATEs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_field_projection_bounds_wide_values_and_releases_cancelled_input",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/document_projection/captured/tests.rs",
+      "capability": "Bounded retained filter projection",
+      "workload": "513 wide fields under 4KiB spill allowance and subsequent cancellation.",
+      "invariant": "Every ID survives below 512KiB additional allocation; cancellation returns 57014 and drops unfinished input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_filtered_text_scores_do_not_retain_complete_child_postings",
+      "cases": 2,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded mixed retrieval COPY",
+      "workload": "Cold OR and ordinary AND over 32,768 rows, with and without a B-tree, under 64KiB work memory.",
+      "invariant": "Exact identities and counts below the unchanged 2MiB peak allocation ceiling.",
+      "case_names": [
+        "case_1_projected_field",
+        "case_2_indexed_field"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_filtered_text_capture_keeps_scores_nulls_overlay_and_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Mixed retrieval provider generations",
+      "workload": "Indexed/unindexed OR, AND, NOT and NULL predicates, private changes, rollback, output-time peer commits and reopen on four providers.",
+      "invariant": "Native text score bits, zero relational scores and original statement support survive; later queries see committed changes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_intersection_filters_share_complete_support_and_original_score_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Captured filter support",
+      "workload": "Two complete text operands and filters surrounding them, with spill forced.",
+      "invariant": "Filters read only the completed support intersection; branch scheduling and exact left-to-right score bits are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_filter_errors_keep_original_precedence_after_failed_or_empty_siblings",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Captured filter error precedence",
+      "workload": "Failed or empty retrieval siblings before two filter failures.",
+      "invariant": "All branches execute, empty support does not suppress validation, and the first original branch error wins.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_filter_reads_only_selected_fields_and_preserves_null_membership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Captured projected filter membership",
+      "workload": "Selected NULL and numeric fields with unselected unrelated rows.",
+      "invariant": "Only selected fields are read and exact NULL/numeric support has zero scores.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_filter_preserves_read_errors_before_missing_document_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Captured projected filter errors",
+      "workload": "Missing promised rows, a later source error and cancellation.",
+      "invariant": "Source reads complete before missing-row diagnostics; original source errors and cancellation propagate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_filter_does_not_retain_wide_projected_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Bounded fallback field projection",
+      "workload": "513 selected 32KiB values through a field-only relation adapter.",
+      "invariant": "Exact IDs with less than 512KiB additional allocation, without retaining the 16MiB projected population.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scored_capture_replay_shares_input_and_releases_the_final_owner",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Immutable scored input replay",
+      "workload": "Independent readers over forced spill with full-width identities and negative zero.",
+      "invariant": "Readers share original score bits without resetting consumed input, and final owner release removes spill.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_evidence_cursor_preserves_sparse_union_duplicate_scores_and_float_order",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/evidence/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Sparse ordered probability signals with an empty signal, duplicate identities, endpoint probabilities and three priors.",
+      "invariant": "The ordered visitor agrees bit-for-bit with the original last-value maps and declared-order evidence sum.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_evidence_validates_all_signals_before_any_output",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/evidence/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "A valid first signal and a later invalid probability.",
+      "invariant": "Every probability is validated before any output, preserving the original diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_evidence_preserves_input_and_consumer_failures",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/evidence/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Input and output callbacks fail separately.",
+      "invariant": "Typed input and consumer failures survive without continuing output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_evidence_retains_only_live_signal_heads",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/evidence/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Three complete 32,768-document signals with a validating discard visitor.",
+      "invariant": "Peak retained allocations remain below 16KiB independent of population; all identities and evidence directions are correct.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_evidence_empty_inputs_never_synthesize_documents",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/evidence/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Zero signals and three empty inputs.",
+      "invariant": "No synthetic support or output is introduced.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_bayesian_operator_validates_prior_then_children_then_probabilities",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Invalid prior, invalid early probability and a failing later child with an execution counter.",
+      "invariant": "Prior validation precedes child evaluation; child errors precede probability validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_exact_evidence_resolves_one_prior_and_preserves_score_bits",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/fusion/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Two fully spilled signals with inferred and explicit priors.",
+      "invariant": "The prior enters once and complete score bits survive capture and replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_exact_evidence_keeps_prior_snapshot_and_probability_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/fusion/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Conflicting priors, a failed snapshot, an invalid prior and invalid probabilities.",
+      "invariant": "Original prior-selection, snapshot and operator-validation ordering remains unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_exact_evidence_keeps_cancellation_typed",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/fusion/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Cancellation after retaining spilled inputs and their snapshot.",
+      "invariant": "The caller receives SQLSTATE 57014 without successful output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_exact_fusion_capture_keeps_typed_signal_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Nested exact score-only signals and unsupported BayesianScore/vector evidence boundaries.",
+      "invariant": "Only complete admitted signals use this capture; unrelated conversion boundaries keep their native owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_exact_text_fusion_does_not_retain_complete_signal_populations",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "32,768 matching rows and two Bayesian text signals at work_mem 64KiB with a validating discard sink.",
+      "invariant": "Exact ordered output remains complete and peak additional allocations stay below the original 2MiB ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_exact_text_fusion_preserves_native_bits_priors_and_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "513 sparse matches, one empty signal, one/all-field calibration, explicit/inferred priors, rollback, an output-time peer commit and durable reopen on four providers.",
+      "invariant": "Native score bits, original statement generation, prior conflict diagnostics, command overlays and committed results remain exact.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_exact_text_fusion_output_failures_keep_transaction_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "A complete text fusion with a cancelled or failed output sink inside an explicit mutation transaction.",
+      "invariant": "Cancellation and consumer errors retain their diagnostics and rollback restores the pre-command data.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "positive_cursor_matches_original_sparse_duplicate_and_adaptive_score_bits",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Sparse and duplicate identities, an empty signal, six gating functions, three exponents, priors, explicit/adaptive weights and normalization.",
+      "invariant": "All emitted score bits match the original ordered map-based formulas.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "positive_cursor_keeps_empty_signals_in_the_declared_count",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "One matching signal alongside empty inputs, all empty inputs and a single signal.",
+      "invariant": "Declared signal count, empty union and the single-signal identity remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "positive_cursor_bounds_live_memory_for_complete_adaptive_inputs",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Three complete 65,536-document signals with adaptive weighting and a validating discard visitor.",
+      "invariant": "Exact support stays complete and peak additional allocations remain below 16KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "positive_cursor_validates_all_scores_before_output_and_preserves_typed_failures",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Invalid later probabilities, input cursor failure and consumer failure.",
+      "invariant": "Probability errors precede output and typed input/consumer failures survive unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_positive_pool_keeps_priors_empty_signals_and_score_bits",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Three spilled inputs with differing corpus priors and an empty middle signal.",
+      "invariant": "Average-logit prior combination and the complete signal denominator preserve exact scores.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_positive_pool_keeps_snapshot_configuration_probability_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Failed snapshot, invalid exponent and invalid probability.",
+      "invariant": "Snapshot acquisition precedes configuration validation, which precedes probability validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_positive_pool_keeps_cancellation_typed",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Cancellation after complete input capture and snapshot acquisition.",
+      "invariant": "SQLSTATE 57014 survives without successful output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_positive_pool_capture_keeps_typed_signal_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Nested complete score inputs and unsupported calibrated vector/score wrappers.",
+      "invariant": "Only supported complete carriers enter bounded pooling capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_positive_text_pool_does_not_retain_complete_signal_populations",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "32,768 matching rows, two Bayesian text signals, work_mem 64KiB and a validating discard sink.",
+      "invariant": "The exact ordered count passes the unchanged 2MiB peak allowance after a 9,320,997-byte baseline.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_positive_pool_keeps_native_bits_options_and_statement_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion/pooling.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "513 sparse matches, empty/nonempty signal changes, single/all-field calibration, configured weights/normalization, private updates, rollback, independent output-time commit and reopen on four providers.",
+      "invariant": "Native score bits, selected statement generation, overlays and persistence remain exact.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_positive_pool_failures_preserve_explicit_transaction_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion/pooling.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Cancelled and failed output sinks inside an explicit mutation transaction.",
+      "invariant": "Typed errors survive and rollback restores original data.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_knn_keeps_selection_workspace_independent_of_corpus_size",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/retained/tests.rs",
+      "capability": "Bounded exact vector selection",
+      "workload": "16,384 retained vectors with K 0, 1 and 8 under 32KiB additional workspace, plus an unbounded requested result.",
+      "invariant": "Finite K preserves exact IDs and score bits without a corpus-sized score buffer; oversized output reports a typed memory error and releases temporary leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "controlled_memory_snapshot_does_not_copy_the_complete_vector_corpus",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/memory_snapshot/tests.rs",
+      "capability": "Immutable memory-vector ownership",
+      "workload": "8,192 vectors of 128 dimensions with simultaneous read and writable snapshots and later mutations.",
+      "invariant": "Capture adds less than 64KiB live allocation while charging the full payload; independent values and canonical identity survive writes and final drop releases the lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "finite_memory_and_retained_knn_keep_only_selected_document_scores",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/memory_snapshot/tests.rs",
+      "capability": "Immutable memory-vector ownership",
+      "workload": "32,768 documents across mutable, immutable and retained exact readers with K 0, 1 and 8 and 32KiB additional selection space.",
+      "invariant": "Exact IDs, ties and score bits survive bounded selection; an unbounded requested result returns a typed memory error without changing the source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "shared_vector_retention_covers_spare_tensor_capacity_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/memory_snapshot/tests.rs",
+      "capability": "Immutable memory-vector ownership",
+      "workload": "A tensor retains spare outer and coordinate capacities before controlled snapshot admission.",
+      "invariant": "Small allowances reject complete retained capacity before publication; an admitted canonical facet retains and then releases the full payload lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "canonical_vector_exports_and_writable_copies_preserve_independent_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/memory_snapshot/tests.rs",
+      "capability": "Immutable memory-vector ownership",
+      "workload": "Explicit legacy BTreeMap export, invalid replacement, deep clone and shared writable snapshot over signed-zero tensors.",
+      "invariant": "The public concrete map type and all value bits remain stable; failed mutations preserve exports and later source/branch writes stay independent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "shared_canonical_identity_matches_owned_tensor_content_and_survives_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/memory_snapshot/tests.rs",
+      "capability": "Immutable memory-vector ownership",
+      "workload": "Shared memory and retained readers encode identical tensor content, followed by signed-zero replacement and boundary traversal.",
+      "invariant": "Content fingerprints agree with the existing retained encoding; old captures remain stable and changed coordinate bits produce a new identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_fusion_capture_retains_explicit_vector_pools_and_declines_unbounded_transforms",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Complete hybrid COPY capture",
+      "workload": "Explicit KNN, calibrated-vector and cosine wrappers across zero, finite and maximum K.",
+      "invariant": "Only native explicit vector pools enter complete score capture; unbounded thresholds and arbitrary cosine transforms retain their native boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_hybrid_pool_does_not_materialize_complete_text_support",
+      "cases": 3,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Complete hybrid COPY capture",
+      "workload": "32,768 text matches with eight vector candidates and 64KiB work memory in automatic, exact and positive hybrid COPY.",
+      "invariant": "Complete output retains fewer than 2MiB additional live Rust bytes without truncating text support or enlarging the fixed allowance.",
+      "case_names": [
+        "case_1_automatic",
+        "case_2_exact",
+        "case_3_positive"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_vector_fusion_preserves_native_bits_and_selected_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion/vector.rs",
+      "capability": "Complete hybrid COPY capture",
+      "workload": "Four storage providers across automatic, exact, positive and calibrated fusion, K 0/1/8, private writes, concurrent output-time changes and durable reopen.",
+      "invariant": "Native score bits and selected generations are preserved; zero K keeps its SQL validation error and private rollback remains exact.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_vector_fusion_output_failures_preserve_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion/vector.rs",
+      "capability": "Complete hybrid COPY capture",
+      "workload": "A 513-row hybrid COPY encounters sink failure or cancellation after private changes.",
+      "invariant": "Typed failure reaches the caller and rollback restores the original table instead of publishing partial effects.",
       "case_names": [
         ""
       ]

@@ -198,7 +198,7 @@ fn row_cast_state_preserves_unqualified_targets_and_parameter_type_changes() {
     assert_eq!(catalog.resolutions.get(), 6);
     assert!(matches!(
         prepared.calls().row_casts[0].1.get(),
-        Some(RowCast::PerEvaluation)
+        Some(RowCast::Source { .. })
     ));
     let nested = PreparedExpressions::scalar(ScalarExpr::Cast {
         expr: Box::new(ScalarExpr::Cast {
@@ -218,7 +218,7 @@ fn row_cast_state_preserves_unqualified_targets_and_parameter_type_changes() {
         .calls()
         .row_casts
         .iter()
-        .all(|(_, state)| matches!(state.get(), Some(RowCast::PerEvaluation))));
+        .all(|(_, state)| matches!(state.get(), Some(RowCast::Source { .. }))));
     let parameter = PreparedExpressions::scalar(ScalarExpr::Cast {
         expr: Box::new(ScalarExpr::Param(1)),
         ty: "pg_catalog.int4".into(),

@@ -7,8 +7,8 @@
 //! Observe recursive nodes in separate frames so unrelated scalar variants do not accumulate stack storage at every child.
 
 use super::{
-    error, BinaryOp, ColumnType, Derivation, ExpressionType, Preparation, QueryPlan, RowSchema,
-    SQLError, ScalarExpr,
+    BinaryOp, ColumnType, Derivation, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError,
+    ScalarExpr,
 };
 
 impl Preparation<'_> {
@@ -18,10 +18,7 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
-        let query = subqueries
-            .get(index)
-            .ok_or_else(|| error("XX000", "scalar subquery slot is outside its plan".into()))?;
-        let schema = self.query(query, Some(input))?;
+        let schema = self.scalar_query_schema(index, input, subqueries)?;
         let mut result = ExpressionType::leaf(schema.column_type(0).cloned());
         if let Some(oid) = schema.column_collation(0) {
             result.derivation = Derivation::implicit(i64::from(oid));

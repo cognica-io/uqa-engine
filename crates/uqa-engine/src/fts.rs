@@ -357,7 +357,7 @@ impl Engine {
         let (old_indexed, indexed_fields) = if known_new {
             (None, Self::value_indexes_built_fields(&t))
         } else {
-            let old = Self::value_indexes_old_values(&t, doc_id);
+            let old = self.value_indexes_old_values(&t, doc_id)?;
             let fields = old.as_ref().map(|old| {
                 old.keys()
                     .cloned()
@@ -412,7 +412,7 @@ impl Engine {
             self.persist_value_indexes_apply_write(&table_name, doc_id, Some(new), unused)?;
         }
         if let Some(new) = new_indexed.as_ref() {
-            Self::value_indexes_apply_write(&t, doc_id, old_indexed.as_ref(), Some(new));
+            self.value_indexes_apply_write(&t, doc_id, Some(new))?;
         }
         drop(store);
         let documents = if existed {

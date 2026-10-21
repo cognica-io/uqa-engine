@@ -39,7 +39,9 @@ impl ScoredDocumentSource {
         }
         let after = match &self.input {
             super::ScoredInputCursor::All { after } => *after,
-            super::ScoredInputCursor::Entries(_) => return Ok(None),
+            super::ScoredInputCursor::Entries(_)
+            | super::ScoredInputCursor::Candidates(_)
+            | super::ScoredInputCursor::Captured(_) => return Ok(None),
         };
         if max_rows == 0 {
             return Ok(Some(false));
@@ -121,7 +123,9 @@ impl ScoredDocumentSource {
         }
         let mut after = match &self.input {
             super::ScoredInputCursor::All { after } => *after,
-            super::ScoredInputCursor::Entries(_) => return Ok(None),
+            super::ScoredInputCursor::Entries(_)
+            | super::ScoredInputCursor::Candidates(_)
+            | super::ScoredInputCursor::Captured(_) => return Ok(None),
         };
         if max_rows == 0 {
             return Ok(Some(Vec::new()));
@@ -436,36 +440,43 @@ impl ScoredDocumentSource {
         let indexed = if self.index_only {
             self.for_each_indexed_entry(&doc_ids, &fields, allow_borrowed, &mut consume)
         } else {
-            None
+            Ok(None)
         };
-        let read = if let Some(count) = indexed {
-            Ok(Some(count))
-        } else {
-            let borrowed = if allow_borrowed {
-                store.for_each_fields_multi_borrowed(&doc_ids, &fields, &mut consume)
-            } else {
-                Ok(None)
-            };
-            borrowed.and_then(|result| {
-                if let Some(count) = result {
-                    Ok(Some(count))
+        let read = match indexed {
+            Ok(Some(count)) => Ok(Some(count)),
+            Err(error) => Err(error),
+            Ok(None) => {
+                let borrowed = if allow_borrowed {
+                    store.for_each_fields_multi_borrowed(&doc_ids, &fields, &mut consume)
                 } else {
-                    store
-                        .for_each_fields_multi_ref_with_presence(&doc_ids, &fields, &mut consume)
-                        .map(|()| None)
-                }
-            })
+                    Ok(None)
+                };
+                borrowed
+                    .and_then(|result| {
+                        if let Some(count) = result {
+                            Ok(Some(count))
+                        } else {
+                            store
+                                .for_each_fields_multi_ref_with_presence(
+                                    &doc_ids,
+                                    &fields,
+                                    &mut consume,
+                                )
+                                .map(|()| None)
+                        }
+                    })
+                    .map_err(|error| {
+                        SQLError::Internal(format!(
+                            "read `{}` projected documents: {error}",
+                            self.table_name
+                        ))
+                    })
+            }
         };
         if let Some(error) = materialization_error {
             return Err(error);
         }
-        let borrowed_count = read.map_err(|error| -> crate::ExecError {
-            SQLError::Internal(format!(
-                "read `{}` projected documents: {error}",
-                self.table_name
-            ))
-            .into()
-        })?;
+        let borrowed_count = read?;
         if borrowed_count.is_some_and(|count| count != index) {
             return Err(SQLError::Internal(
                 "borrowed point projection returned an invalid count".into(),
@@ -481,38 +492,6 @@ impl ScoredDocumentSource {
             .into());
         }
         Ok(())
-    }
-
-    /// Project `fields` of `doc_ids` from the table's index entries, or return `None` when they do not hold every field. A consumer that may call back into the engine receives copies after the index entries are released.
-    fn for_each_indexed_entry(
-        &self,
-        doc_ids: &[DocId],
-        fields: &[&str],
-        allow_borrowed: bool,
-        consume: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
-    ) -> Option<usize> {
-        if allow_borrowed {
-            return self.table.for_each_indexed_fields(doc_ids, fields, consume);
-        }
-        let mut rows: Vec<(DocId, bool, Vec<Value>)> = Vec::with_capacity(doc_ids.len());
-        self.table
-            .for_each_indexed_fields(doc_ids, fields, &mut |doc_id, exists, values| {
-                rows.push((
-                    doc_id,
-                    exists,
-                    values.iter().map(|value| (*value).clone()).collect(),
-                ));
-                true
-            })?;
-        let mut visited = 0;
-        for (doc_id, exists, values) in &rows {
-            visited += 1;
-            let values = values.iter().collect::<Vec<_>>();
-            if !consume(*doc_id, *exists, &values) {
-                break;
-            }
-        }
-        Some(visited)
     }
 
     /// Materialize tuples for a pinned tuple-local recheck scan: a changed tuple projects its latest committed image, an unchanged join partner reads the statement snapshot, and a tuple missing from the snapshot is skipped so the recheck drops the candidate naturally.

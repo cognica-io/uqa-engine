@@ -12,6 +12,9 @@ use uqa_sql::semantics::XMIN_COLUMN;
 use uqa_sql::{ast::ColumnDef, SQLError};
 use uqa_storage::{document_store::Document, DocumentMetadata, DocumentStore, StoredDocument};
 
+mod captured;
+pub use captured::FilterProjection;
+
 /// Read only requested fields and tuple metadata. Complete rows are needed only when a requested virtual generated expression must be evaluated.
 pub fn read_document_projection(
     source: &dyn DocumentStore,
