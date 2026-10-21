@@ -241,7 +241,8 @@ test("HTTP engine executes SQL, atomic batches, and streams", async (context) =>
     values: [[1, 2], [3, 4]],
   });
   assert.deepEqual(special.rows[0].matrix, [[1, 2], [3, 4]]);
-  assert.equal(special.rows[0].outside_chrono, "100000000");
+  // PostgreSQL 18: SELECT DATE '1970-01-01' + 100000000;
+  assert.equal(special.rows[0].outside_chrono, "275760-09-13");
 
   await assert.rejects(engine.sql("SELECT transport_error"), (error) => {
     assert.ok(error instanceof HttpEngineError);
