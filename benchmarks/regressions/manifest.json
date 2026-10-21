@@ -18767,6 +18767,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "fusion_costs_preserve_declared_score_bits_and_positional_parameters",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/tests/fusion_order.rs",
+      "capability": "Ordered fusion observations",
+      "workload": "Three probability triples across exact Bayesian, weighted positive and probabilistic AND/OR fusion with different child costs and both legacy flag values.",
+      "invariant": "Optimized signals retain declared slots and native operator score bits, including positional weights and bounds.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "nested_fusion_keeps_declared_failing_signal_precedence",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/tests/fusion_order.rs",
+      "capability": "Ordered fusion observations",
+      "workload": "Nested fusion with an expensive first error and cheaper later error across all four fusion families.",
+      "invariant": "Optimization preserves the same first failing signal independently of cost and legacy configuration.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
