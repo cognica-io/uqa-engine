@@ -82,6 +82,7 @@ pub trait MutationIndexRead {
         values: &[Value],
         visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
     ) -> Result<DocumentChanges, SQLError>;
+    /// Visit distinct candidate identities in increasing order without reading documents inside the index borrow. A declined probe invokes no callback.
     fn visit_value_index_key(
         &self,
         table: &str,

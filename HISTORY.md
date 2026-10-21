@@ -14,6 +14,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reuse validated immutable scan schema sizes between batches, avoiding repeated column-type serialization while preserving exact spill and lock-origin accounting.
 
+- Preserve declared fusion signal order during optimization, including exact score bits, positional pooling parameters and the first failing signal.
+
+- Add bounded, searchable value-index ownership over encrypted private-record snapshots, preserving exact key order, atomic roots and storage errors.
+
+- Bound fallible index-comparison identities before row reads, preserving exclusions, private changes and typed page errors.
+
 - Visit stored B-tree keys through one retained provider boundary, preserving snapshot visibility and first consumer errors without collecting the complete population.
 
 - Bound partial and expression unique-index candidate capture, preserving equality, NULL distinction, staged masking and original failure order.

@@ -176,7 +176,7 @@ impl EnforcedKeyExecution for EnforcedKey {
     }
 }
 
-fn capture_index_candidates(
+pub(crate) fn capture_index_candidates(
     context: ConstraintContext<'_>,
     table: &str,
     key: &uqa_storage::ValueIndexKey,
