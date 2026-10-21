@@ -20228,6 +20228,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "positive_cursor_matches_original_sparse_duplicate_and_adaptive_score_bits",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Sparse and duplicate identities, an empty signal, six gating functions, three exponents, priors, explicit/adaptive weights and normalization.",
+      "invariant": "All emitted score bits match the original ordered map-based formulas.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "positive_cursor_keeps_empty_signals_in_the_declared_count",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "One matching signal alongside empty inputs, all empty inputs and a single signal.",
+      "invariant": "Declared signal count, empty union and the single-signal identity remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "positive_cursor_bounds_live_memory_for_complete_adaptive_inputs",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Three complete 65,536-document signals with adaptive weighting and a validating discard visitor.",
+      "invariant": "Exact support stays complete and peak additional allocations remain below 16KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "positive_cursor_validates_all_scores_before_output_and_preserves_typed_failures",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/positive/tests.rs",
+      "capability": "Bounded robust text pooling",
+      "workload": "Invalid later probabilities, input cursor failure and consumer failure.",
+      "invariant": "Probability errors precede output and typed input/consumer failures survive unchanged.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

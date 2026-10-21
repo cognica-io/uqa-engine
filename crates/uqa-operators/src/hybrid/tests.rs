@@ -5,6 +5,47 @@
 //
 
 use super::*;
+use uqa_fusion::RobustPositiveEvidencePool;
+
+// Retain the original map-based spread calculation as an independent regression oracle.
+pub(super) fn adaptive_signal_weights(
+    fuser: &RobustPositiveEvidencePool,
+    score_maps: &[BTreeMap<DocId, f64>],
+) -> Option<Vec<f64>> {
+    let spreads: Vec<f64> = score_maps
+        .iter()
+        .map(|scores| {
+            if scores.len() < 2 {
+                return 0.0;
+            }
+            let logits: Vec<f64> = scores
+                .values()
+                .map(|probability| fuser.gated_logit(*probability))
+                .collect();
+            let mean = logits.iter().sum::<f64>() / logits.len() as f64;
+            let variance = logits
+                .iter()
+                .map(|logit| {
+                    let difference = logit - mean;
+                    difference * difference
+                })
+                .sum::<f64>()
+                / logits.len() as f64;
+            variance.sqrt()
+        })
+        .collect();
+    let total: f64 = spreads.iter().sum();
+    if total <= f64::EPSILON {
+        return None;
+    }
+    let uniform = 0.5 / score_maps.len() as f64;
+    Some(
+        spreads
+            .iter()
+            .map(|spread| uniform + 0.5 * spread / total)
+            .collect(),
+    )
+}
 
 struct LiteralOperator(Vec<(DocId, f64)>);
 
@@ -101,6 +142,26 @@ fn adaptive_weights_favor_the_discriminating_signal() {
     assert!(
         adaptive_signal_weights(&fuser, &[flat.clone(), flat]).is_none(),
         "all-flat signals fall back to the unweighted mean"
+    );
+    let mut replay = |signal| {
+        Ok::<_, ()>(
+            [(0.7, 0.9), (0.7, 0.5), (0.7, 0.1)]
+                .into_iter()
+                .enumerate()
+                .map(move |(i, values)| {
+                    Ok(uqa_core::ScoredEntry {
+                        doc_id: i as u64,
+                        score: if signal == 0 { values.0 } else { values.1 },
+                    })
+                }),
+        )
+    };
+    let actual = positive::adaptive_weights(&fuser, 2, &mut replay)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+        weights.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
     );
 }
 

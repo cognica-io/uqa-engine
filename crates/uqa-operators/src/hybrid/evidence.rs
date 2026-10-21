@@ -33,48 +33,16 @@ pub fn visit_exact_evidence<I, E>(
 where
     I: Iterator<Item = Result<ScoredEntry, E>>,
 {
-    for signal in 0..signal_count {
-        for entry in replay(signal).map_err(EvidenceVisitError::Input)? {
-            let entry = entry.map_err(EvidenceVisitError::Input)?;
-            crate::base::require_probability(entry.score, "Bayesian evidence fusion")
-                .map_err(EvidenceVisitError::Fusion)?;
-        }
-    }
-    let mut inputs = (0..signal_count)
-        .map(|signal| {
-            replay(signal)
-                .map(Iterator::peekable)
-                .map_err(EvidenceVisitError::Input)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    validate_probabilities(signal_count, &mut replay, "Bayesian evidence fusion")?;
     let mut evidence = Vec::with_capacity(signal_count);
-    loop {
-        let mut next: Option<DocId> = None;
-        for input in &mut inputs {
-            if let Some(id) = peek_identity(input).map_err(EvidenceVisitError::Input)? {
-                next = Some(next.map_or(id, |old| old.min(id)));
-            }
-        }
-        let Some(doc_id) = next else { return Ok(()) };
+    visit_ordered_union(signal_count, replay, |doc_id, probabilities| {
         evidence.clear();
-        for input in &mut inputs {
-            let mut probability = None;
-            while peek_identity(input).map_err(EvidenceVisitError::Input)? == Some(doc_id) {
-                probability = Some(
-                    input
-                        .next()
-                        .expect("peeked score")
-                        .map_err(EvidenceVisitError::Input)?
-                        .score,
-                );
-            }
-            if let Some(probability) = probability {
-                evidence.push(
-                    EvidenceLogit::from_prior_free_probability(probability).map_err(|error| {
-                        EvidenceVisitError::Fusion(StorageBackendError::Other(error.to_string()))
-                    })?,
-                );
-            }
+        for probability in probabilities.iter().flatten() {
+            evidence.push(
+                EvidenceLogit::from_prior_free_probability(*probability).map_err(|error| {
+                    EvidenceVisitError::Fusion(StorageBackendError::Other(error.to_string()))
+                })?,
+            );
         }
         let posterior = fusion.fuse(&evidence).map_err(|error| {
             EvidenceVisitError::Fusion(StorageBackendError::Other(error.to_string()))
@@ -83,11 +51,69 @@ where
             doc_id,
             score: posterior.value(),
         })
-        .map_err(EvidenceVisitError::Output)?;
+        .map_err(EvidenceVisitError::Output)
+    })
+}
+
+pub(super) fn validate_probabilities<I, E>(
+    signal_count: usize,
+    replay: &mut impl FnMut(usize) -> Result<I, E>,
+    operation: &str,
+) -> Result<(), EvidenceVisitError<E>>
+where
+    I: Iterator<Item = Result<ScoredEntry, E>>,
+{
+    for signal in 0..signal_count {
+        for entry in replay(signal).map_err(EvidenceVisitError::Input)? {
+            let entry = entry.map_err(EvidenceVisitError::Input)?;
+            crate::base::require_probability(entry.score, operation)
+                .map_err(EvidenceVisitError::Fusion)?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn visit_ordered_union<I, E>(
+    signal_count: usize,
+    mut replay: impl FnMut(usize) -> Result<I, E>,
+    mut visit: impl FnMut(DocId, &[Option<f64>]) -> Result<(), EvidenceVisitError<E>>,
+) -> Result<(), EvidenceVisitError<E>>
+where
+    I: Iterator<Item = Result<ScoredEntry, E>>,
+{
+    let mut inputs = (0..signal_count)
+        .map(|signal| {
+            replay(signal)
+                .map(Iterator::peekable)
+                .map_err(EvidenceVisitError::Input)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut probabilities = vec![None; signal_count];
+    loop {
+        let mut next: Option<DocId> = None;
+        for input in &mut inputs {
+            if let Some(id) = peek_identity(input).map_err(EvidenceVisitError::Input)? {
+                next = Some(next.map_or(id, |old| old.min(id)));
+            }
+        }
+        let Some(doc_id) = next else { return Ok(()) };
+        for (input, probability) in inputs.iter_mut().zip(&mut probabilities) {
+            *probability = None;
+            while peek_identity(input).map_err(EvidenceVisitError::Input)? == Some(doc_id) {
+                *probability = Some(
+                    input
+                        .next()
+                        .expect("peeked score")
+                        .map_err(EvidenceVisitError::Input)?
+                        .score,
+                );
+            }
+        }
+        visit(doc_id, &probabilities)?;
     }
 }
 
-fn peek_identity<I, E>(input: &mut Peekable<I>) -> Result<Option<DocId>, E>
+pub(super) fn peek_identity<I, E>(input: &mut Peekable<I>) -> Result<Option<DocId>, E>
 where
     I: Iterator<Item = Result<ScoredEntry, E>>,
 {
