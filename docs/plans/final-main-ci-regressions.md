@@ -1,6 +1,6 @@
 # Repair final-main CI regressions
 
-The maintainer requested that the current work be fixed, verified and merged before pausing. Monitoring alone does not complete that request. PR #1225 repairs the original failures on `38f41167e`; PR #1227 is merged as `0bd5ca9fc`, closes the foreign-table publication failure #1228 and delivers the remaining scan-sizing correction. PR #1231 is merged as `07e8a7a17` and closes Scoring test-oracle issue #1230. Main `e104ccdef` passes all workspace and deterministic checks but retains one confirmed materialized scan regression. PR #1233 is now merged as `18b5cb530` after actual Linux/macOS and six-configuration FDW verification; its controlled and both OS deterministic qualifications pass; macOS archive-integrity failure #1235 is being corrected below. The completed #1216–#1221 changes and the original remaining obligations in #714, #1108, #1117 and #653 remain preserved.
+The current failure follow-up is complete through [PR #1237](https://github.com/cognica-io/uqa-engine/pull/1237), merged as `0a69f04ca`. [Workspace run 39649371896](https://github.com/cognica-io/uqa-engine/actions/runs/39649371896) passes all 18,839 Linux and 18,857 macOS executed cases, all five Nori allocation/output validators and all 16 build-origin archive-integrity checks. [Regression run 39649371853](https://github.com/cognica-io/uqa-engine/actions/runs/39649371853) passes 1,562 checks / 2,176 exact cases and eight independent-process histories on each OS, with all 688 registered source hashes verified. [Controlled run 39649371670](https://github.com/cognica-io/uqa-engine/actions/runs/39649371670) accepts all 20 comparisons, with no inconclusive interval or regression; seven signatures, 160 resource hashes and every independent calibration/comparison observation verify. The reusable EC2 instance is confirmed stopped. Earlier failures and inconclusive results remain attributed to their original sources. After final record and branch cleanup, further implementation pauses as requested; original #714, #1108, #1117 and #653 obligations remain open. The source-scoped sections below preserve the status and evidence at each earlier checkpoint; this final checkpoint supersedes their pending-delivery statements.
 
 ## Scope and current evidence
 
@@ -26,7 +26,7 @@ The failing workspace run is [39542443925](https://github.com/cognica-io/uqa-eng
 - [x] Verify the #1227 automatic Linux/macOS artifacts and all six affected FDW configurations, merge and close #1228.
 - [x] Verify the #1225 final-ready FDW selector against its exact product tree; no foreign-handler input changed and no skipped matrix is counted as a test pass.
 - [x] Merge PR #1225 as `916fb1159`, close #1223/#1224, remove its local/remote branch and update main with the unrelated parity README edit preserved.
-- [ ] Complete remaining qualification, resolve any failures, synchronize these records and then pause.
+- [x] Complete final qualification, resolve the archive and fixture failures, and synchronize the completed delivery records for the requested pause.
 
 The existing `tests/parity/pg18/README.md` edit in the main checkout is unrelated and remains untouched. Reuse the established local build checkout and target cache; use local correctness/work diagnostics while CI supplies controlled timing. Repository events trigger CI; no workflow dispatch, rerun or cancellation is part of this repair.
 
@@ -100,7 +100,7 @@ The retained independent profiles identify per-value cloning and final result-ma
 
 - [x] Keep primitive value copies inline without entering the recursive clone frame; preserve all payload variants and existing ownership/representation semantics.
 - [x] Verify exact floating bits, temporal fields, nested type metadata, independent owned buffers and shared opaque Datum backing in Core; verify affected Execution consumers, strict Clippy, formatting and ownership checks.
-- [ ] Review generated caller code, inspect actual automatic Linux/macOS regressions, merge and complete controlled qualification before pausing.
+- [x] Review generated caller code, inspect actual automatic Linux/macOS regressions, merge and complete controlled qualification before pausing.
 
 Main `e104ccdef` final workspace and deterministic checks are complete: all 18,836 Linux and 18,854 macOS executed cases pass, and both actual regression platforms pass 1,559 checks / 2,173 cases and eight histories with all 687 registered source hashes verified. Deliberately excluded workspace cases are not counted as passes. The controlled materialized regression remains the sole failing final qualification; PR [#1233](https://github.com/cognica-io/uqa-engine/pull/1233) owns its current correction.
 
@@ -132,4 +132,19 @@ PR #1234 merged the archive integrity correction as `6b0f21fa7`. Its automatic w
 
 [#1236](https://github.com/cognica-io/uqa-engine/issues/1236) corrects those fixture contracts. File creation/deletion stacks show that the cursor spool is released, while the intervening UPDATE can retain encrypted value-index cache files until cache invalidation. The revised fixture captures each cursor, portal and mutation owner's files separately, deliberately retains an independent real encrypted value-index cache across every boundary, and still requires all files to disappear after every owner closes. Killed-owner checks, secret/key/header checks, provider modes, allowances and timeouts remain unchanged. The two SQLite parity loaders use runtime `CARGO_MANIFEST_DIR` for relocated nextest archives, with their existing compiled-path fallback for direct execution.
 
-Focused local validation and ordinary automatic regression checks are in progress. Product sources and controlled workloads are unchanged from `18b5cb530`; its 20 accepted comparisons and both OS performance results remain source-scoped evidence. Complete this follow-up, reconcile the final results, merge and clean up before the requested pause. Original #714, #1108, #1117 and #653 obligations remain open.
+The completed local and automatic follow-up is recorded below. Product sources and controlled workloads are unchanged from `18b5cb530`; its earlier 20 accepted comparisons and both OS performance results remain source-scoped evidence. Original #714, #1108, #1117 and #653 obligations remain open.
+
+## Completed verification and requested pause
+
+Archive correction #1234 passed all 18,839 Linux and 18,857 macOS cases at `6b0f21fa7` in run 39642172122. The follow-up #1237 contains only four integration-fixture changes and its progress record; the product implementation, Cargo configuration and controlled workloads remain unchanged from qualified `18b5cb530`. Its merge tree equals locally checked `e10e1e6b5`. Six focused local cases, including all nine normal provider modes, four killed encrypted-owner modes and relocated SQLite fixtures, pass with strict Clippy, rustfmt and dependency/capability checks. The original local 2,354-pass / three-failure partition is retained as a failed observation, not relabeled successful. The corrected six cases are individually present and passing in both final workspace artifacts.
+
+The final evidence verifies exact case identities without skipped or retried JUnit cases, all original acceptance ceilings, and complete independent calibration and comparison observations. Deliberately excluded workspace cases are not included in the executed pass counts. The self-review is complete; Copilot and CodeRabbit reported account quota limits and are not claimed as completed independent reviews. No workflow was manually dispatched, rerun or cancelled. Scoped issues #1235 and #1236 are closed. The requested pause preserves the original remaining acceptance conditions in the linked [ledger](open-performance-corrections.md#delivery-ledger); it does not mark those broader issues complete.
+
+The final controlled report preserves these accepted intervals against the existing qualification reference and unchanged ceilings.
+
+| Workload | Ratio interval | Maximum |
+| --- | --- | --- |
+| Q1 | [1.054674, 1.065570] | 1.10 |
+| Q6 | [0.664848, 0.673373] | 1.10 |
+| Materialized scan | [1.119445, 1.134918] | 1.15 |
+| Cursor scan | [1.012261, 1.034148] | 1.15 |
