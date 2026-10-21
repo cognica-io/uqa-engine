@@ -12,7 +12,9 @@ use super::{
     TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionStatus,
 };
 use crate::notifications::NotificationCommitGuard;
-use uqa_execution::row_locks::{temporary_roles::TemporaryRolePublication, RowChangePublication};
+use uqa_execution::row_locks::{
+    temporary_roles::TemporaryRolePublication, RowChangePreparation, RowChangePublication,
+};
 use uqa_storage::mvcc::TransactionOutcome;
 
 // Drop temporary additions before the notification and row-publication guards are released.
@@ -53,6 +55,7 @@ impl Engine {
                 self.prepare_notification_writer(stack)?;
             }
         }
+        let preparation = self.prepare_commit_writer(stack, storage_savepoint.is_none())?;
         let mut publication =
             self.prepare_transaction_publication(stack, storage_savepoint.is_none())?;
         let savepoints_deferred = Self::backend_savepoints_deferred(stack);
@@ -60,6 +63,13 @@ impl Engine {
             if let Err(error) = self.prepare_statistics_changes(stack, &statistics_changes) {
                 drop(publication);
                 return Err(self.rollback_failed_statistics_preparation(stack, &error));
+            }
+        }
+        if storage_savepoint.is_none() && !resolving {
+            if let Err(error) = self.prepare_commit_records(&mut publication, preparation.is_some())
+            {
+                drop(publication);
+                return Err(self.recover_failed_transaction_finish(stack, false, error));
             }
         }
         // Only a commit that wrote records advances the committed sequence, which lets the session recognize its own commit afterward.
@@ -118,6 +128,56 @@ impl Engine {
             publication.notifications,
             wrote_records,
         )
+    }
+
+    fn prepare_commit_writer(
+        &self,
+        stack: &[TransactionFrame],
+        outer: bool,
+    ) -> Result<Option<RowChangePreparation<'_>>, SQLError> {
+        let frame = stack.last().expect("validated transaction frame");
+        if !outer
+            || !self.versioned_backend_transactions()
+            || frame.intent == TransactionIntent::ReadOnly
+        {
+            return Ok(None);
+        }
+        // Serialize statistics settlement and immutable preparation with other SQL writers while allowing snapshot admission during private preparation.
+        self.row_locks
+            .begin_change_preparation(&self.runtime.cancellation)
+            .map(Some)
+            .map_err(|error| match frame.status {
+                TransactionStatus::CommitPending(transaction) => {
+                    Self::pending_completion_error(transaction, error)
+                }
+                _ => error,
+            })
+    }
+
+    fn prepare_commit_records<'a>(
+        &'a self,
+        publication: &mut TransactionPublication<'a>,
+        serialized: bool,
+    ) -> Result<(), SQLError> {
+        // Notification and temporary-catalog publication retain their established lock ordering. Ordinary data commits release the snapshot gate while preparing immutable records; the writer guard protects settled statistics counters.
+        let admit_readers = serialized
+            && publication.notifications.is_none()
+            && publication.temporary_roles.is_none();
+        if admit_readers {
+            drop(publication.changes.take());
+        }
+        if let Some(backend) = self.storage.backend.as_ref() {
+            backend
+                .prepare_transaction_commit()
+                .map_err(|error| Self::storage_tx_error("prepare COMMIT", &error))?;
+        }
+        if admit_readers {
+            publication.changes = Some(
+                self.row_locks
+                    .begin_change_publication(&self.runtime.cancellation)?,
+            );
+        }
+        Ok(())
     }
 
     /// Maintenance counters are derived at publication, after any earlier publisher. A savepoint can restore an older command base, and concurrent commands must not overwrite each other's accumulated maintenance state. The committing frame keeps what the session takes over once the commit has succeeded.

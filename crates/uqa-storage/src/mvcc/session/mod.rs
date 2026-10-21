@@ -894,6 +894,12 @@ impl KeyValueStore for VersionedKeyValueStore {
         }
     }
 
+    fn prepare_transaction_commit(&self) -> StorageBackendResult<()> {
+        let mut active = self.active.lock();
+        let transaction = active.as_mut().ok_or_else(no_transaction)?;
+        transaction.prepare_commit(&*self.persistence, &self.write_control())
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         let mut active = self.active.lock();
         let sequence_completion = self

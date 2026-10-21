@@ -375,6 +375,10 @@ impl KeyValueStore for SQLiteKeyValueStore {
         self.conn.pin_transaction_snapshot().map_err(Into::into)
     }
 
+    fn prepare_transaction_commit(&self) -> StorageBackendResult<()> {
+        self.conn.prepare_transaction_commit().map_err(Into::into)
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         self.conn.commit_transaction().map_err(Into::into)
     }

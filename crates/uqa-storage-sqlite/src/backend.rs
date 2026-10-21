@@ -638,6 +638,11 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(())
     }
 
+    fn prepare_transaction_commit(&self) -> StorageBackendResult<()> {
+        self.conn.prepare_transaction_commit()?;
+        Ok(())
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         self.conn.commit_transaction()?;
         Ok(())

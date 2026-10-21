@@ -18,6 +18,13 @@ pub struct RowChangeSnapshot<'manager> {
     _local: RwLockReadGuard<'manager, ()>,
 }
 
+/// Serializes writers' final preparation without preventing readers from pinning committed snapshots.
+pub struct RowChangePreparation<'manager> {
+    manager: &'manager RowLockManager,
+    cross_claim: Option<ByteClaim>,
+    _local: RwLockWriteGuard<'manager, ()>,
+}
+
 pub struct RowChangePublication<'manager> {
     manager: &'manager RowLockManager,
     cross_claim: Option<ByteClaim>,
@@ -55,6 +62,16 @@ impl Drop for RowChangeSnapshot<'_> {
     }
 }
 
+impl Drop for RowChangePreparation<'_> {
+    fn drop(&mut self) {
+        if let (Some(CrossAttachment::Active(coordinator)), Some(claim)) =
+            (self.manager.cross.as_ref(), self.cross_claim)
+        {
+            coordinator.release(CHANGE_GATE_SESSION, &[claim]);
+        }
+    }
+}
+
 impl Drop for RowChangePublication<'_> {
     fn drop(&mut self) {
         if let (Some(CrossAttachment::Active(coordinator)), Some(claim)) =
@@ -68,14 +85,13 @@ impl Drop for RowChangePublication<'_> {
 impl RowLockManager {
     fn acquire_change_gate_claim(
         &self,
-        write: bool,
+        claim: ByteClaim,
         cancel: &uqa_core::CancellationToken,
         deadline: Instant,
     ) -> Result<Option<ByteClaim>, SQLError> {
         let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() else {
             return Ok(None);
         };
-        let claim = change_gate_claim(write);
         loop {
             cancel.check()?;
             if let Ok(()) = coordinator
@@ -89,6 +105,37 @@ impl RowLockManager {
             }
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    /// Serialize writer preparation through final publication. Snapshot readers do not acquire this guard. Acquire it before the snapshot/publication gate and release it after metadata publication.
+    pub fn begin_change_preparation(
+        &self,
+        cancel: &uqa_core::CancellationToken,
+    ) -> Result<RowChangePreparation<'_>, SQLError> {
+        let deadline = Instant::now() + CHANGE_GATE_WAIT_LIMIT;
+        let local = loop {
+            cancel.check()?;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(change_gate_timeout());
+            }
+            if let Some(local) = self
+                .change_preparation
+                .try_write_for(remaining.min(WAIT_SLICE))
+            {
+                break local;
+            }
+        };
+        let cross_claim = self.acquire_change_gate_claim(
+            super::cross_process::change_preparation_claim(),
+            cancel,
+            deadline,
+        )?;
+        Ok(RowChangePreparation {
+            manager: self,
+            cross_claim,
+            _local: local,
+        })
     }
 
     /// Hold the shared commit/snapshot gate while a storage snapshot is pinned and its row-change baseline is captured.
@@ -107,7 +154,8 @@ impl RowLockManager {
                 break local;
             }
         };
-        let cross_claim = self.acquire_change_gate_claim(false, cancel, deadline)?;
+        let cross_claim =
+            self.acquire_change_gate_claim(change_gate_claim(false), cancel, deadline)?;
         Ok(RowChangeSnapshot {
             manager: self,
             cross_claim,
@@ -131,7 +179,8 @@ impl RowLockManager {
                 break local;
             }
         };
-        let cross_claim = self.acquire_change_gate_claim(true, cancel, deadline)?;
+        let cross_claim =
+            self.acquire_change_gate_claim(change_gate_claim(true), cancel, deadline)?;
         Ok(RowChangePublication {
             manager: self,
             cross_claim,

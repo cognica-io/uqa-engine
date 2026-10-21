@@ -187,12 +187,36 @@ pub(super) fn commit(
         fingerprint: prepared.fingerprint(),
     };
     let preserves_definitions = if let Some(namespace) = native {
-        native::materialize(&transaction, namespace.0, prepared, sequence, control)
-            .map_err(rejected)?
+        native::materialize(
+            &transaction,
+            namespace.0,
+            prepared,
+            sequence,
+            control,
+            |verify| {
+                stage(
+                    &transaction,
+                    prepared,
+                    receipt,
+                    relaxed.is_none(),
+                    control,
+                    verify,
+                )
+            },
+        )
+        .map_err(rejected)?
     } else {
+        stage(
+            &transaction,
+            prepared,
+            receipt,
+            relaxed.is_none(),
+            control,
+            &mut |_| Ok(()),
+        )
+        .map_err(rejected)?;
         false
     };
-    stage(&transaction, prepared, receipt, relaxed.is_none(), control).map_err(rejected)?;
     admission::commit(transaction, control).map_err(|error| match error {
         Error::Version(error @ VersionError::Cancelled(_)) => CommitFailure::Rejected(error),
         error => CommitFailure::Indeterminate {
@@ -212,6 +236,7 @@ fn stage(
     receipt: CommitReceipt,
     synchronized: bool,
     control: &StorageReadControl,
+    verify: &mut dyn FnMut(&uqa_storage::mvcc::PreparedRecordWrite) -> PhysicalResult<()>,
 ) -> PhysicalResult<()> {
     let sequence = receipt.sequence.as_u64().to_be_bytes();
     let has_runs: bool = connection
@@ -225,6 +250,7 @@ fn stage(
         let mut heads = connection.prepare_cached("INSERT INTO _uqa_mvcc_heads (key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?;
         let mut writes = prepared.writes();
         while let Some(write) = writes.next(control)? {
+            verify(&write)?;
             // Validation found the head each write expects. A key that expects none has no head, so it is in no run and has no compacted tombstone to restore before its first version.
             if write.expected().is_some() {
                 if has_runs {

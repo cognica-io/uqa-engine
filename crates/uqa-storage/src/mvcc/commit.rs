@@ -173,6 +173,7 @@ impl PreparedRecordWrite {
 pub struct PreparedRecordCommit {
     writes: PreparedWrites,
     fingerprint: CommitFingerprint,
+    record_bytes: u64,
     pub(super) graph: Option<GraphEffects>,
     pub(super) vector: Option<super::vector::VectorEffects>,
     pub(super) populations: Option<super::populations::PopulationEffects>,
@@ -225,6 +226,12 @@ impl PreparedRecordCommit {
 
     pub fn is_empty(&self) -> bool {
         self.writes.len() == 0
+    }
+
+    /// Total key and value bytes, counted while fingerprinting the immutable batch.
+    /// Saturates on overflow and needs no further spill reads.
+    pub fn record_bytes(&self) -> u64 {
+        self.record_bytes
     }
 
     /// Visit the writes in order.
@@ -293,8 +300,12 @@ impl PreparedRecordCommit {
             .iter()
             .any(|write| write.kind != RecordWriteKind::Canonical);
         let mut digest = fingerprint_header(typed, writes.len() as u64);
+        let mut record_bytes = 0_u64;
         for write in writes.iter() {
             control.cancellation().check()?;
+            record_bytes = record_bytes
+                .saturating_add(write.key().len() as u64)
+                .saturating_add(write.value().map_or(0, |value| value.len() as u64));
             fingerprint_write(
                 &mut digest,
                 typed,
@@ -312,6 +323,7 @@ impl PreparedRecordCommit {
         Ok(Self::with_fingerprint(
             PreparedWrites::Resident(writes),
             digest.finalize().into(),
+            record_bytes,
         ))
     }
 
@@ -329,8 +341,12 @@ impl PreparedRecordCommit {
     ) -> VersionResult<Self> {
         let typed = run.typed();
         let mut digest = fingerprint_header(typed, run.len());
+        let mut record_bytes = 0_u64;
         let mut cursor = run.cursor(std::ops::Bound::Unbounded);
         while let Some(entry) = cursor.next(control)? {
+            record_bytes = record_bytes
+                .saturating_add(entry.key.bytes().len() as u64)
+                .saturating_add(entry.value.map_or(0, |location| location.len));
             fingerprint_write(
                 &mut digest,
                 typed,
@@ -355,13 +371,19 @@ impl PreparedRecordCommit {
         Ok(Self::with_fingerprint(
             PreparedWrites::Spilled(run),
             digest.finalize().into(),
+            record_bytes,
         ))
     }
 
-    fn with_fingerprint(writes: PreparedWrites, fingerprint: CommitFingerprint) -> Self {
+    fn with_fingerprint(
+        writes: PreparedWrites,
+        fingerprint: CommitFingerprint,
+        record_bytes: u64,
+    ) -> Self {
         Self {
             writes,
             fingerprint,
+            record_bytes,
             graph: None,
             vector: None,
             populations: None,
