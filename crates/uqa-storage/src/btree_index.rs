@@ -11,6 +11,8 @@
 //! [`BTreeMap`] in key order. The result is a [`PostingList`] with
 //! `score = 0.0`, leaving downstream scoring to the operator pipeline.
 
+pub mod retained;
+
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
