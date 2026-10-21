@@ -12,6 +12,7 @@ mod database_security;
 mod deletion;
 mod dependencies;
 mod domain_security;
+mod foreign_publication;
 mod identity;
 mod memberships;
 mod migration;

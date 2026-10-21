@@ -157,10 +157,10 @@ impl Target {
 #[case::native_sqlite(0)]
 #[case::sqlite_key_value(1)]
 #[case::redb(2)]
-fn private_views_keep_renamed_owners_after_peer_catalog_publication(
+fn private_relations_keep_renamed_owners_after_peer_catalog_publication(
     #[case] provider: usize,
     #[values("REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
-    #[values(4, 5)] target_index: usize,
+    #[values(4, 5, 6)] target_index: usize,
 ) {
     let target = &TARGETS[target_index];
     let (directory, first, second) = sessions(provider);
@@ -183,7 +183,7 @@ fn private_views_keep_renamed_owners_after_peer_catalog_publication(
     );
     result.unwrap();
     target.assert_created_as(&second, true, "renamed");
-    // COMMIT releases the owner's logical locks before publishing its catalog epoch. Replay that late notification after the creator has already observed the physical commit and installed its private view; no further durable commit may repair the lost cache incidentally.
+    // COMMIT releases the owner's logical locks before publishing its catalog epoch. Replay that late notification after the creator has already observed the physical commit and installed its private relation; no further durable commit may repair the lost cache incidentally.
     first.publish_catalog_registry_changes();
     second.synchronize_catalog_registries().unwrap();
     sql(&second, "COMMIT; RESET ROLE");

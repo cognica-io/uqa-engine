@@ -7400,25 +7400,31 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
-      "test": "private_views_keep_renamed_owners_after_peer_catalog_publication",
-      "cases": 12,
+      "test": "private_relations_keep_renamed_owners_after_peer_catalog_publication",
+      "cases": 18,
       "source": "crates/uqa-engine/src/tests/catalog/roles/creation.rs",
-      "capability": "Private view catalog publication",
-      "workload": "Twelve provider/isolation/view schedules that deliver the role rename's catalog epoch after the creator observes its physical commit, without another durable commit to repair a lost view.",
-      "invariant": "A nested catalog lookup preserves the private view and original owner incarnation through commit/reopen; the uncorrected merge deterministically loses the ownership JOIN row after COMMIT.",
+      "capability": "Private relation catalog publication",
+      "workload": "Eighteen provider/isolation/view-or-foreign-table schedules deliver the role rename catalog epoch after the creator observes its physical commit, without another durable commit to repair a lost definition.",
+      "invariant": "A nested catalog lookup preserves the private view or fully declared foreign table and its original owner incarnation through commit and reopen.",
       "case_names": [
         "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::target_index_1_4",
         "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::target_index_2_5",
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::target_index_3_6",
         "case_1_native_sqlite::isolation_2___SERIALIZABLE__::target_index_1_4",
         "case_1_native_sqlite::isolation_2___SERIALIZABLE__::target_index_2_5",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::target_index_3_6",
         "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::target_index_1_4",
         "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::target_index_2_5",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::target_index_3_6",
         "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::target_index_1_4",
         "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::target_index_2_5",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::target_index_3_6",
         "case_3_redb::isolation_1___REPEATABLEREAD__::target_index_1_4",
         "case_3_redb::isolation_1___REPEATABLEREAD__::target_index_2_5",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::target_index_3_6",
         "case_3_redb::isolation_2___SERIALIZABLE__::target_index_1_4",
-        "case_3_redb::isolation_2___SERIALIZABLE__::target_index_2_5"
+        "case_3_redb::isolation_2___SERIALIZABLE__::target_index_2_5",
+        "case_3_redb::isolation_2___SERIALIZABLE__::target_index_3_6"
       ]
     },
     {
@@ -20561,6 +20567,88 @@
       "workload": "Alternating 24KiB and empty shared payloads under a 64KiB scan batch bound.",
       "invariant": "The cursor preserves exact ordered values and bounded batches while visiting no more than two surplus source rows over 128 outputs.",
       "capability": "Bounded shared scan prefetch"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "private_foreign_records_preserve_definitions_security_and_peer_changes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/relation_authority/tests.rs",
+      "capability": "Private foreign catalog publication",
+      "workload": "Created, renamed, altered, dropped and recreated definitions beside an unrelated peer definition.",
+      "invariant": "One provenance read per exact relation; preserve the complete private definition/security pair and unrelated committed changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unchanged_foreign_maps_share_storage_and_invalid_private_security_is_rejected",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/relation_authority/tests.rs",
+      "capability": "Private foreign catalog publication",
+      "workload": "Unchanged shared maps, absent private security and provenance errors.",
+      "invariant": "Unchanged inputs retain shared map identity; incomplete security or failed provenance never publishes a replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "test": "foreign_table_provenance_preserves_exact_names_rename_deletion_and_undo",
+      "cases": 1,
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/metadata.rs",
+      "capability": "Private foreign catalog provenance",
+      "workload": "Versioned K/V sessions, neighboring and Unicode/NUL names, rename tombstones, peer commits, snapshot refresh, savepoint undo and commit.",
+      "invariant": "Exact foreign-table keys preserve private provenance without aliasing view records, another schema or another session.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "foreign_table_private_provenance_tracks_exact_names_rename_deletion_and_undo",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/foreign_provenance.rs",
+      "capability": "Private foreign catalog provenance",
+      "workload": "Native and serialized SQLite catalogs with exact names, replacement, rename, deletion, savepoint undo and commit.",
+      "invariant": "Native private provenance includes removal tombstones; serialized catalogs remain non-versioned and both preserve final records.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "private_foreign_definitions_survive_refresh_commit_and_undo",
+      "cases": 18,
+      "source": "crates/uqa-engine/src/tests/catalog/roles/foreign_publication.rs",
+      "capability": "Private foreign catalog publication",
+      "workload": "Three providers, two fixed-snapshot isolation levels and commit/full rollback/savepoint undo; independent PostgreSQL 18.4 catalog DDL fixture.",
+      "invariant": "Private definitions, security, deletion and recreation survive a peer catalog refresh; final catalog columns match PostgreSQL before and after reopen.",
+      "case_names": [
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::finish_1___COMMIT__",
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::finish_2___ROLLBACK__",
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::finish_3___ROLLBACKTObefore_foreignCOMMIT__",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::finish_1___COMMIT__",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::finish_2___ROLLBACK__",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::finish_3___ROLLBACKTObefore_foreignCOMMIT__",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::finish_1___COMMIT__",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::finish_2___ROLLBACK__",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::finish_3___ROLLBACKTObefore_foreignCOMMIT__",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::finish_1___COMMIT__",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::finish_2___ROLLBACK__",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::finish_3___ROLLBACKTObefore_foreignCOMMIT__",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::finish_1___COMMIT__",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::finish_2___ROLLBACK__",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::finish_3___ROLLBACKTObefore_foreignCOMMIT__",
+        "case_3_redb::isolation_2___SERIALIZABLE__::finish_1___COMMIT__",
+        "case_3_redb::isolation_2___SERIALIZABLE__::finish_2___ROLLBACK__",
+        "case_3_redb::isolation_2___SERIALIZABLE__::finish_3___ROLLBACKTObefore_foreignCOMMIT__"
+      ]
     }
   ]
 }

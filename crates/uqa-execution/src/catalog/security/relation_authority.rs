@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Fresh authority retains private view records and relation ACL tuples from the active transaction.
+//! Fresh authority retains private relation definitions and ACL tuples from the active transaction.
 
 use crate::catalog::foreign::StoredForeignTable;
 use std::{collections::BTreeMap, sync::Arc};
@@ -97,6 +97,17 @@ pub fn merge_private_foreign(
     mut latest_definitions: Arc<BTreeMap<RelationIdentity, StoredForeignTable>>,
     mut latest: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
 ) -> StorageBackendResult<ForeignAuthoritySnapshot> {
+    merge_private_foreign_definitions(
+        current_definitions,
+        current,
+        &mut latest_definitions,
+        &mut latest,
+        |relation| {
+            catalog.map_or(Ok(false), |catalog| {
+                catalog.foreign_table_has_private_changes(relation)
+            })
+        },
+    )?;
     for (relation, security) in Arc::make_mut(&mut latest) {
         if current_definitions
             .get(relation)
@@ -118,6 +129,39 @@ pub fn merge_private_foreign(
         definitions: latest_definitions,
         security: latest,
     })
+}
+
+fn merge_private_foreign_definitions(
+    current_definitions: &BTreeMap<RelationIdentity, StoredForeignTable>,
+    current_security: &BTreeMap<RelationIdentity, BoundTableSecurity>,
+    latest_definitions: &mut Arc<BTreeMap<RelationIdentity, StoredForeignTable>>,
+    latest_security: &mut Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
+    mut is_private: impl FnMut(&RelationIdentity) -> StorageBackendResult<bool>,
+) -> StorageBackendResult<()> {
+    let relations = current_definitions
+        .keys()
+        .chain(latest_definitions.keys())
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    for relation in relations {
+        if !is_private(&relation)? {
+            continue;
+        }
+        if let Some(table) = current_definitions.get(&relation) {
+            let security = current_security.get(&relation).ok_or_else(|| {
+                uqa_storage::StorageBackendError::Other(format!(
+                    "private foreign table `{}` has no security metadata",
+                    relation.qualified_name()
+                ))
+            })?;
+            Arc::make_mut(latest_definitions).insert(relation.clone(), table.clone());
+            Arc::make_mut(latest_security).insert(relation, security.clone());
+        } else {
+            Arc::make_mut(latest_definitions).remove(&relation);
+            Arc::make_mut(latest_security).remove(&relation);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
