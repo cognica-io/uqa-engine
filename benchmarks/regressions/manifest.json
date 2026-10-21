@@ -20056,6 +20056,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_evidence_cursor_preserves_sparse_union_duplicate_scores_and_float_order",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/evidence/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Sparse ordered probability signals with an empty signal, duplicate identities, endpoint probabilities and three priors.",
+      "invariant": "The ordered visitor agrees bit-for-bit with the original last-value maps and declared-order evidence sum.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_evidence_validates_all_signals_before_any_output",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/evidence/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "A valid first signal and a later invalid probability.",
+      "invariant": "Every probability is validated before any output, preserving the original diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_evidence_preserves_input_and_consumer_failures",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/evidence/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Input and output callbacks fail separately.",
+      "invariant": "Typed input and consumer failures survive without continuing output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_evidence_retains_only_live_signal_heads",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/evidence/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Three complete 32,768-document signals with a validating discard visitor.",
+      "invariant": "Peak retained allocations remain below 16KiB independent of population; all identities and evidence directions are correct.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_evidence_empty_inputs_never_synthesize_documents",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/evidence/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Zero signals and three empty inputs.",
+      "invariant": "No synthetic support or output is introduced.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "exact_bayesian_operator_validates_prior_then_children_then_probabilities",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/tests.rs",
+      "capability": "Bounded exact Bayesian text fusion",
+      "workload": "Invalid prior, invalid early probability and a failing later child with an execution counter.",
+      "invariant": "Prior validation precedes child evaluation; child errors precede probability validation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

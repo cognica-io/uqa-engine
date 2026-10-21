@@ -17,7 +17,6 @@ use uqa_fusion::{
     AdaptivePositiveEvidencePool as AdaptivePositiveEvidenceFuser, BayesianEvidenceFusion,
     LogitGating, ProbabilisticBoolean, RobustPositiveEvidencePool, SignalQuality,
 };
-use uqa_scoring::EvidenceLogit;
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 use crate::base::{
@@ -25,6 +24,8 @@ use crate::base::{
 };
 use crate::primitive::TermOperator;
 use crate::vector::VectorSimilarityOperator;
+
+pub mod evidence;
 
 /// Default probability for documents missing from a signal, interpolated
 /// by the signal's coverage (Section 5, Paper 3 / Section 4, Paper 4):
@@ -168,7 +169,7 @@ impl Operator for SemanticFilterOperator {
 /// Exact Bayesian fusion of signed prior-free evidence.
 ///
 /// Each present score is interpreted as a prior-free probability-like evidence
-/// value and converted to a signed [`EvidenceLogit`]. Missing signals contribute
+/// value and converted to a signed [`uqa_scoring::EvidenceLogit`]. Missing signals contribute
 /// the additive identity zero. The configured corpus prior enters exactly once,
 /// after which the operator computes
 /// `sigmoid(logit(base_rate) + sum(evidence_i))` without gating, confidence
@@ -208,42 +209,31 @@ impl Operator for BayesianEvidenceFusionOperator {
             .iter()
             .map(|signal| signal.execute(ctx))
             .collect::<StorageBackendResult<_>>()?;
-        for posting_list in &posting_lists {
-            validate_probability_postings(posting_list, "Bayesian evidence fusion")?;
-        }
-
-        let mut all_doc_ids = std::collections::BTreeSet::new();
-        let score_maps: Vec<BTreeMap<DocId, f64>> = posting_lists
-            .iter()
-            .map(|posting_list| {
-                let mut scores = BTreeMap::new();
-                for entry in posting_list {
-                    scores.insert(entry.doc_id, entry.payload.score);
-                    all_doc_ids.insert(entry.doc_id);
-                }
-                scores
-            })
-            .collect();
-        if all_doc_ids.is_empty() {
-            return Ok(PostingList::new());
-        }
-
-        let mut entries = Vec::with_capacity(all_doc_ids.len());
-        for doc_id in all_doc_ids {
-            let evidence: Vec<EvidenceLogit> = score_maps
-                .iter()
-                .filter_map(|scores| scores.get(&doc_id).copied())
-                .map(EvidenceLogit::from_prior_free_probability)
-                .collect::<Result<_, _>>()
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            let posterior = fusion
-                .fuse(&evidence)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            entries.push(PostingEntry::new(
-                doc_id,
-                Payload::with_score(posterior.value()),
-            ));
-        }
+        let mut entries = Vec::new();
+        evidence::visit_exact_evidence(
+            &fusion,
+            posting_lists.len(),
+            |signal| {
+                Ok::<_, StorageBackendError>(posting_lists[signal].entries().iter().map(|entry| {
+                    Ok(uqa_core::ScoredEntry {
+                        doc_id: entry.doc_id,
+                        score: entry.payload.score,
+                    })
+                }))
+            },
+            |entry| {
+                entries.push(PostingEntry::new(
+                    entry.doc_id,
+                    Payload::with_score(entry.score),
+                ));
+                Ok(())
+            },
+        )
+        .map_err(|error| match error {
+            evidence::EvidenceVisitError::Input(error)
+            | evidence::EvidenceVisitError::Output(error)
+            | evidence::EvidenceVisitError::Fusion(error) => error,
+        })?;
         let result = PostingList::from_sorted_unchecked(entries);
         Ok(match self.top_k {
             Some(k) => result.ranked().select_top_k(k),

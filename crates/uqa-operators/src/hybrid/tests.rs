@@ -58,6 +58,35 @@ fn exact_bayesian_operator_rejects_invalid_priors_and_signal_scores() {
 }
 
 #[test]
+fn exact_bayesian_operator_validates_prior_then_children_then_probabilities() {
+    struct FailingSignal(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    impl Operator for FailingSignal {
+        fn execute(&self, _context: &ExecutionContext) -> OperatorResult {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(StorageBackendError::Other("child failure".into()))
+        }
+        fn cost_estimate(&self, _stats: &IndexStats) -> f64 {
+            1.0
+        }
+    }
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let signals: Vec<Arc<dyn Operator>> = vec![
+        Arc::new(LiteralOperator(vec![(1, f64::NAN)])),
+        Arc::new(FailingSignal(Arc::clone(&calls))),
+    ];
+    let error = BayesianEvidenceFusionOperator::new(signals.clone(), 0.0)
+        .execute(&ExecutionContext::new())
+        .unwrap_err();
+    assert!(error.to_string().contains("base_rate"));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    let error = BayesianEvidenceFusionOperator::new(signals, 0.5)
+        .execute(&ExecutionContext::new())
+        .unwrap_err();
+    assert_eq!(error.to_string(), "child failure");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[test]
 fn adaptive_weights_favor_the_discriminating_signal() {
     let fuser = RobustPositiveEvidencePool::new(0.5).expect("test alpha is valid");
     let flat: BTreeMap<DocId, f64> = [(1, 0.7), (2, 0.7), (3, 0.7)].into_iter().collect();
