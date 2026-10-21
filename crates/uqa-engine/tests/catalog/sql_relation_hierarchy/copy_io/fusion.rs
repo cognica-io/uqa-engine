@@ -14,6 +14,8 @@ use uqa_scoring::{EvidenceLogit, ScoringMode};
 
 #[path = "fusion/pooling.rs"]
 mod pooling;
+#[path = "fusion/vector.rs"]
+mod vector;
 
 struct NativeSignals {
     identities: BTreeMap<u64, i64>,

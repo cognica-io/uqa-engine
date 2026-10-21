@@ -68,6 +68,35 @@ fn copy_positive_text_pool_does_not_retain_complete_signal_populations() {
     verify_complete_fusion_memory("pool_positive_evidence");
 }
 
+#[rstest::rstest]
+#[case::automatic("text_match(body,'alpha') AND knn_match(embedding,ARRAY[1.0,0.0],8)")]
+#[case::exact(
+    "fuse_bayesian_evidence(bayesian_match(body,'alpha'),knn_match(embedding,ARRAY[1.0,0.0],8))"
+)]
+#[case::positive(
+    "pool_positive_evidence(bayesian_match(body,'alpha'),knn_match(embedding,ARRAY[1.0,0.0],8))"
+)]
+fn copy_hybrid_pool_does_not_materialize_complete_text_support(#[case] predicate: &str) {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE copy_search(id INTEGER PRIMARY KEY,body TEXT,embedding VECTOR(2));
+         INSERT INTO copy_search SELECT n,'alpha beta',ARRAY[1.0,n::DOUBLE PRECISION]
+         FROM generate_series(1,32768) AS s(n);
+         CREATE INDEX copy_search_body ON copy_search USING gin(body);
+         SET work_mem='64kB'",
+    );
+    let sql = format!("COPY (SELECT id FROM copy_search WHERE {predicate}) TO STDOUT");
+    let mut output = Lines { count: 0, value: 0 };
+    let allocation = allocation_counter::measure(|| {
+        assert_eq!(engine.copy_to(&sql, &mut output).unwrap(), 32_768);
+    });
+    assert_eq!(output.count, 32_768);
+    assert_eq!(output.value, 0);
+    // A fixed eight-candidate vector pool must not retain the complete text population.
+    assert!(allocation.bytes_max < 2 * 1024 * 1024, "{allocation:?}");
+}
+
 fn verify_complete_fusion_memory(function: &str) {
     let engine = Engine::new();
     exec(

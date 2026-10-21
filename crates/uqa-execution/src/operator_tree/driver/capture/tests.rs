@@ -359,3 +359,35 @@ fn captured_text_boolean_population_stays_within_its_shared_allowance() {
     // Three complete score vectors alone require 3MiB, excluding posting payloads.
     assert!(allocated.bytes_max < 512 * 1024, "{allocated:?}");
 }
+
+#[test]
+fn complete_fusion_capture_retains_explicit_vector_pools_and_declines_unbounded_transforms() {
+    for k in [0, 1, 8, usize::MAX] {
+        let knn = OperatorTree::KNN {
+            query_vector: vec![1.0, 0.0],
+            k,
+            field: "embedding".into(),
+        };
+        assert!(tree::complete_scored_tree(&knn));
+        let cosine = OperatorTree::CosineProbability(Box::new(knn));
+        let calibrated = OperatorTree::CalibratedVectorMatch {
+            query_vector: vec![1.0, 0.0],
+            k,
+            field: "embedding".into(),
+            threshold: Some(0.8),
+        };
+        assert!(tree::complete_scored_tree(
+            &OperatorTree::BayesianEvidenceFusion {
+                signals: vec![term("alpha"), cosine, calibrated],
+                base_rate: None,
+            }
+        ));
+    }
+    assert!(!tree::complete_scored_tree(
+        &OperatorTree::CosineProbability(Box::new(OperatorTree::VectorSimilarity {
+            query_vector: vec![1.0, 0.0],
+            threshold: 0.5,
+            field: "embedding".into(),
+        }))
+    ));
+}

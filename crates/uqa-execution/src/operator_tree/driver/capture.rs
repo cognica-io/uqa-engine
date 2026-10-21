@@ -56,6 +56,11 @@ impl PhysicalRetrievalDriver<'_> {
                     predicate,
                 } => self.capture_index_scan(index_name, field, predicate, bytes),
                 OperatorTree::Complement(source) => self.capture_complement(source, bytes),
+                OperatorTree::KNN { .. }
+                | OperatorTree::CalibratedVectorMatch { .. }
+                | OperatorTree::CosineProbability(_) => {
+                    self.capture_vector_postings(self.execute_posting_node(tree)?, bytes)
+                }
                 OperatorTree::BayesianEvidenceFusion { signals, base_rate } => {
                     self.capture_exact_fusion(signals, *base_rate, bytes)
                 }
@@ -82,6 +87,22 @@ impl PhysicalRetrievalDriver<'_> {
                 _ => unreachable!("eligible complete retrieval leaf"),
             },
         )
+    }
+
+    fn capture_vector_postings(
+        &self,
+        postings: uqa_core::PostingList,
+        bytes: usize,
+    ) -> DriverResult<CapturedScoredEntries> {
+        // The vector owner selects its explicit K-candidate pool. Keep that selection and calibration, then retain the scores without forcing an unbounded sibling text population into a posting list.
+        let mut output = ScoredEntryCapture::new(bytes, self.context.runtime.cancellation_token())?;
+        for entry in postings {
+            output.push(uqa_core::ScoredEntry {
+                doc_id: entry.doc_id,
+                score: entry.payload.score,
+            })?;
+        }
+        output.finish()
     }
 
     fn capture_text_leaf(

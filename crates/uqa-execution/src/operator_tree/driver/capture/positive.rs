@@ -46,7 +46,7 @@ impl PhysicalRetrievalDriver<'_> {
             },
             bytes,
             self.context.runtime.cancellation_token(),
-            || self.bridge_context(),
+            || self.bridge_score_context(),
         )
     }
 }

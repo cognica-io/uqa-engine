@@ -105,6 +105,12 @@ impl RetrievalSnapshots for Engine {
     fn snapshot_context(&self, table: &str) -> Result<Option<ExecutionContext>, SQLError> {
         self.snapshot_context(table)
     }
+    fn snapshot_context_for_scores(
+        &self,
+        table: &str,
+    ) -> Result<Option<ExecutionContext>, SQLError> {
+        self.snapshot_context_for_scores(table)
+    }
     fn snapshot_context_with_document_store(
         &self,
         table: &str,

@@ -72,6 +72,13 @@ pub trait RetrievalRelations: Sync {
 
 pub trait RetrievalSnapshots: Sync {
     fn snapshot_context(&self, table: &str) -> Result<Option<ExecutionContext>, SQLError>;
+    /// Retain the relation boundary for already evaluated score signals. Fusion does not read vector indexes; adapters can omit their physical snapshots.
+    fn snapshot_context_for_scores(
+        &self,
+        table: &str,
+    ) -> Result<Option<ExecutionContext>, SQLError> {
+        self.snapshot_context(table)
+    }
     fn snapshot_context_with_document_store(
         &self,
         table: &str,

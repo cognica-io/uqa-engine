@@ -20452,6 +20452,63 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_fusion_capture_retains_explicit_vector_pools_and_declines_unbounded_transforms",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Complete hybrid COPY capture",
+      "workload": "Explicit KNN, calibrated-vector and cosine wrappers across zero, finite and maximum K.",
+      "invariant": "Only native explicit vector pools enter complete score capture; unbounded thresholds and arbitrary cosine transforms retain their native boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_hybrid_pool_does_not_materialize_complete_text_support",
+      "cases": 3,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Complete hybrid COPY capture",
+      "workload": "32,768 text matches with eight vector candidates and 64KiB work memory in automatic, exact and positive hybrid COPY.",
+      "invariant": "Complete output retains fewer than 2MiB additional live Rust bytes without truncating text support or enlarging the fixed allowance.",
+      "case_names": [
+        "case_1_automatic",
+        "case_2_exact",
+        "case_3_positive"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_vector_fusion_preserves_native_bits_and_selected_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion/vector.rs",
+      "capability": "Complete hybrid COPY capture",
+      "workload": "Four storage providers across automatic, exact, positive and calibrated fusion, K 0/1/8, private writes, concurrent output-time changes and durable reopen.",
+      "invariant": "Native score bits and selected generations are preserved; zero K keeps its SQL validation error and private rollback remains exact.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_vector_fusion_output_failures_preserve_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/fusion/vector.rs",
+      "capability": "Complete hybrid COPY capture",
+      "workload": "A 513-row hybrid COPY encounters sink failure or cancellation after private changes.",
+      "invariant": "Typed failure reaches the caller and rollback restores the original table instead of publishing partial effects.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

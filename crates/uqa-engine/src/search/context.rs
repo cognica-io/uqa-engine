@@ -13,7 +13,14 @@ impl Engine {
         &self,
         table: &str,
     ) -> Result<Option<ExecutionContext>, SQLError> {
-        self.snapshot_context_with_documents(table, None)
+        self.snapshot_context_with_documents(table, None, true)
+    }
+
+    pub(crate) fn snapshot_context_for_scores(
+        &self,
+        table: &str,
+    ) -> Result<Option<ExecutionContext>, SQLError> {
+        self.snapshot_context_with_documents(table, None, false)
     }
 
     pub(crate) fn snapshot_context_with_document_store(
@@ -21,13 +28,14 @@ impl Engine {
         table: &str,
         documents: std::sync::Arc<dyn uqa_storage::DocumentStore>,
     ) -> Result<Option<ExecutionContext>, SQLError> {
-        self.snapshot_context_with_documents(table, Some(documents))
+        self.snapshot_context_with_documents(table, Some(documents), true)
     }
 
     fn snapshot_context_with_documents(
         &self,
         table: &str,
         documents: Option<std::sync::Arc<dyn uqa_storage::DocumentStore>>,
+        include_vector_indexes: bool,
     ) -> Result<Option<ExecutionContext>, SQLError> {
         let Some(t) = self
             .try_query_table(table)
@@ -60,6 +68,9 @@ impl Engine {
             ))
             .with_document_store(documents);
 
+        if !include_vector_indexes {
+            return Ok(Some(ctx));
+        }
         for (field, idx) in t.vector_indexes.read().iter() {
             ctx = ctx.with_vector_index(
                 field.clone(),

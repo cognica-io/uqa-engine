@@ -17,7 +17,12 @@ pub(super) fn complete_scored_tree(tree: &OperatorTree) -> bool {
     match tree {
         OperatorTree::Empty
         | OperatorTree::Term { top_k: None, .. }
-        | OperatorTree::IndexScan { .. } => true,
+        | OperatorTree::IndexScan { .. }
+        | OperatorTree::KNN { .. }
+        | OperatorTree::CalibratedVectorMatch { .. } => true,
+        OperatorTree::CosineProbability(source) => {
+            matches!(source.as_ref(), OperatorTree::KNN { .. })
+        }
         OperatorTree::Filter { source, .. } => source.as_deref().is_none_or(complete_scored_tree),
         OperatorTree::Complement(source) => complete_scored_tree(source),
         OperatorTree::Union(children) | OperatorTree::Intersect(children) => {
@@ -41,6 +46,9 @@ pub(super) fn capture(
         OperatorTree::Term { top_k: None, .. }
         | OperatorTree::Filter { .. }
         | OperatorTree::IndexScan { .. }
+        | OperatorTree::KNN { .. }
+        | OperatorTree::CalibratedVectorMatch { .. }
+        | OperatorTree::CosineProbability(_)
         | OperatorTree::Complement(_)
         | OperatorTree::BayesianEvidenceFusion { .. }
         | OperatorTree::RobustPositiveEvidencePool { .. } => leaf(tree, None, bytes),

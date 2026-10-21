@@ -36,7 +36,7 @@ impl PhysicalRetrievalDriver<'_> {
             explicit_base_rate,
             bytes,
             self.context.runtime.cancellation_token(),
-            || self.bridge_context(),
+            || self.bridge_score_context(),
         )
     }
 
@@ -71,6 +71,9 @@ impl PhysicalRetrievalDriver<'_> {
                 scoring: Some(TextScoringMode::BayesianBM25),
                 top_k: None,
             } => self.capture_bayesian_evidence(query, field.as_deref(), bytes),
+            OperatorTree::CosineProbability(source) => self
+                .capture_vector_postings(self.execute_cosine_evidence(source)?, bytes)
+                .map(|rows| (rows, None)),
             other => self.capture_tree(other, bytes).map(|rows| (rows, None)),
         }
     }
