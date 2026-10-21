@@ -18,11 +18,13 @@ The failing workspace run is [39542443925](https://github.com/cognica-io/uqa-eng
 - [x] Correct private-root metadata and pass the unchanged Nori allocation/output gate.
 - [x] Correct the repeatable-read slow path and verify all three providers locally with deterministic work coverage.
 - [ ] Correct Q1 and result-scan repeated work and pass controlled qualification without widening limits or discarding observations.
-- [x] Run formatting, strict owner Clippy, 289 owning-crate cases, dependency/ownership checks and complete-diff review.
-- [x] Verify the final product source in automatic Linux/macOS work, memory and output regression checks.
+- [x] Complete the original #1225 formatting, strict owner Clippy, 289 owning-crate cases, dependency/ownership checks and complete-diff review.
+- [x] Verify the #1225 product source in automatic Linux/macOS work, memory and output regression checks.
 - [ ] Verify the affected full workspace tests on merged main.
-- [ ] Repair #1228, verify private foreign definitions through peer refresh and transaction undo, and close the issue with its delivered PR.
-- [x] Verify the final-ready FDW selector against the exact product tree; no foreign-handler input changed and no skipped matrix is counted as a test pass.
+- [x] Repair #1228 and verify private foreign definitions through peer refresh, transaction undo and reopen locally.
+- [x] Integrate main `01572d476`, preserve both branches’ regression inventory, and pass strict owner Clippy and all 52 integrated failure-path cases.
+- [ ] Verify the #1227 automatic Linux/macOS artifacts and all six affected FDW configurations, merge and close #1228.
+- [x] Verify the #1225 final-ready FDW selector against its exact product tree; no foreign-handler input changed and no skipped matrix is counted as a test pass.
 - [x] Merge PR #1225 as `916fb1159`, close #1223/#1224, remove its local/remote branch and update main with the unrelated parity README edit preserved.
 - [ ] Complete remaining qualification, resolve any failures, synchronize these records and then pause.
 
@@ -51,3 +53,5 @@ Main Nori job [119113658822](https://github.com/cognica-io/uqa-engine/actions/ru
 An explicit late peer publication reproduces #1228 in all six provider/isolation cases while the twelve existing view schedules pass. Storage now exposes exact foreign-record private provenance, sharing the existing view-key lookup mechanics; Execution merges complete private definitions and security before ACL refresh and preserves deletion tombstones. A separate Docker PostgreSQL 18.4 capture records creation, alteration, rename, deletion, recreation and commit/full-rollback/savepoint results. Local verification passes 1,253 distinct owner/storage cases: 1,227 original selected cases, eight Storage metadata cases and the corrected 18-case lifecycle fixture. The lifecycle fixture uses DROP COLUMN for definition replacement, matching the existing implementation and independently captured PostgreSQL behavior. Exact private keys, unchanged-map sharing, missing-security rejection, projection order, encoded widths and overflow diagnostics pass. Earlier test-preparation failures are retained in ignored diagnostics, not counted as passes.
 
 The remaining scan correction walks physical row fragments once and keeps fixed-width scalar sizing outside the recursive variable-value visitor. Exact encoded bytes, nesting checks, overflow diagnostic order and batch limits remain unchanged; focused tests compare actual encoded records and malformed-width errors. This implementation is not yet controlled timing acceptance.
+
+The final integrated source `fa42bf518` includes main #1226 without changing its fixes. All 52 focused integration cases pass, including the original CI failure under all three isolation levels, explicit late-publication schedules, the 18 PostgreSQL-backed lifecycle cases and exact storage/sizing boundaries. Four-crate strict Clippy, formatting, dependency/ownership checks and the combined 1,552-check/2,166-case inventory pass. The local build checkout matches all 47 changed source/fixture paths byte for byte. [Automatic regression run 39577538414](https://github.com/cognica-io/uqa-engine/actions/runs/39577538414) and [final-ready FDW run 39577872721](https://github.com/cognica-io/uqa-engine/actions/runs/39577872721) qualify this product candidate; their results must be inspected before delivery.
