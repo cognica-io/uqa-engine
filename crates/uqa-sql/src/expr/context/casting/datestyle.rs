@@ -20,6 +20,23 @@ pub(super) fn date_output(
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Value>>> {
+    let Some(output) = date_text(value, target, engine, control)? else {
+        return Ok(None);
+    };
+    let (text, memory) = output.into_parts();
+    if matches!(target, Some(ColumnType::Text)) {
+        return Ok(Some(control.finish(Value::Str(text), memory)?));
+    }
+    super::cast_value_from_with_control(&Value::Str(text), target_name, Some("text"), control)
+        .map(Some)
+}
+
+pub(super) fn date_text(
+    value: &Value,
+    target: Option<&ColumnType>,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<String>>> {
     let (Value::Temporal(date @ TemporalValue::Date { .. }), Some(engine)) = (value, engine) else {
         return Ok(None);
     };
@@ -33,17 +50,13 @@ pub(super) fn date_output(
     let memory = control.reserve(setting.capacity())?;
     let setting = control.finish(setting, memory)?;
     control.check()?;
-    let output = date.to_sql_string_in_date_style_with_control(
+    date.to_sql_string_in_date_style_with_control(
         crate::semantics::parameters::datestyle::date_style(&setting),
         crate::semantics::parameters::datestyle::date_order(&setting),
         control,
-    )?;
-    let (text, memory) = output.into_parts();
-    if matches!(target, Some(ColumnType::Text)) {
-        return Ok(Some(control.finish(Value::Str(text), memory)?));
-    }
-    super::cast_value_from_with_control(&Value::Str(text), target_name, Some("text"), control)
-        .map(Some)
+    )
+    .map(Some)
+    .map_err(Into::into)
 }
 
 pub(super) fn input_scope(

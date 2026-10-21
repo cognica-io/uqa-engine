@@ -129,10 +129,6 @@ fn resolved_scalar_kernels_keep_resource_errors_and_exclude_live_type_identities
         Some("57014")
     );
     for ty in [
-        ColumnType::Date,
-        ColumnType::Time,
-        ColumnType::TimestampTz,
-        ColumnType::Interval,
         ColumnType::Oid,
         ColumnType::Regtype,
         ColumnType::Record,
@@ -141,5 +137,59 @@ fn resolved_scalar_kernels_keep_resource_errors_and_exclude_live_type_identities
     ] {
         assert!(ResolvedCast::select(&ty, &ColumnType::Text).is_none());
         assert!(ResolvedCast::select(&ColumnType::Text, &ty).is_none());
+    }
+}
+
+#[test]
+fn resolved_temporal_modifiers_preserve_postgresql_rounding_and_field_rules() {
+    use uqa_core::TemporalValue;
+    let control = ProductionControl::uncontrolled();
+    let cases = [
+        (
+            ColumnType::TimestampPrecision(2),
+            "2000-01-01 12:34:56.789",
+            TemporalValue::Timestamp {
+                micros: 946_730_096_790_000,
+            },
+        ),
+        (
+            ColumnType::TimePrecision(2),
+            "12:34:56.789",
+            TemporalValue::Time {
+                micros: 45_296_790_000,
+            },
+        ),
+        (
+            ColumnType::IntervalWithFields {
+                fields: crate::ast::IntervalFields::DayToSecond,
+                precision: Some(2),
+            },
+            "2 years 3 mons 4 days 12:34:56.789",
+            TemporalValue::Interval {
+                months: 27,
+                days: 4,
+                micros: 45_296_790_000,
+            },
+        ),
+        (
+            ColumnType::IntervalWithFields {
+                fields: crate::ast::IntervalFields::Year,
+                precision: None,
+            },
+            "2 years 3 mons 4 days 12:34:56.789",
+            TemporalValue::Interval {
+                months: 24,
+                days: 0,
+                micros: 0,
+            },
+        ),
+    ];
+    for (target, text, expected) in cases {
+        let cast = ResolvedCast::select(&ColumnType::Text, &target).unwrap();
+        assert_eq!(
+            *cast.evaluate(&Value::Str(text.into()), &control).unwrap(),
+            Value::Temporal(expected),
+        );
+        assert_eq!(*cast.evaluate(&Value::Null, &control).unwrap(), Value::Null);
     }
 }

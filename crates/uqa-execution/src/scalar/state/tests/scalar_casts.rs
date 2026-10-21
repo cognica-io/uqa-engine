@@ -8,6 +8,8 @@ use super::*;
 use std::cell::Cell;
 use uqa_sql::ColumnType;
 
+mod temporal;
+
 #[derive(Default)]
 struct ScalarCatalog {
     resolutions: Cell<usize>,

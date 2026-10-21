@@ -18,6 +18,7 @@ use crate::result::ResultRow;
 
 mod casting;
 mod regtype;
+pub(crate) use casting::evaluate_selected_cast;
 pub use casting::{
     cast_value_with_numeric_resolution_with_control, cast_value_with_resolution_with_control,
     cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,

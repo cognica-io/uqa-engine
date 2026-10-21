@@ -418,7 +418,7 @@ fn cast_with_resolution(
     if let (Some(source), Some(target)) = (resolved_source_type.as_deref(), target_column_type) {
         if let Some(cast) = ResolvedCast::select(source, target).filter(|cast| cast.accepts(value))
         {
-            let output = cast.evaluate(value, control)?;
+            let output = evaluate_selected_value(&cast, value, source_ty, engine, control)?;
             *resolved = Some(cast);
             return Ok(output);
         }
@@ -440,6 +440,44 @@ fn cast_with_resolution(
         engine,
         control,
     )
+}
+
+/// Reuse a selected builtin conversion while preserving live setting scopes before callbacks and conversion.
+pub(crate) fn evaluate_selected_cast(
+    cast: &ResolvedCast,
+    value: &Value,
+    source_name: &str,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let target = cast.target_type();
+    let _date_order = datestyle::input_scope(value, Some(&target), engine, control)?;
+    let _interval_style = intervalstyle::cast_scope(value, Some(&target), engine, control)?;
+    if let Some(engine) = engine {
+        if let Some(output) = engine.cast_domain(value, Some(source_name), &target)? {
+            return Ok(control.retain_external_value(output)?);
+        }
+    }
+    evaluate_selected_value(cast, value, Some(source_name), engine, control)
+}
+
+fn evaluate_selected_value(
+    cast: &ResolvedCast,
+    value: &Value,
+    source_name: Option<&str>,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let target = cast.target_type();
+    if let Some(output) = datestyle::date_text(value, Some(&target), engine, control)? {
+        let (text, memory) = output.into_parts();
+        if matches!(target, ColumnType::Text) {
+            return Ok(control.finish(Value::Str(text), memory)?);
+        }
+        return cast.evaluate_from(&Value::Str(text), Some("text"), control);
+    }
+    let zoned = timezone::cast_timestamp(value, Some(&target), engine, control)?;
+    cast.evaluate_from(zoned.as_ref().unwrap_or(value), source_name, control)
 }
 
 /// Declared type input and identity coercion precede generic output and array casts. Domain checks keep their established first position.

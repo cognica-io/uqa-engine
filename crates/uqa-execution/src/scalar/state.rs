@@ -33,7 +33,7 @@ pub(crate) enum ConstantCast {
     PerEvaluation,
 }
 
-/// Selected builtin scalar conversions are retained for the same immutable execution schema; catalog-defined and session-dependent casts keep their live path.
+/// Selected builtin scalar conversions are retained for the same immutable execution schema; temporal settings and catalog callbacks remain live, while catalog-defined types keep their original resolution path.
 #[derive(Debug)]
 pub(crate) enum RowCast {
     Resolved {

@@ -214,3 +214,7 @@ This delivery retains every scan product/test file qualified at `a831ce975`, now
 ## Complete value-index cache delivery
 
 The cache owner, ordered retained-index construction, cold-key capture and Engine read/publication adapters form one delivery. The final composition at `3231b8e89` passes 171 local Storage/Execution/Engine cases, including all four providers, rollback and reopen, atomic cache publication, index-only reads, COPY and all 22 exact PostgreSQL TPC-H results. Strict Storage/SQL/Planner/Execution/Engine library/test Clippy passes. Its inventory contains 1,428 checks / 1,988 required cases. Product files match their independently reviewed original commits except for the exact three scan-schema sizing lines retained from #1213; those combined paths are included in this local run. Automatic qualification of the expanded source is pending. No timing acceptance or completion of original #714 is claimed.
+
+## Temporal cast selection with live settings
+
+The temporal descriptor and its current-setting preservation proof are recorded in [resolved casts](../design/resolved-numeric-casts.md#temporal-descriptors-and-live-settings). The original unit `94b3d6545` passes 2,295 selected local cases, strict five-crate Clippy and independent PostgreSQL 18.4 references. It is delivered together with execution-block borrowing, clause-local binding and catalog-sensitive source inference. Final combined-source qualification remains separate from these original unit results.

@@ -4,6 +4,8 @@ This page describes UQA Engine 0.6.0 and earlier releases. Use the [version-tagg
 
 ## Unreleased
 
+Builtin temporal casts now reuse selected type metadata within a prepared execution. DateStyle, TimeZone, IntervalStyle, transaction clocks, callbacks and value conversion remain live per row; setting changes and rollback do not reuse an earlier result. No stored format or public method signature changes.
+
 Custom providers that retain B-tree indexes must implement `PersistentStorageBackend::visit_btree_index_entries`: visit the previously evaluated keys once in increasing document-identity order under one selected read boundary, return `false` without visiting only for an unbuilt index, and propagate callback failures. An unsupported implementation reports an error; recomputing stored expression keys from current routine definitions would change their meaning. Query cache hydration also requires the document store's controlled identity-page interface. Native SQLite, SQLite K/V and redb provide these operations. This changes Rust adapter requirements without changing durable formats.
 
 Custom Execution `TableRead` adapters now pass the invoking `StorageReadControl` to index-only projection and return `Result<Option<usize>, SQLError>`; an I/O, cancellation or resource error must not become `None` and trigger a second read. `QueryTableAccess::index_read_control` supplies the selected session's allowance and cancellation. Standalone `ScoredDocumentSource` users can supply the same context through `with_index_read_control`.

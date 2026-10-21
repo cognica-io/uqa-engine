@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse builtin temporal cast type selection across rows while preserving live DateStyle, TimeZone, IntervalStyle, callbacks, precision and cancellation.
+
 - Bound cold value-index restoration, evaluated-key capture and repeatable probes; publish cache changes atomically while preserving stored expression keys, exact physical ordering, independent snapshots, cancellation and storage errors. Ordered construction reuses completed subtree metadata instead of rereading it.
 
 - Reuse validated immutable scan schema sizes between batches, avoiding repeated column-type serialization while preserving exact spill and lock-origin accounting.
