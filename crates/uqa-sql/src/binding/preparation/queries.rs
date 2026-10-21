@@ -20,6 +20,24 @@ thread_local! {
 }
 
 impl Preparation<'_> {
+    pub(super) fn scalar_query_schema(
+        &mut self,
+        index: usize,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<RowSchema, SQLError> {
+        if let Some(schema) = self
+            .bound_condition_queries
+            .and_then(|queries| queries.get(index, input, subqueries))
+        {
+            return Ok(schema.clone());
+        }
+        let query = subqueries
+            .get(index)
+            .ok_or_else(|| error("XX000", "scalar subquery slot is outside its plan".into()))?;
+        self.query(query, Some(input))
+    }
+
     pub(super) fn query(
         &mut self,
         plan: &QueryPlan,

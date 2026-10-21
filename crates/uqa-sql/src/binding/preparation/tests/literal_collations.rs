@@ -101,6 +101,7 @@ fn literal_lowering_and_legacy_codecs_preserve_selected_or_default_collations() 
         drop(cloned);
         assert_eq!(budget.used(), 0);
         let mut preparation = Preparation {
+            bound_condition_queries: None,
             routines: &NoRoutines,
             scope:
                 &mut SchemaScope::for_analysis(&crate::binding::fixture::empty_binding_context())
@@ -123,6 +124,7 @@ fn literal_analysis_rejects_collations_on_noncollatable_types() {
     let context = crate::binding::fixture::empty_binding_context();
     let mut scope = SchemaScope::for_analysis(&context).unwrap();
     let mut preparation = Preparation {
+        bound_condition_queries: None,
         routines: &NoRoutines,
         scope: &mut scope,
         parameters: ParameterTypes::new(&[]),

@@ -16,8 +16,29 @@ use super::{QueryPlan, ScalarExpr, SchemaScope};
 
 pub(super) struct QueryFunctionTypeResolver<'a> {
     pub(super) routines: &'a dyn RoutineResolution,
-    pub(super) scalar_subquery_types: Option<Vec<Option<ColumnType>>>,
+    pub(super) scalar_subquery_schemas: Option<Vec<Option<RowSchema>>>,
     pub(super) defer_routine_namespace_errors: bool,
+}
+
+/// Results of the immediately preceding reference check, borrowed only while the same condition is checked with fixed parameters.
+pub(super) struct BoundConditionQueries<'a> {
+    pub(super) plans: &'a [QueryPlan],
+    pub(super) input: &'a RowSchema,
+    pub(super) schemas: Option<&'a [Option<RowSchema>]>,
+}
+
+impl BoundConditionQueries<'_> {
+    pub(super) fn get(
+        &self,
+        index: usize,
+        input: &RowSchema,
+        plans: &[QueryPlan],
+    ) -> Option<&RowSchema> {
+        if !std::ptr::eq(self.plans, plans) || self.input != input {
+            return None;
+        }
+        self.schemas?.get(index)?.as_ref()
+    }
 }
 
 impl SchemaScope {
@@ -53,25 +74,23 @@ impl SchemaScope {
         if referenced.is_empty() {
             return Ok(QueryFunctionTypeResolver {
                 routines,
-                scalar_subquery_types: None,
+                scalar_subquery_schemas: None,
                 defer_routine_namespace_errors: false,
             });
         }
         // Result typing and validation share the complete lexical row scope.
         let subquery_outer = Some(schema);
-        let mut scalar_subquery_types = vec![None; subqueries.len()];
+        let mut scalar_subquery_schemas = vec![None; subqueries.len()];
         for index in referenced {
             let plan = subqueries.get(index).ok_or_else(|| {
                 SQLError::Internal(format!("scalar subquery slot {index} is out of bounds"))
             })?;
-            scalar_subquery_types[index] = self
-                .bind_query(routines, plan, params, subquery_outer)?
-                .column_type(0)
-                .cloned();
+            scalar_subquery_schemas[index] =
+                Some(self.bind_query(routines, plan, params, subquery_outer)?);
         }
         Ok(QueryFunctionTypeResolver {
             routines,
-            scalar_subquery_types: Some(scalar_subquery_types),
+            scalar_subquery_schemas: Some(scalar_subquery_schemas),
             defer_routine_namespace_errors: false,
         })
     }
@@ -189,13 +208,21 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
         outer_schema: &RowSchema,
         params: &[SQLParam],
     ) -> Result<Option<ColumnType>, SQLError> {
-        let Some(types) = self.scalar_subquery_types.as_ref() else {
+        let Some(schemas) = self.scalar_subquery_schemas.as_ref() else {
             return self
                 .routines
                 .resolve_scalar_subquery_type(subquery, outer_schema, params);
         };
-        types.get(subquery).cloned().ok_or_else(|| {
-            SQLError::Internal(format!("scalar subquery slot {subquery} is out of bounds"))
-        })
+        schemas
+            .get(subquery)
+            .map(|schema| {
+                schema
+                    .as_ref()
+                    .and_then(|schema| schema.column_type(0))
+                    .cloned()
+            })
+            .ok_or_else(|| {
+                SQLError::Internal(format!("scalar subquery slot {subquery} is out of bounds"))
+            })
     }
 }

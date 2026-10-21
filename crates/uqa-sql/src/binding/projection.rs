@@ -159,17 +159,14 @@ pub fn validate_query_block_expression_types(
     params: &[SQLParam],
     ctes: &BindingContext,
 ) -> Result<(), SQLError> {
-    let scalar_subquery_types = statement
+    let scalar_subquery_schemas = statement
         .subqueries
         .iter()
-        .map(|plan| {
-            bind_query_plan_schema(routines, plan, params, ctes, Some(schema))
-                .map(|output| output.column_type(0).cloned())
-        })
+        .map(|plan| bind_query_plan_schema(routines, plan, params, ctes, Some(schema)).map(Some))
         .collect::<Result<Vec<_>, _>>()?;
     let resolver = QueryFunctionTypeResolver {
         routines,
-        scalar_subquery_types: Some(scalar_subquery_types),
+        scalar_subquery_schemas: Some(scalar_subquery_schemas),
         defer_routine_namespace_errors: true,
     };
     let resolve =

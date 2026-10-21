@@ -110,6 +110,7 @@ fn shared_query_outputs_preserve_named_composite_field_descriptors() {
             panic!("query")
         };
         let mut preparation = Preparation {
+            bound_condition_queries: None,
             routines: &catalog,
             scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
             parameters: ParameterTypes::new(&[]),

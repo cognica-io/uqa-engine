@@ -19256,6 +19256,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "clause_reference_and_boolean_checks_bind_each_subquery_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/analysis/tests.rs",
+      "capability": "Clause subquery binding work",
+      "workload": "Scalar, EXISTS, IN and HAVING conditions referencing one scalar-query arena.",
+      "invariant": "Reference validation and Boolean metadata inspection perform exactly one subquery block analysis per condition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "condition_binding_keeps_parameters_outer_types_and_error_order_live",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/analysis/tests.rs",
+      "capability": "Clause subquery binding semantics",
+      "workload": "The same condition with Boolean/integer outer columns and typed parameters, plus an invalid column reference.",
+      "invariant": "Current types and parameters determine success or SQLSTATE; prior successful metadata cannot hide a later invalid condition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "condition_subquery_results_require_the_original_arena_and_complete_outer_schema",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/analysis/tests.rs",
+      "capability": "Clause subquery binding lifetime",
+      "workload": "Identical and separately cloned query arenas, changed input types and qualifiers, and an invalid slot.",
+      "invariant": "Only the original arena and complete equal lexical schema reuse the immutable result descriptor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "repeated_condition_binding_preserves_postgresql_scopes_types_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_subquery/condition_binding.rs",
+      "capability": "Public clause subquery binding",
+      "workload": "Eleven independent PostgreSQL 18.4 results and diagnostics repeated three times, plus changing prepared Boolean parameters.",
+      "invariant": "Exact columns, formatted values and SQLSTATE/messages preserve correlation, CTE shadowing, collation, record comparisons and diagnostic precedence; prepared values remain live.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
