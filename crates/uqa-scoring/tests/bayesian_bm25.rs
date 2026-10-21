@@ -6,15 +6,13 @@
 
 //! Legacy composite-prior score decomposition property tests.
 //!
-//! These tests preserve the historical arithmetic without claiming that its
-//! dependent inputs form a calibrated Bayesian posterior. The two-stage
-//! probability-space calculation must agree with its closed-form log-odds
-//! expression within `1e-9`:
+//! These tests preserve the historical arithmetic without claiming that its dependent inputs form a calibrated Bayesian posterior. Each probability-space update clamps its result, so the independent log-odds reference must retain the same stage boundaries within `1e-9`:
 //!
 //! ```text
-//! logit P(R=1 | s, f, n_hat)
-//!   = logit L(s) + logit p_prior(f, n_hat)               // no base rate
-//!   = logit L(s) + logit p_prior(f, n_hat) + logit b_r   // with base rate
+//! C(p) = clamp(p, epsilon, 1 - epsilon)
+//! p1 = C(sigmoid(logit L(s) + logit p_prior(f, n_hat)))
+//! P = p1                                               // no base rate
+//! P = C(sigmoid(logit p1 + logit b_r))                  // with base rate
 //! ```
 //!
 //! This file pins:
@@ -25,7 +23,46 @@
 //! - `combined_score` is sign-preserving in the log-odds direction
 
 use proptest::prelude::*;
+use uqa_scoring::prob::clamp_prob;
 use uqa_scoring::{logit, sigmoid, LegacyCompositePriorTransform};
+
+fn log_odds_update(signal: f64, prior: f64) -> f64 {
+    clamp_prob(sigmoid(logit(signal) + logit(prior)))
+}
+
+#[test]
+fn clipped_first_update_is_preserved_before_the_base_rate() {
+    // Independent 80-digit decimal evaluations using the exact f64 clamp bounds.
+    for (signal, prior, base_rate, expected) in [
+        (1e-8, 0.001, 0.95, 1.899_999_996_579_998_2e-9),
+        (1.0 - 1e-8, 0.999, 0.05, 0.999_999_998_099_999_8),
+    ] {
+        let actual = LegacyCompositePriorTransform::combined_score(signal, prior, Some(base_rate));
+        assert!((actual - expected).abs() < 1e-15, "{actual} != {expected}");
+        let unclipped = sigmoid(logit(signal) + logit(prior) + logit(base_rate));
+        assert!((actual - unclipped).abs() > 1e-9);
+        let first = log_odds_update(signal, prior);
+        assert!((actual - log_odds_update(first, base_rate)).abs() < 1e-15);
+    }
+}
+
+#[test]
+fn captured_saturated_score_matches_the_staged_log_odds_reference() {
+    let transform = LegacyCompositePriorTransform::new(
+        2.859_533_698_900_037,
+        -1.663_713_539_871_294_1,
+        Some(0.05),
+    )
+    .unwrap();
+    let signal = transform.score_signal(4.803_593_465_550_421_5);
+    let prior = 0.998_799_126_052_224_8;
+    let actual = LegacyCompositePriorTransform::combined_score(signal, prior, Some(0.05));
+    assert!((actual - 0.999_999_998_099_999_8).abs() < 1e-15);
+    let expected = log_odds_update(log_odds_update(signal, prior), 0.05);
+    assert!((actual - expected).abs() < 1e-15);
+    let unclipped = sigmoid(logit(signal) + logit(prior) + logit(0.05));
+    assert!((actual - unclipped).abs() > 1e-9);
+}
 
 /// `safe_prob` keeps logits finite.
 fn safe_prob() -> impl Strategy<Value = f64> {
@@ -50,7 +87,7 @@ proptest! {
 
     /// Decomposition equivalence without a base-rate bias:
     /// the two-update probability-space implementation must equal
-    /// `sigmoid(logit(L) + logit(prior))` within `1e-9`.
+    /// `clamp_prob(sigmoid(logit(L) + logit(prior)))` within `1e-9`.
     #[test]
     fn combined_score_decomposes_without_base_rate(
         score in -5.0f64..5.0,
@@ -64,7 +101,7 @@ proptest! {
         prop_assume!(l > 1e-12 && l < 1.0 - 1e-12);
 
         let direct = LegacyCompositePriorTransform::combined_score(l, prior, None);
-        let closed = sigmoid(logit(l) + logit(prior));
+        let closed = log_odds_update(l, prior);
         prop_assert!(
             (direct - closed).abs() < 1e-9,
             "no-base-rate decomposition broke: direct={direct}, closed={closed}",
@@ -72,8 +109,8 @@ proptest! {
     }
 
     /// Decomposition equivalence with a base-rate bias:
-    /// the two probability-space updates must equal the three-term
-    /// log-odds sum.
+    /// the two probability-space updates must equal the staged log-odds
+    /// reference, including the intermediate probability clamp.
     #[test]
     fn combined_score_decomposes_with_base_rate(
         score in -5.0f64..5.0,
@@ -87,7 +124,7 @@ proptest! {
         prop_assume!(l > 1e-12 && l < 1.0 - 1e-12);
 
         let direct = LegacyCompositePriorTransform::combined_score(l, prior, Some(base_rate));
-        let closed = sigmoid(logit(l) + logit(prior) + logit(base_rate));
+        let closed = log_odds_update(log_odds_update(l, prior), base_rate);
         prop_assert!(
             (direct - closed).abs() < 1e-9,
             "with-base-rate decomposition broke: direct={}, closed={}, br={}",

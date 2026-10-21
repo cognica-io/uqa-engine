@@ -102,13 +102,13 @@ impl LegacyCompositePriorTransform {
     /// Combine a bounded score signal and log-odds biases using the legacy
     /// two-stage probability-space arithmetic.
     ///
-    /// Without `base_rate`:
-    /// `P = L*p / (L*p + (1-L)*(1-p))`.
+    /// Let `C` clamp to `[PROB_EPSILON, 1 - PROB_EPSILON]`. Without `base_rate`:
+    /// `P = C(L*p / (L*p + (1-L)*(1-p)))`.
     ///
-    /// With `base_rate` (the second update is equivalent to adding
-    /// `logit(base_rate)` in log-odds space):
-    /// `Step 1: p1 = L*p / (L*p + (1-L)*(1-p))`
-    /// `Step 2: P  = p1*br / (p1*br + (1-p1)*(1-br))`.
+    /// With `base_rate`, preserve the clamped first result before adding the base-rate log-odds:
+    /// `Step 1: p1 = C(L*p / (L*p + (1-L)*(1-p)))`
+    /// `Step 2: P  = C(p1*br / (p1*br + (1-p1)*(1-br)))`.
+    /// Collapsing both stages into an unclipped three-term log-odds sum changes saturated results.
     pub fn combined_score(score_signal: f64, prior: f64, base_rate: Option<f64>) -> f64 {
         let l = score_signal;
         let p = prior;
