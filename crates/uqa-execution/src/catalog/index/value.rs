@@ -14,7 +14,7 @@ use uqa_storage::BTreeIndex;
 
 mod cache;
 mod comparison;
-pub use cache::{ValueIndexBuilder, ValueIndexCache};
+pub use cache::{apply_cached_values, visit_stored_fields, ValueIndexBuilder, ValueIndexCache};
 
 /// Per-column index: the stored value of every row, and for a search key
 /// the non-null scalar keys in a B-tree plus the doc ids whose field is

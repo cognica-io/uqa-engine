@@ -8,6 +8,7 @@ use super::ScoredInput;
 use uqa_core::ScoredEntry;
 
 mod borrowed;
+mod indexed;
 mod memory;
 
 #[test]

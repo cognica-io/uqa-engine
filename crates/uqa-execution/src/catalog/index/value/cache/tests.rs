@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::PostingList;
 
+mod publication;
+
 fn build(values: &[(DocId, Value)], carried: bool, allowance: usize) -> ValueIndexCache {
     let control = StorageReadControl::with_limit(64 * 1024);
     let mut builder = ValueIndexBuilder::new("key", carried, allowance).unwrap();

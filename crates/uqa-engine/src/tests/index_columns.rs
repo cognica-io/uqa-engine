@@ -49,14 +49,19 @@ pub(super) fn assert_accelerators_equal_documents(engine: &Engine, table: &str) 
         for id in &ids {
             let stored = documents[id].fields().get(column).unwrap_or(&Value::Null);
             assert_eq!(
-                index.stored_value(*id),
+                index
+                    .stored_value(*id, &engine.query_retention_control().unwrap())
+                    .unwrap()
+                    .as_deref(),
                 Some(stored),
                 "{table}.{column} of document {id}"
             );
         }
         for id in [0, 41, 99, 500, 1000] {
             assert_eq!(
-                index.contains(id),
+                index
+                    .contains(id, &engine.query_retention_control().unwrap())
+                    .unwrap(),
                 documents.contains_key(&id),
                 "{table}.{column} of document {id}"
             );

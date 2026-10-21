@@ -34,6 +34,20 @@ pub struct ValueIndexBuilder {
 }
 
 impl ValueIndexBuilder {
+    pub fn from_values(
+        field: &str,
+        carried: bool,
+        bytes: usize,
+        values: impl IntoIterator<Item = (DocId, Value)>,
+        control: &StorageReadControl,
+    ) -> Result<ValueIndexCache, SQLError> {
+        let mut builder = Self::new(field, carried, bytes)?;
+        for (id, value) in values {
+            builder.push(id, value, control)?;
+        }
+        builder.finish(control)
+    }
+
     pub fn new(field: &str, carried: bool, bytes: usize) -> Result<Self, SQLError> {
         let schema = RowSchema::with_internal_relation_types(
             uqa_sql::ast::InternalRelationId::allocate(),

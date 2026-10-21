@@ -17,7 +17,11 @@ use uqa_storage::{
 
 mod builder;
 mod probes;
+mod projection;
+mod publication;
 pub use builder::ValueIndexBuilder;
+pub use projection::visit_stored_fields;
+pub use publication::apply_cached_values;
 
 #[derive(Clone)]
 pub struct ValueIndexCache {
@@ -88,13 +92,26 @@ impl ValueIndexCache {
         value: Option<&Value>,
         control: &StorageReadControl,
     ) -> Result<(), SQLError> {
+        let prepared = self.prepare_replace(id, value, control)?;
+        self.apply_prepared(prepared);
+        Ok(())
+    }
+
+    fn prepare_replace<'a>(
+        &self,
+        id: DocId,
+        value: Option<&'a Value>,
+        control: &StorageReadControl,
+    ) -> Result<publication::PreparedChange<'a>, SQLError> {
         control.check().map_err(storage)?;
-        if let Some(values) = &mut self.retained {
+        if self.retained.is_some() {
+            let mut replacement = self.clone();
+            let values = replacement.retained.as_mut().expect("retained index");
             values.replace(id, value, control).map_err(storage)?;
             if let Some(value) = value {
-                observe(&mut self.policy, value);
+                observe(&mut replacement.policy, value);
             }
-            return Ok(());
+            return Ok(publication::PreparedChange::Replacement(replacement));
         }
         let previous = self
             .policy
@@ -132,26 +149,28 @@ impl ValueIndexCache {
             {
                 replacement.policy.comparison = comparison::StoredComparison::TypedField;
             }
-            *self = replacement;
-            return Ok(());
+            return Ok(publication::PreparedChange::Replacement(replacement));
         }
-        self.policy.remove(id, &Value::Null);
-        if let Some(value) = value {
-            self.policy.insert(id, value);
-        }
-        self.resident_bytes = bytes;
-        Ok(())
+        Ok(publication::PreparedChange::Resident { id, value, bytes })
     }
 
     #[must_use]
     pub fn with_use(mut self, field: &str, carried: bool) -> Self {
+        self.set_use(field, carried);
+        self
+    }
+
+    pub fn set_use(&mut self, field: &str, carried: bool) {
         if self.retained.is_some() {
             self.policy.index = (!carried).then(|| uqa_storage::BTreeIndex::new(field));
         } else {
-            self.policy = self.policy.with_use(field, carried);
+            let previous = std::mem::replace(
+                &mut self.policy,
+                ColumnValueIndex::build_carried(std::iter::empty()),
+            );
+            self.policy = previous.with_use(field, carried);
         }
         self.field = field.to_string();
-        self
     }
 
     pub fn clear(&mut self) {

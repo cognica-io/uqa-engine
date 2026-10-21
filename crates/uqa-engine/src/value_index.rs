@@ -6,12 +6,12 @@
 
 //! Retain value-index caches and provider handles for execution-owned index selection and lookup.
 //!
-//! Catalog policy selects column accelerators and named expression indexes. Query hydration is memory-only; DDL and repair may publish durable postings. Execution owns predicate eligibility, NULL handling, stored-key maintenance and result construction through [`ColumnValueIndex`].
+//! Catalog policy selects column accelerators and named expression indexes. Query hydration retains a bounded cache; DDL and repair may publish durable postings. Execution owns predicate eligibility, NULL handling, stored-key maintenance and result construction through [`ValueIndexCache`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{DocId, PostingList, Predicate, Value};
-pub(crate) use uqa_execution::catalog::index::value::ColumnValueIndex;
+pub(crate) use uqa_execution::catalog::index::value::ValueIndexCache;
 use uqa_storage::ValueIndexKey;
 
 mod keys;
@@ -20,10 +20,7 @@ use crate::{SQLError, StorageBackendError, StorageBackendResult, TableState};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MissingValueIndexMode {
-    /// Build an in-memory accelerator from the pinned document snapshot, but
-    /// leave durable storage untouched. Query execution and rollback recovery
-    /// use this mode so a read transaction can never be upgraded by an index
-    /// cache miss.
+    /// Build a bounded cache from the pinned document snapshot without publishing durable postings. The cache may use temporary spill; a query cache miss never upgrades the database read transaction to a writer.
     MemoryOnly,
     /// Materialize the complete durable posting set when it is absent. Only
     /// DDL and the explicit open-time repair boundary may use this mode.
@@ -135,7 +132,12 @@ impl crate::Engine {
         Ok(self
             .read_value_index_state(table, &state, field, |index| {
                 Ok(index
-                    .visit_key_candidates_with_catalog(predicate, Some(self), visit)?
+                    .visit_key_candidates_with_catalog(
+                        predicate,
+                        Some(self),
+                        &self.query_retention_control()?,
+                        visit,
+                    )?
                     .then_some(()))
             })?
             .is_some())
@@ -181,12 +183,17 @@ impl crate::Engine {
             }
         }
         self.read_value_index_state(table, t, field, |index| {
-            index.scan_observing_with_catalog(predicate, Some(self), || {
-                if let Some((read, columns)) = &observed {
-                    read.observe_column_index(columns, field, predicate)?;
-                }
-                Ok(())
-            })
+            index.scan_observing_with_catalog(
+                predicate,
+                Some(self),
+                &self.query_retention_control()?,
+                || {
+                    if let Some((read, columns)) = &observed {
+                        read.observe_column_index(columns, field, predicate)?;
+                    }
+                    Ok(())
+                },
+            )
         })
     }
 
@@ -245,7 +252,7 @@ impl crate::Engine {
         table: &str,
         t: &std::sync::Arc<TableState>,
         field: &ValueIndexKey,
-        read: impl FnOnce(&ColumnValueIndex) -> Result<Option<T>, SQLError>,
+        read: impl FnOnce(&ValueIndexCache) -> Result<Option<T>, SQLError>,
     ) -> Result<Option<T>, SQLError> {
         {
             let indexes = t.value_indexes.read();
@@ -280,7 +287,7 @@ impl crate::Engine {
         {
             let indexes = table_state.value_indexes.read();
             if let Some(index) = indexes.get(field) {
-                return Ok(index.estimate_cardinality(predicate));
+                return index.estimate_cardinality(predicate, &self.query_retention_control()?);
             }
         }
         if let Some(posting) = self
@@ -297,12 +304,14 @@ impl crate::Engine {
         {
             return Ok(None);
         }
+        let control = self.query_retention_control()?;
         let cardinality = table_state
             .value_indexes
             .read()
             .get(field)
-            .and_then(|index| index.estimate_cardinality(predicate));
-        Ok(cardinality)
+            .map(|index| index.estimate_cardinality(predicate, &control))
+            .transpose()?;
+        Ok(cardinality.flatten())
     }
 
     /// Return whether a retained accelerator or durable probe answers this predicate. Unsupported durable probes retain the read-only hydration path.
@@ -391,9 +400,7 @@ impl crate::Engine {
         {
             return Ok(false);
         }
-        let ids = table.document_store.read().doc_ids()?;
-        let values = self.project_value_index_rows(table, &table_name, field, &ids)?;
-        let built = self.build_value_index(&table_name, table, field, values)?;
+        let built = self.hydrate_value_index_cache(&table_name, table, field, None)?;
         table.value_indexes.write().insert(field.clone(), built);
         Ok(true)
     }
@@ -436,6 +443,17 @@ impl crate::Engine {
         }
 
         let persistent_backend = self.persistent_value_index_backend(&t);
+        if mode == MissingValueIndexMode::MemoryOnly {
+            if !memory_index_exists {
+                let built =
+                    self.hydrate_value_index_cache(&table_name, &t, field, persistent_backend)?;
+                t.value_indexes
+                    .write()
+                    .entry(field.clone())
+                    .or_insert(built);
+            }
+            return Ok(true);
+        }
         let persisted = persistent_backend
             .map(|backend| backend.load_btree_index(&table_name, field))
             .transpose()?
@@ -550,11 +568,7 @@ impl crate::Engine {
             for (field, index) in indexes.iter_mut() {
                 let carry = carried.contains(field);
                 if index.is_carried() != carry {
-                    let current = std::mem::replace(
-                        index,
-                        ColumnValueIndex::build_carried(std::iter::empty()),
-                    );
-                    *index = current.with_use(field.name(), carry);
+                    index.set_use(field.name(), carry);
                 }
             }
         }
@@ -738,26 +752,19 @@ impl crate::Engine {
         Ok(())
     }
 
-    /// Incremental maintenance for built indexes. `old` carries the
-    /// previous field values when the document already existed.
+    /// Forward evaluated keys for atomic maintenance of every built index.
     pub(crate) fn value_indexes_apply_write(
+        &self,
         t: &TableState,
         doc_id: DocId,
-        old: Option<&BTreeMap<ValueIndexKey, Value>>,
         new: Option<&BTreeMap<ValueIndexKey, Value>>,
-    ) {
-        let mut indexes = t.value_indexes.write();
-        if indexes.is_empty() {
-            return;
-        }
-        for (field, index) in indexes.iter_mut() {
-            if let Some(old_values) = old {
-                index.remove(doc_id, old_values.get(field).unwrap_or(&Value::Null));
-            }
-            if let Some(new_values) = new {
-                index.insert(doc_id, new_values.get(field).unwrap_or(&Value::Null));
-            }
-        }
+    ) -> Result<(), SQLError> {
+        uqa_execution::catalog::index::value::apply_cached_values(
+            &mut t.value_indexes.write(),
+            doc_id,
+            new,
+            &self.query_retention_control()?,
+        )
     }
 
     /// Names of every built value-index field, or `None` when no index
@@ -774,21 +781,27 @@ impl crate::Engine {
 
     /// Read the actual cached keys, which may differ from re-evaluating a replaced immutable function on the old document.
     pub(crate) fn value_indexes_old_values(
+        &self,
         t: &TableState,
         doc_id: DocId,
-    ) -> Option<BTreeMap<ValueIndexKey, Value>> {
+    ) -> Result<Option<BTreeMap<ValueIndexKey, Value>>, SQLError> {
         let indexes = t.value_indexes.read();
-        (!indexes.is_empty()).then(|| {
-            indexes
-                .iter()
-                .map(|(field, index)| {
-                    (
-                        field.clone(),
-                        index.stored_value(doc_id).cloned().unwrap_or(Value::Null),
-                    )
-                })
-                .collect()
-        })
+        if indexes.is_empty() {
+            return Ok(None);
+        }
+        let control = self.query_retention_control()?;
+        indexes
+            .iter()
+            .map(|(field, index)| {
+                Ok((
+                    field.clone(),
+                    index
+                        .stored_value(doc_id, &control)?
+                        .map_or(Value::Null, std::borrow::Cow::into_owned),
+                ))
+            })
+            .collect::<Result<_, SQLError>>()
+            .map(Some)
     }
 
     /// Drop every built index for the table (TRUNCATE, bulk reloads,

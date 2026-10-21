@@ -9,6 +9,7 @@
 mod borrowed;
 mod deferred;
 mod hierarchy;
+mod indexed;
 mod materialize;
 
 pub(in crate::query) use deferred::defer_entries;
@@ -213,6 +214,7 @@ impl ScoredInput {
 }
 
 pub struct ScoredDocumentSource {
+    index_read_control: uqa_storage::read_control::StorageReadControl,
     serializable: crate::serializable::SerializableScan,
     scan_batch_bytes: usize,
     batch_layout: crate::spill::EncodedBatchLayout,
@@ -527,6 +529,9 @@ impl ScoredDocumentSource {
         Self {
             scan_batch_bytes: 64 * 1024 * 1024,
             batch_layout: crate::spill::EncodedBatchLayout::default(),
+            index_read_control: uqa_storage::read_control::StorageReadControl::with_limit(
+                64 * 1024,
+            ),
             shared_page_rows: 1,
             table_name: table_name.to_string(),
             table,
@@ -577,6 +582,14 @@ impl ScoredDocumentSource {
     /// Project rows from the index entries the table holds for every projected field. A row-locking read and a pinned recheck still read their documents.
     pub fn with_index_only(mut self, index_only: bool) -> Self {
         self.index_only = index_only;
+        self
+    }
+
+    pub fn with_index_read_control(
+        mut self,
+        control: uqa_storage::read_control::StorageReadControl,
+    ) -> Self {
+        self.index_read_control = control;
         self
     }
 

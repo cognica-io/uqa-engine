@@ -563,7 +563,7 @@ struct TableDataSnapshot {
     document_store: Arc<dyn DocumentStore>,
     inverted_index: Arc<dyn InvertedIndex>,
     vector_indexes: BTreeMap<FieldName, Arc<dyn VectorIndex>>,
-    value_indexes: BTreeMap<uqa_storage::ValueIndexKey, value_index::ColumnValueIndex>,
+    value_indexes: BTreeMap<uqa_storage::ValueIndexKey, value_index::ValueIndexCache>,
     fts_fields: Vec<FieldName>,
     columns: Vec<uqa_sql::ast::ColumnDef>,
     columns_declared: bool,
@@ -630,7 +630,7 @@ pub(crate) struct TableState {
     /// Lazily built per-column value indexes for PRIMARY KEY / UNIQUE
     /// / `CREATE INDEX` btree columns. Maintained incrementally by the
     /// document write paths; cleared on bulk reloads.
-    value_indexes: RwLock<BTreeMap<uqa_storage::ValueIndexKey, value_index::ColumnValueIndex>>,
+    value_indexes: RwLock<BTreeMap<uqa_storage::ValueIndexKey, value_index::ValueIndexCache>>,
     /// Cached `document_store.len()`. Persistent stores answer `len`
     /// with a `COUNT(*)` query, which used to run once per SQL
     /// statement for planner row estimates; the cache is invalidated

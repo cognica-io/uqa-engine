@@ -141,7 +141,7 @@ impl Engine {
                     name,
                     table,
                     &ValueIndexKey::Column(field.into()),
-                    |index| Ok(index.field_candidates(value)),
+                    |index| index.field_candidates(value, &engine.query_retention_control()?),
                 )
             })
         })
@@ -169,7 +169,7 @@ impl Engine {
                 table,
                 &table_state,
                 &ValueIndexKey::Column(field.into()),
-                |index| Ok(index.field_candidates(value)),
+                |index| index.field_candidates(value, &self.query_retention_control()?),
             )
         })
     }

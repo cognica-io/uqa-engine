@@ -7,7 +7,7 @@
 //! Retain document guards, index definitions and physical publication handles for execution-owned index work.
 
 use super::{
-    BTreeMap, ColumnValueIndex, DocId, SQLError, StorageBackendResult, TableState, Value,
+    BTreeMap, DocId, SQLError, StorageBackendResult, TableState, Value, ValueIndexCache,
     ValueIndexKey,
 };
 use crate::Engine;
@@ -102,25 +102,57 @@ impl Engine {
         state: &TableState,
         field: &ValueIndexKey,
         values: Vec<(DocId, Value)>,
-    ) -> StorageBackendResult<ColumnValueIndex> {
+    ) -> StorageBackendResult<ValueIndexCache> {
         let carried = self.value_index_carried_fields(name, state)?;
-        Ok(Self::build_value_index_as(
-            field,
-            carried.contains(field),
-            values,
-        ))
+        self.build_value_index_as(field, carried.contains(field), values)
     }
 
     pub(super) fn build_value_index_as(
+        &self,
         field: &ValueIndexKey,
         carried: bool,
         values: Vec<(DocId, Value)>,
-    ) -> ColumnValueIndex {
-        if carried {
-            ColumnValueIndex::build_carried(values.into_iter())
-        } else {
-            ColumnValueIndex::build(field.name(), values.into_iter())
-        }
+    ) -> StorageBackendResult<ValueIndexCache> {
+        let build = || {
+            let control = self.query_retention_control()?;
+            uqa_execution::catalog::index::value::ValueIndexBuilder::from_values(
+                field.name(),
+                carried,
+                self.work_mem_bytes()?,
+                values,
+                &control,
+            )
+        };
+        build().map_err(|error| super::StorageBackendError::backend("build value cache", error))
+    }
+
+    pub(super) fn hydrate_value_index_cache(
+        &self,
+        table: &str,
+        state: &TableState,
+        field: &ValueIndexKey,
+        backend: Option<&dyn uqa_storage::PersistentStorageBackend>,
+    ) -> StorageBackendResult<ValueIndexCache> {
+        let definitions = self.physical_index_definitions()?;
+        let carried = self
+            .value_index_carried_fields(table, state)?
+            .contains(field);
+        let hydrate = || {
+            uqa_execution::catalog::index::physical::hydration::ValueIndexHydration {
+                documents: &RetainedIndexDocuments(state),
+                definitions: &definitions,
+                expressions: self.constraint_execution_context().index_expressions(),
+                table,
+                field,
+                work_mem_bytes: self.work_mem_bytes()?,
+                control: &self.query_retention_control()?,
+            }
+            .build(carried, |visit| match backend {
+                Some(backend) => backend.visit_btree_index_entries(table, field, visit),
+                None => Ok(false),
+            })
+        };
+        hydrate().map_err(|error| super::StorageBackendError::backend("hydrate value cache", error))
     }
 
     pub(super) fn value_index_carried_fields(
@@ -202,9 +234,10 @@ impl Engine {
         let carried = self.value_index_carried_fields(table_name, table)?;
         let mut indexes = table.value_indexes.write();
         for (field, values) in fields.iter().zip(values) {
-            indexes.entry(field.clone()).or_insert_with(|| {
-                Self::build_value_index_as(field, carried.contains(field), values)
-            });
+            if let std::collections::btree_map::Entry::Vacant(entry) = indexes.entry(field.clone())
+            {
+                entry.insert(self.build_value_index_as(field, carried.contains(field), values)?);
+            }
         }
         Ok(())
     }

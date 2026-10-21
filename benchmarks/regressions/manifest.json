@@ -19027,6 +19027,105 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_cache_prepares_all_fields_before_publishing_a_row",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests/publication.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "Resident and spilled first keys followed by a second key that cannot reserve its nested traversal.",
+      "invariant": "Every cached field remains unchanged on failed preparation; successful replacement and deletion preserve prior snapshots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_index_projection_keeps_null_presence_early_stop_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/tests/publication.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "Mixed resident/carried and spilled values, absent rows, scalar NULL, zero-column output and cancellation.",
+      "invariant": "One-row stored projections preserve presence, early stop and SQLSTATE 57014 without a fallback after failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "index_only_reentrant_projection_captures_all_reads_with_bounded_payload",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/indexed.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "256 stored 8KiB keys captured under 64KiB query work memory before a reentrant consumer.",
+      "invariant": "Complete source reads precede consumer invocation; index guards are released and exact output stays below a fixed 512KiB peak ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "index_only_reentrant_projection_keeps_late_read_errors_before_consumers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/indexed.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "A source visits full-width identities and then reports a typed resource failure.",
+      "invariant": "No consumer executes before a later source read error; SQLSTATE 53200 is preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cold_value_cache_keeps_bounded_payload_and_transaction_snapshots",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/value_index/tests/retained_cache.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "256 indexed 8KiB values, persistent reopen, cold hydration under 64KiB query work memory, mutation, savepoint and rollback.",
+      "invariant": "Cold retained-key construction stays below a fixed 1536KiB peak ceiling; previous snapshots and transaction-visible results remain exact.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cold_value_cache_preserves_persisted_expression_values_after_routine_replacement",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/value_index/tests/retained_cache.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "An immutable expression is replaced after eight wide keys are stored; reopen and cold hydration force retained storage.",
+      "invariant": "The cache preserves every stored key representation instead of recomputing keys using the newer routine definition.",
+      "case_names": [
+        "case_1_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cold_detached_value_cache_reads_its_selected_document_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/value_index/tests/retained_cache.rs",
+      "capability": "Bounded cold value-index consumers",
+      "workload": "A detached cold table generation outlives a live UPDATE and DELETE on each provider.",
+      "invariant": "Hydration reads the selected snapshot, retaining the original value and NULL identity instead of consulting the live backend.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

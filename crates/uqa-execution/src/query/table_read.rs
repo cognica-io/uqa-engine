@@ -40,15 +40,20 @@ pub trait TableRead: Send + Sync {
         &self,
         ids: &[DocId],
         fields: &[&str],
+        control: &uqa_storage::read_control::StorageReadControl,
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
-    ) -> Option<usize> {
-        let _ = (ids, fields, visitor);
-        None
+    ) -> Result<Option<usize>, uqa_sql::SQLError> {
+        let _ = (ids, fields, control, visitor);
+        Ok(None)
     }
 }
 
 /// The chosen transaction snapshot supplies a table generation and the command's row overlay separately.
 pub trait QueryTableAccess: super::indexed_filter::QueryIndexRead {
+    fn index_read_control(
+        &self,
+    ) -> Result<uqa_storage::read_control::StorageReadControl, uqa_sql::SQLError>;
+
     fn serializable_read(
         &self,
         name: &str,
