@@ -69,6 +69,8 @@ const RELATION_BASE: u64 = 1 << 20;
 const RELATION_SPAN: u64 = 1 << 20;
 const ROW_BASE: u64 = 1 << 21;
 const CHANGE_GATE_BYTE: u64 = 9;
+// Bytes 16..56 hold transaction counters; 56 is the next unallocated coordination byte.
+const CHANGE_PREPARATION_BYTE: u64 = 56;
 /// `[ROW_BASE, ROW_BASE + 2 * ROW_SPAN)` carried one record lock per row byte before row claims moved to the shared claim table. The range stays reserved so the relation mode bytes above it keep their offsets. Record-lock offsets travel through `off_t`, so the span is sized to the platform's `off_t` width: 2^40 rows on 64-bit `off_t`, and the largest power of two that keeps every offset below `i32::MAX` where `off_t` is 32 bits.
 const ROW_SPAN: u64 = row_span_for_offset_width(std::mem::size_of::<OffsetWidth>());
 const RELATION_MODE_BASE: u64 = ROW_BASE + 2 * ROW_SPAN;
@@ -115,6 +117,14 @@ pub(super) const fn change_gate_claim(write: bool) -> ByteClaim {
     ByteClaim {
         offset: CHANGE_GATE_BYTE,
         write,
+        row: None,
+    }
+}
+
+pub(super) const fn change_preparation_claim() -> ByteClaim {
+    ByteClaim {
+        offset: CHANGE_PREPARATION_BYTE,
+        write: true,
         row: None,
     }
 }

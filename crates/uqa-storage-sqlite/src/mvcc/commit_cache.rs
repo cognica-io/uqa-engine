@@ -34,14 +34,15 @@ impl<'a> CommitCache<'a> {
         prepared: &PreparedRecordCommit,
         control: &StorageReadControl,
     ) -> PhysicalResult<Option<Self>> {
-        let mut records = 0_u64;
-        let mut writes = prepared.writes();
-        while let Some(write) = writes.next_metadata(control)? {
-            records = records
-                .saturating_add(write.key().len() as u64)
-                .saturating_add(write.value_len().unwrap_or(0));
-        }
-        let wanted = (records.saturating_mul(DIRTIED_FOR_EACH_RECORD_BYTE) / 1024).min(LIMIT_KIB);
+        control
+            .cancellation()
+            .check()
+            .map_err(uqa_storage::mvcc::VersionError::from)?;
+        let wanted = (prepared
+            .record_bytes()
+            .saturating_mul(DIRTIED_FOR_EACH_RECORD_BYTE)
+            / 1024)
+            .min(LIMIT_KIB);
         if wanted <= ORDINARY_KIB {
             return Ok(None);
         }

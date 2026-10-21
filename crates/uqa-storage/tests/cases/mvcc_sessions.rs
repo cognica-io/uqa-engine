@@ -875,3 +875,35 @@ fn sealed_transactions_reject_savepoint_changes_until_the_commit_is_resolved() {
 fn common_reclamation_preserves_reference_snapshots_and_outcomes() {
     uqa_storage::mvcc::verify_version_reclamation(Persistence::new().as_ref()).unwrap();
 }
+
+#[test]
+fn commit_preparation_is_private_repeatable_and_still_validates_conflicts() {
+    let persistence = Persistence::new();
+    let writer = persistence.session(1 << 20);
+    let peer = persistence.session(1 << 20);
+    writer.put(b"key", b"old").unwrap();
+    writer.begin_transaction().unwrap();
+    writer.put(b"key", b"prepared").unwrap();
+    writer.prepare_transaction_commit().unwrap();
+    writer.prepare_transaction_commit().unwrap();
+    assert_eq!(
+        peer.get(b"key").unwrap().as_deref(),
+        Some(b"old".as_slice())
+    );
+    assert!(writer.put(b"other", b"sealed").is_err());
+    peer.put(b"key", b"peer").unwrap();
+    assert!(writer.commit_transaction().is_err());
+    writer.rollback_transaction().unwrap();
+    assert_eq!(
+        peer.get(b"key").unwrap().as_deref(),
+        Some(b"peer".as_slice())
+    );
+    writer.begin_transaction().unwrap();
+    writer.put(b"key", b"success").unwrap();
+    writer.prepare_transaction_commit().unwrap();
+    writer.commit_transaction().unwrap();
+    assert_eq!(
+        peer.get(b"key").unwrap().as_deref(),
+        Some(b"success".as_slice())
+    );
+}

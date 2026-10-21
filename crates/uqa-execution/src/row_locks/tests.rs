@@ -872,3 +872,20 @@ fn change_gate_wait_observes_statement_cancellation() {
 fn change_gate_timeout_is_reported_as_lock_not_available() {
     assert_eq!(change_gate_timeout().sqlstate(), Some("55P03"));
 }
+
+#[test]
+fn writer_preparation_allows_snapshot_admission_but_serializes_other_writers() {
+    let manager = RowLockManager::new();
+    let cancel = uqa_core::CancellationToken::new();
+    let prepared = manager.begin_change_preparation(&cancel).unwrap();
+    assert!(manager.change_preparation.try_write().is_none());
+    let snapshot = manager.begin_change_snapshot(&cancel).unwrap();
+    snapshot.baseline().unwrap();
+    drop(snapshot);
+    let published = manager.begin_change_publication(&cancel).unwrap();
+    assert!(manager.change_gate.try_read().is_none());
+    drop(published);
+    drop(prepared);
+    assert!(manager.change_preparation.try_write().is_some());
+    manager.begin_change_snapshot(&cancel).unwrap();
+}

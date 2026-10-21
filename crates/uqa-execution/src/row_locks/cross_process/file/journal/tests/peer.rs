@@ -95,6 +95,24 @@ fn journal_peer() {
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
         let reply = match line.as_str() {
+            "prepare" => format!(
+                "{}",
+                coordinator
+                    .try_claim(
+                        u64::MAX,
+                        &[crate::row_locks::cross_process::change_preparation_claim()]
+                    )
+                    .unwrap()
+                    .is_ok()
+            ),
+            "snapshot" => {
+                let claim = crate::row_locks::cross_process::change_gate_claim(false);
+                let admitted = coordinator.try_claim(u64::MAX, &[claim]).unwrap().is_ok();
+                if admitted {
+                    coordinator.release(u64::MAX, &[claim]);
+                }
+                format!("{admitted}")
+            }
             "pin" => {
                 retained = Some(coordinator.pin_change_sequence().unwrap());
                 retained.as_ref().unwrap().0.to_string()
@@ -179,4 +197,22 @@ fn a_peer_publishes_after_another_process_replaces_the_generation() {
             HEADER_BYTES
         );
     }
+}
+
+#[test]
+fn preparation_claim_serializes_process_writers_without_blocking_snapshots() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("preparation.db");
+    let coordinator = FileLockCoordinator::open(&path).unwrap();
+    let claim = crate::row_locks::cross_process::change_preparation_claim();
+    coordinator.try_claim(u64::MAX, &[claim]).unwrap().unwrap();
+    let mut peer = Peer::start(&path);
+    assert_eq!(peer.request("prepare"), "false");
+    assert_eq!(peer.request("snapshot"), "true");
+    coordinator.release(u64::MAX, &[claim]);
+    assert_eq!(peer.request("prepare"), "true");
+    assert!(coordinator.try_claim(u64::MAX, &[claim]).unwrap().is_err());
+    peer.terminate();
+    coordinator.try_claim(u64::MAX, &[claim]).unwrap().unwrap();
+    coordinator.release(u64::MAX, &[claim]);
 }

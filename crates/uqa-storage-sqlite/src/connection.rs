@@ -22,6 +22,8 @@ use uqa_storage::{mvcc::VersionedKeyValueStore, KeyValueStore, StorageEncryption
 
 use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions};
 
+#[cfg(not(target_os = "emscripten"))]
+mod checkpoint;
 mod identity;
 mod logical;
 mod native;
@@ -449,6 +451,8 @@ impl ManagedConnection {
         // Synchronous=NORMAL is the recommended pairing with WAL: safe
         // against power loss, faster than FULL.
         conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // Reuse WAL space only up to 64 MiB once readers permit a reset. Active readers and a single larger transaction retain their required frames.
+        conn.pragma_update(None, "journal_size_limit", 64_i64 << 20)?;
         // Foreign keys are off by default; turn on so per-table cleanup
         // can use ON DELETE CASCADE later.
         conn.pragma_update(None, "foreign_keys", "ON")?;

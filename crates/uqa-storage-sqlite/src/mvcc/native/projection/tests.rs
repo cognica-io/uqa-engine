@@ -338,3 +338,116 @@ fn spilled_native_publication_preserves_mixed_writes_history_and_retry() {
         Ok(())
     });
 }
+
+#[test]
+fn native_validation_queue_does_not_duplicate_large_prepared_values() {
+    use crate::mvcc::native::tests::materialization::{initialize, records, replace, with};
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    initialize(&connection);
+    let control = StorageReadControl::with_limit(4 << 20);
+    let store = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    let original = records(&connection, &store, Family::Documents, &control);
+    let payload = format!("{{\"text\":\"{}\"}}", "x".repeat(128 << 10));
+    let changed = replace(
+        &original[0],
+        2,
+        ValueRef::Text(payload.as_bytes()),
+        &control,
+    );
+    let retained = store.snapshot(&control).unwrap();
+    let old = retained.get(changed.key(), &control).unwrap().unwrap();
+    let prepared =
+        PreparedRecordCommit::new(&[changed.write(Some(old.sequence()))], &control).unwrap();
+    let copies = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&copies);
+    with(&connection, |sqlite| {
+        sqlite.create_scalar_function(
+            "observe_validation_bytes",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+            move |context| {
+                observed.fetch_add(context.get::<i64>(0)? as usize, Ordering::Relaxed);
+                Ok(0)
+            },
+        )?;
+        sqlite.execute_batch("CREATE TEMP TRIGGER observe_validation AFTER INSERT ON _uqa_mvcc_native_expected BEGIN SELECT observe_validation_bytes(coalesce(length(NEW.new_value), 0)); END;")?;
+        Ok(())
+    });
+    let id = store.allocate_transaction(&control).unwrap();
+    store.commit(id, &prepared, &control).unwrap();
+    assert_eq!(copies.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        &***retained
+            .get(changed.key(), &control)
+            .unwrap()
+            .unwrap()
+            .value()
+            .unwrap(),
+        original[0].row()
+    );
+    let latest = store.snapshot(&control).unwrap();
+    assert_eq!(
+        &***latest
+            .get(changed.key(), &control)
+            .unwrap()
+            .unwrap()
+            .value()
+            .unwrap(),
+        changed.row()
+    );
+    with(&connection, |sqlite| {
+        assert_eq!(
+            sqlite.query_row(
+                "SELECT body FROM _documents WHERE table_name='public.docs' AND doc_id=1",
+                [],
+                |row| row.get::<_, String>(0)
+            )?,
+            payload
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn old_native_validation_does_not_load_large_spilled_replacements() {
+    use crate::mvcc::native::tests::materialization::{initialize, records, replace, with};
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    initialize(&connection);
+    let control = StorageReadControl::with_limit(4 << 20);
+    let store = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    let original = records(&connection, &store, Family::Documents, &control);
+    let body = format!("{{\"text\":\"{}\"}}", "x".repeat(128 << 10));
+    let changed = replace(&original[0], 2, ValueRef::Text(body.as_bytes()), &control);
+    let private = PrivateRecordChanges::new(&uqa_core::memory::MemoryBudget::new(512 << 10));
+    private
+        .apply(
+            &[changed.write(Some(CommitSequence::from_u64(1)))],
+            &control,
+        )
+        .unwrap();
+    for id in 3..=10 {
+        let inserted = replace(&changed, 1, ValueRef::Integer(id), &control);
+        private.apply(&[inserted.write(None)], &control).unwrap();
+    }
+    let prepared = private.prepare(&control).unwrap();
+    assert!(prepared.resident().is_none());
+    let read = StorageReadControl::with_limit(32 << 10);
+    // Loading the replacement would exceed this allowance. Old-row validation needs only its identity and the tiny committed value.
+    assert!(prepared.writes().next(&read).is_err());
+    with(&connection, |sqlite| {
+        let _permit = crate::mvcc::schema::WritePermit::acquire(sqlite)?;
+        let transaction = crate::mvcc::admission::begin(sqlite, &read)?;
+        seed_originals(&transaction, store.database_id(), &prepared, &read)?;
+        assert_eq!(
+            sqlite.query_row(
+                "SELECT count(*) FROM _uqa_mvcc_native_expected",
+                [],
+                |row| row.get::<_, i64>(0)
+            )?,
+            1
+        );
+        transaction.rollback()?;
+        Ok(())
+    });
+    assert_eq!(read.memory().used(), 0);
+}

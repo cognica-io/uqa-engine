@@ -428,6 +428,10 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         self.store.pin_transaction_snapshot()
     }
 
+    fn prepare_transaction_commit(&self) -> StorageBackendResult<()> {
+        self.store.prepare_transaction_commit()
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         self.store.commit_transaction()
     }

@@ -35,6 +35,7 @@ impl RowLockManager {
             identities: super::identity_registry::IdentityRegistry::default(),
             next_acquisition: AtomicU64::new(1),
             change_gate: RwLock::new(()),
+            change_preparation: RwLock::new(()),
             temporary_roles: Mutex::new(HashMap::new()),
             sequence_positions: Mutex::default(),
             state: Mutex::new(LockTable {

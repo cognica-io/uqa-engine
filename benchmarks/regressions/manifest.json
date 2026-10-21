@@ -20561,6 +20561,123 @@
       "workload": "Alternating 24KiB and empty shared payloads under a 64KiB scan batch bound.",
       "invariant": "The cursor preserves exact ordered values and bounded batches while visiting no more than two surplus source rows over 128 outputs.",
       "capability": "Bounded shared scan prefetch"
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "metadata_selection_preserves_writes_without_loading_rejected_spill_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/commit/cursor/tests.rs",
+      "capability": "Prepared commit sizing",
+      "workload": "Resident and encrypted spilled records with mixed live values and tombstones.",
+      "invariant": "Exact payload sizing performs no spill entry or value read and filtered cursors preserve all selected bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "test": "commit_preparation_is_private_repeatable_and_still_validates_conflicts",
+      "cases": 1,
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions.rs",
+      "capability": "Private commit preparation",
+      "workload": "Repeated preparation, a concurrent conflicting writer, rollback and successful publication.",
+      "invariant": "Preparation exposes no private values, seals writes, preserves conflict rejection and allows rollback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_validation_queue_does_not_duplicate_large_prepared_values",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests.rs",
+      "capability": "Native validation work",
+      "workload": "A 128KiB document update with a retained old snapshot and validation queue trigger.",
+      "invariant": "Validation copies zero payload bytes into its work queue; current/history values remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "a_key_page_never_loads_payload_values",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/queue/tests.rs",
+      "capability": "Native validation memory",
+      "workload": "Sixty-four keys carrying 128KiB payloads under a 4KiB reader allowance.",
+      "invariant": "Every key is visited in order without loading payloads and all reservations are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "wal_commits_finish_while_maintenance_is_paused_and_shutdown_joins_it",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/connection/checkpoint/tests.rs",
+      "capability": "WAL publication lifecycle",
+      "workload": "Plain and encrypted 8MiB commits with paused maintenance, independent reads and reopen.",
+      "invariant": "Commit and visibility do not wait for maintenance; FULL synchronization and durable reopen remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "passive_maintenance_retries_after_a_physical_reader_releases_its_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/connection/checkpoint/tests.rs",
+      "capability": "WAL reader retention",
+      "workload": "A physical reader retains the old snapshot while an 8MiB replacement commits.",
+      "invariant": "The reader keeps its old bytes; background maintenance completes after its release without blocking commit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "writer_preparation_allows_snapshot_admission_but_serializes_other_writers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/tests.rs",
+      "capability": "Snapshot admission",
+      "workload": "Writer preparation, snapshot admission and final publication guards.",
+      "invariant": "Preparation admits readers but serializes writers; final publication excludes snapshot admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "preparation_claim_serializes_process_writers_without_blocking_snapshots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/cross_process/file/journal/tests/peer.rs",
+      "capability": "Cross-process preparation",
+      "workload": "Independent process preparation claims, snapshot claims and abrupt process exit.",
+      "invariant": "Writers serialize across processes, readers remain admissible and process loss releases preparation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "old_native_validation_does_not_load_large_spilled_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests.rs",
+      "capability": "Native old-row validation",
+      "workload": "A 128KiB encrypted spilled replacement checked against its small committed row under a 32KiB allowance.",
+      "invariant": "Old-row validation reads only prepared metadata; it cannot load or allocate the large replacement.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
