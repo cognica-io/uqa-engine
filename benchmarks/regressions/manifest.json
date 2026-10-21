@@ -9793,6 +9793,45 @@
     {
       "package": "uqa-core",
       "kind": "lib",
+      "test": "scalar_clones_preserve_bits_and_temporal_fields_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/cloning/tests.rs",
+      "capability": "Zero-allocation scalar value copies",
+      "workload": "NULL/void, booleans, integer limits, signed zero, infinities, two NaN payloads and every temporal variant.",
+      "invariant": "Clone preserves exact bits and all temporal fields without allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "payload_clones_preserve_owned_buffers_and_nested_type_metadata",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/cloning/tests.rs",
+      "capability": "Owned value copy representation",
+      "workload": "Every owned payload variant, nested values, array lower bounds and element OID, row descriptors, record/enum identities and packed bit strings.",
+      "invariant": "Clone and clone_from preserve representation and independent owned buffers, including nested type metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "datum_cloning_shares_opaque_bytes_without_interpreting_the_offset",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/cloning/tests.rs",
+      "capability": "Lazy shared Datum copies",
+      "workload": "An opaque retained tuple with a type OID and an intentionally out-of-range unread offset.",
+      "invariant": "Clone shares the immutable backing bytes without allocating or decoding the retained offset.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
       "test": "bit_string_order_and_equality_match_postgresql_without_unpacking",
       "cases": 1,
       "case_names": [

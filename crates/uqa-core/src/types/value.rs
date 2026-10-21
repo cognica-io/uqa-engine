@@ -16,6 +16,7 @@ pub(super) mod comparison_control;
 pub use comparison_control::{
     compare_bytes as compare_bytes_with_control, fixed_char_comparison_text_with_control,
 };
+mod cloning;
 mod copying;
 mod decoding;
 mod identity;
@@ -30,7 +31,7 @@ use tagged::value_from_tagged_map;
 ///
 /// Covers the JSON-like values the engine round-trips through a posting
 /// list. Date and datetime variants land with the SQL type system.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub enum Value {
     #[default]
     Null,
