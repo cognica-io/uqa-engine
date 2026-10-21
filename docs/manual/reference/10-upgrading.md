@@ -4,6 +4,10 @@ This page describes UQA Engine 0.6.0 and earlier releases. Use the [version-tagg
 
 ## Unreleased
 
+Custom providers that retain B-tree indexes must implement `PersistentStorageBackend::visit_btree_index_entries`: visit the previously evaluated keys once in increasing document-identity order under one selected read boundary, return `false` without visiting only for an unbuilt index, and propagate callback failures. An unsupported implementation reports an error; recomputing stored expression keys from current routine definitions would change their meaning. Query cache hydration also requires the document store's controlled identity-page interface. Native SQLite, SQLite K/V and redb provide these operations. This changes Rust adapter requirements without changing durable formats.
+
+Custom Execution `TableRead` adapters now pass the invoking `StorageReadControl` to index-only projection and return `Result<Option<usize>, SQLError>`; an I/O, cancellation or resource error must not become `None` and trigger a second read. `QueryTableAccess::index_read_control` supplies the selected session's allowance and cancellation. Standalone `ScoredDocumentSource` users can supply the same context through `with_index_read_control`.
+
 SQLite builds use the maintained `uqa-rusqlite` 0.39.1 and `uqa-libsqlite3-sys` 0.37.1 packages, preserving the upstream 0.39.0 API and SQLite/SQLCipher sources while removing the bundled global page-cache memory-management mutex. This changes the driver's Rust package identity, with maintainer approval; it does not change database formats or SQL behavior. Applications that name driver types can import `uqa_storage_sqlite::rusqlite` or alias the maintained package as shown below. Every native dependency must use the same package family: official and maintained sys crates both declare `links = "sqlite3"`, so a transitive dependency on official rusqlite must also be migrated. Cargo aliases preserve import spelling, not cross-package type identity.
 
 ```toml
