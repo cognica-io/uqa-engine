@@ -156,6 +156,8 @@ $$
 
 where $\pi$ is the prior and each $\ell_i$ is prior-free evidence. Counting a posterior's prior again produces an incorrect result.
 
+Fusion preserves the declared signal order for floating-point accumulation, positional weights and normalization bounds, and selection of the first failing signal. Cost estimates do not reorder exact Bayesian, positive-evidence or probabilistic Boolean fusion inputs; equal document support alone would not preserve their score bits.
+
 Positive-evidence pooling is deliberately a robust ranking heuristic rather than an exact conditional-independence statement:
 
 ```sql

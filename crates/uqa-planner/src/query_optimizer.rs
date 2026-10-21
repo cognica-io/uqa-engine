@@ -23,10 +23,9 @@
 //! 6. `fuse_join_pattern` -- merge intersected PatternMatch operators
 //!    that share a vertex variable.
 //! 7. `reorder_intersect` -- sort membership-only Intersect children by estimated operator cost (cheapest first); decorated operands retain their order.
-//! 8. `reorder_fusion_signals` -- sort fusion signals by cost; graph
-//!    operators receive a 0.5x discount when graph stats are
-//!    available.
-//! 9. `apply_index_scan` -- substitute leaf Filter with IndexScan when a covering index is registered and cheaper.
+//! 8. `apply_index_scan` -- substitute leaf Filter with IndexScan when a covering index is registered and cheaper.
+//!
+//! Fusion signals retain declaration order because floating-point folds and first errors are observable; positional pooling parameters keep their original correspondence.
 //!
 //! Vector-threshold operands remain distinct: intersection adds each raw cosine score, and approximate query-vector equality cannot preserve threshold support. Rewrites must also retain invalid-threshold errors.
 
@@ -59,6 +58,8 @@ pub struct OptimizerConfig {
     #[deprecated(note = "vector threshold merging was removed; this field has no effect")]
     pub enable_merge_vector_thresholds: bool,
     pub enable_reorder_intersect: bool,
+    /// Retained for source compatibility; ignored because reordering fusion signals changes score bits and first-error precedence.
+    #[deprecated(note = "fusion signal reordering was removed; this field has no effect")]
     pub enable_reorder_fusion_signals: bool,
     pub enable_apply_index_scan: bool,
 }
@@ -93,7 +94,7 @@ impl Default for OptimizerConfig {
             enable_fuse_join_pattern: true,
             enable_merge_vector_thresholds: false,
             enable_reorder_intersect: true,
-            enable_reorder_fusion_signals: true,
+            enable_reorder_fusion_signals: false,
             enable_apply_index_scan: true,
         }
     }
@@ -189,9 +190,6 @@ impl QueryOptimizer {
         }
         if self.config.enable_reorder_intersect {
             op = self.reorder_intersect(op);
-        }
-        if self.config.enable_reorder_fusion_signals {
-            op = self.reorder_fusion_signals(op);
         }
         if self.config.enable_apply_index_scan {
             op = self.apply_index_scan(op);

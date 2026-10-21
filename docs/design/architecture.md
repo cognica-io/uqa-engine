@@ -186,7 +186,7 @@ flowchart TD
     Access -->|row| Row["Relational pipeline"]
     Access -->|hybrid| Hybrid["Posting candidates plus residual"]
     Access -->|operator| LocalTree
-    LocalTree --> TreeOpt["QueryOptimizer, 10 passes"]
+    LocalTree --> TreeOpt["QueryOptimizer"]
     Tree --> TreeOpt
     TreeOpt --> Driver["PlanExecutor and EngineDriver"]
     Driver --> TupleRows["Posting, graph, or generalized tuples"]
@@ -233,6 +233,14 @@ For decorated operands the cost-ordering pass now emits the identical sequence o
 On the existing membership-only domain each child emits the default payload, and merging two such payloads gives the default payload: $\mu(0,0)=0$. Thus the result is the intersection of the finite document supports with that same decoration, independent of permutation. Cost ordering remains enabled for that domain; this correction neither expands its scope nor adds a claim about reordering fallible storage reads. Scored children are not projected onto membership to obtain this law.
 
 Owning Planner tests execute the real Storage and Operators implementations. [Vector cases](../../crates/uqa-planner/src/query_optimizer/tests/vector_thresholds.rs) assert the independent rounded-score example and empty-result/invalid-threshold ordering; [payload cases](../../crates/uqa-planner/src/query_optimizer/tests/intersection_order.rs) require literal right-biased facet fields and prove that cheaper membership-only operands still move first. These regressions exercise the proof obligations but do not replace the preservation argument.
+
+### Ordered fusion signals
+
+Fusion inputs retain declaration order through optimization, including nested exact Bayesian evidence, robust positive-evidence pooling and probabilistic Boolean nodes. Cost estimates do not justify permuting their binary64 folds or selecting a different first failing signal. Positional weights and normalization bounds remain attached to the same declared input. The deprecated `OptimizerConfig::enable_reorder_fusion_signals` field remains source-compatible but has no effect.
+
+Fix the ordered child results $P_1,\ldots,P_n$, their corresponding parameters $\theta_1,\ldots,\theta_n$ and the existing operator's accumulation function $A$. Its observable score is the machine computation $a_0,\ a_i=A(a_{i-1},P_i,\theta_i)$, followed by that operator's unchanged final transform. Equality of the real-number formula under permutation does not imply equality of this rounded sequence: even binary64 addition has the counterexample in the preceding intersection proof. In #1214, cost-ordering a two-signal text/vector fusion changed the same document's output from bits `4593997936289501089` to `4593997936289501092` while preserving its support. That is a decorated-value difference, not a new relevance calibration.
+
+Removing the permutation leaves every already optimized child in its original slot. By induction, each accumulator receives identical operands and positional parameters, so its bits, final transform and support are identical to the declared fold. Concurrent child evaluation may retain its existing scheduling; the ordered result collection still chooses the same first error before fusion. Applying the argument recursively preserves nested fusion observations, assuming each unchanged child transformation satisfies its own contract. No payload semiring, floating-point associativity or commutativity is assumed. Owning Planner tests compare the native operators' exact score bits, positional parameters and nested failing-signal precedence with the legacy flag both enabled and disabled; public COPY tests also compare all four storage providers against the unoptimized native execution route.
 
 ## Relational physical execution
 

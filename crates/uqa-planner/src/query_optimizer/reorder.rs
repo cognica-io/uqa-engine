@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Cost-based filter, intersection, and fusion-signal ordering.
+//! Filter placement and cost ordering of membership-only intersections.
 
 use uqa_operators::OperatorTree;
 
-use super::{tree_map::map_operator_children, QueryOptimizer};
+use super::QueryOptimizer;
 
 impl QueryOptimizer {
     // ---------------------------------------------------------------
@@ -85,104 +85,6 @@ impl QueryOptimizer {
             return OperatorTree::Intersect(children);
         }
         self.recurse_children(op)
-    }
-
-    // ---------------------------------------------------------------
-    // 9. Reorder fusion signals
-    // ---------------------------------------------------------------
-
-    pub(super) fn reorder_fusion_signals(&self, op: OperatorTree) -> OperatorTree {
-        match op {
-            OperatorTree::BayesianEvidenceFusion { signals, base_rate } => {
-                let mut signals: Vec<_> = signals
-                    .into_iter()
-                    .map(|signal| self.reorder_fusion_signals(signal))
-                    .collect();
-                signals.sort_by(|left, right| {
-                    self.graph_aware_signal_cost(left)
-                        .total_cmp(&self.graph_aware_signal_cost(right))
-                });
-                OperatorTree::BayesianEvidenceFusion { signals, base_rate }
-            }
-            OperatorTree::RobustPositiveEvidencePool {
-                signals,
-                alpha,
-                gating,
-                weights,
-                logit_min,
-                logit_max,
-                adaptive_weights,
-            } => {
-                let mut indexed_signals: Vec<(usize, OperatorTree)> = signals
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, signal)| (index, self.reorder_fusion_signals(signal)))
-                    .collect();
-                indexed_signals.sort_by(|(_, left), (_, right)| {
-                    let ca = self.graph_aware_signal_cost(left);
-                    let cb = self.graph_aware_signal_cost(right);
-                    ca.total_cmp(&cb)
-                });
-                let order: Vec<usize> = indexed_signals
-                    .iter()
-                    .map(|(original_index, _)| *original_index)
-                    .collect();
-                let reordered_weights =
-                    weights.map(|values| order.iter().map(|index| values[*index]).collect());
-                let reordered_logit_min =
-                    logit_min.map(|values| order.iter().map(|index| values[*index]).collect());
-                let reordered_logit_max =
-                    logit_max.map(|values| order.iter().map(|index| values[*index]).collect());
-                OperatorTree::RobustPositiveEvidencePool {
-                    signals: indexed_signals
-                        .into_iter()
-                        .map(|(_, signal)| signal)
-                        .collect(),
-                    alpha,
-                    gating,
-                    weights: reordered_weights,
-                    logit_min: reordered_logit_min,
-                    logit_max: reordered_logit_max,
-                    adaptive_weights,
-                }
-            }
-            OperatorTree::ProbBoolFusion { signals, mode } => {
-                let mut sigs: Vec<OperatorTree> = signals
-                    .into_iter()
-                    .map(|s| self.reorder_fusion_signals(s))
-                    .collect();
-                sigs.sort_by(|a, b| {
-                    let ca = self.graph_aware_signal_cost(a);
-                    let cb = self.graph_aware_signal_cost(b);
-                    ca.total_cmp(&cb)
-                });
-                OperatorTree::ProbBoolFusion {
-                    signals: sigs,
-                    mode,
-                }
-            }
-            other => self.recurse_fusion(other),
-        }
-    }
-
-    pub(super) fn graph_aware_signal_cost(&self, signal: &OperatorTree) -> f64 {
-        let base = self.estimator.estimate(signal, &self.index_stats);
-        if self.graph_stats.is_some()
-            && matches!(
-                signal,
-                OperatorTree::Traverse { .. }
-                    | OperatorTree::PatternMatch { .. }
-                    | OperatorTree::RegularPathQuery { .. }
-            )
-        {
-            base * 0.5
-        } else {
-            base
-        }
-    }
-
-    pub(super) fn recurse_fusion(&self, op: OperatorTree) -> OperatorTree {
-        map_operator_children(op, |child| self.reorder_fusion_signals(child))
     }
 
     pub(super) fn filter_applies_to(field: &str, target: &OperatorTree) -> bool {
