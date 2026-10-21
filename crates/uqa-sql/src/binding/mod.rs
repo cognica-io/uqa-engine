@@ -21,6 +21,7 @@ pub mod composite_rename;
 mod cte_controls;
 mod ctes;
 mod dependencies;
+mod execution;
 pub mod legacy_collations;
 pub mod legacy_patterns;
 mod merge_scopes;
@@ -38,6 +39,7 @@ mod type_resolution;
 mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
+pub use execution::bind_query_block_for_execution;
 pub use preparation::{
     analyze_column_type_transform, assign_stored_query_input_collations,
     infer_prepared_parameter_types,

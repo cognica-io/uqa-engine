@@ -7,10 +7,9 @@
 //! Query-block validation and physical source selection.
 
 use super::{
-    bind_source_plan_schema_for_execution, binding_context,
-    ensure_select_privileges_for_query_block, execute_query_block_operator_output,
-    expand_from_star_columns, overlay_outer_schema, projection_columns,
-    run_select_without_from_output, run_single_foreign_select_output,
+    bind_query_block_for_execution, binding_context, ensure_select_privileges_for_query_block,
+    execute_query_block_operator_output, expand_from_star_columns, overlay_outer_schema,
+    projection_columns, run_select_without_from_output, run_single_foreign_select_output,
     run_single_table_select_output, validate_query_block_expression_types,
     validate_query_block_references, validate_query_set_contexts,
     validate_source_set_contexts_before_build, with_query_table_pseudo_columns, ComputePlan,
@@ -388,19 +387,15 @@ pub fn execute_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     scoped_ctes.lock_identities.retain_after_lock =
         inherited_lock_identities && !row_identity_barrier;
     let defer_distinct_limit = uqa_sql::semantics::should_defer_distinct_limit(block);
-    let mut execution = uqa_sql::semantics::select_execution_stmt(block, defer_distinct_limit);
     let outer = scoped_ctes.row_lock_outer_row().map(|row| &row.schema);
-    let source_schema = if let Some(source) = execution.from.as_mut() {
-        bind_source_plan_schema_for_execution(
-            context.ctes.routines,
-            source,
-            params,
-            &scoped_ctes,
-            outer,
-        )?
-    } else {
-        crate::RowSchema::default()
-    };
+    let (execution, source_schema) = bind_query_block_for_execution(
+        context.ctes.routines,
+        block,
+        params,
+        &scoped_ctes,
+        outer,
+        defer_distinct_limit,
+    )?;
     run_bound_query_block_output(
         context,
         block,

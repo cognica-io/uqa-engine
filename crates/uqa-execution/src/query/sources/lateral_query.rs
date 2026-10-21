@@ -190,7 +190,6 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
     scoped_ctes: &mut CteScope<S>,
     output_mode: QueryOutputMode<'_>,
 ) -> Result<QueryOutput, SQLError> {
-    let mut stmt = stmt.clone();
     let inherited_lock_identities = scoped_ctes.lock_identities.emit;
     let mut scoped_ctes = scoped_ctes.enter_scalar_subqueries(&stmt.subqueries);
     scoped_ctes.set_row_lock_outer_row(outer_row.clone());
@@ -201,27 +200,25 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         !stmt.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
     scoped_ctes.lock_identities.retain_after_lock =
         inherited_lock_identities && !row_identity_barrier;
-    let own_schema = match stmt.from.as_mut() {
-        Some(from) => crate::query::binding::bind_source_plan_schema_for_execution(
-            context.ctes.routines,
-            from,
-            params,
-            &scoped_ctes,
-            Some(&outer_row.schema),
-        )?,
-        None => crate::RowSchema::default(),
-    };
+    let (mut stmt, own_schema) = crate::query::binding::bind_query_block_for_execution(
+        context.ctes.routines,
+        stmt,
+        params,
+        &scoped_ctes,
+        Some(&outer_row.schema),
+        false,
+    )?;
     // The operator of a lateral block also holds its outer row, whose columns must not take a GROUP BY name before an output column, so the names are bound against the block's own columns first.
     if matches!(stmt.compute, ComputePlan::Aggregate) {
         uqa_sql::semantics::grouping_sets::bind_grouping_names(
             context.ctes.routines,
-            &mut stmt,
+            stmt.to_mut(),
             &own_schema,
             None,
             params,
         )?;
     }
-    let stmt = &stmt;
+    let stmt = stmt.as_ref();
     if let Some(from) = stmt.from.as_ref() {
         uqa_sql::semantics::sets::validation::validate_source_set_contexts_before_build(
             context.relational.catalog,

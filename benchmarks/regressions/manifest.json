@@ -19191,6 +19191,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "execution_binding_does_not_copy_unchanged_query_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests.rs",
+      "capability": "Immutable execution block syntax",
+      "workload": "Sixteen executions bind a block containing a 256KiB literal and an unchanged VALUES source.",
+      "invariant": "Total allocation remains below 128KiB; unchanged syntax is borrowed while each execution still binds its source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "execution_binding_isolates_distinct_slices_and_function_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests.rs",
+      "capability": "Immutable execution block syntax",
+      "workload": "Repeated table-function binding with and without DISTINCT slice deferral.",
+      "invariant": "Selected builtin identity and types are retained in an owned execution block; original syntax and limit/offset remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "borrowed_execution_binding_keeps_live_parameters_and_outer_types",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests.rs",
+      "capability": "Immutable execution block syntax",
+      "workload": "One borrowed plan binds under changing correlated row types and typed parameters.",
+      "invariant": "Each invocation uses its current outer schema and parameter type without reusing previous metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "borrowed_execution_binding_preserves_missing_relation_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests.rs",
+      "capability": "Immutable execution block syntax",
+      "workload": "An unchanged comma-join source names two absent relations.",
+      "invariant": "The first source still reports the original UnknownTable diagnostic before later binding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "unchanged_execution_blocks_preserve_postgresql_lateral_and_slice_results",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_lateral.rs",
+      "capability": "Immutable execution block syntax",
+      "workload": "Five independent PostgreSQL 18.4 cases cover nested VALUES, DISTINCT slicing, lateral projection, grouped name precedence and ROWS FROM ordinality; each is repeated three times.",
+      "invariant": "Public Engine execution preserves every ordered value and NULL across reused plans.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
