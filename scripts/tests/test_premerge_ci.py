@@ -56,6 +56,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             '      - "!scripts/tests/test_release_recovery.py"\n'
             '      - "benchmarks/**"\n'
             '      - ".github/scripts/**"\n'
+            '      - "!.github/scripts/install-manylinux-build-deps.sh"\n'
             "      - rust-toolchain.toml\n"
             '      - ".cargo/**"\n'
             "      - .github/workflows/workspace-tests.yml\n"
