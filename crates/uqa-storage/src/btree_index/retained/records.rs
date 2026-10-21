@@ -14,7 +14,10 @@ use crate::{
 use uqa_core::{memory::MemoryBudget, DocId, Value};
 
 #[cfg(test)]
-thread_local! { pub(super) static VALUE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+thread_local! {
+    pub(super) static VALUE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(super) static NODE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 const CHUNK: usize = 4096;
 const NODE: u8 = 0;
@@ -100,6 +103,8 @@ impl<'a> Records<'a> {
         view: &PrivateRecordSnapshot,
         id: DocId,
     ) -> StorageBackendResult<Option<Node>> {
+        #[cfg(test)]
+        NODE_READS.with(|reads| reads.set(reads.get() + 1));
         view.get(&key(NODE, id), &self.control)
             .map_err(failure)?
             .as_ref()
@@ -176,7 +181,7 @@ impl<'a> Records<'a> {
             .map(Some)
             .map_err(StorageBackendError::from)
     }
-    pub fn put_value(&self, id: DocId, value: &Value) -> StorageBackendResult<()> {
+    pub fn put_value(&self, id: DocId, value: &Value) -> StorageBackendResult<u64> {
         let bytes = serde_json::to_vec(value)?;
         for (ordinal, chunk) in bytes.chunks(CHUNK).enumerate() {
             self.control.check()?;
@@ -191,7 +196,8 @@ impl<'a> Records<'a> {
                 bytes: bytes.len() as u64,
                 count: 1,
             },
-        )
+        )?;
+        Ok(bytes.len() as u64)
     }
     pub fn remove_value(&self, id: DocId) -> StorageBackendResult<()> {
         let node = self.node(id)?;

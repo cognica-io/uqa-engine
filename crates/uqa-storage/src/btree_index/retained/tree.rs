@@ -234,13 +234,13 @@ pub(super) struct Builder<'a, 'b> {
     pub previous: Option<(DocId, Value)>,
 }
 impl Builder<'_, '_> {
-    pub fn build(&mut self, count: usize, depth: u8) -> StorageBackendResult<Option<DocId>> {
+    pub fn build(&mut self, count: usize, depth: u8) -> StorageBackendResult<(Option<DocId>, u8)> {
         check(self.records, depth)?;
         if count == 0 {
-            return Ok(None);
+            return Ok((None, 0));
         }
         let left_count = count / 2;
-        let left = self.build(left_count, depth + 1)?;
+        let (left, left_height) = self.build(left_count, depth + 1)?;
         let (id, value) = (self.source)()?.ok_or_else(|| invalid("short ordered index input"))?;
         if self.previous.as_ref().is_some_and(|(before_id, before)| {
             before.cmp(&value).then_with(|| before_id.cmp(&id)).is_ge()
@@ -254,13 +254,25 @@ impl Builder<'_, '_> {
         {
             return Err(invalid("duplicate index input identity"));
         }
-        self.records.put_value(id, &value)?;
+        let bytes = self.records.put_value(id, &value)?;
         self.previous = Some((id, value));
-        let right = self.build(count - left_count - 1, depth + 1)?;
-        let mut node = self.records.node(id)?;
-        node.left = left;
-        node.right = right;
-        save_height(self.records, id, node)?;
-        Ok(Some(id))
+        let (right, right_height) = self.build(count - left_count - 1, depth + 1)?;
+        let height = left_height
+            .max(right_height)
+            .checked_add(1)
+            .filter(|height| *height <= MAX_HEIGHT)
+            .ok_or_else(|| invalid("ordered height overflow"))?;
+        // This unpublished builder just completed both children, so their metadata need not be read from spill again.
+        self.records.set_node(
+            id,
+            Node {
+                left,
+                right,
+                height,
+                bytes,
+                count: count as u64,
+            },
+        )?;
+        Ok((Some(id), height))
     }
 }

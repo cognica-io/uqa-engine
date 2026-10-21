@@ -18949,6 +18949,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_ordered_build_does_not_reread_completed_subtrees",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Bounded retained value indexes",
+      "workload": "Ordered inputs of 31 and 128 keys with zero and 64KiB spill thresholds.",
+      "invariant": "At most one metadata read per input key for duplicate-identity validation; complete values, ordering and balanced heights remain exact.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
