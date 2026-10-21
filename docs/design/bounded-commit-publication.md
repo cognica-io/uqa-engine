@@ -18,8 +18,9 @@ The SQLite pool owns one managed checkpoint worker for each ordinary file pool o
 
 - [x] Reproduce the unchanged main commit path and independently inspect Storage, SQLite and Execution ownership/dependency boundaries.
 - [x] Add deterministic regressions for zero validation payload copies, exact cached sizing, bounded queue memory, paused checkpoint completion, physical-reader retention, private preparation, conflict rejection, local snapshot admission and cross-process writer exclusion.
-- [x] Complete local checks: 1,292 SQLite cases, 60 final focused library cases, 20 final native validation/materialization cases, the private preparation/conflict case and all 95 Engine transaction cases. Strict Storage/SQLite/Execution/Engine Clippy and ownership/dependency checks pass. An earlier parallel KV text run hit the 30-second admission limit; the final sequential run including KV preparation forwarding passes.
+- [x] Complete local checks: 1,292 SQLite cases, 60 focused library cases, 20 final native validation/materialization cases and the private preparation/conflict case. After integrating dependency #1225, all 74 focused owner cases and 95 sequential Engine transaction cases pass. Strict Storage/SQLite/Execution/Engine Clippy and ownership/dependency checks pass. An earlier parallel KV text run hit the 30-second admission limit; the final sequential run including KV preparation forwarding passes.
 - [ ] Verify automatic Linux/macOS bounded-work, memory and output regression results for the delivered source.
-- [ ] Verify all six selected FDW configurations for the final source fingerprint, merge the implementation PR and record delivery evidence.
+- [x] Complete automatic FDW selection in run 39565086625: no foreign-handler input changed, fingerprint `2a9512e00bf08c70c15be808feeab7891e949ff4934a3844326696d39c752a7c`. This is a valid scope exclusion, not six executed configuration passes.
+- [ ] Merge the qualified implementation PR and record delivery evidence.
 
 Timing acceptance remains separate from correctness and bounded-work evidence. No throughput or latency percentage is asserted without an independently calibrated controlled host. Diagnostic traces remain outside tracked source.
