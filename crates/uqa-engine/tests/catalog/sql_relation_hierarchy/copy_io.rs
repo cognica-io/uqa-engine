@@ -39,6 +39,9 @@ mod publication;
 #[path = "copy_io/projection.rs"]
 mod projection;
 
+#[path = "copy_io/retrieval.rs"]
+mod retrieval;
+
 #[path = "copy_io/rules.rs"]
 mod rules;
 

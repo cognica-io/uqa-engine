@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Capture complete single-field text-search scores incrementally before SQL document reads, avoiding full posting/score vectors in COPY while preserving exact scores, document order, snapshot generation, cancellation and serializable observations.
+
 - Bound exact ANALYZE and cold memory-engine statistics collection with paged snapshots and spill-backed distribution input, preserving distinct/NULL counts, histogram boundaries, MCV frequencies and transaction publication.
 
 - Bound scalar-filter index candidate capture and replay, preserving command masks, tuple rechecks, residual predicates and snapshot results without a complete posting or identity vector.

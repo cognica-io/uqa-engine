@@ -39,9 +39,9 @@ impl ScoredDocumentSource {
         }
         let after = match &self.input {
             super::ScoredInputCursor::All { after } => *after,
-            super::ScoredInputCursor::Entries(_) | super::ScoredInputCursor::Candidates(_) => {
-                return Ok(None)
-            }
+            super::ScoredInputCursor::Entries(_)
+            | super::ScoredInputCursor::Candidates(_)
+            | super::ScoredInputCursor::Captured(_) => return Ok(None),
         };
         if max_rows == 0 {
             return Ok(Some(false));
@@ -123,9 +123,9 @@ impl ScoredDocumentSource {
         }
         let mut after = match &self.input {
             super::ScoredInputCursor::All { after } => *after,
-            super::ScoredInputCursor::Entries(_) | super::ScoredInputCursor::Candidates(_) => {
-                return Ok(None)
-            }
+            super::ScoredInputCursor::Entries(_)
+            | super::ScoredInputCursor::Candidates(_)
+            | super::ScoredInputCursor::Captured(_) => return Ok(None),
         };
         if max_rows == 0 {
             return Ok(Some(Vec::new()));

@@ -19584,6 +19584,139 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "exhaustive_text_visitor_preserves_native_score_bits_and_duplicate_terms",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/text/exhaustive/tests.rs",
+      "capability": "Incremental exhaustive text scoring",
+      "workload": "Native BM25 and Bayesian BM25 with duplicate query terms.",
+      "invariant": "Visitor entries match the existing exhaustive scorer in document order and exact score bits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "exhaustive_text_visitor_stops_at_the_consumer_boundary",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/text/exhaustive/tests.rs",
+      "capability": "Incremental exhaustive text scoring",
+      "workload": "Stop the exhaustive visitor at its first output.",
+      "invariant": "The consumer stop is reported and no additional result is emitted.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "exhaustive_text_visitor_preserves_parameter_errors_before_output",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/text/exhaustive/tests.rs",
+      "capability": "Incremental exhaustive text scoring",
+      "workload": "Invalid native scoring parameters.",
+      "invariant": "The existing parameter error precedes any output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "exhaustive_text_visitor_borrows_large_term_support",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/text/exhaustive/tests.rs",
+      "capability": "Incremental exhaustive text scoring",
+      "workload": "65,536 memory-index postings streamed without retaining output.",
+      "invariant": "Exact complete count under a fixed 128KiB peak ceiling; no owned whole-population posting cursor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_scored_capture_spills_before_retaining_the_population",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Bounded complete retrieval capture",
+      "workload": "65,536 full-width IDs and floating-point score bit patterns under 64KiB workspace.",
+      "invariant": "Fixed 512KiB peak ceiling; every identity and score bit is preserved through spill.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scored_capture_preserves_duplicate_identity_order_and_score_bits",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Bounded complete retrieval capture",
+      "workload": "Duplicate IDs, signed zero and NaN payloads with zero and nonzero workspace.",
+      "invariant": "Exact sequence and score bits survive both in-memory and spilled capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scored_capture_cancelled_replay_releases_unread_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Bounded complete retrieval capture",
+      "workload": "Cancel after complete capture while records remain unread.",
+      "invariant": "57014 releases the unread spill and subsequent pulls end.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scored_capture_drop_removes_unread_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Bounded complete retrieval capture",
+      "workload": "Drop a completed capture without consuming it.",
+      "invariant": "Its temporary file is removed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_text_matches_capture_scores_without_complete_posting_vectors",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded public text COPY",
+      "workload": "Cold first text COPY of 32,768 matches under 64KiB work memory with a validating discard sink.",
+      "invariant": "Every ID is emitted exactly once in the original order under a fixed 2MiB peak allocation ceiling, without statistics warmup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_text_capture_preserves_scores_and_statement_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded public text COPY",
+      "workload": "513 text matches on memory, SQLite, SQLite K/V and redb with a writer interleaved at the first COPY output.",
+      "invariant": "Native score bits and the original statement generation survive UPDATE/DELETE/INSERT; later queries and durable reopen see committed changes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

@@ -7,17 +7,31 @@
 //! Streaming scored-document input adapters.
 
 mod borrowed;
+mod capture;
 mod deferred;
 mod hierarchy;
 mod indexed;
 mod materialize;
 
+pub use capture::CapturedScoredEntries;
+pub(crate) use capture::ScoredEntryCapture;
 pub(in crate::query) use deferred::defer_entries;
 pub use hierarchy::HierarchyScoredDocumentSource;
 
 /// One execution of already-bound retrieval work under the retained statement inputs.
 pub type ScoredEntriesProducer<'a> =
-    Box<dyn FnOnce() -> Result<Vec<ScoredEntry>, SQLError> + Send + 'a>;
+    Box<dyn FnOnce() -> Result<ProducedScoredEntries, SQLError> + Send + 'a>;
+
+pub enum ProducedScoredEntries {
+    Materialized(Vec<ScoredEntry>),
+    Captured(CapturedScoredEntries),
+}
+
+impl From<Vec<ScoredEntry>> for ProducedScoredEntries {
+    fn from(entries: Vec<ScoredEntry>) -> Self {
+        Self::Materialized(entries)
+    }
+}
 
 use crate::{query::table_read::TableRead, row_locks::recheck::RecheckDoc, ExecResult};
 use std::sync::Arc;
@@ -246,6 +260,7 @@ pub struct ScoredDocumentSource {
 pub enum ScoredInputCursor {
     All { after: Option<DocId> },
     Entries(std::vec::IntoIter<ScoredEntry>),
+    Captured(Box<CapturedScoredEntries>),
     Candidates(Box<super::SelectedIdCursor>),
 }
 
@@ -581,6 +596,16 @@ impl ScoredDocumentSource {
         self
     }
 
+    pub(in crate::query) fn with_captured_entries(
+        mut self,
+        entries: CapturedScoredEntries,
+    ) -> Self {
+        self.input = ScoredInputCursor::Captured(Box::new(entries));
+        self.input_guarantees_presence = false;
+        self.ordering.clear();
+        self
+    }
+
     pub fn with_serializable_read(
         mut self,
         read: Option<crate::serializable::SerializableRelationRead>,
@@ -632,6 +657,15 @@ impl ScoredDocumentSource {
             .map(|pin| (pin.doc_id, None))
             .collect::<std::collections::BTreeMap<_, _>>();
         let indexed = match &mut self.input {
+            ScoredInputCursor::Captured(entries) => {
+                for entry in entries.by_ref() {
+                    let entry = entry?;
+                    if let Some(score) = selected.get_mut(&entry.doc_id) {
+                        *score = Some(entry.score);
+                    }
+                }
+                true
+            }
             ScoredInputCursor::Entries(entries) => {
                 for entry in entries.by_ref() {
                     if let Some(score) = selected.get_mut(&entry.doc_id) {
@@ -749,6 +783,15 @@ impl ScoredDocumentSource {
             return Ok(Vec::new());
         }
         match &mut self.input {
+            ScoredInputCursor::Captured(entries) => entries
+                .by_ref()
+                .take(max_rows)
+                .map(|entry| {
+                    let entry = entry?;
+                    self.serializable.observe_row(entry.doc_id)?;
+                    Ok(entry)
+                })
+                .collect(),
             ScoredInputCursor::Candidates(ids) => ids
                 .by_ref()
                 .take(max_rows)

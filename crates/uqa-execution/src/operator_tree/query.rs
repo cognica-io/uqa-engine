@@ -12,7 +12,8 @@ use super::{
     binding::RetrievalBinding,
     driver::posting::posting_list_to_scored,
     runtime::{
-        execute_preoptimized_tree, execute_tree, expect_posting_output, TreeExecutionContext,
+        execute_preoptimized_scored_entries, execute_tree, expect_posting_output,
+        TreeExecutionContext,
     },
 };
 use crate::query::graph_lifecycle::GraphLifecycle;
@@ -92,6 +93,7 @@ impl<'a> RetrievalQueryContext<'a> {
         signal_table: &'b str,
         where_expr: Option<&ScalarExpr>,
         params: &'b [SQLParam],
+        capture_complete_scores: bool,
     ) -> Result<Option<crate::query::scored_input::ScoredEntriesProducer<'b>>, SQLError>
     where
         'a: 'b,
@@ -107,10 +109,14 @@ impl<'a> RetrievalQueryContext<'a> {
         };
         let trees = self.trees;
         Ok(Some(Box::new(move || {
-            let output =
-                execute_preoptimized_tree(&trees, table, signal_table, params, &optimized)?;
-            let posting = expect_posting_output(output, "SQL WHERE")?;
-            Ok(posting_list_to_scored(&posting))
+            execute_preoptimized_scored_entries(
+                &trees,
+                table,
+                signal_table,
+                params,
+                &optimized,
+                capture_complete_scores,
+            )
         })))
     }
 }

@@ -33,6 +33,7 @@ pub trait RelationRetrieval: Sync {
         signal_table: &'a str,
         predicate: Option<&ScalarExpr>,
         params: &'a [SQLParam],
+        capture_complete_scores: bool,
     ) -> Result<Option<crate::query::scored_input::ScoredEntriesProducer<'a>>, SQLError>;
     fn optimized(
         &self,

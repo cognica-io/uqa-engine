@@ -97,6 +97,14 @@ pub trait PhysicalTextRetrieval: Sync {
         limit: usize,
         top_k: Option<TextTopKPlan>,
     ) -> Result<Vec<ScoredEntry>, SQLError>;
+    fn visit_search_leaf(
+        &self,
+        table: &str,
+        field: &str,
+        query: &str,
+        mode: &ScoringMode,
+        visitor: &mut dyn FnMut(ScoredEntry) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError>;
 }
 
 pub trait PhysicalVectorRetrieval: Sync {

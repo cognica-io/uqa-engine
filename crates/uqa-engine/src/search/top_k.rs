@@ -96,4 +96,41 @@ impl Engine {
             .search_leaf_profiled(table, field, query, mode, top_k, physical_top_k)?
             .entries)
     }
+
+    pub(crate) fn visit_search_leaf(
+        &self,
+        table: &str,
+        field: &str,
+        query: &str,
+        mode: &ScoringMode,
+        visitor: &mut dyn FnMut(ScoredEntry) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        let table_state = self
+            .try_query_table(table)
+            .map_err(|error| storage_sql_error("resolve text-search table", error))?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        let index = table_state.inverted_index.read();
+        let index = uqa_execution::serializable::text::ObservedTextIndex::new(
+            index.as_ref(),
+            self.serializable_table_read(table)?,
+            table_state.columns.snapshot(),
+        );
+        let mut consumer_error = None;
+        let result =
+            uqa_scoring::visit_text_query(&index, field, query, mode, &mut |entry| match visitor(
+                entry,
+            ) {
+                Ok(()) => true,
+                Err(error) => {
+                    consumer_error = Some(error);
+                    false
+                }
+            });
+        if let Some(error) = consumer_error {
+            return Err(error);
+        }
+        result
+            .map(|_| ())
+            .map_err(super::helpers::scoring_sql_error)
+    }
 }

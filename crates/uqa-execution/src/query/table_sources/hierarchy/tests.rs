@@ -118,6 +118,7 @@ fn source(retrieval: &Retrieval, recheck: bool, hierarchy: bool) -> Box<dyn Phys
                         recheck,
                     )
                     .map(Option::unwrap)
+                    .map(Into::into)
             })),
             None,
             physical.recheck_pins,

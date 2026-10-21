@@ -142,6 +142,17 @@ impl PhysicalTextRetrieval for Engine {
     ) -> Result<Vec<ScoredEntry>, SQLError> {
         self.search_leaf(table, field, query, mode, limit, top_k)
     }
+
+    fn visit_search_leaf(
+        &self,
+        table: &str,
+        field: &str,
+        query: &str,
+        mode: &ScoringMode,
+        visitor: &mut dyn FnMut(ScoredEntry) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        self.visit_search_leaf(table, field, query, mode, visitor)
+    }
 }
 
 impl PhysicalVectorRetrieval for Engine {

@@ -23,6 +23,7 @@ use uqa_operators::{
 use uqa_sql::{ast::ColumnType, SQLError, SQLParam};
 use uqa_storage::StorageBackendError;
 
+mod capture;
 pub mod context;
 mod deep_layers;
 mod dispatch;
@@ -201,28 +202,12 @@ impl<'a> PhysicalRetrievalDriver<'a> {
         scoring: Option<TextScoringMode>,
         top_k: Option<uqa_operators::TextTopKPlan>,
     ) -> DriverResult<PostingList> {
-        let scoring = scoring.ok_or_else(|| {
-            SQLError::Internal(
-                "OperatorTree::Term reached PhysicalRetrievalDriver without bound text scoring"
-                    .into(),
-            )
-        })?;
+        let scoring = Self::bound_text_scoring(scoring)?;
         if let Some(field) = field {
             self.context
                 .text
                 .validate_text_search_field(self.table, field)?;
-            let mode = match scoring {
-                TextScoringMode::BM25 => {
-                    uqa_scoring::ScoringMode::BM25(uqa_scoring::BM25Params::default())
-                }
-                TextScoringMode::BayesianBM25 => {
-                    uqa_scoring::ScoringMode::BayesianBM25(self.bayesian_params_for(field)?)
-                }
-                TextScoringMode::CustomBM25(params) => uqa_scoring::ScoringMode::BM25(params),
-                TextScoringMode::CustomBayesianBM25(params) => {
-                    uqa_scoring::ScoringMode::BayesianBM25(params)
-                }
-            };
+            let mode = self.text_scoring_mode(field, scoring)?;
             return self
                 .context
                 .text

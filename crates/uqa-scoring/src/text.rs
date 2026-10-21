@@ -92,6 +92,33 @@ pub fn score_text_query(
     Ok(profile)
 }
 
+/// Visit complete exhaustive scores in ascending document identity order, without retaining the result population. Repeated query terms and calibration use the same scorer and evaluation order as [`score_text_query`]. A false callback result stops immediately; the return value distinguishes that stop from complete traversal.
+pub fn visit_text_query(
+    index: &dyn InvertedIndex,
+    field: &str,
+    query: &str,
+    mode: &ScoringMode,
+    visitor: &mut dyn FnMut(ScoredEntry) -> bool,
+) -> Result<bool, TextSearchError> {
+    let analyzer = index
+        .search_analyzer_revision(field)
+        .map_err(|error| storage_error("resolve text analyzer revision", error))?;
+    let terms = analyze_query_terms(&analyzer, query)
+        .map_err(|error| storage_error("analyze text query", error))?;
+    exhaustive::visit_text_terms(index, field, &terms, mode, visitor)
+}
+
+/// Visit already-analyzed term occurrences using the exhaustive scorer, preserving their original order and duplicate contributions.
+pub fn visit_text_terms(
+    index: &dyn InvertedIndex,
+    field: &str,
+    terms: &[TokenTermKey],
+    mode: &ScoringMode,
+    visitor: &mut dyn FnMut(ScoredEntry) -> bool,
+) -> Result<bool, TextSearchError> {
+    exhaustive::visit_text_terms(index, field, terms, mode, visitor)
+}
+
 /// Score ordered lossless term occurrences; repeated query terms remain independent scoring contributions.
 pub fn score_text_terms(
     index: &dyn InvertedIndex,

@@ -93,10 +93,18 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
             (score_top_k, stmt.r#where.as_ref())
         {
             Some(Box::new(move || {
-                retrieval.function(table, reference_name, name, args, params, Some(top_k))
+                retrieval
+                    .function(table, reference_name, name, args, params, Some(top_k))
+                    .map(Into::into)
             }))
         } else {
-            retrieval.prepare_accelerated(table, reference_name, predicate.as_ref(), params)?
+            retrieval.prepare_accelerated(
+                table,
+                reference_name,
+                predicate.as_ref(),
+                params,
+                post_retrieval_top_k.is_none(),
+            )?
         };
     let score_bearing_filter = stmt
         .r#where
@@ -126,6 +134,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
                                 params,
                                 ctes,
                             )
+                            .map(Into::into)
                         }));
                         ScoredInput::entries(
                             Vec::new(),
@@ -143,7 +152,9 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
                             && !expr_is_jsonpath_fts_match(filter_expr) =>
                     {
                         pending = Some(Box::new(move || {
-                            retrieval.function(table, reference_name, name, args, params, None)
+                            retrieval
+                                .function(table, reference_name, name, args, params, None)
+                                .map(Into::into)
                         }));
                         ScoredInput::entries(
                             Vec::new(),

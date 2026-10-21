@@ -10,7 +10,55 @@ use super::{search_stats_for_terms, storage_error, TextSearchError};
 use crate::{BM25Scorer, BayesianBM25Scorer, Scorer, ScoringMode};
 use std::sync::Arc;
 use uqa_core::ScoredEntry;
+use uqa_storage::clustered_postings::{OwnedPostingReadCursor, PostingReadCursor};
 use uqa_storage::{InvertedIndex, TokenTermKey};
+
+#[cfg(test)]
+mod tests;
+
+trait ScoreOutput {
+    fn borrows_index(&self) -> bool {
+        false
+    }
+    fn reserve_single_term(&mut self, _: usize) {}
+    fn push(&mut self, entry: ScoredEntry) -> bool;
+}
+
+impl ScoreOutput for Vec<ScoredEntry> {
+    fn reserve_single_term(&mut self, capacity: usize) {
+        self.reserve_exact(capacity);
+    }
+    fn push(&mut self, entry: ScoredEntry) -> bool {
+        Vec::push(self, entry);
+        true
+    }
+}
+
+struct Visitor<'a>(&'a mut dyn FnMut(ScoredEntry) -> bool);
+
+impl ScoreOutput for Visitor<'_> {
+    fn borrows_index(&self) -> bool {
+        true
+    }
+    fn push(&mut self, entry: ScoredEntry) -> bool {
+        self.0(entry)
+    }
+}
+
+pub(super) fn visit_text_terms(
+    index: &dyn InvertedIndex,
+    field: &str,
+    terms: &[TokenTermKey],
+    mode: &ScoringMode,
+    visitor: &mut dyn FnMut(ScoredEntry) -> bool,
+) -> Result<bool, TextSearchError> {
+    let output = &mut Visitor(visitor);
+    match terms.len() {
+        0 => Ok(true),
+        1 => visit_single_text_term(index, field, terms, mode, output),
+        _ => visit_multiple_text_terms(index, field, terms, mode, output),
+    }
+}
 
 pub(super) fn build_text_scorer(
     mode: &ScoringMode,
@@ -35,10 +83,27 @@ pub(super) fn score_single_text_term(
     analyzed_terms: &[TokenTermKey],
     mode: &ScoringMode,
 ) -> Result<Vec<ScoredEntry>, TextSearchError> {
+    let mut entries = Vec::new();
+    visit_single_text_term(index, field, analyzed_terms, mode, &mut entries)?;
+    Ok(entries)
+}
+
+fn visit_single_text_term(
+    index: &dyn InvertedIndex,
+    field: &str,
+    analyzed_terms: &[TokenTermKey],
+    mode: &ScoringMode,
+    output: &mut impl ScoreOutput,
+) -> Result<bool, TextSearchError> {
     let term = &analyzed_terms[0];
-    let mut cursor = index
-        .posting_cursor_key(field, term)
-        .map_err(|error| storage_error("open term score cursor", error))?;
+    let mut cursor: Box<dyn PostingReadCursor + '_> = if output.borrows_index() {
+        index.posting_read_cursor_key(field, term)
+    } else {
+        index
+            .posting_cursor_key(field, term)
+            .map(|cursor| Box::new(OwnedPostingReadCursor(cursor)) as Box<dyn PostingReadCursor>)
+    }
+    .map_err(|error| storage_error("open term score cursor", error))?;
     let document_frequency = cursor.doc_freq();
     let term_doc_freqs = [document_frequency];
     let stats = Arc::new(
@@ -50,21 +115,23 @@ pub(super) fn score_single_text_term(
     let scored_capacity = usize::try_from(document_frequency).map_err(|_| {
         TextSearchError::InvalidIndex("text document frequency exceeds usize".into())
     })?;
-    let mut entries = Vec::with_capacity(scored_capacity);
+    output.reserve_single_term(scored_capacity);
     while let Some(entry) = cursor.current() {
-        entries.push(ScoredEntry {
+        if !output.push(ScoredEntry {
             doc_id: entry.doc_id,
             score: scorer.finalize_score(&[scorer.term_score_with_idf(
                 entry.term_freq,
                 entry.doc_length,
                 idf,
             )]),
-        });
+        }) {
+            return Ok(false);
+        }
         cursor
             .advance()
             .map_err(|error| storage_error("advance term score cursor", error))?;
     }
-    Ok(entries)
+    Ok(true)
 }
 
 pub(super) fn score_multiple_text_terms(
@@ -73,9 +140,36 @@ pub(super) fn score_multiple_text_terms(
     analyzed_terms: &[TokenTermKey],
     mode: &ScoringMode,
 ) -> Result<Vec<ScoredEntry>, TextSearchError> {
-    let mut cursors = index
-        .posting_cursors_keys_bulk(field, analyzed_terms)
-        .map_err(|error| storage_error("open term score cursors", error))?;
+    let mut entries = Vec::new();
+    visit_multiple_text_terms(index, field, analyzed_terms, mode, &mut entries)?;
+    Ok(entries)
+}
+
+fn visit_multiple_text_terms(
+    index: &dyn InvertedIndex,
+    field: &str,
+    analyzed_terms: &[TokenTermKey],
+    mode: &ScoringMode,
+    output: &mut impl ScoreOutput,
+) -> Result<bool, TextSearchError> {
+    let mut cursors: Vec<Box<dyn PostingReadCursor + '_>> = if output.borrows_index() {
+        analyzed_terms
+            .iter()
+            .map(|term| index.posting_read_cursor_key(field, term))
+            .collect::<Result<_, _>>()
+    } else {
+        index
+            .posting_cursors_keys_bulk(field, analyzed_terms)
+            .map(|cursors| {
+                cursors
+                    .into_iter()
+                    .map(|cursor| {
+                        Box::new(OwnedPostingReadCursor(cursor)) as Box<dyn PostingReadCursor>
+                    })
+                    .collect()
+            })
+    }
+    .map_err(|error| storage_error("open term score cursors", error))?;
     let term_doc_freqs = cursors
         .iter()
         .map(|cursor| cursor.doc_freq())
@@ -91,7 +185,6 @@ pub(super) fn score_multiple_text_terms(
         .collect();
     let mut term_freqs = vec![0_u64; analyzed_terms.len()];
     let mut per_term = vec![0.0; analyzed_terms.len()];
-    let mut entries = Vec::new();
     while let Some(doc_id) = cursors
         .iter()
         .filter_map(|cursor| cursor.current().map(|entry| entry.doc_id))
@@ -126,10 +219,12 @@ pub(super) fn score_multiple_text_terms(
         for ((term_score, term_freq), idf) in per_term.iter_mut().zip(&term_freqs).zip(&term_idfs) {
             *term_score = scorer.term_score_with_idf(*term_freq, doc_length, *idf);
         }
-        entries.push(ScoredEntry {
+        if !output.push(ScoredEntry {
             doc_id,
             score: scorer.finalize_score(&per_term),
-        });
+        }) {
+            return Ok(false);
+        }
     }
-    Ok(entries)
+    Ok(true)
 }
