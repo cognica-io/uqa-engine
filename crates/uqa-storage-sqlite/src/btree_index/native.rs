@@ -144,14 +144,27 @@ pub(super) fn load(
     table: &str,
     field: &ValueIndexKey,
 ) -> Result<Option<Vec<(DocId, Value)>>> {
+    let mut values = Vec::new();
+    let built = visit_entries(snapshot, table, field, &mut |id, value| {
+        values.push((id, value));
+        Ok(())
+    })?;
+    Ok(built.then_some(values))
+}
+
+pub(super) fn visit_entries(
+    snapshot: &NativeSnapshot,
+    table: &str,
+    field: &ValueIndexKey,
+    visit: &mut dyn FnMut(DocId, Value) -> Result<()>,
+) -> Result<bool> {
     let Some(owner) = snapshot.table_owner(table)? else {
-        return Ok(None);
+        return Ok(false);
     };
     let field = SQLiteValueIndexKey(field);
     if !snapshot.contains_row(Family::BtreeIndexes, owner, &[field.as_value_ref()])? {
-        return Ok(None);
+        return Ok(false);
     }
-    let mut values = Vec::new();
     // The latest committed entries are read where they are stored, with the session's private entries merged in; any other snapshot visits its records.
     if snapshot.visit_latest_index_entries(
         table,
@@ -159,11 +172,11 @@ pub(super) fn load(
         field.as_value_ref(),
         &snapshot.control,
         &mut |doc_id, value| {
-            values.push((decode_doc_id(doc_id)?, decode_value(value)?));
+            visit(decode_doc_id(doc_id)?, decode_value(value)?)?;
             Ok(true)
         },
     )? {
-        return Ok(Some(values));
+        return Ok(true);
     }
     snapshot.visit_rows(
         Family::BtreeIndexEntries,
@@ -176,11 +189,11 @@ pub(super) fn load(
             let value = row[3].as_str().map_err(|_| {
                 SQLiteError::StorageBackend("native B-tree value must be text".into())
             })?;
-            values.push((decode_doc_id(doc_id)?, decode_value(value)?));
+            visit(decode_doc_id(doc_id)?, decode_value(value)?)?;
             Ok(())
         },
     )?;
-    Ok(Some(values))
+    Ok(true)
 }
 
 fn mark(

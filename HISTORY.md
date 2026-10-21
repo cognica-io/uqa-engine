@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Visit stored B-tree keys through one retained provider boundary, preserving snapshot visibility and first consumer errors without collecting the complete population.
+
 - Bound partial and expression unique-index candidate capture, preserving equality, NULL distinction, staged masking and original failure order.
 
 - Bound MERGE target identities and locked successor images while preserving target lock order, exact refreshed-row actions and original failure precedence.

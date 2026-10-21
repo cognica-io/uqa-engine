@@ -18598,6 +18598,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_entry_visitor_bounds_wide_values_and_preserves_identity_order",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/tests/btree_entries.rs",
+      "capability": "Bounded stored index reads",
+      "workload": "4,096 wide Unicode keys plus a full-width identity and NULL.",
+      "invariant": "Less than 512KiB peak allocation for more than 8MiB of stored values, exact increasing IDs, and separate unbuilt/empty/named namespaces.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_entry_visitor_stops_before_later_corruption_and_preserves_errors",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/tests/btree_entries.rs",
+      "capability": "Bounded stored index reads",
+      "workload": "A typed consumer failure before a malformed stored value.",
+      "invariant": "Preserve the first typed error and never decode the following row after consumer failure; complete scans still reject corruption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "stored_entries_stream_wide_values_on_native_and_legacy_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/btree_index/entries/tests.rs",
+      "capability": "Bounded stored index reads",
+      "workload": "2,048 wide Unicode values on native and legacy SQLite reads.",
+      "invariant": "Less than 512KiB peak allocation for more than 8MiB of stored values and identical identity/value order to the existing collector.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "stored_entry_visitors_preserve_private_values_rollback_and_typed_failure",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/btree_index/entries/tests.rs",
+      "capability": "Bounded stored index reads",
+      "workload": "Private replacement with NULL and bytes, rollback and a typed consumer failure.",
+      "invariant": "Preserve private entries, original values after rollback and first error identity on both SQLite representations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "stored_entry_visitors_keep_historical_values_and_cancel_before_delivery",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/btree_index/entries/tests.rs",
+      "capability": "Bounded stored index reads",
+      "workload": "A retained old read across another session commit and an already cancelled native snapshot.",
+      "invariant": "The old snapshot retains all original values; cancellation returns its typed error before any callback.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -65,6 +65,44 @@ pub(super) fn load(
     Ok(Some(entries))
 }
 
+pub(super) fn visit_entries(
+    store: &dyn KeyValueStore,
+    table: &str,
+    field: &crate::ValueIndexKey,
+    visit: &mut dyn FnMut(DocId, Value) -> StorageBackendResult<()>,
+) -> StorageBackendResult<bool> {
+    let definition = btree_index_key(table, field)?;
+    let prefix = btree_entry_field_prefix(table, field)?;
+    let mut built = false;
+    store.with_read_view(&mut |read| {
+        read.control().check()?;
+        read.visit_value(&definition, &mut |format| {
+            if let Some(format) = format {
+                if format != BTREE_FORMAT_V1 {
+                    return Err(other_error(format!(
+                        "unsupported persisted B-tree format for `{table}.{field}`"
+                    )));
+                }
+                built = true;
+            }
+            Ok(())
+        })?;
+        if built {
+            read.visit_prefix(&prefix, &mut |key, value| {
+                read.control().check()?;
+                let mut offset = prefix.len();
+                let id = read_u64(key, &mut offset)?;
+                if offset != key.len() {
+                    return Err(other_error("persisted B-tree entry key has trailing bytes"));
+                }
+                visit(id, decode_value(value)?)
+            })?;
+        }
+        Ok(())
+    })?;
+    Ok(built)
+}
+
 pub(super) fn fields(
     store: &dyn KeyValueStore,
     table: &str,

@@ -20,6 +20,7 @@ use super::{ManagedConnection, Result, SQLiteError};
 use crate::value_index_key::SQLiteValueIndexKey;
 
 pub(crate) mod coverage;
+mod entries;
 pub(crate) mod equality;
 mod native;
 pub(crate) mod probe;
