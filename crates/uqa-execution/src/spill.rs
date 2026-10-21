@@ -43,6 +43,8 @@ pub(crate) use format::{
 };
 mod batch_writer;
 pub(crate) use batch_writer::SpillBatchWriter;
+mod batch_layout;
+pub(crate) use batch_layout::EncodedBatchLayout;
 pub(crate) use indexed::BufferedIndexedSpill;
 pub use indexed::IndexedSpill;
 

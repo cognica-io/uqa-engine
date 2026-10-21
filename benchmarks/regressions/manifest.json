@@ -18793,6 +18793,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "ordered_typed_scan_batches_do_not_reencode_the_complete_schema",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/memory.rs",
+      "capability": "Typed scan batch sizing",
+      "workload": "512 one-row batches of 64 typed columns through shared and borrowed document cursors in scored and local table sources.",
+      "invariant": "Every value and EOF remain exact; total allocations stay below 8,192 and peak additional allocation below 256KiB for each source/provider combination.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_batch_layout_keeps_exact_sizes_and_independent_lock_origin_state",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/batch_layout.rs",
+      "capability": "Exact batch schema retention",
+      "workload": "Independent batches with mixed, absent and present row-lock origins, including row removal.",
+      "invariant": "Each batch exactly matches native encoded size and resets all row and origin accounting.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_batch_layout_rebinds_changed_schema_names_types_and_slots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/batch_layout.rs",
+      "capability": "Exact batch schema invalidation",
+      "workload": "Equal-width schemas with different qualifiers/types and a wider schema, followed by the original schema.",
+      "invariant": "Only identical immutable schemas share sizing; every changed schema yields its exact native byte count.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

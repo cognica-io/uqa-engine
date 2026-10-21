@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse validated immutable scan schema sizes between batches, avoiding repeated column-type serialization while preserving exact spill and lock-origin accounting.
+
 - Preserve declared fusion signal order during optimization, including exact score bits, positional pooling parameters and the first failing signal.
 
 - Add bounded, searchable value-index ownership over encrypted private-record snapshots, preserving exact key order, atomic roots and storage errors.

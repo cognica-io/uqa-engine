@@ -41,7 +41,7 @@ impl ScoredDocumentSource {
             .map(String::as_str)
             .collect::<Vec<_>>();
         let mut rows = Vec::with_capacity(max_rows);
-        let mut size = crate::spill::EncodedBatchSizer::new(&self.schema)?;
+        let mut size = self.batch_layout.for_schema(&self.schema)?;
         while rows.len() < max_rows {
             let remaining = max_rows - rows.len();
             let mut last = None;

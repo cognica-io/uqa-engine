@@ -17,7 +17,7 @@ impl LocalTableRowSource {
     ) -> ExecResult<Option<Vec<PhysicalRow>>> {
         let fields = self.columns.iter().map(String::as_str).collect::<Vec<_>>();
         let mut rows = Vec::with_capacity(max_rows);
-        let mut size = crate::spill::EncodedBatchSizer::new(&self.physical_schema)?;
+        let mut size = self.batch_layout.for_schema(&self.physical_schema)?;
         while rows.len() < max_rows {
             self.cancellation.check().map_err(SQLError::from)?;
             let remaining = max_rows - rows.len();

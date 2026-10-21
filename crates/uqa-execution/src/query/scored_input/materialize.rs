@@ -151,7 +151,7 @@ impl ScoredDocumentSource {
                 return Ok(Some(Vec::new()));
             }
             let mut rows = Vec::with_capacity(shared_rows.len());
-            let mut size = crate::spill::EncodedBatchSizer::new(&self.schema)?;
+            let mut size = self.batch_layout.for_schema(&self.schema)?;
             for (doc_id, shared) in shared_rows {
                 after = Some(doc_id);
                 let super::ScoredInputCursor::All { after: cursor } = &mut self.input else {

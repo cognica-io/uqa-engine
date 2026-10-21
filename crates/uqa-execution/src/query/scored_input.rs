@@ -215,6 +215,7 @@ impl ScoredInput {
 pub struct ScoredDocumentSource {
     serializable: crate::serializable::SerializableScan,
     scan_batch_bytes: usize,
+    batch_layout: crate::spill::EncodedBatchLayout,
     shared_page_rows: usize,
     table_name: String,
     table: Arc<dyn TableRead>,
@@ -525,6 +526,7 @@ impl ScoredDocumentSource {
             expose_metadata_namespace(&schema, metadata_doc_id_attribute, metadata_score_attribute);
         Self {
             scan_batch_bytes: 64 * 1024 * 1024,
+            batch_layout: crate::spill::EncodedBatchLayout::default(),
             shared_page_rows: 1,
             table_name: table_name.to_string(),
             table,
