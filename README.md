@@ -23,15 +23,13 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.6.0
+## New in 0.6.1
 
-Version 0.6.0 uses PostgreSQL 18.4's regular expression engine and input collations for pattern matching and case mapping. Functions in FROM and select lists preserve PostgreSQL set-returning behavior, eligible SQL routine bodies undergo planning, and routine errors carry ordered SQL/PL/pgSQL CONTEXT. See the [release history](HISTORY.md#060---2026-10-18).
+Version 0.6.1 fixes UPDATE and DELETE statements that silently ignored inputs after the first comma-separated FROM or USING relation. It also corrects date/timestamp comparison, SQL diagnostics and nested SQL/Cypher stack handling. See the [release history](HISTORY.md#061---2026-10-22).
 
-BIT and BIT VARYING values retain their exact logical lengths through SQL, language bindings and persistent storage. Shell types and type descriptions retain transactional catalog identities. Text occurrence commits share unchanged-snapshot reads and ordered spill output within the existing memory allowance.
+Mutation, referential-action, graph, sorting and persistent-restore paths retain large intermediate inputs under their memory allowances and spill when needed. Execution reuses selected type metadata and avoids repeated row materialization; bundled SQLite builds remove the global page-cache memory-management mutex.
 
-The `usql` shell adds query-buffer commands, variables, conditionals, script includes, native file COPY, output formats, syntax highlighting, completion, cancellation and idle LISTEN notifications. Standalone Linux, macOS and Windows binaries for x86_64 and ARM64 bundle Nori, Kuromoji, Arrow and DuckDB; install them with the attached scripts or `cargo binstall`. See the [CLI installation and command reference](docs/manual/reference/03-cli.md).
-
-Persistent databases upgrade to SQLite record format 65 and redb record format 61; native mapping 17 and coordination format 2 are unchanged. Close every owner, retain a pre-upgrade backup and update all owners together. Pattern and case-mapping changes also require recreating affected expression/partial indexes and stored generated columns. Follow the [0.6.0 upgrade guide](docs/manual/reference/10-upgrading.md#060) for the exact migration and Rust adapter requirements.
+Custom Rust execution and storage adapters need interface updates, and SQLite integrations now use the maintained `uqa-rusqlite` package family. Newly stored `pg_typeof` bindings cannot be read by 0.6.0. Update all database owners together and retain a pre-upgrade backup; the [0.6.1 upgrade guide](docs/manual/reference/10-upgrading.md#061) covers these changes and earlier format migrations.
 
 ## Mathematical foundation
 
@@ -44,7 +42,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.6.0
+python -m pip install uqa==0.6.1
 usql
 ```
 
@@ -96,10 +94,10 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.6.0
+cargo add uqa@0.6.1
 ```
 
-Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.6.0 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
+Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.6.1 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
 
