@@ -265,3 +265,57 @@ fn ordered_typed_scan_batches_do_not_reencode_the_complete_schema() {
         "{observations:?}"
     );
 }
+
+#[test]
+fn mixed_width_shared_pages_do_not_prefetch_the_unconsumed_tail_repeatedly() {
+    let mut documents = MemoryDocumentStore::new();
+    for id in 1..=128 {
+        let body = if id % 2 == 1 {
+            "한".repeat(8192)
+        } else {
+            String::new()
+        };
+        documents
+            .put(
+                id,
+                [
+                    ("id".into(), Value::Int(id as i64)),
+                    ("body".into(), Value::Str(body)),
+                ]
+                .into(),
+            )
+            .unwrap();
+    }
+    let visited = Arc::new(AtomicUsize::new(0));
+    let table = Arc::new(Table(RwLock::new(Box::new(Documents {
+        rows: documents,
+        shared: true,
+        visited: Arc::clone(&visited),
+    }))));
+    let mut source = source(table, false);
+    let mut expected = 1;
+    loop {
+        let rows = source.next_physical_batch(1024).unwrap();
+        if rows.is_empty() {
+            break;
+        }
+        assert!(
+            rows.len() <= 6,
+            "batch must retain the existing 64KiB bound"
+        );
+        for row in rows {
+            assert_eq!(row.value(0), Some(&Value::Int(expected)));
+            assert_eq!(row.value(2), Some(&Value::Null));
+            match row.value(1) {
+                Some(Value::Str(body)) => {
+                    assert_eq!(body.len(), if expected % 2 == 1 { 24576 } else { 0 });
+                }
+                value => panic!("unexpected shared payload: {value:?}"),
+            }
+            expected += 1;
+        }
+    }
+    assert_eq!(expected, 129);
+    assert!(visited.load(Ordering::Relaxed) <= 130,
+        "a narrow last row must not inflate the next page and repeatedly read its unconsumed wide rows");
+}

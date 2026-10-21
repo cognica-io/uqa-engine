@@ -156,6 +156,7 @@ impl ScoredDocumentSource {
             }
             let mut rows = Vec::with_capacity(shared_rows.len());
             let mut size = self.batch_layout.for_schema(&self.schema)?;
+            let mut largest_row = 0;
             for (doc_id, shared) in shared_rows {
                 after = Some(doc_id);
                 let super::ScoredInputCursor::All { after: cursor } = &mut self.input else {
@@ -170,10 +171,7 @@ impl ScoredDocumentSource {
                     let row = self.physical_row_from_shared(doc_id, 0.0, shared)?;
                     let before = size.bytes();
                     size.append(&row)?;
-                    self.shared_page_rows = self
-                        .scan_batch_bytes
-                        .div_ceil((size.bytes() - before).max(1))
-                        .clamp(1, crate::DEFAULT_BATCH_SIZE);
+                    largest_row = largest_row.max(size.bytes() - before);
                     rows.push(row);
                     if size.bytes() >= self.scan_batch_bytes {
                         break;
@@ -181,6 +179,10 @@ impl ScoredDocumentSource {
                 }
             }
             if !rows.is_empty() {
+                self.shared_page_rows = self
+                    .scan_batch_bytes
+                    .div_ceil(largest_row.max(1))
+                    .clamp(1, crate::DEFAULT_BATCH_SIZE);
                 return Ok(Some(rows));
             }
         }

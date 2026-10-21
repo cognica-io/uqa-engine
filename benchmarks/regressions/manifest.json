@@ -20548,6 +20548,19 @@
       "workload": "One-row identity pages when every base row has a private replacement.",
       "invariant": "The complete ordered result reads each base identity once; per-page masking never rescans the unconsumed base suffix.",
       "capability": "Bounded private identity reads"
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "mixed_width_shared_pages_do_not_prefetch_the_unconsumed_tail_repeatedly",
+      "source": "crates/uqa-execution/src/query/scored_input/tests/memory.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "workload": "Alternating 24KiB and empty shared payloads under a 64KiB scan batch bound.",
+      "invariant": "The cursor preserves exact ordered values and bounded batches while visiting no more than two surplus source rows over 128 outputs.",
+      "capability": "Bounded shared scan prefetch"
     }
   ]
 }

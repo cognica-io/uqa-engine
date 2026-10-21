@@ -70,6 +70,8 @@ impl VisibleDocumentIds<'_> {
                     }
                 }
             }
+            control.check()?;
+            self.control.check()?;
             let stored = base.get(position).copied();
             match (stored, private) {
                 (Some(id), Some((changed, _))) if id < changed => {

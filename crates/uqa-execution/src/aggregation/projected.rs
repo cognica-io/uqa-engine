@@ -76,13 +76,16 @@ pub(super) fn compact_text_pair<Row: RowLookup>(
     columns: &[ProjectedGroupColumn],
     row: &Row,
 ) -> Option<u64> {
-    if !columns
-        .iter()
-        .all(|column| matches!(column, ProjectedGroupColumn::Text(_)))
-    {
+    let [ProjectedGroupColumn::Text(first), ProjectedGroupColumn::Text(second)] = columns else {
         return None;
-    }
-    try_pack_compact_text_pair(columns.iter().map(|column| column.value(row)))
+    };
+    try_pack_compact_text_pair(
+        [
+            row.positional_column(*first),
+            row.positional_column(*second),
+        ]
+        .into_iter(),
+    )
 }
 
 #[inline]
