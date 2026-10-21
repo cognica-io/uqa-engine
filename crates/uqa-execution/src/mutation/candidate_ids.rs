@@ -28,7 +28,7 @@ pub(crate) struct CandidateIds {
 }
 
 impl CandidateIds {
-    pub(super) fn new(bytes: usize, cancellation: CancellationToken) -> Self {
+    pub(crate) fn new(bytes: usize, cancellation: CancellationToken) -> Self {
         Self {
             rows: SpillBuffer::new(bytes),
             schema: RowSchema::with_internal_relation_types(
@@ -42,7 +42,7 @@ impl CandidateIds {
     }
 
     /// Table ordinals refer to the already bound hierarchy; no relation name is copied per candidate.
-    pub(super) fn push(&mut self, table: usize, id: DocId) -> Result<(), SQLError> {
+    pub(crate) fn push(&mut self, table: usize, id: DocId) -> Result<(), SQLError> {
         self.cancellation.check()?;
         let table = u64::try_from(table).map_err(|_| invalid("table ordinal exceeds u64"))?;
         self.pending.push(PhysicalRow::from_values(vec![
@@ -115,7 +115,7 @@ impl CandidateIds {
         Ok(())
     }
 
-    pub(super) fn finish(mut self) -> Result<CapturedCandidateIds, SQLError> {
+    pub(crate) fn finish(mut self) -> Result<CapturedCandidateIds, SQLError> {
         self.cancellation.check()?;
         self.flush()?;
         Ok(CapturedCandidateIds {

@@ -18962,6 +18962,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cold_index_capture_reconciles_stale_and_missing_ids_without_reevaluating_stored_keys",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/hydration/tests.rs",
+      "capability": "Bounded cold index capture and reconciliation",
+      "workload": "Stored keys with stale/missing identities, empty/unbuilt markers, complete identity capture, 259 expression rows, delayed errors and 2MiB of missing keys.",
+      "invariant": "Previously evaluated keys are retained; complete 256-row capture precedes expressions and diagnostics, document guards are released before callbacks and cancellation is typed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cold_index_expression_capture_preserves_batch_boundary_and_releases_document_guards",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/hydration/tests.rs",
+      "capability": "Bounded cold index capture and reconciliation",
+      "workload": "Stored keys with stale/missing identities, empty/unbuilt markers, complete identity capture, 259 expression rows, delayed errors and 2MiB of missing keys.",
+      "invariant": "Previously evaluated keys are retained; complete 256-row capture precedes expressions and diagnostics, document guards are released before callbacks and cancellation is typed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cold_index_capture_preserves_later_read_errors_before_validation_or_evaluation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/hydration/tests.rs",
+      "capability": "Bounded cold index capture and reconciliation",
+      "workload": "Stored keys with stale/missing identities, empty/unbuilt markers, complete identity capture, 259 expression rows, delayed errors and 2MiB of missing keys.",
+      "invariant": "Previously evaluated keys are retained; complete 256-row capture precedes expressions and diagnostics, document guards are released before callbacks and cancellation is typed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cold_index_capture_handles_empty_markers_cancellation_and_provider_contract_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/hydration/tests.rs",
+      "capability": "Bounded cold index capture and reconciliation",
+      "workload": "Stored keys with stale/missing identities, empty/unbuilt markers, complete identity capture, 259 expression rows, delayed errors and 2MiB of missing keys.",
+      "invariant": "Previously evaluated keys are retained; complete 256-row capture precedes expressions and diagnostics, document guards are released before callbacks and cancellation is typed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cold_index_capture_bounds_wide_missing_key_population_before_cache_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/hydration/tests.rs",
+      "capability": "Bounded cold index capture and reconciliation",
+      "workload": "Stored keys with stale/missing identities, empty/unbuilt markers, complete identity capture, 259 expression rows, delayed errors and 2MiB of missing keys.",
+      "invariant": "Capture, projection and cache publication remain within a fixed 1536KiB peak allocation ceiling.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
