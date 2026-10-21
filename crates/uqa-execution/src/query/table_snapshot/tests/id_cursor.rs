@@ -238,3 +238,36 @@ fn malformed_borrowed_identity_cursors_release_partial_consumer_buffers() {
         assert_eq!(control.memory().used(), 0);
     }
 }
+
+#[test]
+fn private_replacements_do_not_rescan_the_remaining_base_for_each_identity_page() {
+    let control = StorageReadControl::with_limit(64 * 1024);
+    let source = BorrowedSource::new(&control);
+    let changes = DocumentChanges::from_rows(
+        [1, 3, 5, 9]
+            .into_iter()
+            .map(|id| (id, Some(document(&[("key", Value::Int(20))], 42))))
+            .collect(),
+        &control,
+    )
+    .unwrap();
+    let view = capture(&source, changes);
+    let retained = control.memory().used();
+    let mut after = None;
+    let mut found = Vec::new();
+    loop {
+        let page = view.documents.next_doc_ids(after, 1).unwrap();
+        let Some(id) = page.first().copied() else {
+            break;
+        };
+        found.push(id);
+        after = Some(id);
+    }
+    assert_eq!(found, [1, 3, 5, 9]);
+    assert_eq!(
+        source.visited.load(Ordering::Relaxed),
+        found.len(),
+        "each base identity must be read once even when every row has a private replacement"
+    );
+    assert_eq!(control.memory().used(), retained);
+}

@@ -153,3 +153,61 @@ fn missing_generated_private_values_are_completed_from_the_selected_source() {
         [(2, vec![Value::Int(21)])].into()
     );
 }
+
+#[test]
+fn identity_only_retained_projection_never_reads_base_or_private_payloads() {
+    let (columns, target, base) = renamed_documents();
+    let source = ProjectedSource::new(&base);
+    let base_reads = Arc::clone(&source.projections);
+    let mut private = MemoryDocumentStore::new();
+    private
+        .put_stored(7, document(&[("renamed", Value::Int(700))], 53))
+        .unwrap();
+    let private = ProjectedSource::new(&private);
+    let private_reads = Arc::clone(&private.projections);
+    let control = control();
+    let changes = DocumentChanges::default()
+        .with_retained(
+            Arc::new(private),
+            selection([(3, false), (5, false), (7, true)]),
+            &control,
+        )
+        .unwrap();
+    let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
+    let view = retain(
+        Arc::new(source),
+        &columns,
+        &schema(&target, &index),
+        changes,
+        &control,
+    )
+    .unwrap();
+    let retained = control.memory().used();
+    let mut ids = Vec::new();
+    assert_eq!(
+        view.documents
+            .for_each_next_fields(None, 10, &[], &mut |id, values| {
+                assert!(values.is_empty());
+                ids.push(id);
+                ids.len() < 2
+            })
+            .unwrap(),
+        Some(2)
+    );
+    assert_eq!(ids, [1, 7]);
+    assert_eq!(base_reads.load(Ordering::Relaxed), 0);
+    assert_eq!(private_reads.load(Ordering::Relaxed), 0);
+    assert_eq!(control.memory().used(), retained);
+    let result = view
+        .documents
+        .for_each_next_fields(Some(7), 10, &[], &mut |id, values| {
+            assert_eq!(id, u64::MAX);
+            assert!(values.is_empty());
+            control.cancellation().cancel();
+            false
+        });
+    assert!(result.is_err());
+    assert_eq!(base_reads.load(Ordering::Relaxed), 0);
+    assert_eq!(private_reads.load(Ordering::Relaxed), 0);
+    assert_eq!(control.memory().used(), retained);
+}

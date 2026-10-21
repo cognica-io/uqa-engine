@@ -48,8 +48,8 @@ impl PrivateRecordChanges {
         let resident = super::replaced_resident(&state.records, state.resident, &write);
         let identity = PrivateRecordRevision::allocate()?;
         let scopes = state
-            .scopes
-            .as_ref()
+            .policy
+            .scopes()
             .map(|scopes| scopes.with_writes(std::slice::from_ref(&write), identity, control))
             .transpose()?;
         let key = write.shared_key();
@@ -60,7 +60,7 @@ impl PrivateRecordChanges {
         control.check()?;
         state.records = records;
         state.sources = sources;
-        state.scopes = scopes;
+        state.policy.restore_scopes(scopes);
         state.resident = resident;
         state.revision = Some(identity);
         Ok(())

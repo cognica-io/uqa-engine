@@ -12,6 +12,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Merge stored and private row identities without repeatedly scanning replaced base rows, and avoid loading row payloads for identity-only projections. Private decoded blocks remain bounded and are released after their read batch.
+
+- Avoid repeated read-ahead of mixed-width scan rows and redundant compact text-group key work while preserving exact batch sizes, NULL distinctions and group identities.
+
+- Remove redundant metadata from private transaction roots while preserving explicit spill thresholds across forks, savepoints and rollback.
+
 - Reject distrusted emSign certificate chains by updating rustls-webpki and both bundled root-certificate packages to their patched releases.
 
 - Bound complete text support in hybrid COPY with finite vector pools, preserving native calibration, exact score bits, selected generations and output-failure rollback.

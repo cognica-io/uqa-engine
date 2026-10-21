@@ -69,7 +69,7 @@ fn summary_work_depends_on_scopes_instead_of_spilled_records() {
     assert!(!changes.owner.state.lock().runs.is_empty());
     {
         let state = changes.owner.state.lock();
-        let summary = state.scopes.as_ref().unwrap().changes.owner.state.lock();
+        let summary = state.policy.scopes().unwrap().changes.owner.state.lock();
         assert!(
             summary.runs.is_empty(),
             "replacing one scope must not accumulate resident size"
@@ -244,8 +244,8 @@ fn high_cardinality_summaries_spill_and_match_exact_private_revisions() {
     {
         let state = changes.owner.state.lock();
         assert!(!state
-            .scopes
-            .as_ref()
+            .policy
+            .scopes()
             .unwrap()
             .changes
             .owner

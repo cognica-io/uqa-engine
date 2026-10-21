@@ -179,7 +179,41 @@ fn staged_change(row: StagedRow) -> Change {
     })
 }
 
+/// Holds decoded private blocks only while a bounded batch reads them.
+pub(crate) struct ChangesReadScope {
+    _identities: Option<uqa_storage::mvcc::PrivateRecordReadScope>,
+    _staged: BudgetedVec<uqa_storage::mvcc::PrivateRecordReadScope>,
+}
+
 impl DocumentChanges {
+    pub(crate) fn read_scope(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<ChangesReadScope> {
+        control.check()?;
+        let identities = self
+            .identities
+            .as_ref()
+            .map(|layer| {
+                layer.control.check()?;
+                layer.view.read_scope(control)
+            })
+            .transpose()?;
+        let mut staged = BudgetedVec::new(control.memory());
+        if let Some(layers) = &self.staged {
+            layers.control.check()?;
+            for view in layers.views.iter() {
+                if let Some(scope) = view.read_scope(control)? {
+                    staged.push(scope)?;
+                }
+            }
+        }
+        Ok(ChangesReadScope {
+            _identities: identities,
+            _staged: staged,
+        })
+    }
+
     /// These changes with the rows that views of running commands staged above them, the newest command's view last.
     pub(crate) fn with_staged(
         mut self,

@@ -147,6 +147,19 @@ pub(crate) struct StagedRowsView {
 }
 
 impl StagedRowsView {
+    pub(crate) fn read_scope(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_storage::mvcc::PrivateRecordReadScope>> {
+        self.spilled
+            .as_ref()
+            .map(|view| {
+                view.read_scope(control)
+                    .map_err(uqa_storage::mvcc::VersionError::into_storage_error)
+            })
+            .transpose()
+    }
+
     /// The row staged for `id`, if any.
     pub(crate) fn get(
         &self,

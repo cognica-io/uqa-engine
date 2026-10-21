@@ -86,17 +86,21 @@ pub fn try_pack_compact_text_pair<'a>(
     Some(u64::from(first) << 32 | u64::from(second))
 }
 
+#[inline]
 fn compact_text_component(value: Option<&Value>) -> Option<u32> {
-    match value {
-        None | Some(Value::Null) => Some(0),
-        Some(Value::Str(value)) if value.len() <= 3 => {
-            let mut packed = [0u8; 4];
-            packed[0] = u8::try_from(value.len()).ok()? + 1;
-            packed[1..][..value.len()].copy_from_slice(value.as_bytes());
-            Some(u32::from_be_bytes(packed))
-        }
-        Some(_) => None,
-    }
+    let bytes = match value {
+        None | Some(Value::Null) => return Some(0),
+        Some(Value::Str(value)) => value.as_bytes(),
+        Some(_) => return None,
+    };
+    let packed = match bytes {
+        [] => [1, 0, 0, 0],
+        [first] => [2, *first, 0, 0],
+        [first, second] => [3, *first, *second, 0],
+        [first, second, third] => [4, *first, *second, *third],
+        _ => return None,
+    };
+    Some(u32::from_be_bytes(packed))
 }
 
 /// Encode positional values in Core's exact equality domain used by DISTINCT and spill-backed row-key state. SQL operator coercions must precede encoding. This is an execution key, not a versioned durable storage format.

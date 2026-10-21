@@ -346,6 +346,7 @@ fn compact_text_pair_key_is_stable_for_borrowed_and_owned_values() {
     let values = [Some(&first), Some(&second)];
 
     let key = try_pack_compact_text_pair(values.into_iter()).unwrap();
+    assert_eq!(key, 0x0241_0000_024f_0000);
     let owned = [first.clone(), second.clone()];
     assert_eq!(
         key,
@@ -365,6 +366,9 @@ fn compact_text_pair_key_is_stable_for_borrowed_and_owned_values() {
         Value::Str("ABC".into()),
         Value::Str("é".into()),
         Value::Str("한".into()),
+        Value::Str("\0".into()),
+        Value::Str("A\0".into()),
+        Value::Str("A\0B".into()),
     ];
     let mut keys = std::collections::BTreeSet::new();
     for first in &candidates {
