@@ -19,11 +19,11 @@ struct ResultMaterializationPlan {
 
 struct ResultMaterializationEntry {
     column: String,
-    logical: usize,
+    slot: usize,
     take: bool,
 }
 
-/// Reuse the immutable schema's conversion plan for row-at-a-time public sinks.
+/// Reuse the immutable schema's conversion plan for public result consumers.
 pub(crate) struct ResultRowMaterializer {
     schema: RowSchema,
     plan: Option<ResultMaterializationPlan>,
@@ -45,6 +45,20 @@ impl ResultRowMaterializer {
         match &self.plan {
             Some(plan) => materializer.materialize_remapped_result_row_with_plan(row, plan),
             None => materializer.materialize_identity_result_row(row),
+        }
+    }
+
+    pub(crate) fn extend(&self, output: &mut Vec<ResultRow>, rows: Vec<PhysicalRow>) {
+        let materializer = RowMaterializer::new(&self.schema);
+        match &self.plan {
+            Some(plan) => output.extend(
+                rows.into_iter()
+                    .map(|row| materializer.materialize_remapped_result_row_with_plan(row, plan)),
+            ),
+            None => output.extend(
+                rows.into_iter()
+                    .map(|row| materializer.materialize_identity_result_row(row)),
+            ),
         }
     }
 }
@@ -111,7 +125,7 @@ impl<'a> RowMaterializer<'a> {
             .zip(take)
             .map(|(logical, take)| ResultMaterializationEntry {
                 column: columns[logical].clone(),
-                logical,
+                slot: self.schema.layout_slots()[logical],
                 take,
             })
             .collect::<Vec<_>>();
@@ -136,7 +150,7 @@ impl<'a> RowMaterializer<'a> {
         );
         let mut result = ResultRow::new();
         for entry in &plan.entries {
-            let slot = self.schema.layout_slots()[entry.logical];
+            let slot = entry.slot;
             let value = if slot == NULL_SLOT {
                 Value::Null
             } else {
@@ -155,7 +169,7 @@ impl<'a> RowMaterializer<'a> {
         debug_assert_eq!(self.schema.physical_width(), fragment.len());
         let mut result = ResultRow::new();
         for entry in &plan.entries {
-            let slot = self.schema.layout_slots()[entry.logical];
+            let slot = entry.slot;
             let value = if slot == NULL_SLOT {
                 Value::Null
             } else {
