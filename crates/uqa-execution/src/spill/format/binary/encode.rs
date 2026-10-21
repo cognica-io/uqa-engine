@@ -236,7 +236,11 @@ fn add_record_size(
     Ok(())
 }
 
-#[inline]
+#[expect(
+    clippy::inline_always,
+    reason = "ordinary inlining retains a per-scalar call; the recursive visitor stays out of line"
+)]
+#[inline(always)]
 fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<()> {
     if depth > MAX_VALUE_DEPTH {
         return Err(spill_error("spill value nesting exceeds 128 levels"));
@@ -250,6 +254,8 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
     }
 }
 
+// Keep the recursive visitor out of the inline scalar path and its small call frame.
+#[inline(never)]
 fn add_variable_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<()> {
     match value {
         Value::Datum(value) => {
