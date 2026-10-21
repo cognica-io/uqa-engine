@@ -7,6 +7,7 @@
 use super::*;
 use std::cell::RefCell;
 use uqa_core::{Payload, PostingEntry, PostingList, ScoredEntry};
+use uqa_sql::SQLError;
 
 fn term(query: &str) -> OperatorTree {
     OperatorTree::Term {
@@ -17,12 +18,117 @@ fn term(query: &str) -> OperatorTree {
     }
 }
 
+fn text_input(tree: &OperatorTree) -> (Option<&str>, &str, Option<TextScoringMode>) {
+    let OperatorTree::Term {
+        field,
+        query,
+        scoring,
+        ..
+    } = tree
+    else {
+        panic!("expected text leaf");
+    };
+    (field.as_deref(), query, *scoring)
+}
+
 fn entries(values: &[(u64, f64)], bytes: usize) -> DriverResult<CapturedScoredEntries> {
     let mut capture = ScoredEntryCapture::new(bytes, CancellationToken::new())?;
     for &(doc_id, score) in values {
         capture.push(ScoredEntry { doc_id, score })?;
     }
     capture.finish()
+}
+
+fn filter(field: &str) -> OperatorTree {
+    OperatorTree::Filter {
+        field: field.into(),
+        predicate: uqa_core::Predicate::IsNotNull,
+        source: None,
+    }
+}
+
+#[test]
+fn captured_intersection_filters_share_complete_support_and_original_score_order() {
+    let tree = OperatorTree::Intersect(vec![
+        filter("first"),
+        term("one"),
+        term("two"),
+        filter("last"),
+    ]);
+    assert!(tree::complete_scored_tree(&tree));
+    let seen = RefCell::new(Vec::new());
+    let actual = tree::capture(
+        &tree,
+        0,
+        &CancellationToken::new(),
+        &|leaf, support, bytes| match leaf {
+            OperatorTree::Term { query, .. } => {
+                assert!(support.is_none());
+                seen.borrow_mut().push(query.clone());
+                entries(
+                    if query == "one" {
+                        &[(1, -0.0), (2, 1e16)]
+                    } else {
+                        &[(2, 1.0), (3, 9.0)]
+                    },
+                    bytes,
+                )
+            }
+            OperatorTree::Filter { field, .. } => {
+                seen.borrow_mut().push(field.clone());
+                let ids = support.unwrap().cursor().collect::<Result<Vec<_>, _>>()?;
+                assert_eq!(ids, [2]);
+                entries(&[(2, 0.0)], bytes)
+            }
+            _ => panic!("unexpected leaf"),
+        },
+    )
+    .unwrap()
+    .map(Result::unwrap)
+    .collect::<Vec<_>>();
+    assert_eq!(*seen.borrow(), ["one", "two", "first", "last"]);
+    assert_eq!(actual.len(), 1);
+    assert_eq!(actual[0].doc_id, 2);
+    assert_eq!(
+        actual[0].score.to_bits(),
+        (((0.0_f64 + 1e16) + 1.0) + 0.0).to_bits()
+    );
+}
+
+#[test]
+fn captured_filter_errors_keep_original_precedence_after_failed_or_empty_siblings() {
+    for fail_text in [false, true] {
+        let seen = RefCell::new(Vec::new());
+        let tree = OperatorTree::Intersect(vec![filter("first"), term("text"), filter("last")]);
+        let error = tree::capture(
+            &tree,
+            0,
+            &CancellationToken::new(),
+            &|leaf, support, bytes| match leaf {
+                OperatorTree::Term { .. } => {
+                    seen.borrow_mut().push("text".to_owned());
+                    if fail_text {
+                        Err(SQLError::UnknownColumn("text-error".into()))
+                    } else {
+                        entries(&[], bytes)
+                    }
+                }
+                OperatorTree::Filter { field, .. } => {
+                    seen.borrow_mut().push(field.clone());
+                    assert_eq!(support.is_none(), fail_text);
+                    if let Some(support) = support {
+                        assert!(support.is_empty());
+                    }
+                    Err(SQLError::UnknownColumn(field.clone()))
+                }
+                _ => panic!("unexpected leaf"),
+            },
+        )
+        .err()
+        .unwrap();
+        assert!(matches!(error, SQLError::UnknownColumn(field) if field == "first"));
+        assert_eq!(*seen.borrow(), ["text", "first", "last"]);
+    }
 }
 
 #[test]
@@ -50,13 +156,10 @@ fn captured_text_boolean_fold_preserves_support_and_native_score_bits() {
         } else {
             OperatorTree::Union(children)
         };
-        assert!(tree::complete_text_tree(&tree));
-        let actual = tree::capture(
-            &tree,
-            0,
-            &CancellationToken::new(),
-            &|_, query, _, bytes| entries(&values[query.parse::<usize>().unwrap()], bytes),
-        )
+        assert!(tree::complete_scored_tree(&tree));
+        let actual = tree::capture(&tree, 0, &CancellationToken::new(), &|tree, _, bytes| {
+            entries(&values[text_input(tree).1.parse::<usize>().unwrap()], bytes)
+        })
         .unwrap()
         .map(|entry| {
             let entry = entry.unwrap();
@@ -92,7 +195,8 @@ fn captured_text_branches_all_run_before_the_first_error_is_reported() {
         term("first-error"),
         term("last-error"),
     ]);
-    let result = tree::capture(&tree, 1024, &CancellationToken::new(), &|_, query, _, _| {
+    let result = tree::capture(&tree, 1024, &CancellationToken::new(), &|tree, _, _| {
+        let query = text_input(tree).1;
         visited.borrow_mut().push(query.to_owned());
         Err(uqa_sql::SQLError::Routine {
             sqlstate: "22023".into(),
@@ -107,7 +211,7 @@ fn captured_text_branches_all_run_before_the_first_error_is_reported() {
         &OperatorTree::Union(Vec::new()),
         0,
         &CancellationToken::new(),
-        &|_, _, _, _| panic!("empty tree has no leaves"),
+        &|_, _, _| panic!("empty tree has no leaves"),
     )
     .unwrap();
     assert_eq!(empty.count(), 0);
@@ -115,7 +219,7 @@ fn captured_text_branches_all_run_before_the_first_error_is_reported() {
 
 #[test]
 fn complete_text_capture_declines_non_score_and_limited_operands() {
-    assert!(tree::complete_text_tree(&OperatorTree::Intersect(vec![
+    assert!(tree::complete_scored_tree(&OperatorTree::Intersect(vec![
         term("one"),
         OperatorTree::Union(vec![term("two"), OperatorTree::Empty]),
     ])));
@@ -128,12 +232,12 @@ fn complete_text_capture_declines_non_score_and_limited_operands() {
             strategy: uqa_operators::TextTopKStrategy::Wand,
         }),
     };
-    assert!(!tree::complete_text_tree(&limited));
-    assert!(!tree::complete_text_tree(&OperatorTree::Union(vec![
+    assert!(!tree::complete_scored_tree(&limited));
+    assert!(!tree::complete_scored_tree(&OperatorTree::Union(vec![
         term("one"),
         limited,
     ])));
-    assert!(!tree::complete_text_tree(&OperatorTree::Phrase {
+    assert!(!tree::complete_scored_tree(&OperatorTree::Phrase {
         field: Some("body".into()),
         query: "one two".into(),
         scoring: Some(TextScoringMode::BM25),
@@ -148,13 +252,14 @@ fn complete_text_capture_keeps_the_all_field_leaf_boundary() {
         scoring: Some(TextScoringMode::BM25),
         top_k: None,
     };
-    assert!(tree::complete_text_tree(&tree));
+    assert!(tree::complete_scored_tree(&tree));
     let observed = RefCell::new(0);
     let mut result = tree::capture(
         &tree,
         64 * 1024,
         &CancellationToken::new(),
-        &|field, query, scoring, bytes| {
+        &|tree, _, bytes| {
+            let (field, query, scoring) = text_input(tree);
             assert_eq!(field, None);
             assert_eq!(query, "alpha beta");
             assert_eq!(scoring, Some(TextScoringMode::BM25));
@@ -182,7 +287,8 @@ fn captured_text_boolean_population_stays_within_its_shared_allowance() {
             &tree,
             64 * 1024,
             &CancellationToken::new(),
-            &|_, query, _, bytes| {
+            &|tree, _, bytes| {
+                let query = text_input(tree).1;
                 let mut capture = ScoredEntryCapture::new(bytes, CancellationToken::new())?;
                 for doc_id in 0..65_536 {
                     capture.push(ScoredEntry {

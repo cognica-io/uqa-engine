@@ -124,7 +124,7 @@ fn capture_scored_entries(
     validate_text_top_k_placement(tree)?;
     let driver = PhysicalRetrievalDriver::new(context.driver, table, signal_table, params);
     if capture_complete_scores {
-        if let Some(entries) = driver.capture_text_scores(tree)? {
+        if let Some(entries) = driver.capture_scored_input(tree)? {
             return Ok(crate::query::scored_input::ProducedScoredEntries::Captured(
                 entries,
             ));

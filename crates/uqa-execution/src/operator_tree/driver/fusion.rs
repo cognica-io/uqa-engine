@@ -220,6 +220,15 @@ impl PhysicalRetrievalDriver<'_> {
         field: &str,
         predicate: &uqa_core::Predicate,
     ) -> DriverResult<PostingList> {
+        self.require_index_scan(index_name, field)?;
+        self.value_index_scan(field, predicate)?.ok_or_else(|| {
+            SQLError::Unsupported(format!(
+                "index {index_name:?} cannot evaluate predicate {predicate:?}"
+            ))
+        })
+    }
+
+    pub(super) fn require_index_scan(&self, index_name: &str, field: &str) -> DriverResult<()> {
         self.require_column(field)?;
         let index = self
             .context
@@ -261,11 +270,7 @@ impl PhysicalRetrievalDriver<'_> {
                 "index {index_name:?} does not cover leading field {field:?}"
             )));
         }
-        self.value_index_scan(field, predicate)?.ok_or_else(|| {
-            SQLError::Unsupported(format!(
-                "index {index_name:?} cannot evaluate predicate {predicate:?}"
-            ))
-        })
+        Ok(())
     }
 
     pub(super) fn execute_vector_exclusion(

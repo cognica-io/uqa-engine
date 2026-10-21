@@ -4,31 +4,59 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Capture complete text-only trees before document reads, without population-sized postings.
+//! Capture complete score-only trees before document reads, without population-sized postings.
 
 use super::{DriverResult, OperatorTree, PhysicalRetrievalDriver, TextScoringMode};
 use crate::query::scored_input::{CapturedScoredEntries, ScoredEntryCapture};
 use uqa_core::CancellationToken;
 
+mod filters;
 #[cfg(test)]
 mod tests;
 mod tree;
 
 impl PhysicalRetrievalDriver<'_> {
-    pub(in crate::operator_tree) fn capture_text_scores(
+    pub(in crate::operator_tree) fn capture_scored_input(
         &self,
         tree: &OperatorTree,
     ) -> DriverResult<Option<CapturedScoredEntries>> {
-        if !tree::complete_text_tree(tree) {
+        if !tree::complete_scored_tree(tree) {
             return Ok(None);
         }
+        self.capture_tree(tree, self.context.runtime.work_mem_bytes()?)
+            .map(Some)
+    }
+
+    fn capture_tree(
+        &self,
+        tree: &OperatorTree,
+        bytes: usize,
+    ) -> DriverResult<CapturedScoredEntries> {
         tree::capture(
             tree,
-            self.context.runtime.work_mem_bytes()?,
+            bytes,
             &self.context.runtime.cancellation_token(),
-            &|field, query, scoring, bytes| self.capture_text_leaf(field, query, scoring, bytes),
+            &|tree, support, bytes| match tree {
+                OperatorTree::Term {
+                    field,
+                    query,
+                    scoring,
+                    top_k: None,
+                } => self.capture_text_leaf(field.as_deref(), query, *scoring, bytes),
+                OperatorTree::Filter {
+                    field,
+                    predicate,
+                    source,
+                } => self.capture_filter(field, predicate, source.as_deref(), support, bytes),
+                OperatorTree::IndexScan {
+                    index_name,
+                    field,
+                    predicate,
+                } => self.capture_index_scan(index_name, field, predicate, bytes),
+                OperatorTree::Complement(source) => self.capture_complement(source, bytes),
+                _ => unreachable!("eligible complete retrieval leaf"),
+            },
         )
-        .map(Some)
     }
 
     fn capture_text_leaf(

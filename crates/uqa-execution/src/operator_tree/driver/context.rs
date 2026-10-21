@@ -43,12 +43,31 @@ pub trait RetrievalRelations: Sync {
     fn has_table(&self, table: &str) -> StorageBackendResult<bool>;
     fn column_type(&self, table: &str, field: &str) -> StorageBackendResult<Option<ColumnType>>;
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError>;
+    fn table_doc_id_page(
+        &self,
+        table: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError>;
     fn get_document_fields(
         &self,
         table: &str,
         ids: &[DocId],
         field: &str,
     ) -> Result<BTreeMap<DocId, Value>, SQLError>;
+    /// Retain the selected projection context and its original read/evaluation ordering while capturing complete filter support.
+    fn capture_document_filter(
+        &self,
+        table: &str,
+        ids: &crate::query::SelectedIds,
+        field: &str,
+        predicate: &uqa_core::Predicate,
+        bytes: usize,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<crate::query::scored_input::CapturedScoredEntries, SQLError> {
+        super::filter::capture(self, table, field, predicate, ids, bytes, cancellation)
+    }
 }
 
 pub trait RetrievalSnapshots: Sync {

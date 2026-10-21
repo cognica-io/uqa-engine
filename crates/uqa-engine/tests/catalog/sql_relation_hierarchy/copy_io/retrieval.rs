@@ -237,6 +237,227 @@ fn copy_boolean_text_scores_do_not_retain_complete_child_postings(#[case] predic
     assert!(allocated.bytes_max < 2 * 1024 * 1024, "{allocated:?}");
 }
 
+#[rstest::rstest]
+#[case::projected_field(false)]
+#[case::indexed_field(true)]
+fn copy_filtered_text_scores_do_not_retain_complete_child_postings(#[case] indexed: bool) {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE copy_search(id INTEGER PRIMARY KEY, body TEXT, grp INTEGER);
+        INSERT INTO copy_search SELECT n,'alpha beta',1 FROM generate_series(1,32768) AS s(n);
+        CREATE INDEX copy_search_body ON copy_search USING gin(body)",
+    );
+    if indexed {
+        exec(&engine, "CREATE INDEX copy_search_grp ON copy_search(grp)");
+    }
+    exec(&engine, "SET work_mem='64kB'");
+    for operation in ["OR", "AND"] {
+        let mut output = Lines { count: 0, value: 0 };
+        let sql = format!(
+            "COPY (SELECT id FROM copy_search WHERE text_match(body,'alpha') {operation} grp=1) TO STDOUT"
+        );
+        let allocated = allocation_counter::measure(|| {
+            assert_eq!(engine.copy_to(&sql, &mut output).unwrap(), 32_768);
+        });
+        assert_eq!(output.count, 32_768);
+        assert_eq!(output.value, 0);
+        assert!(
+            allocated.bytes_max < 2 * 1024 * 1024,
+            "{operation}: {allocated:?}"
+        );
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn copy_filtered_text_capture_keeps_scores_nulls_overlay_and_generation(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("filtered-text-copy.db");
+    let engine = copy_engine(provider, &path);
+    exec(
+        &engine,
+        "CREATE TABLE copy_search(id INTEGER PRIMARY KEY, body TEXT NOT NULL, grp INTEGER);
+        INSERT INTO copy_search SELECT n,CASE WHEN n%3=0 THEN 'alpha beta' ELSE 'gamma' END,
+            CASE WHEN n%2=0 THEN 1 ELSE NULL END FROM generate_series(1,513) AS s(n);
+        CREATE INDEX copy_search_body ON copy_search USING gin(body)",
+    );
+    let text = "text_match(body,'alpha beta alpha')";
+    let native = native_text_score_bits(&engine, "copy_search", false);
+    let expected = (1..=513)
+        .filter(|id| id % 2 == 0 || id % 3 == 0)
+        .map(|id| (id, native.get(&id).copied().unwrap_or(0.0_f64.to_bits())))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    check_filtered_text_queries(&engine, text, &native, &expected);
+    check_filtered_text_commands(&engine, text, &expected);
+    let sql = format!("COPY (SELECT id,_score FROM copy_search WHERE {text} OR grp=1) TO STDOUT");
+    let writer = (provider != 0).then(|| engine.new_session().unwrap());
+    let mut output = FilteredInterleave {
+        writer: writer.as_ref(),
+        bytes: Vec::new(),
+    };
+    assert_eq!(
+        engine.copy_to(&sql, &mut output).unwrap(),
+        expected.len() as u64
+    );
+    assert_eq!(copied_text_scores(output.bytes), expected);
+    drop(writer);
+    let count_sql = format!("SELECT count(*) AS n FROM copy_search WHERE {text} OR grp=1");
+    let count = if provider == 0 { 342 } else { 341 };
+    assert_eq!(
+        engine.sql(&count_sql, &[]).unwrap().rows[0]["n"],
+        uqa_core::Value::Int(count)
+    );
+    drop(engine);
+    if provider != 0 {
+        let reopened = copy_engine(provider, &path);
+        assert_eq!(
+            reopened.sql(&count_sql, &[]).unwrap().rows[0]["n"],
+            uqa_core::Value::Int(341)
+        );
+    }
+}
+
+struct FilteredInterleave<'a> {
+    writer: Option<&'a Engine>,
+    bytes: Vec<u8>,
+}
+impl std::io::Write for FilteredInterleave<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if let Some(writer) = self.writer.take() {
+            exec(
+                writer,
+                "UPDATE copy_search SET body='gamma',grp=NULL WHERE id=512;
+                 DELETE FROM copy_search WHERE id=513;
+                 INSERT INTO copy_search VALUES(514,'gamma',1)",
+            );
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+fn copied_text_scores(bytes: Vec<u8>) -> std::collections::BTreeMap<i64, u64> {
+    String::from_utf8(bytes)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let (id, score) = line.split_once('\t').unwrap();
+            (
+                id.parse::<i64>().unwrap(),
+                score.parse::<f64>().unwrap().to_bits(),
+            )
+        })
+        .collect()
+}
+
+fn check_filtered_text_queries(
+    engine: &Engine,
+    text: &str,
+    native: &std::collections::BTreeMap<i64, u64>,
+    expected: &std::collections::BTreeMap<i64, u64>,
+) {
+    for indexed in [false, true] {
+        if indexed {
+            exec(
+                engine,
+                "RESET work_mem; CREATE INDEX copy_search_grp ON copy_search(grp)",
+            );
+        }
+        exec(engine, "SET work_mem='64kB'");
+        let cases = [
+            (format!("{text} OR grp=1"), expected.clone()),
+            (
+                format!("({text} OR grp=1) AND grp IS NULL"),
+                expected
+                    .iter()
+                    .filter(|(id, _)| *id % 2 != 0)
+                    .map(|(id, score)| (*id, *score))
+                    .collect(),
+            ),
+            (
+                format!("({text} AND grp=1) OR id=1"),
+                native
+                    .iter()
+                    .filter(|(id, _)| *id % 2 == 0)
+                    .map(|(id, score)| (*id, *score))
+                    .chain([(1, 0.0_f64.to_bits())])
+                    .collect(),
+            ),
+            (
+                format!("NOT {text} OR grp=1"),
+                (1..=513)
+                    .filter(|id| id % 3 != 0 || id % 2 == 0)
+                    .map(|id| (id, 0.0_f64.to_bits()))
+                    .collect(),
+            ),
+        ];
+        for (predicate, expected) in cases {
+            let mut output = Vec::new();
+            let count = engine
+                .copy_to(
+                    &format!(
+                        "COPY (SELECT id,_score FROM copy_search WHERE {predicate}) TO STDOUT"
+                    ),
+                    &mut output,
+                )
+                .unwrap();
+            assert_eq!(
+                count,
+                expected.len() as u64,
+                "{predicate}, indexed={indexed}"
+            );
+            assert_eq!(
+                copied_text_scores(output),
+                expected,
+                "{predicate}, indexed={indexed}"
+            );
+        }
+    }
+}
+
+fn check_filtered_text_commands(
+    engine: &Engine,
+    text: &str,
+    expected: &std::collections::BTreeMap<i64, u64>,
+) {
+    exec(
+        engine,
+        "BEGIN; UPDATE copy_search SET grp=1 WHERE id=1;
+        DELETE FROM copy_search WHERE id=2; INSERT INTO copy_search VALUES(515,'gamma',1)",
+    );
+    let command_native = native_text_score_bits(engine, "copy_search", false);
+    let mut command_expected = expected
+        .keys()
+        .copied()
+        .map(|id| {
+            (
+                id,
+                command_native
+                    .get(&id)
+                    .copied()
+                    .unwrap_or(0.0_f64.to_bits()),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    command_expected.insert(1, 0.0_f64.to_bits());
+    command_expected.remove(&2);
+    command_expected.insert(515, 0.0_f64.to_bits());
+    let sql = format!("COPY (SELECT id,_score FROM copy_search WHERE {text} OR grp=1) TO STDOUT");
+    let mut command_output = Vec::new();
+    assert_eq!(
+        engine.copy_to(&sql, &mut command_output).unwrap(),
+        command_expected.len() as u64
+    );
+    assert_eq!(copied_text_scores(command_output), command_expected);
+    exec(engine, "ROLLBACK");
+}
+
 #[test]
 fn copy_all_field_text_scores_do_not_retain_the_complete_population() {
     let engine = Engine::new();

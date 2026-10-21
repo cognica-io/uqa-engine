@@ -7,6 +7,34 @@
 use super::*;
 
 #[test]
+fn scored_capture_replay_shares_input_and_releases_the_final_owner() {
+    let cancellation = CancellationToken::new();
+    let mut capture = ScoredEntryCapture::new(0, cancellation).unwrap();
+    for doc_id in [0, 7, u64::MAX] {
+        capture
+            .push(ScoredEntry {
+                doc_id,
+                score: -0.0,
+            })
+            .unwrap();
+    }
+    let path = capture.rows.spill_path().unwrap().to_path_buf();
+    let mut original = capture.finish().unwrap();
+    let mut replay = original.replay().unwrap();
+    assert_eq!(original.next().unwrap().unwrap().doc_id, 0);
+    assert!(original.replay().is_err());
+    drop(original);
+    assert!(path.exists());
+    for id in [0, 7, u64::MAX] {
+        let entry = replay.next().unwrap().unwrap();
+        assert_eq!(entry.doc_id, id);
+        assert_eq!(entry.score.to_bits(), (-0.0_f64).to_bits());
+    }
+    assert!(replay.next().is_none());
+    assert!(!path.exists());
+}
+
+#[test]
 fn complete_scored_capture_spills_before_retaining_the_population() {
     let cancellation = CancellationToken::new();
     let allocated = allocation_counter::measure(|| {

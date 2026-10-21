@@ -16,6 +16,7 @@ use uqa_sql::{
 
 mod capture;
 mod ids;
+pub(crate) use capture::capture_predicate;
 pub use ids::{SelectedIdCursor, SelectedIds};
 
 pub(crate) struct IndexCandidates<'a> {

@@ -60,6 +60,17 @@ impl RetrievalRelations for Engine {
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         self.query_table_doc_ids(table)
     }
+    fn table_doc_id_page(
+        &self,
+        table: &str,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
+        uqa_execution::mutation::constraints::context::MutationRead::table_doc_id_page(
+            self, table, after, limit, control,
+        )
+    }
     fn get_document_fields(
         &self,
         table: &str,
@@ -67,6 +78,26 @@ impl RetrievalRelations for Engine {
         field: &str,
     ) -> Result<BTreeMap<DocId, Value>, SQLError> {
         self.get_document_fields(table, ids, field)
+    }
+    fn capture_document_filter(
+        &self,
+        table: &str,
+        ids: &uqa_execution::query::SelectedIds,
+        field: &str,
+        predicate: &uqa_core::Predicate,
+        bytes: usize,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<uqa_execution::query::scored_input::CapturedScoredEntries, SQLError> {
+        let state = self.require_query_table(table)?;
+        let columns = state.columns.snapshot();
+        let changes = self.command_overlay_changes(table)?;
+        let documents = state.document_store.read();
+        uqa_execution::query::document_projection::FilterProjection {
+            source: documents.as_ref(),
+            changes: changes.as_ref(),
+            definitions: &columns,
+        }
+        .capture(table, ids, field, predicate, bytes, cancellation)
     }
 }
 

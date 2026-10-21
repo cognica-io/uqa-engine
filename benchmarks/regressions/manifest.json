@@ -19948,6 +19948,114 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_filtered_text_scores_do_not_retain_complete_child_postings",
+      "cases": 2,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded mixed retrieval COPY",
+      "workload": "Cold OR and ordinary AND over 32,768 rows, with and without a B-tree, under 64KiB work memory.",
+      "invariant": "Exact identities and counts below the unchanged 2MiB peak allocation ceiling.",
+      "case_names": [
+        "case_1_projected_field",
+        "case_2_indexed_field"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_filtered_text_capture_keeps_scores_nulls_overlay_and_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Mixed retrieval provider generations",
+      "workload": "Indexed/unindexed OR, AND, NOT and NULL predicates, private changes, rollback, output-time peer commits and reopen on four providers.",
+      "invariant": "Native text score bits, zero relational scores and original statement support survive; later queries see committed changes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_intersection_filters_share_complete_support_and_original_score_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Captured filter support",
+      "workload": "Two complete text operands and filters surrounding them, with spill forced.",
+      "invariant": "Filters read only the completed support intersection; branch scheduling and exact left-to-right score bits are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_filter_errors_keep_original_precedence_after_failed_or_empty_siblings",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Captured filter error precedence",
+      "workload": "Failed or empty retrieval siblings before two filter failures.",
+      "invariant": "All branches execute, empty support does not suppress validation, and the first original branch error wins.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_filter_reads_only_selected_fields_and_preserves_null_membership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Captured projected filter membership",
+      "workload": "Selected NULL and numeric fields with unselected unrelated rows.",
+      "invariant": "Only selected fields are read and exact NULL/numeric support has zero scores.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_filter_preserves_read_errors_before_missing_document_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Captured projected filter errors",
+      "workload": "Missing promised rows, a later source error and cancellation.",
+      "invariant": "Source reads complete before missing-row diagnostics; original source errors and cancellation propagate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_filter_does_not_retain_wide_projected_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Bounded fallback field projection",
+      "workload": "513 selected 32KiB values through a field-only relation adapter.",
+      "invariant": "Exact IDs with less than 512KiB additional allocation, without retaining the 16MiB projected population.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scored_capture_replay_shares_input_and_releases_the_final_owner",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Immutable scored input replay",
+      "workload": "Independent readers over forced spill with full-width identities and negative zero.",
+      "invariant": "Readers share original score bits without resetting consumed input, and final owner release removes spill.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
