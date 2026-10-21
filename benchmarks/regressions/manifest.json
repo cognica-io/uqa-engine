@@ -18663,6 +18663,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "fallible_index_validation_captures_identities_with_bounded_workspace",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/value_index/tests/comparison_capture.rs",
+      "capability": "Bounded fallible index validation",
+      "workload": "65,536 retained table identities, a fallible array index and exclusion of the updated row, under 64KiB work memory.",
+      "invariant": "Capture all identities before reading values; compare 65,535 other rows in original order with less than 512KiB peak additional allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "fallible_index_identity_capture_preserves_typed_failure_before_row_reads",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/value_index/tests/comparison_capture.rs",
+      "capability": "Bounded fallible index validation",
+      "workload": "The retained table rejects a later identity page with a typed memory error during index validation and direct selected-snapshot capture.",
+      "invariant": "Both page adapters retain SQLSTATE 53200 and capture failure precedes every row read.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

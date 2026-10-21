@@ -474,3 +474,5 @@ fn rollbacks_leave_the_rows_they_undo_out_of_every_lookup() {
     );
     assert_lookups(&engine, &[(60, &[]), (11, &[]), (10, &[1])]);
 }
+
+mod comparison_capture;
