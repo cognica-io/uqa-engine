@@ -14,6 +14,8 @@ use crate::{
 use uqa_core::{CancellationToken, ScoredEntry, Value};
 use uqa_sql::SQLError;
 
+mod merge;
+
 pub(crate) struct ScoredEntryCapture {
     rows: SpillBuffer,
     writer: SpillBatchWriter,

@@ -4,40 +4,53 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Capture complete single-field text scores before document reads, without population-sized postings.
+//! Capture complete text-only trees before document reads, without population-sized postings.
 
 use super::{DriverResult, OperatorTree, PhysicalRetrievalDriver, TextScoringMode};
 use crate::query::scored_input::{CapturedScoredEntries, ScoredEntryCapture};
+use uqa_core::CancellationToken;
+
+#[cfg(test)]
+mod tests;
+mod tree;
 
 impl PhysicalRetrievalDriver<'_> {
     pub(in crate::operator_tree) fn capture_text_scores(
         &self,
         tree: &OperatorTree,
     ) -> DriverResult<Option<CapturedScoredEntries>> {
-        let OperatorTree::Term {
-            field: Some(field),
-            query,
-            scoring,
-            top_k: None,
-        } = tree
-        else {
+        if !tree::complete_text_tree(tree) {
             return Ok(None);
-        };
-        let scoring = Self::bound_text_scoring(*scoring)?;
+        }
+        tree::capture(
+            tree,
+            self.context.runtime.work_mem_bytes()?,
+            &self.context.runtime.cancellation_token(),
+            &|field, query, scoring, bytes| self.capture_text_leaf(field, query, scoring, bytes),
+        )
+        .map(Some)
+    }
+
+    fn capture_text_leaf(
+        &self,
+        field: &str,
+        query: &str,
+        scoring: Option<TextScoringMode>,
+        bytes: usize,
+    ) -> DriverResult<CapturedScoredEntries> {
+        let scoring = Self::bound_text_scoring(scoring)?;
         self.context
             .text
             .validate_text_search_field(self.table, field)?;
         let mode = self.text_scoring_mode(field, scoring)?;
-        let mut entries = ScoredEntryCapture::new(
-            self.context.runtime.work_mem_bytes()?,
-            self.context.runtime.cancellation_token(),
-        )?;
+        let mut entries =
+            ScoredEntryCapture::new(bytes, self.context.runtime.cancellation_token())?;
         self.context
             .text
             .visit_search_leaf(self.table, field, query, &mode, &mut |entry| {
                 entries.push(entry)
             })?;
-        entries.finish().map(Some)
+        entries.finish()
     }
 
     pub(super) fn bound_text_scoring(

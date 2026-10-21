@@ -19717,6 +19717,101 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_text_boolean_fold_preserves_support_and_native_score_bits",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Ordered text score composition",
+      "workload": "Three overlapping score-only inputs with disjoint keys, zero, maximum u64 and a non-associative floating-point example.",
+      "invariant": "Union/intersection support and every score bit equal the original left-to-right posting fold.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_text_branches_all_run_before_the_first_error_is_reported",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Complete text branch error precedence",
+      "workload": "An empty intersection child followed by two failing text children, plus an empty union.",
+      "invariant": "Both failing children execute, the first typed error wins, and an empty union remains empty.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_text_capture_declines_non_score_and_limited_operands",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Text capture carrier eligibility",
+      "workload": "Nested text unions/intersections, a top-k term and a phrase carrier.",
+      "invariant": "Only complete score-only text operands enter this capture; unsupported payloads and limited candidates retain their original executor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_text_boolean_population_stays_within_its_shared_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "Bounded Boolean text score population",
+      "workload": "Three 65,536-entry branches in a nested union/intersection under a shared 64KiB allowance.",
+      "invariant": "All ordered identities and exact score bits survive with peak allocation below 512KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "score_only_merge_releases_both_inputs_after_cancellation_or_empty_support",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Text merge spill cleanup",
+      "workload": "Two disjoint spilled inputs with normal completion or pre-requested cancellation.",
+      "invariant": "Both unread input files are removed; empty support remains empty and cancellation preserves SQLSTATE 57014.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_boolean_text_scores_do_not_retain_complete_child_postings",
+      "cases": 2,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded public Boolean text COPY",
+      "workload": "Cold 32,768-row text AND/OR output under work_mem 64KiB with a validating discard sink.",
+      "invariant": "Every ascending ID is emitted exactly once while peak additional allocation remains below 2MiB.",
+      "case_names": [
+        "case_1_intersection",
+        "case_2_union"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_boolean_text_capture_preserves_scores_and_statement_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Boolean text COPY provider snapshots",
+      "workload": "Partially overlapping alpha/beta scores on four providers; persistent peers replace/delete/insert during output and the database is reopened.",
+      "invariant": "Exact union score bits and statement-generation output match native leaf scoring; later queries and reopen observe only committed changes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

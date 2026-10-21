@@ -91,3 +91,35 @@ fn scored_capture_drop_removes_unread_spill() {
     drop(rows);
     assert!(!path.exists());
 }
+
+#[test]
+fn score_only_merge_releases_both_inputs_after_cancellation_or_empty_support() {
+    for cancelled in [false, true] {
+        let cancellation = CancellationToken::new();
+        let mut inputs = Vec::new();
+        let mut paths = Vec::new();
+        for id in [1, 2] {
+            let mut capture = ScoredEntryCapture::new(0, cancellation.clone()).unwrap();
+            capture
+                .push(ScoredEntry {
+                    doc_id: id,
+                    score: 0.5,
+                })
+                .unwrap();
+            paths.push(capture.rows.spill_path().unwrap().to_path_buf());
+            inputs.push(capture.finish().unwrap());
+        }
+        let right = inputs.pop().unwrap();
+        let left = inputs.pop().unwrap();
+        if cancelled {
+            cancellation.cancel();
+        }
+        let result = left.merge_text_scores(right, true, 0, cancellation);
+        if cancelled {
+            assert_eq!(result.err().unwrap().sqlstate(), Some("57014"));
+        } else {
+            assert_eq!(result.unwrap().count(), 0);
+        }
+        assert!(paths.iter().all(|path| !path.exists()));
+    }
+}
