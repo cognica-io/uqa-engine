@@ -174,3 +174,94 @@ fn source(table: Arc<dyn TableRead>, local: bool) -> Box<dyn RowSource> {
         )
     }
 }
+
+#[test]
+fn ordered_typed_scan_batches_do_not_reencode_the_complete_schema() {
+    use crate::query::local_table::{LocalTableRowSource, LocalTableScanConfig};
+    use uqa_sql::ColumnType;
+
+    let columns = (0..64).map(|n| format!("value_{n}")).collect::<Vec<_>>();
+    let schema = crate::RowSchema::with_types(
+        columns.clone(),
+        vec![Some(ColumnType::BigInteger); columns.len()],
+    );
+    let mut observations = Vec::new();
+    for (shared, local) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut rows = MemoryDocumentStore::new();
+        for id in 1..=512 {
+            rows.put(
+                id,
+                columns
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, name)| (name.clone(), Value::Int(id as i64 * 64 + slot as i64)))
+                    .collect(),
+            )
+            .unwrap();
+        }
+        let table = Arc::new(Table(RwLock::new(Box::new(Documents {
+            rows,
+            shared,
+            visited: Arc::new(AtomicUsize::new(0)),
+        }))));
+        let mut scan: Box<dyn RowSource> = if local {
+            Box::new(
+                LocalTableRowSource::new(LocalTableScanConfig {
+                    cancellation: uqa_core::CancellationToken::new(),
+                    serializable: None,
+                    table_name: "typed_scan".into(),
+                    table,
+                    column_definitions: Arc::new(Vec::new()),
+                    columns: columns.clone(),
+                    schema: columns.clone(),
+                    physical_schema: schema.clone(),
+                    metadata: uqa_sql::plan::source_projection::RelationMetadataProjection::default(
+                    ),
+                    table_oid: None,
+                    predicate: None,
+                    estimated_cardinality: 512,
+                    lock_origin: None,
+                    recheck_pins: None,
+                    candidates: None,
+                    command_changes: None,
+                })
+                .with_scan_batch_bytes(4096),
+            )
+        } else {
+            let mut scan = ScoredDocumentSource::new(
+                "typed_scan",
+                table,
+                ScoredInput::All,
+                columns.clone(),
+                None,
+                None,
+            )
+            .with_scan_batch_bytes(4096);
+            scan.schema = schema.clone();
+            Box::new(scan)
+        };
+        let allocation = allocation_counter::measure(|| {
+            for id in 1..=512 {
+                let rows = scan.next_physical_batch(1).unwrap();
+                assert_eq!(rows.len(), 1);
+                for slot in 0..64 {
+                    assert_eq!(
+                        rows[0].value(slot),
+                        Some(&Value::Int(id * 64 + slot as i64))
+                    );
+                }
+            }
+            assert!(scan.next_physical_batch(1).unwrap().is_empty());
+        });
+        observations.push((shared, local, allocation));
+    }
+    for (shared, local, allocation) in &observations {
+        eprintln!("shared={shared}, local={local}: {allocation:?}");
+    }
+    assert!(
+        observations
+            .iter()
+            .all(|(_, _, a)| a.count_total < 8192 && a.bytes_max < 256 * 1024),
+        "{observations:?}"
+    );
+}

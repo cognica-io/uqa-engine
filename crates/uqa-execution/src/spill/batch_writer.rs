@@ -13,6 +13,7 @@ pub(crate) struct SpillBatchWriter {
     schema: RowSchema,
     pending: Vec<PhysicalRow>,
     pending_size: EncodedBatchSizer,
+    empty_size: EncodedBatchSizer,
 }
 
 impl SpillBatchWriter {
@@ -22,6 +23,7 @@ impl SpillBatchWriter {
             schema,
             pending: Vec::new(),
             pending_size,
+            empty_size: pending_size,
         })
     }
 
@@ -56,7 +58,7 @@ impl SpillBatchWriter {
             self.schema.clone(),
             std::mem::take(&mut self.pending),
         ))?;
-        self.pending_size = EncodedBatchSizer::new(&self.schema)?;
+        self.pending_size = self.empty_size;
         Ok(())
     }
 }

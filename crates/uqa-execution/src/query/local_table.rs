@@ -19,6 +19,7 @@ pub type SharedLockOrigin = (Arc<str>, Arc<str>);
 
 pub struct LocalTableRowSource {
     scan_batch_bytes: usize,
+    batch_layout: crate::spill::EncodedBatchLayout,
     shared_page_rows: usize,
     cancellation: uqa_core::CancellationToken,
     serializable: crate::serializable::SerializableScan,
@@ -149,6 +150,7 @@ impl LocalTableRowSource {
     pub fn new(config: LocalTableScanConfig) -> Self {
         Self {
             scan_batch_bytes: 64 * 1024 * 1024,
+            batch_layout: crate::spill::EncodedBatchLayout::default(),
             shared_page_rows: 1,
             cancellation: config.cancellation,
             serializable: crate::serializable::SerializableScan::new(config.serializable),
