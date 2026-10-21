@@ -224,3 +224,35 @@ fn foreign_or_incomplete_reservations_cannot_replace_the_original_index_allowanc
     drop(index);
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn retained_knn_keeps_selection_workspace_independent_of_corpus_size() {
+    let control = StorageReadControl::with_limit(16 * 1024 * 1024);
+    let mut builder = RetainedVectorIndexBuilder::new(2, &control);
+    for id in (1..=16384).rev() {
+        append(&mut builder, &control, id, vec![vec![1.0, 0.0]]).unwrap();
+    }
+    let retained = builder.finish().unwrap();
+    let retained_bytes = control.memory().used();
+    let remaining = control
+        .memory()
+        .reserve(control.memory().limit() - retained_bytes - 32 * 1024)
+        .unwrap();
+    for k in [0, 1, 8] {
+        let allocation = allocation_counter::measure(|| {
+            let result = retained.search_knn(&[1.0, 0.0], k).unwrap();
+            assert_eq!(result.len(), k);
+            for (position, entry) in result.iter().enumerate() {
+                assert_eq!(entry.doc_id, position as u64 + 1);
+                assert_eq!(entry.payload.score.to_bits(), 1.0_f64.to_bits());
+            }
+        });
+        assert!(allocation.bytes_max < 32 * 1024, "{allocation:?}");
+    }
+    assert!(matches!(
+        retained.search_knn(&[1.0, 0.0], usize::MAX),
+        Err(StorageBackendError::Memory(_))
+    ));
+    drop(remaining);
+    assert_eq!(control.memory().used(), retained_bytes);
+}

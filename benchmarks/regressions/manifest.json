@@ -20374,6 +20374,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_knn_keeps_selection_workspace_independent_of_corpus_size",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/retained/tests.rs",
+      "capability": "Bounded exact vector selection",
+      "workload": "16,384 retained vectors with K 0, 1 and 8 under 32KiB additional workspace, plus an unbounded requested result.",
+      "invariant": "Finite K preserves exact IDs and score bits without a corpus-sized score buffer; oversized output reports a typed memory error and releases temporary leases.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
