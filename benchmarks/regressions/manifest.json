@@ -18689,6 +18689,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_matches_ordered_replacements_and_independent_snapshots",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Bounded retained value indexes",
+      "workload": "160 ordered replacements/deletions with zero and 64KiB spill thresholds, independent roots and clear.",
+      "invariant": "Exact identity and value traversal matches the reference map; AVL heights, snapshot isolation and cleanup remain valid.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_keeps_exact_carriers_and_full_width_identities",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Bounded retained value indexes",
+      "workload": "Full-width identities and mixed exact numerics, signed zero, NULL, non-finite floats, bytes and wide Unicode.",
+      "invariant": "Preserve representation identity, exact numeric equality, ordering and strict/inclusive range counts.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_bounds_large_keys_and_repeated_equality_work",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Bounded retained value indexes",
+      "workload": "256 keys each exceeding 8KiB, 64KiB resident allowance and 32 exact equality probes.",
+      "invariant": "Peak additional allocation stays below 512KiB; at most 640 decoded keys for repeated probes and zero for an unbounded cardinality count.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_failure_and_early_stop_preserve_prior_roots",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Bounded retained value indexes",
+      "workload": "Failed allocation, current cancellation, seven-row consumer stop and callback failure on retained roots.",
+      "invariant": "Failed mutation preserves earlier and current roots, and callbacks stop at the first boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_ordered_build_rejects_invalid_sources_without_publishing",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Bounded retained value indexes",
+      "workload": "Short, long, unsorted and repeated-identity input plus all intervals over 63 sorted keys.",
+      "invariant": "Reject invalid builders without publishing; subtree counts match exact bounded interval cardinalities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_rejects_invalid_chunk_lengths_before_allocation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Bounded retained value indexes",
+      "workload": "A retained node declares an impossible payload length.",
+      "invariant": "Reject malformed chunk lengths before large allocation with a 128KiB additional peak ceiling.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

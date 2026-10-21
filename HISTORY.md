@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Add bounded, searchable value-index ownership over encrypted private-record snapshots, preserving exact key order, atomic roots and storage errors.
+
 - Bound fallible index-comparison identities before row reads, preserving exclusions, private changes and typed page errors.
 
 - Visit stored B-tree keys through one retained provider boundary, preserving snapshot visibility and first consumer errors without collecting the complete population.
