@@ -28,6 +28,7 @@ on:
       - "!scripts/tests/test_release_recovery.py"
       - "benchmarks/**"
       - ".github/scripts/**"
+      - "!.github/scripts/install-manylinux-build-deps.sh"
       - rust-toolchain.toml
       - ".cargo/**"
       - .github/workflows/workspace-tests.yml

@@ -21,10 +21,12 @@ install_manylinux_build_deps() {
   fi
 
   if (( ${#packages[@]} > 0 )); then
+    # Perl and libclang come from the base distribution, not EPEL.
+    # Unrelated repository metadata must not be a build prerequisite.
     if command -v dnf >/dev/null 2>&1; then
-      dnf install -y "${packages[@]}"
+      dnf install -y --disablerepo='epel*' "${packages[@]}"
     elif command -v yum >/dev/null 2>&1; then
-      yum install -y "${packages[@]}"
+      yum install -y --disablerepo='epel*' "${packages[@]}"
     else
       echo "No supported package manager is available for manylinux build dependencies" >&2
       return 1

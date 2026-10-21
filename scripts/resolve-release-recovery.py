@@ -58,6 +58,53 @@ def transport_only_wheel_failure(job: dict) -> bool:
     )
 
 
+def dependency_setup_wheel_failure(job: dict, log: str) -> bool:
+    """Recognize an EPEL metadata failure before maturin or package checks run."""
+    if job.get("name") not in {"python / linux x86_64", "python / linux aarch64"}:
+        return False
+    steps = job.get("steps", [])
+    statuses = {step["name"]: step["conclusion"] for step in steps}
+    failures = {name for name, status in statuses.items() if status == "failure"}
+    if (job.get("conclusion") != "failure" or len(statuses) != len(steps)
+            or failures != {"Build wheel"}
+            or any(statuses.get(name) != "skipped" for name in WHEEL_CHECKS - {"Build wheel"})
+            or any(status not in {"success", "failure", "skipped"} for status in statuses.values())):
+        return False
+    clean = re.sub(r"\x1b\[[0-9;]*m", "", log)
+    lines = [re.sub(r"^\d{4}-\d{2}-\d{2}T\S+Z ", "", line) for line in clean.splitlines()]
+    marker = "##[group]Run before script"
+    if lines.count(marker) != 1:
+        return False
+    setup = []
+    for line in lines[lines.index(marker) + 1:]:
+        if line.startswith(("##[group]", "##[endgroup]")):
+            break
+        setup.append(line)
+    if any(re.search(r"\b(?:Compiling|Checking) \S+ v\d|maturin build", line) for line in setup):
+        return False
+    return any(re.fullmatch(
+        r"Error: Failed to download metadata for repo 'epel[^']*': "
+        r"Cannot download repomd\.xml: Cannot download repodata/repomd\.xml: All mirrors were tried",
+        line,
+    ) for line in setup)
+
+
+def dependency_failure_logs(repository: str, jobs: list[dict]) -> dict[str, str]:
+    logs = {}
+    for job in jobs:
+        if (job["name"] in {"python / linux x86_64", "python / linux aarch64"}
+                and job["conclusion"] == "failure"
+                and any(step["name"] == "Build wheel" and step["conclusion"] == "failure"
+                        for step in job.get("steps", []))):
+            job_id = job["id"]
+            if not isinstance(job_id, int) or job_id <= 0:
+                raise ValueError("invalid failed wheel job identity")
+            logs[job["name"]] = subprocess.check_output(
+                ["gh", "api", f"repos/{repository}/actions/jobs/{job_id}/logs"], text=True,
+            )
+    return logs
+
+
 def api(endpoint: str) -> dict:
     return json.loads(subprocess.check_output(["gh", "api", endpoint], text=True))
 
@@ -105,7 +152,7 @@ def publication_complete(repository: str, tag: str, source_run_id: int) -> bool:
     )
 
 
-def validate(run: dict, tag: str, commit: str, repository: str, jobs: list[dict], artifacts: list[dict], *, allow_python_repair: bool = False) -> list[dict] | None:
+def validate(run: dict, tag: str, commit: str, repository: str, jobs: list[dict], artifacts: list[dict], *, allow_python_repair: bool = False, dependency_logs: dict[str, str] | None = None) -> list[dict] | None:
     if (
         run["status"] != "completed" or run["conclusion"] != "failure"
         or run["event"] not in {"push", "workflow_dispatch"}
@@ -117,9 +164,17 @@ def validate(run: dict, tag: str, commit: str, repository: str, jobs: list[dict]
     statuses = {job["name"]: job["conclusion"] for job in jobs}
     if len(statuses) != len(jobs):
         raise ValueError("duplicate build job identities")
+    setup_failures = {
+        job["name"] for job in jobs
+        if allow_python_repair and dependency_setup_wheel_failure(
+            job, (dependency_logs or {}).get(job["name"], ""))
+    }
     repairable = {
         job["name"]: WHEEL_MATRIX[job["name"]] for job in jobs
-        if allow_python_repair and job["name"] in WHEEL_MATRIX and transport_only_wheel_failure(job)
+        if allow_python_repair and job["name"] in WHEEL_MATRIX and (
+            transport_only_wheel_failure(job)
+            or job["name"] in setup_failures
+        )
     }
     deferred = set(repairable)
     minimum = "python / minimum supported python"
@@ -139,6 +194,8 @@ def validate(run: dict, tag: str, commit: str, repository: str, jobs: list[dict]
                artifact["name"].startswith("usql-") for artifact in artifacts):
         required |= {"usql-" + target for target in TARGETS}
     available = {artifact["name"] for artifact in artifacts if artifact["expired"] is False and artifact["workflow_run"]["head_sha"] == commit and artifact["workflow_run"]["id"] == run["id"]}
+    if any("python-wheel-" + WHEEL_MATRIX[name]["target"] in available for name in setup_failures):
+        raise ValueError("unexpected wheel artifact from failed dependency setup")
     missing = required - available
     rebuild = {"python-wheel-" + item["target"]: item for item in repairable.values()}
     if missing - rebuild.keys():
@@ -251,7 +308,8 @@ def main() -> None:
         raise ValueError("invalid release commit")
     jobs = pages(f"repos/{repository}/actions/runs/{run['id']}/jobs", "jobs")
     artifacts = pages(f"repos/{repository}/actions/runs/{run['id']}/artifacts", "artifacts")
-    matrix = validate(run, tag, commit, repository, jobs, artifacts, allow_python_repair=True)
+    matrix = validate(run, tag, commit, repository, jobs, artifacts, allow_python_repair=True,
+                      dependency_logs=dependency_failure_logs(repository, jobs))
     retained_run = previous_repair(repository, run, matrix)
     print(f"Recover {tag} from run {run['id']} at {commit}; missing wheels: {matrix}; retained repair run: {retained_run}.")
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
