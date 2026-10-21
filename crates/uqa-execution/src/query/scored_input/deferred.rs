@@ -20,7 +20,7 @@ pub(in crate::query) fn defer_entries<'a>(
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     let Some(pending) = pending else {
         return Ok(Box::new(TableScan::new(Box::new(
-            source.with_recheck_pins(pins),
+            source.with_recheck_pins(pins)?,
         ))));
     };
     let schema = source
@@ -40,7 +40,7 @@ pub(in crate::query) fn defer_entries<'a>(
             Ok(Box::new(
                 source
                     .with_retrieval_entries(entries)
-                    .with_recheck_pins(pins),
+                    .with_recheck_pins(pins)?,
             ))
         }),
     )))

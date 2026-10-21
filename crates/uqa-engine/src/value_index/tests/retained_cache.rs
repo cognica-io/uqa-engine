@@ -117,20 +117,24 @@ fn cold_value_cache_preserves_persisted_expression_values_after_routine_replacem
     drop(engine);
     let engine = open(kind, &path);
     engine.sql("SET work_mem = '64kB'", &[]).unwrap();
-    assert!(engine
-        .ensure_value_index("expression_keys", &field)
-        .unwrap());
-    let table = engine.require_table("expression_keys").unwrap();
-    let indexes = table.value_indexes.read();
-    let index = &indexes[&field];
-    assert!(index.is_spilled());
-    for (id, expected) in expected {
-        assert!(index
-            .stored_value(id, &engine.query_retention_control().unwrap())
-            .unwrap()
-            .unwrap()
-            .has_same_representation(&expected));
-    }
+    engine
+        .with_direct_read_snapshot(|engine| {
+            let table = engine.require_query_table("expression_keys")?;
+            assert!(engine
+                .ensure_query_value_index("expression_keys", &table, &field)
+                .unwrap());
+            let indexes = table.value_indexes.read();
+            let index = &indexes[&field];
+            assert!(index.is_spilled());
+            for (id, expected) in expected {
+                assert!(index
+                    .stored_value(id, &engine.query_retention_control()?)?
+                    .unwrap()
+                    .has_same_representation(&expected));
+            }
+            Ok(())
+        })
+        .unwrap();
 }
 
 #[rstest::rstest]

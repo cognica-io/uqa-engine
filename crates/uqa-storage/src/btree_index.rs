@@ -158,6 +158,7 @@ impl BTreeIndex {
                 self.entries
                     .range((Bound::Unbounded, Bound::Included(t.clone()))),
             ),
+            Predicate::Between { low, high } if low > high => Box::new(std::iter::empty()),
             Predicate::Between { low, high } => Box::new(
                 self.entries
                     .range((Bound::Included(low.clone()), Bound::Included(high.clone()))),
@@ -195,6 +196,24 @@ impl BTreeIndex {
             .fold(0usize, |total, (_, bucket)| {
                 total.saturating_add(bucket.len())
             })
+    }
+
+    /// Borrow matching identities in physical key/bucket order. A document stored under multiple keys may occur more than once; callers that need set order sort and deduplicate at their own output boundary. Returns false when the visitor stops.
+    pub fn visit_matching_ids(
+        &self,
+        predicate: &Predicate,
+        visit: &mut dyn FnMut(DocId) -> bool,
+    ) -> bool {
+        for (value, bucket) in self.matching_entries(predicate) {
+            if Self::entry_matches(predicate, value) {
+                for &id in bucket {
+                    if !visit(id) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 
     /// Run `predicate` against the index, returning the matching `doc_ids`
@@ -257,6 +276,42 @@ mod tests {
             high: Value::Int(2025),
         });
         assert_eq!(ids(&pl), vec![2, 3, 4]);
+    }
+
+    #[test]
+    fn reversed_between_bounds_have_empty_support_in_every_access_path() {
+        let index = idx_with_ints();
+        let predicate = Predicate::Between {
+            low: Value::Int(2030),
+            high: Value::Int(2020),
+        };
+        assert!(index.scan(&predicate).is_empty());
+        assert_eq!(index.estimate_cardinality(&predicate), 0);
+        assert!(index.visit_matching_ids(&predicate, &mut |_| {
+            panic!("reversed range returned an identity")
+        }));
+    }
+
+    #[test]
+    fn btree_identity_visits_preserve_key_order_and_stop_at_the_selected_row() {
+        let mut index = BTreeIndex::new("v");
+        for (id, value) in [(7, 3), (1, 9), (7, 9), (u64::MAX, 0)] {
+            index.insert(id, Value::Int(value));
+        }
+        let mut visited = Vec::new();
+        assert!(index.visit_matching_ids(&Predicate::IsNotNull, &mut |id| {
+            visited.push(id);
+            true
+        }));
+        assert_eq!(visited, [u64::MAX, 7, 1, 7]);
+        visited.clear();
+        assert!(
+            !index.visit_matching_ids(&Predicate::GreaterThan(Value::Int(0)), &mut |id| {
+                visited.push(id);
+                id != 1
+            })
+        );
+        assert_eq!(visited, [7, 1]);
     }
 
     #[test]

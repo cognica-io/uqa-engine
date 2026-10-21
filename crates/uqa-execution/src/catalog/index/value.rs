@@ -345,6 +345,50 @@ impl ColumnValueIndex {
         self.scan_observing_with_catalog(predicate, None, observe)
     }
 
+    /// Capture predicate support without materializing posting payloads. SQL-dependent comparisons keep document order; plain B-tree candidates may arrive in key order.
+    pub fn visit_observing_with_catalog(
+        &self,
+        predicate: &Predicate,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+        observe: impl FnOnce() -> Result<(), uqa_sql::SQLError>,
+        visit: &mut dyn FnMut(DocId) -> Result<(), uqa_sql::SQLError>,
+    ) -> Result<bool, uqa_sql::SQLError> {
+        let Some(index) = &self.index else {
+            return Ok(false);
+        };
+        if comparison::needs_sql_comparison(predicate, self.comparison.can_fail()) {
+            observe()?;
+            for (&id, value) in &self.values {
+                if comparison::matches(value, predicate, catalog)? {
+                    visit(id)?;
+                }
+            }
+            return Ok(true);
+        }
+        if !self.supports(predicate) {
+            return Ok(false);
+        }
+        observe()?;
+        if matches!(predicate, Predicate::IsNull) {
+            for &id in &self.nulls {
+                visit(id)?;
+            }
+        } else {
+            let mut failure = None;
+            index.visit_matching_ids(predicate, &mut |id| match visit(id) {
+                Ok(()) => true,
+                Err(error) => {
+                    failure = Some(error);
+                    false
+                }
+            });
+            if let Some(error) = failure {
+                return Err(error);
+            }
+        }
+        Ok(true)
+    }
+
     /// Evaluate catalog-dependent keys in the same catalog generation as the caller.
     pub fn scan_observing_with_catalog(
         &self,

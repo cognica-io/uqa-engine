@@ -160,6 +160,57 @@ impl crate::Engine {
         )
     }
 
+    pub(crate) fn value_index_query_visit(
+        &self,
+        table: &str,
+        field: &str,
+        predicate: &Predicate,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        let read = self.serializable_table_read(table)?;
+        let state = self.require_query_table(table)?;
+        let field = ValueIndexKey::Column(field.into());
+        let columns = state.columns.snapshot();
+        if !state.value_indexes.read().contains_key(&field) {
+            if let Some((name, backend)) = self
+                .value_index_probe_backend(table, &state, &field)
+                .map_err(|error| {
+                    uqa_execution::storage_errors::storage_error(
+                        "select stored value index",
+                        &error,
+                    )
+                })?
+            {
+                if uqa_execution::catalog::index::value::visit_durable_equality(
+                    backend, &name, &field, predicate, visit,
+                )? {
+                    if let Some(read) = &read {
+                        read.observe_column_index(&columns, &field, predicate)?;
+                    }
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(self
+            .read_value_index_state(table, &state, &field, |index| {
+                index
+                    .visit_observing_with_catalog(
+                        predicate,
+                        Some(self),
+                        &self.query_retention_control()?,
+                        || {
+                            if let Some(read) = &read {
+                                read.observe_column_index(&columns, &field, predicate)?;
+                            }
+                            Ok(())
+                        },
+                        visit,
+                    )
+                    .map(|supported| supported.then_some(()))
+            })?
+            .is_some())
+    }
+
     pub(crate) fn value_index_scan_state(
         &self,
         table: &str,

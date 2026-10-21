@@ -51,6 +51,7 @@ pub mod document_projection;
 pub mod exact_lookup;
 pub mod generated;
 pub(crate) mod index_candidates;
+pub use index_candidates::{SelectedIdCursor, SelectedIds};
 pub mod indexed_filter;
 pub(crate) mod key_candidates;
 pub mod local_table;

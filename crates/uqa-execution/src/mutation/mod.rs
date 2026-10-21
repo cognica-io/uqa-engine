@@ -60,6 +60,7 @@ pub mod statement_end;
 
 pub mod delete;
 mod row_membership;
+pub(crate) use row_membership::PhysicalRowBuffer;
 
 pub mod dispatch;
 

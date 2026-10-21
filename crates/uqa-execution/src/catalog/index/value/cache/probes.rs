@@ -56,6 +56,7 @@ impl ValueIndexCache {
                 result.map_err(storage)?;
             } else {
                 for (&id, value) in &self.policy.values {
+                    control.check().map_err(storage)?;
                     if comparison::matches(value, predicate, catalog)? {
                         visit(id)?;
                     }
@@ -67,15 +68,15 @@ impl ValueIndexCache {
             return Ok(false);
         }
         let Some(values) = &self.retained else {
-            if matches!(predicate, Predicate::Equals(_) | Predicate::IsNull) {
-                return self
-                    .policy
-                    .visit_key_candidates_with_catalog(predicate, catalog, visit);
-            }
-            for entry in self.policy.scan(predicate).expect("supported").entries() {
-                visit(entry.doc_id)?;
-            }
-            return Ok(true);
+            return self.policy.visit_observing_with_catalog(
+                predicate,
+                catalog,
+                || Ok(()),
+                &mut |id| {
+                    control.check().map_err(storage)?;
+                    visit(id)
+                },
+            );
         };
         ranges(predicate, &mut |low, high| {
             let mut failure = None;
@@ -89,6 +90,25 @@ impl ValueIndexCache {
             failure.map_or_else(|| result.map_err(storage), Err)
         })?;
         Ok(true)
+    }
+
+    pub fn visit_observing_with_catalog(
+        &self,
+        predicate: &Predicate,
+        catalog: Option<&dyn SQLValueCatalog>,
+        control: &StorageReadControl,
+        observe: impl FnOnce() -> Result<(), SQLError>,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        if self.is_carried()
+            || (!self.supports(predicate)
+                && !comparison::needs_sql_comparison(predicate, self.policy.comparison.can_fail()))
+        {
+            return Ok(false);
+        }
+        control.check().map_err(storage)?;
+        observe()?;
+        self.visit(predicate, catalog, control, visit)
     }
 
     pub fn scan_observing_with_catalog(

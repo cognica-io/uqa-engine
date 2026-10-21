@@ -108,6 +108,35 @@ impl QueryTableAccess for Engine {
     }
 }
 impl uqa_execution::query::indexed_filter::QueryIndexRead for Engine {
+    fn visit_value_index(
+        &self,
+        table: &str,
+        field: &str,
+        predicate: &uqa_core::Predicate,
+        visit: &mut dyn FnMut(uqa_core::DocId) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        self.value_index_query_visit(table, field, predicate, visit)
+    }
+
+    fn visit_exact_command_matches(
+        &self,
+        table: &str,
+        field: &str,
+        value: &uqa_core::Value,
+        visit: &mut dyn FnMut(uqa_core::DocId) -> Result<(), SQLError>,
+    ) -> Result<uqa_execution::query::document_changes::DocumentChanges, SQLError> {
+        let table = self.command_overlay_table_name(table)?;
+        uqa_execution::mutation::overlay::CommandMutationOverlay::visit_column_matches_with_catalog(
+            &mut self.session.command_mutation_overlays.lock(),
+            &table,
+            &[field.to_owned()],
+            std::slice::from_ref(value),
+            &self.query_retention_control()?,
+            Some(self),
+            visit,
+        )
+    }
+
     fn value_index_scan(
         &self,
         table: &str,

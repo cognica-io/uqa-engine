@@ -19360,6 +19360,139 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "indexed_scan_candidates_capture_large_support_without_posting_materialization",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/index_candidates/tests.rs",
+      "capability": "Bounded scalar index support",
+      "workload": "65,536 reverse-ordered matching identities, 64KiB work memory and complete sequential replay.",
+      "invariant": "Peak additional allocation stays below the unchanged 1MiB ceiling; candidates arrive once in ascending order without materializing a posting list.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_identity_capture_preserves_full_width_order_and_independent_cursors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/index_candidates/tests.rs",
+      "capability": "Frozen index candidate identities",
+      "workload": "Duplicate and unsigned-extreme identities with zero and 64KiB spill thresholds, two independent cursors and source-owner release.",
+      "invariant": "Complete unsigned identity order, uniqueness and frozen cursor lifetime are identical across resident and spilled sources.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_identity_capture_propagates_late_errors_and_cursor_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/index_candidates/tests.rs",
+      "capability": "Candidate capture errors",
+      "workload": "Late source XX001 and cursor cancellation after one emitted identity with resident and forced-spill capture.",
+      "invariant": "Late capture errors prevent a successful selection; 57014 propagates once and exhausted failed cursors do not resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "small_selected_identity_capture_does_not_allocate_spill_or_sort_buffers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/index_candidates/tests.rs",
+      "capability": "Small index candidate overhead",
+      "workload": "One matching identity under a 64MiB configured allowance.",
+      "invariant": "Total allocation stays below 4KiB without preallocating the allowance or opening sort/spill state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_index_candidates_freeze_newest_command_and_fixed_versions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/index_candidates/tests/commands.rs",
+      "capability": "Command-aware bounded index support",
+      "workload": "Two command frames over fixed replacements and deletions, equality/range/NULL predicates, frame rollback and frozen replay.",
+      "invariant": "Newest command masks take precedence over fixed and stored values; capture remains stable after frame changes and hidden command views return the original stored support.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_identity_rechecks_retain_only_pinned_support_and_preserve_pin_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/indexed.rs",
+      "capability": "Bounded indexed tuple rechecks",
+      "workload": "65,536 selected identities and three recheck pins including a missing identity and reverse pin order.",
+      "invariant": "Rechecks retain only matching pins below 512KiB additional allocation, preserve zero unscored values and clear incompatible ordering metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_identity_recheck_propagates_cursor_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/indexed.rs",
+      "capability": "Indexed tuple recheck errors",
+      "workload": "A cancelled spilled candidate source with a matching tuple pin.",
+      "invariant": "Recheck construction propagates 57014 instead of returning missing or partial support.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "btree_identity_visits_preserve_key_order_and_stop_at_the_selected_row",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index.rs",
+      "capability": "Borrowed B-tree candidate visitation",
+      "workload": "Repeated identities across physical keys, an unsigned-extreme ID and early stop.",
+      "invariant": "Physical key/bucket order and duplicates are preserved until the caller chooses set order; the visitor stops at the requested identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "reversed_between_bounds_have_empty_support_in_every_access_path",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index.rs",
+      "capability": "Reversed B-tree range bounds",
+      "workload": "A populated B-tree with an inclusive lower bound larger than its upper bound.",
+      "invariant": "Scans, estimates and borrowed visits return empty support without entering an invalid BTreeMap range.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "indexed_copy_candidates_keep_residuals_private_rows_and_durable_results",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/candidates.rs",
+      "capability": "Public indexed COPY candidate lifetime",
+      "workload": "257 rows and an indexed predicate with a scalar residual; private inserts, deletion and replacement, single-table/join scans, UPDATE, savepoint rollback and reopen on four providers.",
+      "invariant": "COPY results and changed-row counts match independent PostgreSQL 18.4 (87 rows, ID sum 12134), with the same results after rollback and durable reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

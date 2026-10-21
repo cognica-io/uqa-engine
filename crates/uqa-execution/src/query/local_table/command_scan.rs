@@ -29,22 +29,32 @@ impl LocalTableRowSource {
         &mut self,
         max_rows: usize,
     ) -> crate::ExecResult<Vec<crate::PhysicalRow>> {
-        let Some(candidates) = self.candidates.clone() else {
-            return Err(SQLError::Internal("candidate scan has no identities".into()).into());
-        };
+        if self.candidate_cursor.is_none() {
+            self.candidate_cursor = Some(
+                self.candidates
+                    .as_ref()
+                    .ok_or_else(|| SQLError::Internal("candidate scan has no identities".into()))?
+                    .cursor(),
+            );
+        }
         let changes = self.command_changes.clone();
         let mut rows = Vec::new();
-        while rows.len() < max_rows && self.candidate_cursor < candidates.len() {
-            let end = candidates
-                .len()
-                .min(self.candidate_cursor + (max_rows - rows.len()));
-            let page = &candidates[self.candidate_cursor..end];
-            self.candidate_cursor = end;
+        while rows.len() < max_rows {
+            let page = self
+                .candidate_cursor
+                .as_mut()
+                .expect("opened candidate cursor")
+                .by_ref()
+                .take(max_rows - rows.len())
+                .collect::<Result<Vec<_>, _>>()?;
+            if page.is_empty() {
+                break;
+            }
             let mut persisted_ids = Vec::new();
             let mut private_ids = Vec::new();
             {
                 let store = self.table.read_documents();
-                for &id in page {
+                for &id in &page {
                     self.cancellation.check().map_err(SQLError::from)?;
                     self.serializable.observe_row(id)?;
                     let changed = changes
@@ -76,7 +86,7 @@ impl LocalTableRowSource {
             };
             let mut persisted_ids = persisted_ids.into_iter().peekable();
             let mut private_ids = private_ids.into_iter().peekable();
-            for &id in page {
+            for &id in &page {
                 // A present row whose projection names no field has no projected values.
                 let physical = if persisted_ids.next_if_eq(&id).is_some() {
                     persisted.remove(&id)

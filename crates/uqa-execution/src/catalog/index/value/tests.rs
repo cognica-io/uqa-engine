@@ -360,6 +360,24 @@ fn typed_field_probes_preserve_btree_operator_errors() {
                 error.to_string(),
                 format!("could not identify a comparison function for type {name}")
             );
+            let mut observed = false;
+            let error = index
+                .visit_observing_with_catalog(
+                    &predicate,
+                    None,
+                    || {
+                        observed = true;
+                        Ok(())
+                    },
+                    &mut |_| panic!("failed comparison delivered an identity"),
+                )
+                .unwrap_err();
+            assert!(observed);
+            assert_eq!(error.sqlstate(), Some("42883"));
+            assert_eq!(
+                error.to_string(),
+                format!("could not identify a comparison function for type {name}")
+            );
         }
     }
 }

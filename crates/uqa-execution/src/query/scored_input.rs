@@ -35,6 +35,7 @@ use uqa_sql::{
 
 pub enum ScoredInput {
     All,
+    Candidates(super::SelectedIds),
     Entries {
         entries: Vec<ScoredEntry>,
         score_bearing: bool,
@@ -245,6 +246,7 @@ pub struct ScoredDocumentSource {
 pub enum ScoredInputCursor {
     All { after: Option<DocId> },
     Entries(std::vec::IntoIter<ScoredEntry>),
+    Candidates(Box<super::SelectedIdCursor>),
 }
 
 #[derive(Clone, Copy, Default)]
@@ -405,6 +407,20 @@ impl ScoredDocumentSource {
                     })
                     .collect(),
                 true,
+            ),
+            ScoredInput::Candidates(ids) => (
+                ScoredInputCursor::Candidates(Box::new(ids.cursor())),
+                ScoreOrigin::Unscored,
+                ordered_primary_key
+                    .into_iter()
+                    .map(|position| crate::PhysicalOrder {
+                        position,
+                        descending: false,
+                        nulls_first: None,
+                        nullable: false,
+                    })
+                    .collect(),
+                false,
             ),
             ScoredInput::Entries {
                 entries,
@@ -604,30 +620,48 @@ impl ScoredDocumentSource {
     }
 
     /// Pin this scan to a tuple-local recheck candidate's tuples. A ranked input (retrieval predicate) was re-executed against the latest index state when the recheck rebuilt the scan, so a pinned tuple survives only if the retrieval still matches it, exactly like `PostgreSQL` re-evaluating the WHERE clause on the substituted tuple; its score is the re-executed retrieval score. A plain scan input keeps every pinned tuple and lets the residual predicates decide.
-    pub fn with_recheck_pins(mut self, pins: Option<Arc<Vec<RecheckDoc>>>) -> Self {
+    pub fn with_recheck_pins(
+        mut self,
+        pins: Option<Arc<Vec<RecheckDoc>>>,
+    ) -> Result<Self, SQLError> {
         let Some(pins) = pins else {
-            return self;
+            return Ok(self);
         };
-        let ranked: Option<std::collections::BTreeMap<DocId, f64>> = match &mut self.input {
-            ScoredInputCursor::Entries(entries) => Some(
-                entries
-                    .by_ref()
-                    .map(|entry| (entry.doc_id, entry.score))
-                    .collect(),
-            ),
-            ScoredInputCursor::All { .. } => None,
+        let mut selected = pins
+            .iter()
+            .map(|pin| (pin.doc_id, None))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let indexed = match &mut self.input {
+            ScoredInputCursor::Entries(entries) => {
+                for entry in entries.by_ref() {
+                    if let Some(score) = selected.get_mut(&entry.doc_id) {
+                        *score = Some(entry.score);
+                    }
+                }
+                true
+            }
+            ScoredInputCursor::Candidates(ids) => {
+                for id in ids.by_ref() {
+                    if let Some(score) = selected.get_mut(&id?) {
+                        *score = Some(0.0);
+                    }
+                }
+                true
+            }
+            ScoredInputCursor::All { .. } => false,
         };
         let entries = pins
             .iter()
-            .filter_map(|pin| match ranked.as_ref() {
-                Some(scores) => scores.get(&pin.doc_id).map(|score| ScoredEntry {
+            .filter_map(|pin| {
+                let score = if indexed {
+                    selected.get(&pin.doc_id).copied().flatten()
+                } else {
+                    Some(0.0)
+                };
+                score.map(|score| ScoredEntry {
                     doc_id: pin.doc_id,
-                    score: *score,
-                }),
-                None => Some(ScoredEntry {
-                    doc_id: pin.doc_id,
-                    score: 0.0,
-                }),
+                    score,
+                })
             })
             .collect::<Vec<_>>();
         if !entries
@@ -646,7 +680,7 @@ impl ScoredDocumentSource {
             .collect();
         self.recheck_pinned = true;
         self.input = ScoredInputCursor::Entries(entries.into_iter());
-        self
+        Ok(self)
     }
 
     /// Bind every visible column to its relation without changing public labels or copying values.
@@ -715,6 +749,15 @@ impl ScoredDocumentSource {
             return Ok(Vec::new());
         }
         match &mut self.input {
+            ScoredInputCursor::Candidates(ids) => ids
+                .by_ref()
+                .take(max_rows)
+                .map(|id| {
+                    let doc_id = id?;
+                    self.serializable.observe_row(doc_id)?;
+                    Ok(ScoredEntry { doc_id, score: 0.0 })
+                })
+                .collect(),
             ScoredInputCursor::Entries(entries) => {
                 for entry in entries.as_slice().iter().take(max_rows) {
                     self.serializable.observe_row(entry.doc_id)?;

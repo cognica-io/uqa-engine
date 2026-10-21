@@ -144,3 +144,64 @@ fn verify_where(engine: &Engine) {
         "2\t\\N\t\\N\n3\t32\t64\n"
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn indexed_copy_candidates_keep_residuals_private_rows_and_durable_results(
+    #[case] provider: usize,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("indexed-copy.db");
+    let engine = copy_engine(provider, &path);
+    exec(
+        &engine,
+        "CREATE TABLE indexed_copy (id BIGINT PRIMARY KEY, v INTEGER, body TEXT);
+         INSERT INTO indexed_copy SELECT g, g % 3, repeat('x',64) FROM generate_series(1,257) AS s(g);
+         CREATE INDEX indexed_copy_v ON indexed_copy(v);
+         SET work_mem='64kB'",
+    );
+    exec(
+        &engine,
+        "BEGIN ISOLATION LEVEL REPEATABLE READ;
+         SELECT count(*) FROM indexed_copy;
+         UPDATE indexed_copy SET v=2 WHERE id=3;
+         DELETE FROM indexed_copy WHERE id=5;
+         INSERT INTO indexed_copy VALUES(999,2,'added')",
+    );
+    // PostgreSQL 18.4 independently returns 87 / 12134 for both access shapes and after the update.
+    for query in [
+        "SELECT count(*),sum(id) FROM indexed_copy WHERE v=2 AND length(body)>0",
+        "SELECT count(*),sum(t.id) FROM indexed_copy t CROSS JOIN (VALUES(1)) q(x) WHERE t.v=2 AND length(t.body)>0",
+    ] {
+        assert_eq!(
+            copy_to_string(&engine, &format!("COPY ({query}) TO STDOUT")),
+            "87\t12134\n"
+        );
+    }
+    assert_eq!(
+        engine
+            .sql(
+                "UPDATE indexed_copy SET v=v+1 WHERE v=2 AND length(body)>0",
+                &[]
+            )
+            .unwrap()
+            .affected_rows,
+        87
+    );
+    let verify = |engine: &Engine| {
+        assert_eq!(
+            copy_to_string(engine, "COPY (SELECT count(*),sum(id) FROM indexed_copy WHERE v=3 AND length(body)>0) TO STDOUT"),
+            "87\t12134\n"
+        );
+    };
+    verify(&engine);
+    exec(&engine, "SAVEPOINT selected_ids; DELETE FROM indexed_copy WHERE v=3 AND length(body)>0; ROLLBACK TO selected_ids; COMMIT");
+    verify(&engine);
+    drop(engine);
+    if provider != 0 {
+        verify(&copy_engine(provider, &path));
+    }
+}

@@ -50,6 +50,19 @@ pub struct CommandIndexProbe {
 }
 
 impl CommandMutationOverlay {
+    pub fn visit_column_matches_with_catalog(
+        overlays: &mut [Self],
+        table: &str,
+        fields: &[String],
+        values: &[Value],
+        control: &StorageReadControl,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<DocumentChanges, SQLError> {
+        Self::visit_matches_with_catalog(overlays, table, fields, values, control, catalog, visit)?;
+        Self::changes(overlays, table, DocumentChanges::default(), control)
+    }
+
     pub fn column_matches(
         overlays: &mut [Self],
         table: &str,

@@ -122,3 +122,67 @@ fn index_only_reentrant_projection_keeps_late_read_errors_before_consumers() {
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("53200"));
 }
+
+#[test]
+fn selected_identity_rechecks_retain_only_pinned_support_and_preserve_pin_order() {
+    use crate::{query::SelectedIds, row_locks::recheck::RecheckDoc};
+    let token = uqa_core::CancellationToken::new();
+    let selected = SelectedIds::capture((0..65_536).map(Ok), 64 * 1024, &token).unwrap();
+    let (table, _) = fixture(false);
+    let source = ScoredDocumentSource::new(
+        "indexed",
+        table,
+        ScoredInput::Candidates(selected),
+        vec!["key".into()],
+        Some("key".into()),
+        None,
+    );
+    let pins = Arc::new(
+        [65_535, u64::MAX, 0]
+            .into_iter()
+            .map(|doc_id| RecheckDoc {
+                doc_id,
+                document: None,
+            })
+            .collect(),
+    );
+    let allocation = allocation_counter::measure(|| {
+        let mut source = source.with_recheck_pins(Some(pins)).unwrap();
+        assert!(crate::RowSource::output_ordering(&source).is_empty());
+        let entries = source.next_entries(16).unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| (entry.doc_id, entry.score))
+                .collect::<Vec<_>>(),
+            [(65_535, 0.0), (0, 0.0)]
+        );
+        assert!(source.next_entries(16).unwrap().is_empty());
+    });
+    assert!(allocation.bytes_max < 512 * 1024, "{allocation:?}");
+}
+
+#[test]
+fn selected_identity_recheck_propagates_cursor_errors() {
+    use crate::{query::SelectedIds, row_locks::recheck::RecheckDoc};
+    let token = uqa_core::CancellationToken::new();
+    let selected = SelectedIds::capture([Ok(1)], 0, &token).unwrap();
+    let (table, _) = fixture(false);
+    let source = ScoredDocumentSource::new(
+        "indexed",
+        table,
+        ScoredInput::Candidates(selected),
+        vec!["key".into()],
+        None,
+        None,
+    );
+    token.cancel();
+    let error = source
+        .with_recheck_pins(Some(Arc::new(vec![RecheckDoc {
+            doc_id: 1,
+            document: None,
+        }])))
+        .err()
+        .expect("cancelled recheck");
+    assert_eq!(error.sqlstate(), Some("57014"));
+}

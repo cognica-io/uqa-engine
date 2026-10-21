@@ -318,7 +318,15 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
             })
         } else {
             None
-        };
+        }
+        .map(|ids| {
+            crate::query::SelectedIds::from_sorted(
+                ids,
+                context.runtime.work_mem_bytes()?,
+                &context.runtime.cancellation_token(),
+            )
+        })
+        .transpose()?;
         if candidates.is_none() && recheck_pins.is_none() {
             if let Some(filter) = &predicate_expression {
                 candidates = crate::query::index_candidates::IndexCandidates {
@@ -334,6 +342,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
                     params,
                     command_visible: ctes.reads_command_overlay(),
                     cancellation: &context.runtime.cancellation_token(),
+                    bytes: context.runtime.work_mem_bytes()?,
                 }
                 .select(filter)?;
             }
@@ -373,7 +382,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
                 estimated_cardinality,
                 lock_origin,
                 recheck_pins,
-                candidates: candidates.map(std::sync::Arc::from),
+                candidates,
                 command_changes,
             })
             .with_scan_batch_bytes(context.runtime.work_mem_bytes()?),

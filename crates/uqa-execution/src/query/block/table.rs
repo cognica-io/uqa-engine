@@ -290,16 +290,11 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
                 params,
                 command_visible: ctes.reads_command_overlay(),
                 cancellation: &context.scans.runtime.cancellation_token(),
+                bytes: context.scans.runtime.work_mem_bytes()?,
             })
             .select(filter)?
             {
-                scored = ScoredInput::entries(
-                    identities
-                        .into_iter()
-                        .map(|doc_id| uqa_core::ScoredEntry { doc_id, score: 0.0 })
-                        .collect(),
-                    false,
-                );
+                scored = ScoredInput::Candidates(identities);
             }
         }
     }

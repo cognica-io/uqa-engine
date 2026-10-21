@@ -92,7 +92,7 @@ fn evaluate(
                 .with_retrieval_entries(target.entries)
                 .with_recheck_pins(target.recheck_pins)
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, SQLError>>()?;
     let source: Box<dyn RowSource> = if sources.len() == 1 {
         Box::new(
             sources
