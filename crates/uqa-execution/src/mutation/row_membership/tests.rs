@@ -96,3 +96,31 @@ fn physical_row_membership_spills_below_one_key_without_losing_exact_keys() {
         assert!(allocated.bytes_max < 512 * 1024, "{bytes}: {allocated:?}");
     }
 }
+
+#[test]
+fn physical_row_replay_preserves_relation_and_unsigned_identity_order() {
+    let tables = ["", "a", "a\0", "a\0b", "aa", "b", "한국어"];
+    let ids = [0, 1, 255, 256, u64::MAX];
+    let expected: Vec<_> = tables
+        .iter()
+        .flat_map(|table| ids.map(|id| ((*table).to_owned(), id)))
+        .collect();
+    for allowance in [0, 64 * 1024] {
+        let mut rows = PhysicalRowBuffer::new(allowance, CancellationToken::new(), "MERGE targets");
+        for (table, id) in expected.iter().rev() {
+            rows.insert(table, *id).unwrap();
+            assert!(rows.snapshot().unwrap().contains(table, *id).unwrap());
+        }
+        let rows = rows.finish().unwrap();
+        let mut actual = Vec::new();
+        rows.visit(&mut |table, id| {
+            actual.push((table.to_owned(), id));
+            Ok(true)
+        })
+        .unwrap();
+        assert_eq!(actual, expected);
+        for (table, id) in &actual {
+            assert!(rows.contains(table, *id).unwrap());
+        }
+    }
+}

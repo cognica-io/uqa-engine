@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound MERGE target identities and locked successor images while preserving target lock order, exact refreshed-row actions and original failure precedence.
+
 - Bound initial constraint-validation identity capture before row evaluation, preserving selected/live visibility and original failure order without a whole-table identity vector.
 
 - Share immutable CTE and scalar-subquery plans across binding and execution scopes while preserving independent lexical maps, mutable execution ownership and scalar-cache identities.
