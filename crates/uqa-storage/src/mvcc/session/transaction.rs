@@ -561,6 +561,25 @@ impl Transaction {
         Ok(())
     }
 
+    pub(super) fn prepare_commit(
+        &mut self,
+        persistence: &dyn VersionedPersistence,
+        control: &StorageReadControl,
+    ) -> crate::StorageBackendResult<()> {
+        if self.abort_only {
+            return Err(VersionError::TransactionSealed.into_storage_error());
+        }
+        if self
+            .seal_publication(persistence, control)
+            .map_err(VersionError::into_storage_error)?
+            .is_some()
+        {
+            self.prepare_effects(persistence, control)
+                .map_err(VersionError::into_storage_error)?;
+        }
+        Ok(())
+    }
+
     fn commit_records(
         &mut self,
         persistence: &dyn VersionedPersistence,

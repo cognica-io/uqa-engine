@@ -338,3 +338,72 @@ fn spilled_native_publication_preserves_mixed_writes_history_and_retry() {
         Ok(())
     });
 }
+
+#[test]
+fn native_validation_queue_does_not_duplicate_large_prepared_values() {
+    use crate::mvcc::native::tests::materialization::{initialize, records, replace, with};
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    initialize(&connection);
+    let control = StorageReadControl::with_limit(4 << 20);
+    let store = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    let original = records(&connection, &store, Family::Documents, &control);
+    let payload = format!("{{\"text\":\"{}\"}}", "x".repeat(128 << 10));
+    let changed = replace(
+        &original[0],
+        2,
+        ValueRef::Text(payload.as_bytes()),
+        &control,
+    );
+    let retained = store.snapshot(&control).unwrap();
+    let old = retained.get(changed.key(), &control).unwrap().unwrap();
+    let prepared =
+        PreparedRecordCommit::new(&[changed.write(Some(old.sequence()))], &control).unwrap();
+    let copies = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&copies);
+    with(&connection, |sqlite| {
+        sqlite.create_scalar_function(
+            "observe_validation_bytes",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+            move |context| {
+                observed.fetch_add(context.get::<i64>(0)? as usize, Ordering::Relaxed);
+                Ok(0)
+            },
+        )?;
+        sqlite.execute_batch("CREATE TEMP TRIGGER observe_validation AFTER INSERT ON _uqa_mvcc_native_expected BEGIN SELECT observe_validation_bytes(coalesce(length(NEW.new_value), 0)); END;")?;
+        Ok(())
+    });
+    let id = store.allocate_transaction(&control).unwrap();
+    store.commit(id, &prepared, &control).unwrap();
+    assert_eq!(copies.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        &***retained
+            .get(changed.key(), &control)
+            .unwrap()
+            .unwrap()
+            .value()
+            .unwrap(),
+        original[0].row()
+    );
+    let latest = store.snapshot(&control).unwrap();
+    assert_eq!(
+        &***latest
+            .get(changed.key(), &control)
+            .unwrap()
+            .unwrap()
+            .value()
+            .unwrap(),
+        changed.row()
+    );
+    with(&connection, |sqlite| {
+        assert_eq!(
+            sqlite.query_row(
+                "SELECT body FROM _documents WHERE table_name='public.docs' AND doc_id=1",
+                [],
+                |row| row.get::<_, String>(0)
+            )?,
+            payload
+        );
+        Ok(())
+    });
+}

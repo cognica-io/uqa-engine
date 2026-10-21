@@ -155,55 +155,33 @@ fn a_long_key_ends_its_page_and_is_read_once_its_length_is_reserved() {
 }
 
 #[test]
-fn a_page_reads_each_short_value_and_leaves_a_long_one_to_its_visitor() {
+fn a_key_page_never_loads_payload_values() {
     let connection = Connection::open_in_memory().unwrap();
     queue(&connection);
     let family = NativeRecordFamily::Documents.id();
-    let values = [
-        None,
-        Some(Vec::new()),
-        Some(vec![7_u8; INLINE_VALUE_BYTES]),
-        Some(vec![9_u8; INLINE_VALUE_BYTES + 1]),
-        Some(vec![1_u8, 2, 3]),
-    ];
-    for (ordinal, value) in values.iter().enumerate() {
+    for ordinal in 0..64 {
         connection
             .execute(
-                "INSERT INTO _uqa_mvcc_native_expected VALUES (?1, ?2, ?3)",
-                params![family, key(ordinal as u8, 4), value],
+                "INSERT INTO _uqa_mvcc_native_expected VALUES (?1, ?2, zeroblob(131072))",
+                params![family, key(ordinal, 4)],
             )
             .unwrap();
     }
-    let control = StorageReadControl::with_limit(65536);
-    let mut visited = Vec::new();
-    visit_with_value(
+    let control = StorageReadControl::with_limit(4096);
+    let mut visited = 0;
+    visit(
         &connection,
         "_uqa_mvcc_native_expected",
         "1",
-        "new_value",
         &control,
-        |_, key, value| {
-            visited.push((
-                key[0],
-                match value {
-                    QueuedValue::Read(value) => Some(value.map(<[u8]>::to_vec)),
-                    QueuedValue::Unread => None,
-                },
-            ));
+        |_, key| {
+            assert_eq!(key[0], visited);
+            visited += 1;
             Ok(())
         },
     )
     .unwrap();
-    assert_eq!(
-        visited,
-        [
-            (0, Some(None)),
-            (1, Some(Some(Vec::new()))),
-            (2, Some(Some(vec![7_u8; INLINE_VALUE_BYTES]))),
-            (3, None),
-            (4, Some(Some(vec![1_u8, 2, 3]))),
-        ]
-    );
+    assert_eq!(visited, 64);
     assert_eq!(control.memory().used(), 0);
 }
 

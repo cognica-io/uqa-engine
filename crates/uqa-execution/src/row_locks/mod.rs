@@ -26,7 +26,7 @@ pub mod shared_objects;
 pub mod temporary_roles;
 mod waits;
 
-pub use change_gate::RowChangePublication;
+pub use change_gate::{RowChangePreparation, RowChangePublication};
 use change_resolution::{
     epoch_is_after, mutation_strength, normalize_pending_row_changes, remove_inactive_versions,
     resolve_local_change_target, row_has_waiter,
@@ -91,6 +91,7 @@ pub struct RowLockManager {
     identities: identity_registry::IdentityRegistry,
     next_acquisition: AtomicU64,
     change_gate: RwLock<()>,
+    change_preparation: RwLock<()>,
     state: Mutex<LockTable>,
     temporary_roles: Mutex<HashMap<u64, std::collections::BTreeSet<u32>>>,
     /// Held while one sequence's position is read and advanced; it also holds the positions of a database without a lock sidecar.

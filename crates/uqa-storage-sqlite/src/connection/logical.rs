@@ -42,6 +42,15 @@ impl BoundRecordSession {
 }
 
 impl ManagedConnection {
+    pub(crate) fn prepare_transaction_commit(&self) -> Result<()> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.write();
+        if let Some(logical) = self.session.logical.get() {
+            logical.prepare_transaction_commit()?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn require_sequence_value_durability(&self) -> Result<()> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();

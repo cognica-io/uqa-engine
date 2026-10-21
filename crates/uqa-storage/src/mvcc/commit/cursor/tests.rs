@@ -55,6 +55,15 @@ fn metadata_selection_preserves_writes_without_loading_rejected_spill_values() {
         };
         let read = StorageReadControl::with_limit(32 << 10);
         read_counts::take();
+        let bytes: u64 = writes
+            .iter()
+            .map(|write| write.key.len() as u64 + write.value.map_or(0, |value| value.len() as u64))
+            .sum();
+        assert_eq!(prepared.record_bytes(), bytes);
+        let counts = read_counts::take();
+        assert_eq!(counts.entries, 0);
+        assert_eq!(counts.values, 0);
+        assert_eq!(counts.blocks, 0);
         let mut cursor = prepared.writes();
         let mut visited = 0;
         while let Some(write) = cursor

@@ -6,7 +6,7 @@
 
 //! Apply evaluated native records and verify every trigger/cascade result before publishing their history. Cache generations are provider-owned additive effects, captured at the same commit sequence.
 
-use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
+use rusqlite::{params, types::ValueRef, Connection};
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     mvcc::{CommitSequence, DatabaseId, PreparedRecordCommit, PreparedRecordWrite, VersionError},
@@ -95,9 +95,12 @@ pub(in crate::mvcc) fn materialize(
     prepared: &PreparedRecordCommit,
     sequence: CommitSequence,
     control: &StorageReadControl,
+    stage: impl FnOnce(&mut dyn FnMut(&PreparedRecordWrite) -> PhysicalResult<()>) -> PhysicalResult<()>,
 ) -> PhysicalResult<bool> {
     let capture = Capture::install(connection, control)?;
-    capture.resolve(apply(connection, database, prepared, sequence, control))
+    capture.resolve(apply(
+        connection, database, prepared, sequence, control, stage,
+    ))
 }
 
 fn apply(
@@ -106,6 +109,7 @@ fn apply(
     prepared: &PreparedRecordCommit,
     sequence: CommitSequence,
     control: &StorageReadControl,
+    stage: impl FnOnce(&mut dyn FnMut(&PreparedRecordWrite) -> PhysicalResult<()>) -> PhysicalResult<()>,
 ) -> PhysicalResult<bool> {
     seed_originals(connection, database, prepared, control)?;
     seed_targets(connection, prepared, control)?;
@@ -147,10 +151,10 @@ fn apply(
     super::graph_lookup::validate_deletions(connection, prepared, control)?;
     // Every owner binding of the commit is published by now, so the rows of one table share one read of its binding.
     let mut table_owners = owners::TableOwners::default();
-    let mut records = prepared.writes();
-    while let Some(record) = records.next(control)? {
+    stage(&mut |record| {
         if let Some(row) = record.value() {
             let (identity, values) = decode_record(record.key(), row, control)?;
+            let family = identity.family();
             owners::validate_among(
                 &mut table_owners,
                 connection,
@@ -159,8 +163,15 @@ fn apply(
                 &values,
                 control,
             )?;
+            let key = physical::physical_key(family.layout(), &values, control)?;
+            if physical::get(connection, family.layout(), &key, control)?.as_deref() != Some(row) {
+                return Err(
+                    invalid("native trigger or cascade changed an unprepared record").into(),
+                );
+            }
         }
-    }
+        Ok(())
+    })?;
     let preserves_definitions = verify_changes(connection, database, sequence, control)?;
     connection
         .prepare_cached("DELETE FROM _uqa_mvcc_native_expected")?
@@ -215,23 +226,20 @@ fn verify_changes(
             )
         },
     )?;
-    queue::visit_with_value(
+    // New rows were compared byte-for-byte with the immutable prepared value in
+    // the history pass. Old physical keys with no new owner must be absent.
+    queue::visit(
         connection,
         "_uqa_mvcc_native_expected",
-        "1",
-        "new_value",
+        "new_key IS NULL",
         control,
-        |family, key, expected| {
-            let row = physical::get(connection, family.layout(), key, control)?;
-            match expected {
-                queue::QueuedValue::Read(expected) if expected == row.as_deref() => Ok(()),
-                queue::QueuedValue::Read(_) => {
-                    Err(invalid("native trigger or cascade changed an unprepared record").into())
-                }
-                queue::QueuedValue::Unread => {
-                    verify_expected(connection, family, key, row.as_deref(), control)
-                }
+        |family, key| {
+            if physical::get(connection, family.layout(), key, control)?.is_some() {
+                return Err(
+                    invalid("native trigger or cascade changed an unprepared record").into(),
+                );
             }
+            Ok(())
         },
     )?;
     Ok(preserves_definitions)
@@ -399,8 +407,8 @@ fn seed_targets(
             );
         }
         let key = physical::physical_key(family.layout(), &values, control)?;
-        let _bindings = crate::read_control::reserve_bindings(control, &[&key, record.key(), row])?;
-        let changed = connection.prepare_cached("INSERT INTO _uqa_mvcc_native_expected(family, physical_key, new_key, new_value) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(family, physical_key) DO UPDATE SET new_key = excluded.new_key, new_value = excluded.new_value WHERE _uqa_mvcc_native_expected.new_key IS NULL")?.execute(params![family.id(), &key[..], record.key(), row])?;
+        let _bindings = crate::read_control::reserve_bindings(control, &[&key, record.key()])?;
+        let changed = connection.prepare_cached("INSERT INTO _uqa_mvcc_native_expected(family, physical_key, new_key, new_value) VALUES (?1, ?2, ?3, x'') ON CONFLICT(family, physical_key) DO UPDATE SET new_key = excluded.new_key, new_value = excluded.new_value WHERE _uqa_mvcc_native_expected.new_key IS NULL")?.execute(params![family.id(), &key[..], record.key()])?;
         if changed != 1 {
             return Err(invalid("two native records claim the same physical primary key").into());
         }
@@ -446,22 +454,6 @@ fn validate_retired_owners(
                 validate().map_err(Error::into_version)
             },
         )?;
-    }
-    Ok(())
-}
-
-fn verify_expected(
-    connection: &Connection,
-    family: Family,
-    key: &[u8],
-    row: Option<&[u8]>,
-    control: &StorageReadControl,
-) -> PhysicalResult<()> {
-    let _bindings =
-        crate::read_control::reserve_bindings(control, &[key, row.unwrap_or_default()])?;
-    let valid: Option<bool> = connection.prepare_cached("SELECT new_value IS ?3 FROM _uqa_mvcc_native_expected WHERE family = ?1 AND physical_key = ?2")?.query_row(params![family.id(), key, row], |row| row.get(0)).optional()?;
-    if valid != Some(true) {
-        return Err(invalid("native trigger or cascade changed an unprepared record").into());
     }
     Ok(())
 }

@@ -690,6 +690,11 @@ pub trait KeyValueStore: Send + Sync {
         ))
     }
 
+    /// Freeze transaction-private records and resolve immutable publication inputs without making them visible. The caller must finish all evaluated writes first. Repeated preparation retains the same batch; COMMIT still validates current heads and derived-effect versions, and ROLLBACK remains available. Providers without separate preparation keep their existing commit path.
+    fn prepare_transaction_commit(&self) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(
             "KeyValue transaction commit is not implemented for this store".into(),

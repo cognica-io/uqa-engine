@@ -41,11 +41,14 @@ pub(super) struct ConnectionPool {
     /// same connection, and encrypted databases must not repeat key
     /// derivation merely to create a request-local change monitor.
     pub(super) data_version_monitor: Mutex<Option<Connection>>,
-    source: Option<DatabaseSource>,
+    source: Option<Arc<DatabaseSource>>,
     // Keep restoration excluded until every physical connection has closed.
     pub(super) owner: Option<Arc<DatabaseOwner>>,
     /// Decoded document columns shared by every session of this database.
     pub(super) decoded_columns: crate::document_store::decoded_columns::DecodedColumns,
+    // Declared last: callback context outlives every physical connection.
+    #[cfg(not(target_os = "emscripten"))]
+    pub(super) checkpoint: Option<super::checkpoint::Checkpoint>,
 }
 
 impl ConnectionPool {
@@ -55,7 +58,10 @@ impl ConnectionPool {
         max_connections: usize,
         owner: Option<Arc<DatabaseOwner>>,
     ) -> Result<Arc<Self>> {
-        let source = DatabaseSource::capture(&mut spec, &initial)?;
+        let source = DatabaseSource::capture(&mut spec, &initial)?.map(Arc::new);
+        #[cfg(not(target_os = "emscripten"))]
+        let checkpoint =
+            super::checkpoint::Checkpoint::start(&spec, source.clone(), owner.clone())?;
         // The stable SQLite monitor pins the original file identity even if all
         // checkout connections are discarded. A separate Unix File must not be
         // opened and closed here: close can release other SQLite POSIX locks.
@@ -70,6 +76,8 @@ impl ConnectionPool {
             receipt_state: Arc::default(),
             serializable_connection: Mutex::new(None),
             snapshot_registry: Mutex::new(None),
+            #[cfg(not(target_os = "emscripten"))]
+            checkpoint,
             spec,
             max_connections: max_connections.max(1),
             state: Mutex::new(PoolState {
@@ -87,7 +95,7 @@ impl ConnectionPool {
     }
 
     pub(super) fn check_source(&self) -> Result<()> {
-        self.source.as_ref().map_or(Ok(()), DatabaseSource::check)
+        self.source.as_ref().map_or(Ok(()), |source| source.check())
     }
 
     pub(super) fn open_connection(&self) -> Result<Connection> {
@@ -97,6 +105,10 @@ impl ConnectionPool {
         let connection = connection?;
         if let Some(source) = &self.source {
             source.check_connection(&connection)?;
+        }
+        #[cfg(not(target_os = "emscripten"))]
+        if let Some(checkpoint) = &self.checkpoint {
+            checkpoint.install(&connection);
         }
         Ok(connection)
     }
@@ -199,6 +211,15 @@ impl Drop for PooledConnection {
             self.pool.checkin(connection);
         } else {
             self.pool.discard();
+        }
+    }
+}
+
+impl Drop for ConnectionPool {
+    fn drop(&mut self) {
+        #[cfg(not(target_os = "emscripten"))]
+        if let Some(checkpoint) = &mut self.checkpoint {
+            checkpoint.stop();
         }
     }
 }
