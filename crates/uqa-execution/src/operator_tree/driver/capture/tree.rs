@@ -13,12 +13,7 @@ use super::{
 
 pub(super) fn complete_text_tree(tree: &OperatorTree) -> bool {
     match tree {
-        OperatorTree::Empty
-        | OperatorTree::Term {
-            field: Some(_),
-            top_k: None,
-            ..
-        } => true,
+        OperatorTree::Empty | OperatorTree::Term { top_k: None, .. } => true,
         OperatorTree::Union(children) | OperatorTree::Intersect(children) => {
             children.iter().all(complete_text_tree)
         }
@@ -30,15 +25,20 @@ pub(super) fn capture(
     tree: &OperatorTree,
     bytes: usize,
     cancellation: &CancellationToken,
-    leaf: &impl Fn(&str, &str, Option<TextScoringMode>, usize) -> DriverResult<CapturedScoredEntries>,
+    leaf: &impl Fn(
+        Option<&str>,
+        &str,
+        Option<TextScoringMode>,
+        usize,
+    ) -> DriverResult<CapturedScoredEntries>,
 ) -> DriverResult<CapturedScoredEntries> {
     match tree {
         OperatorTree::Term {
-            field: Some(field),
+            field,
             query,
             scoring,
             top_k: None,
-        } => leaf(field, query, *scoring, bytes),
+        } => leaf(field.as_deref(), query, *scoring, bytes),
         OperatorTree::Union(children) | OperatorTree::Intersect(children) => {
             // Every branch must run, including branches after an error or an empty intersection. Branch errors retain the same left-to-right precedence as the ordinary executor.
             let branch_bytes = bytes / children.len().saturating_add(2);

@@ -33,15 +33,28 @@ impl PhysicalRetrievalDriver<'_> {
 
     fn capture_text_leaf(
         &self,
-        field: &str,
+        field: Option<&str>,
         query: &str,
         scoring: Option<TextScoringMode>,
         bytes: usize,
     ) -> DriverResult<CapturedScoredEntries> {
         let scoring = Self::bound_text_scoring(scoring)?;
+        let Some(field) = field else {
+            return self.capture_all_fields(query, scoring, bytes);
+        };
         self.context
             .text
             .validate_text_search_field(self.table, field)?;
+        self.capture_field_scores(field, query, scoring, bytes)
+    }
+
+    fn capture_field_scores(
+        &self,
+        field: &str,
+        query: &str,
+        scoring: TextScoringMode,
+        bytes: usize,
+    ) -> DriverResult<CapturedScoredEntries> {
         let mode = self.text_scoring_mode(field, scoring)?;
         let mut entries =
             ScoredEntryCapture::new(bytes, self.context.runtime.cancellation_token())?;
@@ -51,6 +64,50 @@ impl PhysicalRetrievalDriver<'_> {
                 entries.push(entry)
             })?;
         entries.finish()
+    }
+
+    fn capture_all_fields(
+        &self,
+        query: &str,
+        scoring: TextScoringMode,
+        bytes: usize,
+    ) -> DriverResult<CapturedScoredEntries> {
+        let fields = self.all_field_text_fields(scoring)?;
+        let mut output: Option<CapturedScoredEntries> = None;
+        for field in fields {
+            let next = self.capture_field_scores(&field, query, scoring, bytes / 3)?;
+            output = Some(match output {
+                Some(previous) => previous.merge_field_scores(
+                    next,
+                    bytes,
+                    self.context.runtime.cancellation_token(),
+                )?,
+                None => next,
+            });
+        }
+        Ok(output.expect("all-field validation requires an indexed field"))
+    }
+
+    pub(super) fn all_field_text_fields(
+        &self,
+        scoring: TextScoringMode,
+    ) -> DriverResult<Vec<String>> {
+        if matches!(
+            scoring,
+            TextScoringMode::CustomBM25(_) | TextScoringMode::CustomBayesianBM25(_)
+        ) {
+            return Err(super::SQLError::TypeMismatch(
+                "explicit text scoring parameters require one concrete field".into(),
+            ));
+        }
+        let fields = self.context.text.fts_fields_for_table(self.table)?;
+        if fields.is_empty() {
+            return Err(super::SQLError::TypeMismatch(format!(
+                "text search: table `{}` has no text-indexed columns",
+                self.table
+            )));
+        }
+        Ok(fields)
     }
 
     pub(super) fn bound_text_scoring(

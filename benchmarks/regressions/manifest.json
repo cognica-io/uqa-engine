@@ -19812,6 +19812,61 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_score_merge_preserves_native_maximum_and_unmatched_bits",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/capture/tests.rs",
+      "capability": "Exact all-field score fold",
+      "workload": "Three field populations with disjoint identities, finite overlaps, signed zeros, NaN and maximum document identity.",
+      "invariant": "Ordered merging preserves the original field-map maximum and every unmatched score bit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_text_capture_keeps_the_all_field_leaf_boundary",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/capture/tests.rs",
+      "capability": "All-field retrieval capture boundary",
+      "workload": "An all-field term enters the complete score-only tree capture with its original query and scoring mode.",
+      "invariant": "One all-field leaf invocation retains its field inventory boundary and exact score.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_all_field_text_scores_do_not_retain_the_complete_population",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "Bounded public all-field text COPY",
+      "workload": "Cold 32,768-row output across two indexed fields under 64KiB work memory and a validating discard sink.",
+      "invariant": "Every ID is emitted once in order while peak additional allocation stays below the unchanged 2MiB ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "copy_all_field_text_capture_preserves_max_scores_and_generation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/copy_io/retrieval.rs",
+      "capability": "All-field text COPY provider snapshots",
+      "workload": "Repeated query terms, NULLs and overlapping/disjoint field scores on four providers; persistent peers update, delete and insert during output before reopen.",
+      "invariant": "Exact field-maximum score bits and the complete original statement generation survive; later queries and reopen see committed changes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

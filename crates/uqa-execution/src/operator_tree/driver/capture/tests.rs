@@ -141,6 +141,37 @@ fn complete_text_capture_declines_non_score_and_limited_operands() {
 }
 
 #[test]
+fn complete_text_capture_keeps_the_all_field_leaf_boundary() {
+    let tree = OperatorTree::Term {
+        field: None,
+        query: "alpha beta".into(),
+        scoring: Some(TextScoringMode::BM25),
+        top_k: None,
+    };
+    assert!(tree::complete_text_tree(&tree));
+    let observed = RefCell::new(0);
+    let mut result = tree::capture(
+        &tree,
+        64 * 1024,
+        &CancellationToken::new(),
+        &|field, query, scoring, bytes| {
+            assert_eq!(field, None);
+            assert_eq!(query, "alpha beta");
+            assert_eq!(scoring, Some(TextScoringMode::BM25));
+            *observed.borrow_mut() += 1;
+            entries(&[(1, 0.5)], bytes)
+        },
+    )
+    .unwrap();
+    assert_eq!(*observed.borrow(), 1);
+    assert_eq!(
+        result.next().unwrap().unwrap().score.to_bits(),
+        0.5_f64.to_bits()
+    );
+    assert!(result.next().is_none());
+}
+
+#[test]
 fn captured_text_boolean_population_stays_within_its_shared_allowance() {
     let tree = OperatorTree::Union(vec![
         term("0"),

@@ -232,3 +232,142 @@ fn copy_boolean_text_scores_do_not_retain_complete_child_postings(#[case] predic
     assert_eq!(output.value, 0);
     assert!(allocated.bytes_max < 2 * 1024 * 1024, "{allocated:?}");
 }
+
+#[test]
+fn copy_all_field_text_scores_do_not_retain_the_complete_population() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE copy_search(id INTEGER PRIMARY KEY, title TEXT, body TEXT);
+        INSERT INTO copy_search SELECT n,'alpha','beta' FROM generate_series(1,32768) AS s(n);
+        CREATE INDEX copy_search_title ON copy_search USING gin(title);
+        CREATE INDEX copy_search_body ON copy_search USING gin(body);
+        SET work_mem='64kB'",
+    );
+    let mut output = Lines { count: 0, value: 0 };
+    let allocated = allocation_counter::measure(|| {
+        assert_eq!(engine.copy_to("COPY (SELECT id FROM copy_search WHERE text_match('_all','alpha beta')) TO STDOUT", &mut output).unwrap(), 32_768);
+    });
+    assert_eq!(output.count, 32_768);
+    assert_eq!(output.value, 0);
+    assert!(allocated.bytes_max < 2 * 1024 * 1024, "{allocated:?}");
+}
+
+fn native_all_field_score_bits(engine: &Engine) -> std::collections::BTreeMap<i64, u64> {
+    let ids = engine
+        .sql("SELECT id,_doc_id FROM copy_search", &[])
+        .unwrap();
+    let ids = ids
+        .rows
+        .iter()
+        .map(|row| {
+            let (uqa_core::Value::Int(id), uqa_core::Value::Int(doc_id)) =
+                (&row["id"], &row["_doc_id"])
+            else {
+                panic!("integer identities");
+            };
+            (u64::try_from(*doc_id).unwrap(), *id)
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut expected = std::collections::BTreeMap::<i64, f64>::new();
+    for field in ["body", "title"] {
+        for entry in engine
+            .search(
+                "copy_search",
+                field,
+                "alpha beta alpha",
+                &uqa_scoring::ScoringMode::BM25(uqa_scoring::BM25Params::default()),
+                usize::MAX,
+            )
+            .unwrap()
+        {
+            expected
+                .entry(ids[&entry.doc_id])
+                .and_modify(|score| *score = score.max(entry.score))
+                .or_insert(entry.score);
+        }
+    }
+    expected
+        .into_iter()
+        .map(|(id, score)| (id, score.to_bits()))
+        .collect()
+}
+
+struct AllFieldSink<'a> {
+    writer: Option<&'a Engine>,
+    bytes: Vec<u8>,
+}
+
+impl std::io::Write for AllFieldSink<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if let Some(writer) = self.writer.take() {
+            exec(
+                writer,
+                "UPDATE copy_search SET title='changed',body='changed' WHERE id=512;
+                DELETE FROM copy_search WHERE id=513;
+                INSERT INTO copy_search VALUES(514,'alpha',NULL)",
+            );
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn copy_all_field_text_capture_preserves_max_scores_and_generation(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("all-field-copy.db");
+    let engine = copy_engine(provider, &path);
+    exec(
+        &engine,
+        "CREATE TABLE copy_search(id INTEGER PRIMARY KEY, title TEXT, body TEXT);
+        INSERT INTO copy_search SELECT n,
+            CASE WHEN n%3=0 THEN 'alpha alpha' WHEN n%3=1 THEN 'other' ELSE NULL END,
+            CASE WHEN n%2=0 THEN 'alpha beta alpha' ELSE 'beta' END
+            FROM generate_series(1,513) AS s(n);
+        CREATE INDEX copy_search_body ON copy_search USING gin(body);
+        CREATE INDEX copy_search_title ON copy_search USING gin(title);
+        SET work_mem='64kB'",
+    );
+    let expected = native_all_field_score_bits(&engine);
+    assert_eq!(expected.len(), 513);
+    let writer = (provider != 0).then(|| engine.new_session().unwrap());
+    let mut output = AllFieldSink {
+        writer: writer.as_ref(),
+        bytes: Vec::new(),
+    };
+    assert_eq!(engine.copy_to("COPY (SELECT id,_score FROM copy_search WHERE text_match('_all','alpha beta alpha')) TO STDOUT", &mut output).unwrap(), 513);
+    let actual = String::from_utf8(output.bytes)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let (id, score) = line.split_once('\t').unwrap();
+            (
+                id.parse::<i64>().unwrap(),
+                score.parse::<f64>().unwrap().to_bits(),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(actual, expected);
+    let sql = "SELECT count(*) AS n FROM copy_search WHERE text_match('_all','alpha beta alpha')";
+    assert_eq!(
+        engine.sql(sql, &[]).unwrap().rows[0]["n"],
+        uqa_core::Value::Int(if provider == 0 { 513 } else { 512 })
+    );
+    drop(writer);
+    drop(engine);
+    if provider != 0 {
+        let engine = copy_engine(provider, &path);
+        assert_eq!(
+            engine.sql(sql, &[]).unwrap().rows[0]["n"],
+            uqa_core::Value::Int(512)
+        );
+    }
+}

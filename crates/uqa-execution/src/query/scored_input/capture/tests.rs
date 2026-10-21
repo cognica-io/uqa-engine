@@ -123,3 +123,45 @@ fn score_only_merge_releases_both_inputs_after_cancellation_or_empty_support() {
         assert!(paths.iter().all(|path| !path.exists()));
     }
 }
+
+#[test]
+fn field_score_merge_preserves_native_maximum_and_unmatched_bits() {
+    let fields = [
+        [(0, -0.0), (1, 5.0), (u64::MAX, f64::NAN)],
+        [(0, 0.0), (2, 0.25), (u64::MAX, 7.0)],
+        [(1, 2.0), (3, -0.0), (u64::MAX, 4.0)],
+    ];
+    let mut expected = std::collections::BTreeMap::<u64, f64>::new();
+    let mut actual: Option<CapturedScoredEntries> = None;
+    for field in fields {
+        let mut capture = ScoredEntryCapture::new(0, CancellationToken::new()).unwrap();
+        for (doc_id, score) in field {
+            expected
+                .entry(doc_id)
+                .and_modify(|previous| *previous = previous.max(score))
+                .or_insert(score);
+            capture.push(ScoredEntry { doc_id, score }).unwrap();
+        }
+        let next = capture.finish().unwrap();
+        actual = Some(match actual {
+            Some(previous) => previous
+                .merge_field_scores(next, 0, CancellationToken::new())
+                .unwrap(),
+            None => next,
+        });
+    }
+    let actual = actual
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (entry.doc_id, entry.score.to_bits())
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        actual,
+        expected
+            .into_iter()
+            .map(|(id, score)| (id, score.to_bits()))
+            .collect()
+    );
+}

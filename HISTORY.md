@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound complete all-field text-search score capture before COPY document reads, retaining the original per-document maximum across fields, exact score bits and statement snapshots.
+
 - Bound complete text-search AND/OR score capture before COPY document reads, preserving exact score addition, branch error precedence and statement snapshots.
 
 - Capture complete single-field text-search scores incrementally before SQL document reads, avoiding full posting/score vectors in COPY while preserving exact scores, document order, snapshot generation, cancellation and serializable observations.

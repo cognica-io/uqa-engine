@@ -226,37 +226,10 @@ impl<'a> PhysicalRetrievalDriver<'a> {
                 "physical text top-k requires one concrete field".into(),
             ));
         }
-        if matches!(
-            scoring,
-            TextScoringMode::CustomBM25(_) | TextScoringMode::CustomBayesianBM25(_)
-        ) {
-            return Err(SQLError::TypeMismatch(
-                "explicit text scoring parameters require one concrete field".into(),
-            ));
-        }
-        let fields = self.context.text.fts_fields_for_table(self.table)?;
-        if fields.is_empty() {
-            return Err(SQLError::TypeMismatch(format!(
-                "text search: table `{}` has no text-indexed columns",
-                self.table
-            )));
-        }
+        let fields = self.all_field_text_fields(scoring)?;
         let mut by_document = BTreeMap::<DocId, f64>::new();
         for field in fields {
-            let mode = match scoring {
-                TextScoringMode::BM25 => {
-                    uqa_scoring::ScoringMode::BM25(uqa_scoring::BM25Params::default())
-                }
-                TextScoringMode::BayesianBM25 => {
-                    uqa_scoring::ScoringMode::BayesianBM25(self.bayesian_params_for(&field)?)
-                }
-                TextScoringMode::CustomBM25(_) | TextScoringMode::CustomBayesianBM25(_) => {
-                    return Err(SQLError::Internal(
-                        "custom all-field scoring passed validation without a concrete field"
-                            .into(),
-                    ));
-                }
-            };
+            let mode = self.text_scoring_mode(&field, scoring)?;
             for entry in
                 self.context
                     .text
