@@ -20665,6 +20665,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "old_native_validation_does_not_load_large_spilled_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests.rs",
+      "capability": "Native old-row validation",
+      "workload": "A 128KiB encrypted spilled replacement checked against its small committed row under a 32KiB allowance.",
+      "invariant": "Old-row validation reads only prepared metadata; it cannot load or allocate the large replacement.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

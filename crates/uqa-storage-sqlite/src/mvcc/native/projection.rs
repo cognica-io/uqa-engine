@@ -315,21 +315,20 @@ fn seed_originals(
     // Nothing is published yet, so the rows of one table share one read of its owner binding.
     let mut table_owners = owners::TableOwners::default();
     let mut records = prepared.writes();
-    while let Some(record) = records.next_where(control, |metadata| {
-        let identity = NativeRecordIdentity::decode_full(metadata.key(), control)?;
+    while let Some(record) = records.next_metadata(control)? {
+        let identity = NativeRecordIdentity::decode_full(record.key(), control)?;
         if matches!(identity.owner(), NativeRecordOwner::Database(id) if id != database) {
-            return Err(VersionError::WrongDatabase);
+            return Err(VersionError::WrongDatabase.into());
         }
         if identity.family() == Family::CacheRevisions {
-            return Err(invalid(
-                "native cache generations are provider-owned commit effects",
-            ));
+            return Err(
+                invalid("native cache generations are provider-owned commit effects").into(),
+            );
         }
-        // Revision validation already proved this under the same exclusive
-        // physical transaction. An absent head has no original value, including
-        // in compacted runs; tombstones retain a revision and still pass here.
-        Ok(metadata.expected().is_some())
-    })? {
+        // Revision validation already proved this under the same physical transaction. Only immutable namespace/format bindings need the replacement bytes in this old-row pass.
+        if record.expected().is_none() {
+            continue;
+        }
         read::value(
             connection,
             record.key(),
@@ -342,7 +341,9 @@ fn seed_originals(
                     };
                     let (identity, values) = decode_record(record.key(), row, control)?;
                     let family = identity.family();
-                    if family == Family::StandaloneGraphScopes && record.value() != Some(row) {
+                    if family == Family::StandaloneGraphScopes
+                        && !prepared_value_matches(prepared, record.key(), row, control)?
+                    {
                         return Err(
                             invalid("standalone graph namespace bindings are immutable").into()
                         );
@@ -369,7 +370,7 @@ fn seed_originals(
                     connection.prepare_cached("INSERT INTO _uqa_mvcc_native_expected(family, physical_key, old_key) VALUES (?1, ?2, ?3)")?.execute(params![family.id(), &key[..], record.key()])?;
                     if family == Family::Metadata
                         && values[0] == ValueRef::Text(b"schema_version")
-                        && record.value() != Some(row)
+                        && !prepared_value_matches(prepared, record.key(), row, control)?
                     {
                         return Err(invalid(
                             "native format version cannot be changed by a record commit",
@@ -383,6 +384,25 @@ fn seed_originals(
         )?;
     }
     Ok(())
+}
+
+fn prepared_value_matches(
+    prepared: &PreparedRecordCommit,
+    key: &[u8],
+    expected: &[u8],
+    control: &StorageReadControl,
+) -> PhysicalResult<bool> {
+    if let Some(records) = prepared.resident() {
+        return Ok(records
+            .iter()
+            .find(|record| record.key() == key)
+            .is_some_and(|record| record.value() == Some(expected)));
+    }
+    let record = prepared
+        .spilled_writes_from(key)
+        .expect("spilled batch")
+        .next(control)?;
+    Ok(record.is_some_and(|record| record.key() == key && record.value() == Some(expected)))
 }
 
 fn seed_targets(

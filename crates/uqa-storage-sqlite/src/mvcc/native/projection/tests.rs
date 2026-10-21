@@ -407,3 +407,47 @@ fn native_validation_queue_does_not_duplicate_large_prepared_values() {
         Ok(())
     });
 }
+
+#[test]
+fn old_native_validation_does_not_load_large_spilled_replacements() {
+    use crate::mvcc::native::tests::materialization::{initialize, records, replace, with};
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    initialize(&connection);
+    let control = StorageReadControl::with_limit(4 << 20);
+    let store = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    let original = records(&connection, &store, Family::Documents, &control);
+    let body = format!("{{\"text\":\"{}\"}}", "x".repeat(128 << 10));
+    let changed = replace(&original[0], 2, ValueRef::Text(body.as_bytes()), &control);
+    let private = PrivateRecordChanges::new(&uqa_core::memory::MemoryBudget::new(512 << 10));
+    private
+        .apply(
+            &[changed.write(Some(CommitSequence::from_u64(1)))],
+            &control,
+        )
+        .unwrap();
+    for id in 3..=10 {
+        let inserted = replace(&changed, 1, ValueRef::Integer(id), &control);
+        private.apply(&[inserted.write(None)], &control).unwrap();
+    }
+    let prepared = private.prepare(&control).unwrap();
+    assert!(prepared.resident().is_none());
+    let read = StorageReadControl::with_limit(32 << 10);
+    // Loading the replacement would exceed this allowance. Old-row validation needs only its identity and the tiny committed value.
+    assert!(prepared.writes().next(&read).is_err());
+    with(&connection, |sqlite| {
+        let _permit = crate::mvcc::schema::WritePermit::acquire(sqlite)?;
+        let transaction = crate::mvcc::admission::begin(sqlite, &read)?;
+        seed_originals(&transaction, store.database_id(), &prepared, &read)?;
+        assert_eq!(
+            sqlite.query_row(
+                "SELECT count(*) FROM _uqa_mvcc_native_expected",
+                [],
+                |row| row.get::<_, i64>(0)
+            )?,
+            1
+        );
+        transaction.rollback()?;
+        Ok(())
+    });
+    assert_eq!(read.memory().used(), 0);
+}
