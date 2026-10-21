@@ -2,7 +2,7 @@
 
 The initial source inspection for issue [#714](https://github.com/cognica-io/uqa-engine/issues/714) at main `6b9f8cb87` found a complete `SQLResult`, followed by all encoded bytes in a `Vec` before Execution wrote that buffer. The following corrections address those owners and the intermediate producers; the remaining requirements are recorded in the current checkpoint. Completion requires actual large-output memory, byte correctness, snapshot, cancellation and failing-sink evidence; source inspection alone does not satisfy the issue.
 
-The current materialized scan follow-up remains active after `e104ccdef`: controlled run 39615026712 accepts 19 comparisons but confirms materialized regression [1.162293, 1.193828] against 1.15, with no inconclusive comparison. PR #1233 addresses the remaining Core scalar-clone dispatch cost; the [repair record](final-main-ci-regressions.md#scalar-copy-dispatch) preserves exact evidence and the remaining verification. No original obligation or failed observation is dropped.
+PR [#1233](https://github.com/cognica-io/uqa-engine/pull/1233) is merged as `18b5cb530`, whose complete tree equals verified product `d614fd221`. Core scalar copies now avoid the recursive payload frame while preserving every value representation and ownership contract. Both actual OS regression suites pass all 1,562 checks / 2,176 cases and eight histories, with all 688 source hashes verified; all six FDW configurations also pass. Main workspace 39632340784, regression 39632340999 and controlled qualification 39632340688 are in progress. The requested pause follows successful final qualification and record cleanup; original unfinished obligations remain preserved.
 
 ## Delivery checkpoint before the requested pause
 
