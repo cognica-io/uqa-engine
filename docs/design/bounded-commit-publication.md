@@ -19,8 +19,9 @@ The SQLite pool owns one managed checkpoint worker for each ordinary file pool o
 - [x] Reproduce the unchanged main commit path and independently inspect Storage, SQLite and Execution ownership/dependency boundaries.
 - [x] Add deterministic regressions for zero validation payload copies, exact cached sizing, bounded queue memory, paused checkpoint completion, physical-reader retention, private preparation, conflict rejection, local snapshot admission and cross-process writer exclusion.
 - [x] Complete local checks: 1,292 SQLite cases, 60 focused library cases, 20 final native validation/materialization cases and the private preparation/conflict case. After integrating dependency #1225, all 74 focused owner cases and 95 sequential Engine transaction cases pass. Strict Storage/SQLite/Execution/Engine Clippy and ownership/dependency checks pass. An earlier parallel KV text run hit the 30-second admission limit; the final sequential run including KV preparation forwarding passes.
-- [ ] Verify automatic Linux/macOS bounded-work, memory and output regression results for the delivered source.
+- [x] Verify automatic Linux/macOS bounded-work, memory and output regression results in [run 39567963158](https://github.com/cognica-io/uqa-engine/actions/runs/39567963158): each platform passes 1,545 checks / 2,136 cases and eight independent-process histories. Both artifact sets match the exact `3b13ad8b1` product tree (tested merge `990d7ca83`), manifest, 681 source hashes and every executed JUnit case, with zero failures, errors or skips.
 - [x] Complete automatic FDW selection in run 39565086625: no foreign-handler input changed, fingerprint `2a9512e00bf08c70c15be808feeab7891e949ff4934a3844326696d39c752a7c`. This is a valid scope exclusion, not six executed configuration passes.
-- [ ] Merge the qualified implementation PR and record delivery evidence.
+
+The remaining merge task and delivered main revision are tracked in the live checklist of [PR #1226](https://github.com/cognica-io/uqa-engine/pull/1226). This final record update changes documentation only; all qualified product and runner inputs remain unchanged.
 
 Timing acceptance remains separate from correctness and bounded-work evidence. No throughput or latency percentage is asserted without an independently calibrated controlled host. Diagnostic traces remain outside tracked source.
