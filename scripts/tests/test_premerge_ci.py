@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import pathlib
 import subprocess
@@ -126,6 +127,62 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("retries = 0", profile)
         self.assertIn("terminate-after = 10", profile)
         self.assertNotIn('on-timeout = "pass"', profile)
+
+    def test_downloaded_archive_must_match_the_original_builder_bytes(self) -> None:
+        workspace = (ROOT / ".github/workflows/workspace-tests.yml").read_text(encoding="utf-8")
+        self.assertIn("archive-sha256: ${{ steps.archive.outputs.sha256 }}", workspace)
+        self.assertIn("UQA_TEST_ARCHIVE_SHA256: ${{ needs.build.outputs.archive-sha256 }}", workspace)
+        self.assertIn("digest-mismatch: error", workspace)
+        self.assertLess(workspace.index("name: Verify the downloaded test archive"),
+                        workspace.index("name: Run prebuilt workspace tests"))
+
+        def script(name: str) -> str:
+            step = workspace.split(f"      - name: {name}\n", 1)[1]
+            lines = step.split("        run: |\n", 1)[1].splitlines()
+            commands = []
+            for line in lines:
+                if not line.startswith("          "):
+                    break
+                commands.append(line[10:])
+            self.assertTrue(commands)
+            return "\n".join(commands)
+
+        fingerprint = script("Fingerprint the completed test archive")
+        verify = script("Verify the downloaded test archive")
+        original = b"complete test archive\x00" * 64
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            archive = directory / "uqa-tests.tar.zst"
+            output = directory / "builder-output"
+            environment = os.environ.copy()
+            environment.update(RUNNER_TEMP=temporary, GITHUB_OUTPUT=str(output))
+
+            def run(commands: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(["bash", "-e", "-o", "pipefail", "-c", commands],
+                                      env=environment, text=True, capture_output=True)
+
+            archive.write_bytes(original)
+            built = run(fingerprint)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            expected = output.read_text().strip().removeprefix("sha256=")
+            self.assertEqual(expected, hashlib.sha256(original).hexdigest())
+            environment["UQA_TEST_ARCHIVE_SHA256"] = expected
+            for name, content, valid in (("complete", original, True),
+                                         ("truncated", original[:-1], False),
+                                         ("changed", original[:-1] + b"!", False),
+                                         ("missing", None, False)):
+                with self.subTest(name=name):
+                    if content is None:
+                        archive.unlink()
+                    else:
+                        archive.write_bytes(content)
+                    result = run(verify)
+                    self.assertEqual(result.returncode == 0, valid, result.stdout + result.stderr)
+            archive.write_bytes(original)
+            environment["UQA_TEST_ARCHIVE_SHA256"] = ""
+            self.assertNotEqual(run(verify).returncode, 0)
+            archive.unlink()
+            self.assertNotEqual(run(fingerprint).returncode, 0)
 
 
     def test_temporary_tag_caches_are_restore_only(self) -> None:
