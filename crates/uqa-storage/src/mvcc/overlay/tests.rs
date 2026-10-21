@@ -41,6 +41,38 @@ fn explicit_memory_tier_limit_spills_with_admitted_metadata_and_survives_fork() 
     assert_matches(&before, &expected, &control);
     assert_matches(&original.snapshot().unwrap(), &expected, &control);
     assert_matches(&fork.snapshot().unwrap(), &forked, &control);
+    let savepoint = StorageSavepointId::allocate();
+    fork.savepoint(savepoint).unwrap();
+    stage(&fork, &mut forked, 64, Some("later".into()), &control);
+    fork.rollback_to_savepoint(savepoint).unwrap();
+    forked.remove(&key(64));
+    for index in 64..68 {
+        stage(
+            &fork,
+            &mut forked,
+            index,
+            Some("after undo".into()),
+            &control,
+        );
+        assert!(fork.owner.state.lock().records.len() <= 1);
+    }
+    assert_matches(&fork.snapshot().unwrap(), &forked, &control);
+    fork.rollback().unwrap();
+    forked.clear();
+    for index in 68..72 {
+        stage(
+            &fork,
+            &mut forked,
+            index,
+            Some("after rollback".into()),
+            &control,
+        );
+        assert!(fork.owner.state.lock().records.len() <= 1);
+    }
+    assert!(spilled_runs(&fork) > 0);
+    assert_matches(&fork.snapshot().unwrap(), &forked, &control);
+    assert_matches(&before, &expected, &control);
+    assert_matches(&original.snapshot().unwrap(), &expected, &control);
     assert!(control.memory().used() <= 64 * 1024);
 }
 

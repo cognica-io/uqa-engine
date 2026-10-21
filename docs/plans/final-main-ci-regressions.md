@@ -23,3 +23,9 @@ The failing workspace run is [39542443925](https://github.com/cognica-io/uqa-eng
 - [ ] Merge, close resolved scoped issues, remove the completed branch, restore main and then pause.
 
 The existing `tests/parity/pg18/README.md` edit in the main checkout is unrelated and remains untouched. Reuse the established local build checkout and target cache; use local correctness/work diagnostics while CI supplies controlled timing. Repository events trigger CI; no workflow dispatch, rerun or cancellation is part of this repair.
+
+## Repair evidence
+
+The private-root representation now stores provider revision summaries and an explicit early spill threshold as mutually exclusive policies, removing the redundant optional threshold from normal roots. Fifty local Storage overlay tests pass, including frozen revisions, failed admission, nested savepoints and explicit spill-policy preservation through fork and rollback. The unchanged redb Nori allocation/output/reopen gate is still running; its result is required before this item is complete.
+
+The original repeatable-read test also times out locally at its existing 300-second limit. One stack sample attributes the active path to repeated encrypted identity-block reads from retained document projections and visible-row filtering. Execution now holds Storage's existing bounded read scopes across those batches; focused owner and integration verification is in progress. No fixture, allowance or timeout changed.

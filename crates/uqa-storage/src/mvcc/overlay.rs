@@ -24,7 +24,9 @@ mod cursor;
 pub use cursor::{PrivateRecordCursor, PrivateRecordEntry};
 mod selection;
 pub(super) use selection::PrivateRecordSelection;
+mod policy;
 mod retained;
+use policy::RootPolicy;
 mod scopes;
 pub use scopes::PrivateRevisionScope;
 use scopes::RevisionScopes;
@@ -116,11 +118,9 @@ struct State {
     records: Records,
     /// The estimated bytes the memory tier holds, which decide when it spills.
     resident: usize,
-    /// An optional earlier spill threshold, independent of the hard allowance for run metadata and I/O.
-    memory_tier_limit: Option<usize>,
     runs: RunSet,
     sources: Sources,
-    scopes: Option<RevisionScopes>,
+    policy: RootPolicy,
     revision: Option<PrivateRecordRevision>,
     savepoints: BudgetedVec<Savepoint>,
 }
@@ -138,14 +138,15 @@ impl State {
     /// The smallest memory tier that spills, which is also the size of the smallest runs.
     fn least_spill(&self) -> usize {
         let ordinary = self.records.budget().limit() / RESIDENT_DIVISOR;
-        self.memory_tier_limit
+        self.policy
+            .memory_tier_limit()
             .map_or(ordinary, |limit| ordinary.min(limit.max(1)))
     }
 
     /// Move the memory tier into a new run when the transaction's allowance is under pressure: more than half of it is used and the memory tier holds a share of it worth a run. The allowance measures what this tier actually holds, so changes that share their values with an earlier owner do not spill on their own. Failure leaves both tiers unchanged.
     fn make_room(&mut self, control: &StorageReadControl) -> VersionResult<()> {
         let budget = self.records.budget();
-        let retain = self.memory_tier_limit.map_or_else(
+        let retain = self.policy.memory_tier_limit().map_or_else(
             || {
                 self.resident < self.least_spill()
                     || budget.used() <= budget.limit() / PRESSURE_DIVISOR
@@ -216,10 +217,9 @@ impl PrivateRecordChanges {
                 state: Mutex::new(State {
                     records: state.records.clone(),
                     resident: state.resident,
-                    memory_tier_limit: state.memory_tier_limit,
                     runs: state.runs.clone(),
                     sources: state.sources.clone(),
-                    scopes: state.scopes.as_ref().map(RevisionScopes::fork),
+                    policy: state.policy.fork(),
                     revision: state.revision,
                     savepoints: BudgetedVec::new(state.records.budget()),
                 }),
@@ -277,7 +277,7 @@ impl PrivateRecordChanges {
     /// Spill the resident tier earlier while retaining the same hard allowance for keys, run metadata and I/O scratch. The threshold is checked before each atomic write; the current write may exceed it. Forks preserve the policy. Ordinary transaction owners retain their pressure-based policy.
     pub fn with_memory_tier_limit(memory: &MemoryBudget, bytes: usize) -> Self {
         let changes = Self::new(memory);
-        changes.owner.state.lock().memory_tier_limit = Some(bytes);
+        changes.owner.state.lock().policy = RootPolicy::Unscoped(Some(bytes));
         changes
     }
 
@@ -302,13 +302,13 @@ impl PrivateRecordChanges {
         let changes = Self::with_revision_scope(control.memory(), scope);
         if let Some(run) = run {
             let mut state = changes.owner.state.lock();
-            if let Some(mut scopes) = state.scopes.take() {
+            if let Some(mut scopes) = state.policy.take_scopes() {
                 let mut cursor = run.cursor(std::ops::Bound::Unbounded);
                 while let Some(entry) = cursor.next(control)? {
                     let key = PreparedRecordWrite::from_shared(entry.key, None, None);
                     scopes = scopes.with_writes(&[key], revision, control)?;
                 }
-                state.scopes = Some(scopes);
+                state.policy.restore_scopes(Some(scopes));
             }
             state.runs = RunSet::from_run(run);
             state.revision = Some(revision);
@@ -326,10 +326,9 @@ impl PrivateRecordChanges {
                 state: Mutex::new(State {
                     records: Records::new(memory),
                     resident: 0,
-                    memory_tier_limit: None,
                     runs: RunSet::empty(),
                     sources: Sources::new(memory),
-                    scopes: scope.map(|scope| RevisionScopes::new(memory, scope)),
+                    policy: RootPolicy::new(memory, scope),
                     revision: None,
                     savepoints: BudgetedVec::new(memory),
                 }),
@@ -376,8 +375,8 @@ impl PrivateRecordChanges {
         state.make_room(control)?;
         let identity = PrivateRecordRevision::allocate()?;
         let scopes = state
-            .scopes
-            .as_ref()
+            .policy
+            .scopes()
             .map(|scopes| scopes.with_writes(writes, identity, control))
             .transpose()?;
         let invalidates_source = writes
@@ -395,7 +394,7 @@ impl PrivateRecordChanges {
                 },
             )?;
             state.resident = resident;
-            state.scopes = scopes;
+            state.policy.restore_scopes(scopes);
             state.revision = Some(identity);
             return Ok(());
         }
@@ -420,7 +419,7 @@ impl PrivateRecordChanges {
         // Candidate roots own every reservation before this single atomic publication.
         state.records = records;
         state.sources = sources;
-        state.scopes = scopes;
+        state.policy.restore_scopes(scopes);
         state.resident = resident;
         state.revision = Some(identity);
         Ok(())
@@ -471,8 +470,8 @@ impl PrivateRecordChanges {
             runs: state.runs.clone(),
             sources: state.sources.snapshot(),
             scopes: state
-                .scopes
-                .as_ref()
+                .policy
+                .scopes()
                 .map(RevisionScopes::snapshot)
                 .transpose()?,
             revision: state.revision,
@@ -486,7 +485,7 @@ impl PrivateRecordChanges {
         let resident = state.resident;
         let runs = state.runs.clone();
         let sources = state.sources.snapshot();
-        let scopes = state.scopes.as_ref().map(RevisionScopes::fork);
+        let scopes = state.policy.scopes().map(RevisionScopes::fork);
         let revision = state.revision;
         state.savepoints.push(Savepoint {
             id,
@@ -517,10 +516,11 @@ impl PrivateRecordChanges {
         state.runs = state.savepoints[position].runs.clone();
         let sources = state.savepoints[position].sources.clone();
         state.sources.restore(&sources);
-        state.scopes = state.savepoints[position]
+        let scopes = state.savepoints[position]
             .scopes
             .as_ref()
             .map(RevisionScopes::fork);
+        state.policy.restore_scopes(scopes);
         state.revision = state.savepoints[position].revision;
         state.truncate_savepoints(position + 1);
         Ok(())
@@ -533,7 +533,8 @@ impl PrivateRecordChanges {
         state.resident = 0;
         state.runs = RunSet::empty();
         state.sources = Sources::new(&memory);
-        state.scopes = state.scopes.as_ref().map(RevisionScopes::empty);
+        let scopes = state.policy.scopes().map(RevisionScopes::empty);
+        state.policy.restore_scopes(scopes);
         state.revision = None;
         state.truncate_savepoints(0);
         Ok(())
