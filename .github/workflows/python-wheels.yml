@@ -165,16 +165,6 @@ jobs:
           cache-bin: false
           cache-targets: false
 
-      - name: Check out reviewed recovery build tools
-        if: ${{ inputs.source_ref != '' }}
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: .release-build-tools
-          sparse-checkout: .github/scripts/install-manylinux-build-deps.sh
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         env:
@@ -184,7 +174,7 @@ jobs:
           maturin-version: v1.11.5
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
-          before-script-linux: source ${{ inputs.source_ref != '' && '.release-build-tools' || '.' }}/.github/scripts/install-manylinux-build-deps.sh
+          before-script-linux: source .github/scripts/install-manylinux-build-deps.sh
           args: --release --locked --features nori,kuromoji --compatibility pypi --out dist
 
       - name: Check wheel license contents

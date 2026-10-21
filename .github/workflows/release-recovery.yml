@@ -11,7 +11,6 @@ on:
       - .github/workflows/release-assets.yml
       - .github/workflows/python-wheels.yml
       - .github/workflows/release.yml
-      - .github/scripts/install-manylinux-build-deps.sh
       - scripts/resolve-release-recovery.py
       - scripts/check-published-crate.py
       - scripts/package-publishable-crates.sh
