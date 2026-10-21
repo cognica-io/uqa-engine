@@ -7,6 +7,10 @@
 //! Predicate-aware unique index probes and runtime key values.
 
 use super::ConstraintContext;
+use crate::mutation::{
+    candidate_ids::{visit_identity_pages, CandidateIds, CapturedCandidateIds},
+    row_membership::PhysicalRowBuffer,
+};
 use uqa_sql::catalog::index::EnforcedKey;
 
 use uqa_core::{DocId, Value};
@@ -160,37 +164,7 @@ impl EnforcedKeyExecution for EnforcedKey {
         if self.keys.iter().any(|key| key.column().is_none())
             || (self.keys.len() > 1 && self.index_catalog.is_some())
         {
-            let key = local_physical_key(self, context, table)?;
-            let indexed = context
-                .indexes
-                .value_index_scan_key(
-                    table,
-                    &key,
-                    &uqa_core::Predicate::Equals(Value::Row(values.to_vec().into())),
-                )?
-                .ok_or_else(|| SQLError::Internal(format!("missing physical index {key:?}")))?;
-            let uqa_storage::ValueIndexKey::Index(physical_key) = &key else {
-                unreachable!("tuple index has a physical identity")
-            };
-            let staged = context
-                .indexes
-                .staged_expression_matches(table, physical_key, values)?;
-            for entry in indexed.entries() {
-                let id = entry.doc_id;
-                if Some(id) == ignored
-                    || staged.changes.contains_change(id).map_err(changes_error)?
-                {
-                    continue;
-                }
-                if context.reads.get_document(table, id)?.is_some() {
-                    return Ok(Some(id));
-                }
-            }
-            return Ok(staged
-                .matches
-                .iter()
-                .copied()
-                .find(|id| Some(*id) != ignored));
+            return find_physical_conflict(self, context, table, values, ignored);
         }
         if self.predicate.is_none() {
             return context
@@ -198,57 +172,132 @@ impl EnforcedKeyExecution for EnforcedKey {
                 .find_conflict(table, &self.columns, values)
                 .map(|id| id.filter(|id| Some(*id) != ignored));
         }
-        let indexed = self
-            .columns
-            .first()
-            .zip(values.first())
-            .map(|(column, value)| {
-                context.indexes.value_index_scan_key(
-                    table,
-                    &uqa_storage::ValueIndexKey::Column(column.clone()),
-                    &if matches!(value, Value::Null) {
-                        uqa_core::Predicate::IsNull
-                    } else {
-                        uqa_core::Predicate::Equals(value.clone())
-                    },
-                )
-            })
-            .transpose()?
-            .flatten();
-        let mut ids = if let Some(indexed) = indexed {
-            indexed
-                .entries()
-                .iter()
-                .map(|entry| entry.doc_id)
-                .collect::<std::collections::BTreeSet<_>>()
-        } else {
-            context
-                .reads
-                .live_table_doc_ids(table)?
-                .into_iter()
-                .collect()
-        };
-        // A row the running command staged holds its key in the command's own index rather than in storage.
-        ids.extend(
-            context
-                .indexes
-                .staged_matches(table, &self.columns, values)?,
-        );
-        for id in ids {
-            if Some(id) == ignored {
-                continue;
-            }
-            let Some(document) = context.reads.get_document(table, id)? else {
-                continue;
-            };
-            if let Some(actual) = self.values(context, table, &document)? {
-                if key_values_equal(&actual, values, context.values)? {
-                    return Ok(Some(id));
+        find_partial_conflict(self, context, table, values, ignored)
+    }
+}
+
+fn capture_index_candidates(
+    context: ConstraintContext<'_>,
+    table: &str,
+    key: &uqa_storage::ValueIndexKey,
+    predicate: &uqa_core::Predicate,
+) -> Result<Option<CapturedCandidateIds>, SQLError> {
+    let mut ids = CandidateIds::new(
+        context.memory.work_mem_bytes()?,
+        context.cancellation.clone(),
+    );
+    if !context
+        .indexes
+        .visit_value_index_key(table, key, predicate, &mut |id| ids.push(0, id))?
+    {
+        return Ok(None);
+    }
+    ids.finish().map(Some)
+}
+
+fn find_physical_conflict(
+    key: &EnforcedKey,
+    context: ConstraintContext<'_>,
+    table: &str,
+    values: &[Value],
+    ignored: Option<DocId>,
+) -> Result<Option<DocId>, SQLError> {
+    let key = local_physical_key(key, context, table)?;
+    let indexed = capture_index_candidates(
+        context,
+        table,
+        &key,
+        &uqa_core::Predicate::Equals(Value::Row(values.to_vec().into())),
+    )?
+    .ok_or_else(|| SQLError::Internal(format!("missing physical index {key:?}")))?;
+    let uqa_storage::ValueIndexKey::Index(physical_key) = &key else {
+        unreachable!("tuple index has a physical identity")
+    };
+    let mut staged = CandidateIds::new(
+        context.memory.work_mem_bytes()?,
+        context.cancellation.clone(),
+    );
+    let changes = context.indexes.visit_staged_expression_matches(
+        table,
+        physical_key,
+        values,
+        &mut |id| staged.push(0, id),
+    )?;
+    let staged = staged.finish()?;
+    for row in indexed.read_rows()? {
+        let (_, id) = row?;
+        if Some(id) != ignored
+            && !changes.contains_change(id).map_err(changes_error)?
+            && context.reads.get_document(table, id)?.is_some()
+        {
+            return Ok(Some(id));
+        }
+    }
+    // Command-frame order, including memory and spilled entries, is retained rather than sorting this second probe.
+    for row in staged.read_rows()? {
+        let (_, id) = row?;
+        if Some(id) != ignored {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
+fn find_partial_conflict(
+    key: &EnforcedKey,
+    context: ConstraintContext<'_>,
+    table: &str,
+    values: &[Value],
+    ignored: Option<DocId>,
+) -> Result<Option<DocId>, SQLError> {
+    let mut ids = PhysicalRowBuffer::new(
+        context.memory.work_mem_bytes()?,
+        context.cancellation.clone(),
+        "partial index candidates",
+    );
+    let indexed = match key.columns.first().zip(values.first()) {
+        Some((column, value)) => context.indexes.visit_value_index_key(
+            table,
+            &uqa_storage::ValueIndexKey::Column(column.clone()),
+            &if matches!(value, Value::Null) {
+                uqa_core::Predicate::IsNull
+            } else {
+                uqa_core::Predicate::Equals(value.clone())
+            },
+            &mut |id| ids.insert("", id),
+        )?,
+        None => false,
+    };
+    if !indexed {
+        visit_identity_pages(
+            context.cancellation,
+            |after, limit, control| {
+                context
+                    .reads
+                    .live_table_doc_id_page(table, after, limit, control)
+            },
+            &mut |id| ids.insert("", id),
+        )?;
+    }
+    context
+        .indexes
+        .visit_staged_matches(table, &key.columns, values, &mut |id| ids.insert("", id))?;
+    let ids = ids.finish()?;
+    let mut found = None;
+    ids.visit(&mut |_, id| {
+        if Some(id) != ignored {
+            if let Some(document) = context.reads.get_document(table, id)? {
+                if let Some(actual) = key.values(context, table, &document)? {
+                    if key_values_equal(&actual, values, context.values)? {
+                        found = Some(id);
+                        return Ok(false);
+                    }
                 }
             }
         }
-        Ok(None)
-    }
+        Ok(true)
+    })?;
+    Ok(found)
 }
 
 fn find_conflict_excluding(

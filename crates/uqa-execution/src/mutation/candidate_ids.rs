@@ -99,21 +99,8 @@ impl CandidateIds {
             &StorageReadControl,
         ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError>,
     ) -> Result<(), SQLError> {
-        let control =
-            StorageReadControl::new(&MemoryBudget::new(ID_PAGE_MEMORY), &self.cancellation);
-        let mut after = None;
-        loop {
-            self.cancellation.check()?;
-            let page = page(after, ID_PAGE_SIZE, &control)?;
-            let Some(last) = page.last().copied() else {
-                break;
-            };
-            after = Some(last);
-            for &id in page.iter() {
-                self.push(table, id)?;
-            }
-        }
-        Ok(())
+        let cancellation = self.cancellation.clone();
+        visit_identity_pages(&cancellation, &mut page, &mut |id| self.push(table, id))
     }
 
     fn flush(&mut self) -> Result<(), SQLError> {
@@ -175,6 +162,31 @@ impl CapturedCandidateIds {
                     decode_prepared_doc_id(id, "mutation target identities")?,
                 ))
             }))
+    }
+}
+
+/// Visit the selected ordered identity pages before the caller begins any row evaluation.
+pub(crate) fn visit_identity_pages(
+    cancellation: &CancellationToken,
+    mut page: impl FnMut(
+        Option<DocId>,
+        usize,
+        &StorageReadControl,
+    ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError>,
+    visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    let control = StorageReadControl::new(&MemoryBudget::new(ID_PAGE_MEMORY), cancellation);
+    let mut after = None;
+    loop {
+        cancellation.check()?;
+        let page = page(after, ID_PAGE_SIZE, &control)?;
+        let Some(last) = page.last().copied() else {
+            return Ok(());
+        };
+        after = Some(last);
+        for &id in page.iter() {
+            visit(id)?;
+        }
     }
 }
 

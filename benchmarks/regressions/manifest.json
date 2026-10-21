@@ -18559,6 +18559,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_null_candidates_visit_without_posting_materialization_or_equality_conflation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/tests.rs",
+      "capability": "Bounded unique-index candidates",
+      "workload": "16,384 alternating SQL NULL/integer keys, NULL equality and a typed consumer failure.",
+      "invariant": "Null candidates require less than 4KiB additional peak allocation, preserve identity order, distinguish Equals(NULL), and retain the first consumer error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "null_candidate_eligibility_preserves_row_and_carried_index_fallbacks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/tests.rs",
+      "capability": "Bounded unique-index candidates",
+      "workload": "Row-valued, carried-only and unsupported-predicate candidate probes.",
+      "invariant": "Declined probes invoke no consumer; row NULL semantics are not approximated by scalar-null buckets.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "expression_match_visitor_preserves_frame_order_masking_and_consumer_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/overlay/tests/expressions.rs",
+      "capability": "Bounded unique-index candidates",
+      "workload": "256 spilled expression keys and a newer frame that rekeys, deletes and inserts matching rows.",
+      "invariant": "The visitor retains the original frame/row sequence and complete command mask, reads previously evaluated keys, and stops on a typed consumer failure.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -74,6 +74,31 @@ impl CommandMutationOverlay {
         Ok(CommandIndexProbe { matches, changes })
     }
 
+    /// Visit already evaluated tuple keys before retaining the same command mask; the callback captures identities without evaluating row expressions.
+    pub fn visit_expression_matches_with_catalog(
+        overlays: &mut [Self],
+        table: &str,
+        physical_key: &str,
+        values: &[Value],
+        control: &StorageReadControl,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+        visit: &mut dyn FnMut(DocId) -> Result<(), SQLError>,
+    ) -> Result<DocumentChanges, SQLError> {
+        super::matching::visit_matches(
+            overlays,
+            table,
+            super::matching::MatchKeys {
+                fields: &[physical_key.to_owned()],
+                values: &[Value::Row(values.to_vec().into())],
+                kind: KeyKind::Expressions,
+            },
+            control,
+            catalog,
+            visit,
+        )?;
+        Self::changes(overlays, table, DocumentChanges::default(), control)
+    }
+
     pub fn expression_matches(
         overlays: &mut [Self],
         table: &str,
