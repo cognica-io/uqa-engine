@@ -6,7 +6,7 @@ The maintainer requested that the current work be fixed, verified and merged bef
 
 | Task | Confirmed failure | Owner and completion condition | Status |
 | --- | --- | --- | --- |
-| [#1223](https://github.com/cognica-io/uqa-engine/issues/1223) | Nori redb peak 8,292,358 bytes exceeds the unchanged 8,292,342-byte ceiling | Storage private-root representation; retain allocation, output, fork, savepoint and spill contracts | Fixed; unchanged local allocation/output/reopen gate passes |
+| [#1223](https://github.com/cognica-io/uqa-engine/issues/1223) | Nori redb peak 8,292,358 bytes exceeds the unchanged 8,292,342-byte ceiling | Storage private-root representation; retain allocation, output, fork, savepoint and spill contracts | Fixed; unchanged local and main allocation/output/reopen gates pass |
 | [#1224](https://github.com/cognica-io/uqa-engine/issues/1224) | Existing repeatable-read test exceeds 300 seconds on Linux and macOS | Storage/Execution path responsible for private-write work; preserve the fixture, allowance and timeout | Ordered merge and scoped reads pass the original three-provider test locally; automatic OS checks pending |
 | [#653](https://github.com/cognica-io/uqa-engine/issues/653) | Controlled Q1 +11.4%, materialized scan +19.5%, cursor scan +17.4% | Owning execution or storage path; pass the same independently calibrated controlled comparison | Scan/grouping fixes pass 136 local cases; controlled qualification pending |
 
@@ -18,9 +18,11 @@ The failing workspace run is [39542443925](https://github.com/cognica-io/uqa-eng
 - [x] Correct the repeatable-read slow path and verify all three providers locally with deterministic work coverage.
 - [ ] Correct Q1 and result-scan repeated work and pass controlled qualification without widening limits or discarding observations.
 - [x] Run formatting, strict owner Clippy, 289 owning-crate cases, dependency/ownership checks and complete-diff review.
-- [ ] Verify the final product source in automatic Linux/macOS work, memory and output regression checks and the affected full tests.
-- [ ] Qualify affected FDW inputs once when the completed draft becomes ready, keeping every logical commit and PR task record current.
-- [ ] Merge, close resolved scoped issues, remove the completed branch, restore main and then pause.
+- [x] Verify the final product source in automatic Linux/macOS work, memory and output regression checks.
+- [ ] Verify the affected full workspace tests on merged main.
+- [x] Verify the final-ready FDW selector against the exact product tree; no foreign-handler input changed and no skipped matrix is counted as a test pass.
+- [x] Merge PR #1225 as `916fb1159`, close #1223/#1224, remove its local/remote branch and update main with the unrelated parity README edit preserved.
+- [ ] Complete remaining qualification, resolve any failures, synchronize these records and then pause.
 
 The existing `tests/parity/pg18/README.md` edit in the main checkout is unrelated and remains untouched. Reuse the established local build checkout and target cache; use local correctness/work diagnostics while CI supplies controlled timing. Repository events trigger CI; no workflow dispatch, rerun or cancellation is part of this repair.
 
@@ -35,3 +37,9 @@ The deeper repeatable-read cause is quadratic identity filtering: each page firs
 Analytical repair candidates remove per-row adaptive page division and use the largest observed row to prevent repeated prefetch of mixed-width tails. The existing exact batch-size bound remains enforced for every row. Compact text-pair grouping now binds the exact two slots and packs zero-to-three bytes directly, preserving the prior encoded keys, null distinction and UTF-8 bytes. All 136 local aggregation, DISTINCT, scored-input and sizing cases pass, including a new mixed-width visit-count check. Controlled timing is still required; no local timing is claimed as acceptance.
 
 The final combined local owner run passes all 289 Storage/Execution cases, including the corrected captured-cancellation precedence, all four new work/memory checks, spill-policy rollback and exact grouping keys. The checked-in FDW selector finds no affected foreign-handler input locally; that exclusion is not counted as an executed test pass. Build outputs remain in the shared cache (57.27GB, below the existing 100GB limit).
+
+## Automatic qualification of the merged repair
+
+PR run [39561493248](https://github.com/cognica-io/uqa-engine/actions/runs/39561493248) verifies the exact `a55a0aebb` product tree, which equals merged main `916fb1159`: both Linux and macOS pass 1,536 checks / 2,127 cases and eight independent-process histories, with 676 registered source hashes and exact JUnit identities checked and no failures, errors or skips. FDW scope [39561532911](https://github.com/cognica-io/uqa-engine/actions/runs/39561532911) finds no changed foreign-handler input.
+
+Main Nori job [119113658822](https://github.com/cognica-io/uqa-engine/actions/runs/39567631928/job/119113658822) passes all five analysis/index/phrase/SQLite/redb report validators against unchanged limits and expected outputs. The redb seed-256 peak is 8,292,342 bytes; all four redb transactions release their retained allowance. Artifact verification repeats no measurement. Full workspace [39567631928](https://github.com/cognica-io/uqa-engine/actions/runs/39567631928), main work/memory/output checks [39567631962](https://github.com/cognica-io/uqa-engine/actions/runs/39567631962) and controlled EC2 [39567631944](https://github.com/cognica-io/uqa-engine/actions/runs/39567631944) remain in progress. The task is not paused or complete.
