@@ -1,8 +1,8 @@
 # Upgrading UQA Engine
 
-This page describes UQA Engine 0.6.0 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.0/docs/manual/reference/10-upgrading.md) when installing the 0.6.0 packages.
+This page describes UQA Engine 0.6.1 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.1/docs/manual/reference/10-upgrading.md) when installing the 0.6.1 packages.
 
-## Unreleased
+## 0.6.1
 
 Custom Execution `QueryIndexRead` adapters now implement `visit_value_index` and `visit_exact_command_matches` in addition to the materializing retrieval methods. The first visitor retains the selected generation and predicate observation and may decline only before invoking any callback; the second captures every command match and returns its mask from the same frame view. Their callbacks capture identities without reentering Engine. `LocalTableScanConfig::candidates` and unscored `ScoredInput::Candidates` use `SelectedIds`; `SelectedIds::capture` sorts and deduplicates a complete fallible input under the supplied allowance, and independent cursors preserve that captured support. `ScoredDocumentSource::with_recheck_pins` now returns `Result` so candidate I/O and cancellation cannot become missing rows. These Rust adapter changes do not change durable formats.
 
@@ -20,7 +20,7 @@ rusqlite = { package = "uqa-rusqlite", version = "=0.39.1", default-features = f
 
 Emscripten uses the same maintained packages with `bundled,blob,cache` instead of SQLCipher. Python, JavaScript, WASM and standalone CLI users do not manage these Rust dependencies directly. The provider re-export names the identical underlying driver module; it introduces no execution, conversion or storage operation. Connection-local memory reclamation and SQLCipher encryption remain active; the optional process-wide `sqlite3_release_memory` facility is no longer compiled in.
 
-Current main retains the analyzed argument type of `pg_typeof` as a structural function binding while preserving normal argument evaluation. Newly stored definitions can contain that binding; use compatible binaries for all owners before creating or replacing them, because 0.6.0 cannot deserialize the new dispatch identity. Existing calls without this metadata bind their original arguments through the normal execution path.
+Version 0.6.1 retains the analyzed argument type of `pg_typeof` as a structural function binding while preserving normal argument evaluation. Newly stored definitions can contain that binding; use compatible binaries for all owners before creating or replacing them, because 0.6.0 cannot deserialize the new dispatch identity. Existing calls without this metadata bind their original arguments through the normal execution path.
 
 ## 0.6.0
 
@@ -712,20 +712,20 @@ SQLite catalogs advance to version 46 for durable cache revisions, graph access 
 
 ## Package versions
 
-Update the UQA packages used by one application together. Rust's `0.1`, `0.2`, `0.3`, `0.4` and `0.5` dependency requirements do not select `0.6.0`; change the requirement explicitly and regenerate the application's lockfile.
+Update the UQA packages used by one application together. Rust's `0.1`, `0.2`, `0.3`, `0.4` and `0.5` dependency requirements do not select `0.6.1`; change the requirement explicitly and regenerate the application's lockfile.
 
 | Environment | Versioned installation |
 | --- | --- |
-| Embedded Rust | `cargo add uqa@0.6.0` |
-| Rust HTTP client | `cargo add uqa-client@0.6.0` |
-| Python and `usql` | `python -m pip install --upgrade uqa==0.6.0` |
-| Embedded Node.js | `npm install @cognica-io/uqa@0.6.0` |
-| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.6.0` |
-| Browser WASM | `npm install @cognica-io/uqa-wasm@0.6.0` |
+| Embedded Rust | `cargo add uqa@0.6.1` |
+| Rust HTTP client | `cargo add uqa-client@0.6.1` |
+| Python and `usql` | `python -m pip install --upgrade uqa==0.6.1` |
+| Embedded Node.js | `npm install @cognica-io/uqa@0.6.1` |
+| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.6.1` |
+| Browser WASM | `npm install @cognica-io/uqa-wasm@0.6.1` |
 
 Embedded Rust crates require Rust 1.90 or newer; CLI, Python and full-workspace source builds require Rust 1.95 or newer. Python requires Python 3.8 or newer, and the Node.js package requires Node.js 16 or newer. The Node.js root package selects an exact-version native optional package for embedded execution; deploy the root and native packages from the same release. Deploy the Browser WASM JavaScript module and `uqa.wasm` from the same package together, including when updating a browser cache.
 
-The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.6.0) contains the Python and npm archives, standalone Node.js addons, standalone usql archives and installers, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.6.0"` consistently for every UQA dependency.
+The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.6.1) contains the Python and npm archives, standalone Node.js addons, standalone usql archives and installers, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.6.1"` consistently for every UQA dependency.
 
 ## Automatic statistics and session caches
 
@@ -794,10 +794,10 @@ Default document-API FTS registrations preserve their field list and analyzer re
 Existing native catalogs may retain the Python-era `_graph_catalog(graph_name)` alias alongside `_named_graphs` and native graph membership. Migration validates this exact representation and merges its names into `_named_graphs` before restoring graph metadata, then retires the alias in the same transaction. Catalog vertices, edges and memberships remain in their original namespace; Rust standalone graph catalogs use a different schema and keep their independent conversion. Historical FTS accelerator tables may declare their term column as `TEXT`: empty tables retire normally and canonical BLOB keys preserve their bytes; populated text-valued keys are rejected rather than coerced into another token representation.
 
 1. Stop writers, close every engine using the database, and create a recoverable backup through the [storage backup procedure](04-storage-and-security.md#backups-and-copies).
-2. Open a copy with the exact 0.6.0 application and its selected provider, encryption key, and compression configuration.
+2. Open a copy with the exact 0.6.1 application and its selected provider, encryption key, and compression configuration.
 3. Execute representative reads, writes, role and privilege checks, stored routines and views, and retrieval queries. Verify indexes, transaction rollback, and close-and-reopen behavior with the application's data.
 4. Update every process sharing the database before reopening the original file. Register process-local runtime callbacks again when the application starts.
-5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.6.0.
+5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.6.1.
 
 Keep migration failures visible and resolve them before admitting writes. Retain encryption keys and any external rollback anchor according to the [storage and security contract](04-storage-and-security.md).
 

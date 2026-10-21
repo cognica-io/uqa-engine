@@ -60,7 +60,7 @@ Serial declarations allocate generated integer values through an owned sequence.
 
 ## Bit strings
 
-UQA Engine 0.6.0 supports `BIT(n)`, `BIT VARYING(n)` and its alias `VARBIT(n)`. The length is a number of bits. An omitted length on the `BIT` keyword means one bit; unmodified quoted `"bit"` or catalog-qualified `pg_catalog.bit` has no length constraint. An omitted varying length also has no declared bound. Binary literals use `B'101'`, hexadecimal literals use `X'9a'`, and both produce a `bit` value with the literal's exact length, including an empty literal.
+UQA Engine 0.6.1 supports `BIT(n)`, `BIT VARYING(n)` and its alias `VARBIT(n)`. The length is a number of bits. An omitted length on the `BIT` keyword means one bit; unmodified quoted `"bit"` or catalog-qualified `pg_catalog.bit` has no length constraint. An omitted varying length also has no declared bound. Binary literals use `B'101'`, hexadecimal literals use `X'9a'`, and both produce a `bit` value with the literal's exact length, including an empty literal.
 
 Assignment to `BIT(n)` requires exactly `n` bits, while assignment to `BIT VARYING(n)` accepts at most `n`. An explicit cast to `BIT(n)` truncates excess bits on the right or pads with zeroes on the right; a varying-length cast truncates excess bits without padding. Text output contains exactly the logical binary digits, preserving leading zeroes and empty values. Arrays and composite fields retain that value and their declared fixed/varying type. Equality compares the bit sequence; ordering is lexicographic with zero before one and a shorter prefix before its extension. Grouping, joins and indexes preserve the same equality classes.
 
