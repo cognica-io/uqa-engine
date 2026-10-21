@@ -10,13 +10,16 @@ HASHES = {'16.0.0-UnicodeData.txt': 'ff58e5823bd095166564a006e47d111130813dcf8bf
 def load(root, version, name):
     key = f"{version}-{name}"
     data = (root / key).read_bytes()
-    assert hashlib.sha256(data).hexdigest() == HASHES[key], key
+    if hashlib.sha256(data).hexdigest() != HASHES[key]:
+        raise SystemExit(f"hash mismatch: {key}")
     return data.decode().splitlines()
 
 def lowercase(root, version):
     result = {}
     for line in load(root, version, "UnicodeData.txt"):
         fields = line.split(";")
+        if len(fields) != 15:
+            raise SystemExit(f"invalid UnicodeData record in {version}")
         if fields[13]:
             result[int(fields[0], 16)] = (int(fields[13], 16),)
     for line in load(root, version, "SpecialCasing.txt"):
@@ -39,13 +42,16 @@ def main():
     old, new = [lowercase(root, v) for v in ("16.0.0", "17.0.0")]
     delta = [(c, new.get(c, (c,))) for c in sorted(old.keys() | new.keys())
              if old.get(c, (c,)) != new.get(c, (c,))]
-    assert len(delta) == 28 and all(len(mapping) == 1 for _, mapping in delta)
+    if len(delta) != 28 or any(len(mapping) != 1 for _, mapping in delta):
+        raise SystemExit("unexpected full lowercase delta")
     source = (Path(__file__).resolve().parents[1] /
               "crates/uqa-analysis/src/unicode/unicode_17.rs").read_text()
     actual = [tuple(int(c, 16) for c in pair) for pair in
               re.findall(r"\('\\u\{([0-9a-f]+)\}', '\\u\{([0-9a-f]+)\}'\)", source)]
-    assert actual == [(c, mapping[0]) for c, mapping in delta]
-    assert whitespace(root, "16.0.0") == whitespace(root, "17.0.0")
+    if actual != [(c, mapping[0]) for c, mapping in delta]:
+        raise SystemExit("committed lowercase table differs from the verified UCD inputs")
+    if whitespace(root, "16.0.0") != whitespace(root, "17.0.0"):
+        raise SystemExit("retained whitespace sets differ")
     print("28 full lowercase deltas and identical whitespace sets verified")
 
 if __name__ == "__main__":
