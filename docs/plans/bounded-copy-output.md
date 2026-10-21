@@ -4,7 +4,7 @@ The initial source inspection for issue [#714](https://github.com/cognica-io/uqa
 
 ## Delivery checkpoint before the requested pause
 
-On 2026-10-21 the maintainer requested completion of the current work followed by a pause, then directed one merge followed by final-main CI instead of waiting for each PR. PR #1221 integrates the already reviewed logical commits from #1216–#1221. The local evidence below is complete; pending pre-merge jobs are not passing evidence. Verify the actual final-main Linux/macOS work, memory and output results after the single merge, preserve any failures, and pause after delivery and branch cleanup. No new follow-up implementation is included in this boundary.
+PR #1221 merged the reviewed #1216–#1221 work as `38f41167e`. Actual Linux/macOS regression run [39542443759](https://github.com/cognica-io/uqa-engine/actions/runs/39542443759) passed 1,532 checks / 2,123 cases and eight independent-process histories per OS, but final-main workspace and controlled checks exposed the Nori allocation excess, the repeatable-read timeout and three analytical regressions. The maintainer required those failures to be fixed before pausing. [PR #1225](https://github.com/cognica-io/uqa-engine/pull/1225) is now merged as `916fb1159`; its exact product tree passes all 1,536 checks / 2,127 cases and eight histories per OS in [39561493248](https://github.com/cognica-io/uqa-engine/actions/runs/39561493248), and main Nori verification passes. The [repair record](final-main-ci-regressions.md) tracks the remaining full-workspace and controlled qualification. No pending or skipped job is passing evidence. Original unfinished obligations remain preserved below.
 
 | Included PR | Completed behavior | Local evidence |
 | --- | --- | --- |

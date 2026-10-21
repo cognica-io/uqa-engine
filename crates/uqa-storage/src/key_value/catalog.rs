@@ -697,6 +697,13 @@ impl CatalogFacade for KeyValueCatalog {
         self.save_foreign_table_impl(row)
     }
 
+    fn foreign_table_has_private_changes(
+        &self,
+        relation: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        self.relation_record_has_private_changes(TAG_FOREIGN_TABLE, relation)
+    }
+
     fn rename_foreign_table(
         &self,
         from: &RelationIdentity,

@@ -771,6 +771,19 @@ pub trait CatalogFacade: Send + Sync {
     fn drop_foreign_table(&self, relation: &RelationIdentity) -> StorageBackendResult<()>;
     fn load_foreign_tables(&self) -> StorageBackendResult<Vec<ForeignTableRow>>;
 
+    /// Whether this exact foreign-table record has a private creation, replacement or deletion in the current session, including either end of a rename.
+    fn foreign_table_has_private_changes(
+        &self,
+        _relation: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "private foreign-table provenance is not supported by this catalog".into(),
+            ));
+        }
+        Ok(false)
+    }
+
     fn save_catalog_index(
         &self,
         relation: &RelationIdentity,

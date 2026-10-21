@@ -736,6 +736,16 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::save_foreign_table(self, row))
     }
 
+    fn foreign_table_has_private_changes(
+        &self,
+        relation: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        into_storage_result(self.native_relation_has_private_changes(
+            super::native::RelationRecord::ForeignTable,
+            relation,
+        ))
+    }
+
     fn rename_foreign_table(
         &self,
         from: &RelationIdentity,

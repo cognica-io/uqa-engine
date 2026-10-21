@@ -16,23 +16,7 @@ impl Catalog {
         &self,
         relation: &RelationIdentity,
     ) -> Result<bool> {
-        Ok(self
-            .read_native(|snapshot| {
-                let key = crate::mvcc::native::NativeRecordIdentity::new(
-                    Family::Views,
-                    NativeRecordOwner::Database(snapshot.database),
-                )?
-                .encode_key(
-                    &[text(&relation.schema), text(&relation.name)],
-                    &snapshot.control,
-                )?;
-                Ok(snapshot
-                    .view
-                    .private_keys(&key, None, 1, &snapshot.control)?
-                    .iter()
-                    .any(|entry| entry.key() == &*key))
-            })?
-            .unwrap_or(false))
+        self.native_relation_has_private_changes(RelationRecord::View, relation)
     }
 
     pub(in crate::catalog) fn save_native_view(&self, view: &ViewRow) -> Result<Option<()>> {

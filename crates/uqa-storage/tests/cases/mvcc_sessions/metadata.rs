@@ -11,6 +11,71 @@ mod observed;
 use uqa_storage::{CatalogFacade, KeyValueCatalog};
 
 #[test]
+fn foreign_table_provenance_preserves_exact_names_rename_deletion_and_undo() {
+    let persistence = Persistence::new();
+    let first = Arc::new(persistence.session(1 << 24));
+    let second = Arc::new(persistence.session(1 << 24));
+    let a = KeyValueCatalog::new(first.clone());
+    let b = KeyValueCatalog::new(second.clone());
+    let schema = "tenant:%_\0日本語";
+    a.save_schema(schema).unwrap();
+    a.save_schema("other").unwrap();
+    a.save_foreign_server("remote", "memory_fdw", "{}").unwrap();
+    let saved = uqa_core::RelationIdentity::new(schema, "saved:%_\0");
+    let neighbor = uqa_core::RelationIdentity::new(schema, "saved:%_\0next");
+    let other = uqa_core::RelationIdentity::new("other", &saved.name);
+    let renamed = uqa_core::RelationIdentity::new(schema, "renamed");
+    let created = uqa_core::RelationIdentity::new(schema, "created");
+    let peer = uqa_core::RelationIdentity::new(schema, "peer");
+    let row = |relation: &uqa_core::RelationIdentity| uqa_storage::ForeignTableRow {
+        relation: relation.clone(),
+        security: uqa_storage::RelationSecurityRow::legacy("uqa"),
+        server_name: "remote".into(),
+        columns_json: "[]".into(),
+        options_json: "{}".into(),
+    };
+    for relation in [&saved, &neighbor, &other] {
+        a.save_foreign_table(&row(relation)).unwrap();
+        assert!(!a.foreign_table_has_private_changes(relation).unwrap());
+    }
+    first.begin_transaction().unwrap();
+    first.savepoint("foreign_tables").unwrap();
+    a.save_foreign_table(&row(&saved)).unwrap();
+    assert!(a.foreign_table_has_private_changes(&saved).unwrap());
+    assert!(!a.view_has_private_changes(&saved).unwrap());
+    a.rename_foreign_table(&saved, &renamed).unwrap();
+    a.save_foreign_table(&row(&created)).unwrap();
+    a.drop_foreign_table(&renamed).unwrap();
+    for relation in [&saved, &renamed, &created] {
+        assert!(a.foreign_table_has_private_changes(relation).unwrap());
+        assert!(!b.foreign_table_has_private_changes(relation).unwrap());
+    }
+    for relation in [
+        &neighbor,
+        &other,
+        &uqa_core::RelationIdentity::new(schema, "saved"),
+    ] {
+        assert!(!a.foreign_table_has_private_changes(relation).unwrap());
+    }
+    b.save_foreign_table(&row(&peer)).unwrap();
+    first
+        .refresh_transaction_snapshot(&uqa_core::CancellationToken::new())
+        .unwrap();
+    assert!(a.foreign_table_has_private_changes(&renamed).unwrap());
+    assert!(!a.foreign_table_has_private_changes(&peer).unwrap());
+    first.rollback_to_savepoint("foreign_tables").unwrap();
+    for relation in [&saved, &renamed, &created] {
+        assert!(!a.foreign_table_has_private_changes(relation).unwrap());
+    }
+    a.drop_foreign_table(&saved).unwrap();
+    first.commit_transaction().unwrap();
+    assert!(!a.foreign_table_has_private_changes(&saved).unwrap());
+    let rows = b.load_foreign_tables().unwrap();
+    assert!(!rows.iter().any(|row| row.relation == saved));
+    assert!(rows.iter().any(|row| row.relation == peer));
+}
+
+#[test]
 fn borrowed_metadata_visits_retain_private_and_committed_boundaries() {
     let persistence = Persistence::new();
     let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 24));

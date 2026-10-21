@@ -99,6 +99,20 @@ pub(super) fn release_relation(
 }
 
 impl KeyValueCatalog {
+    pub(super) fn relation_record_has_private_changes(
+        &self,
+        tag: u8,
+        relation: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        if !self.store.transaction_model().is_versioned() {
+            return Ok(false);
+        }
+        let key = relation_key(tag, relation)?;
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            Ok(read.revision(&[&key])?.has_private_changes())
+        })
+    }
+
     pub(super) fn require_relation_kind(
         &self,
         relation: &RelationIdentity,

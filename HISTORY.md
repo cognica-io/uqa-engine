@@ -12,13 +12,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve private foreign-table definitions and ownership across concurrent catalog refresh, including creation, alteration, rename, deletion, recreation and transaction undo.
+
 - Prepare immutable transaction records outside the statement-snapshot gate while preserving writer exclusion, conflict checks and atomic data/metadata publication.
 
 - Avoid duplicate native commit verification payloads and redundant encrypted spill reads, and move file-pool WAL checkpoints to managed maintenance while retaining FULL commit synchronization.
 
 - Merge stored and private row identities without repeatedly scanning replaced base rows, and avoid loading row payloads for identity-only projections. Private decoded blocks remain bounded and are released after their read batch.
 
-- Avoid repeated read-ahead of mixed-width scan rows and redundant compact text-group key work while preserving exact batch sizes, NULL distinctions and group identities.
+- Avoid repeated read-ahead of mixed-width scan rows, repeated fragment searches during exact byte accounting and redundant compact text-group key work while preserving exact batch sizes, NULL distinctions and group identities.
 
 - Remove redundant metadata from private transaction roots while preserving explicit spill thresholds across forks, savepoints and rollback.
 

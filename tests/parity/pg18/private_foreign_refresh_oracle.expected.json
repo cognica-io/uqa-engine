@@ -1,0 +1,124 @@
+{
+  "postgresql_version_num": "180004",
+  "capture_script_sha256": "5551d0aa393d466cb11e72405a977342f2ef59597d87d2ce4fb79bc05372962c",
+  "session_script_sha256": "c12bbb226a4a3ae944740e95844c0b874dd4a9c2e80b144497600205f9ef4366",
+  "scope": "Private foreign creation, alteration, rename, deletion and recreation beside a peer definition commit, with commit, rollback and savepoint undo; a handlerless wrapper is used only for catalog DDL.",
+  "cases": [
+    {
+      "isolation": "REPEATABLE READ",
+      "finish": "COMMIT",
+      "columns": [
+        "created|v|integer",
+        "peer|v|integer",
+        "recreated|v|text",
+        "renamed_to|v|integer",
+        "replaced|v|integer"
+      ],
+      "peer_columns": [
+        "created|v|integer",
+        "peer|v|integer",
+        "recreated|v|text",
+        "renamed_to|v|integer",
+        "replaced|v|integer"
+      ]
+    },
+    {
+      "isolation": "REPEATABLE READ",
+      "finish": "ROLLBACK",
+      "columns": [
+        "dropped|v|integer",
+        "peer|v|integer",
+        "recreated|v|integer",
+        "renamed_from|v|integer",
+        "replaced|v|integer",
+        "replaced|extra|text"
+      ],
+      "peer_columns": [
+        "dropped|v|integer",
+        "peer|v|integer",
+        "recreated|v|integer",
+        "renamed_from|v|integer",
+        "replaced|v|integer",
+        "replaced|extra|text"
+      ]
+    },
+    {
+      "isolation": "REPEATABLE READ",
+      "finish": "ROLLBACK TO before_foreign; COMMIT",
+      "columns": [
+        "dropped|v|integer",
+        "peer|v|integer",
+        "recreated|v|integer",
+        "renamed_from|v|integer",
+        "replaced|v|integer",
+        "replaced|extra|text"
+      ],
+      "peer_columns": [
+        "dropped|v|integer",
+        "peer|v|integer",
+        "recreated|v|integer",
+        "renamed_from|v|integer",
+        "replaced|v|integer",
+        "replaced|extra|text"
+      ]
+    },
+    {
+      "isolation": "SERIALIZABLE",
+      "finish": "COMMIT",
+      "columns": [
+        "created|v|integer",
+        "peer|v|integer",
+        "recreated|v|text",
+        "renamed_to|v|integer",
+        "replaced|v|integer"
+      ],
+      "peer_columns": [
+        "created|v|integer",
+        "peer|v|integer",
+        "recreated|v|text",
+        "renamed_to|v|integer",
+        "replaced|v|integer"
+      ]
+    },
+    {
+      "isolation": "SERIALIZABLE",
+      "finish": "ROLLBACK",
+      "columns": [
+        "dropped|v|integer",
+        "peer|v|integer",
+        "recreated|v|integer",
+        "renamed_from|v|integer",
+        "replaced|v|integer",
+        "replaced|extra|text"
+      ],
+      "peer_columns": [
+        "dropped|v|integer",
+        "peer|v|integer",
+        "recreated|v|integer",
+        "renamed_from|v|integer",
+        "replaced|v|integer",
+        "replaced|extra|text"
+      ]
+    },
+    {
+      "isolation": "SERIALIZABLE",
+      "finish": "ROLLBACK TO before_foreign; COMMIT",
+      "columns": [
+        "dropped|v|integer",
+        "peer|v|integer",
+        "recreated|v|integer",
+        "renamed_from|v|integer",
+        "replaced|v|integer",
+        "replaced|extra|text"
+      ],
+      "peer_columns": [
+        "dropped|v|integer",
+        "peer|v|integer",
+        "recreated|v|integer",
+        "renamed_from|v|integer",
+        "replaced|v|integer",
+        "replaced|extra|text"
+      ]
+    }
+  ]
+}

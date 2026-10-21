@@ -78,8 +78,9 @@ pub(crate) fn encoded_physical_row_record_size(
     physical_width: usize,
 ) -> ExecResult<usize> {
     let mut bytes = 8_usize;
+    let mut values = row.values();
     for slot in 0..physical_width {
-        let value = row.value(slot).ok_or_else(|| {
+        let value = values.next().flatten().ok_or_else(|| {
             spill_error(format!(
                 "physical row is missing slot {slot} of {physical_width}"
             ))
@@ -89,7 +90,7 @@ pub(crate) fn encoded_physical_row_record_size(
     if !row.lock_origins().is_empty() {
         add_lock_origins_size(&mut bytes, row)?;
     }
-    if row.value(physical_width).is_some() {
+    if values.next().flatten().is_some() {
         return Err(spill_error(format!(
             "physical row has more than {physical_width} slots"
         )));
@@ -235,19 +236,29 @@ fn add_record_size(
     Ok(())
 }
 
+#[inline]
 fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<()> {
     if depth > MAX_VALUE_DEPTH {
         return Err(spill_error("spill value nesting exceeds 128 levels"));
     }
     add_size(total, 1, "value tag")?;
     match value {
+        Value::Null | Value::Void => Ok(()),
+        Value::Bool(_) => add_size(total, 1, "boolean value"),
+        Value::Int(_) | Value::Float(_) => add_size(total, 8, "numeric value"),
+        _ => add_variable_value_size(total, value, depth),
+    }
+}
+
+fn add_variable_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<()> {
+    match value {
         Value::Datum(value) => {
             add_size(total, 16, "datum identity, offset and length")?;
             add_size(total, value.bytes().len(), "datum bytes")
         }
-        Value::Null | Value::Void => Ok(()),
-        Value::Bool(_) => add_size(total, 1, "boolean value"),
-        Value::Int(_) | Value::Float(_) => add_size(total, 8, "numeric value"),
+        Value::Null | Value::Void | Value::Bool(_) | Value::Int(_) | Value::Float(_) => {
+            unreachable!("fixed-width scalar sizing does not enter the recursive path")
+        }
         Value::Str(value) => add_string_size(total, value, "string value"),
         Value::FixedChar(value) => add_string_size(total, value, "fixed character value"),
         Value::Bytes(value) => {
@@ -762,4 +773,84 @@ fn write_raw(writer: &mut impl Write, value: &[u8], description: &str) -> ExecRe
     writer
         .write_all(value)
         .map_err(|error| spill_error(format!("failed to write spill {description}: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scalar_sizing_preserves_encoded_bytes_depth_and_overflow_order() {
+        for (value, expected, payload) in [
+            (Value::Null, 1, None),
+            (Value::Void, 1, None),
+            (Value::Bool(true), 2, Some("boolean value")),
+            (Value::Int(i64::MIN), 9, Some("numeric value")),
+            (Value::Float(-0.0), 9, Some("numeric value")),
+        ] {
+            for depth in [0, MAX_VALUE_DEPTH] {
+                let mut size = 0;
+                add_value_size(&mut size, &value, depth).unwrap();
+                let mut encoded = Vec::new();
+                encode_value(&mut encoded, &value, depth).unwrap();
+                assert_eq!(size, expected);
+                assert_eq!(encoded.len(), expected);
+            }
+            let mut size = 7;
+            assert!(add_value_size(&mut size, &value, MAX_VALUE_DEPTH + 1)
+                .unwrap_err()
+                .to_string()
+                .contains("nesting exceeds 128"));
+            assert_eq!(size, 7);
+            let mut size = usize::MAX;
+            assert!(add_value_size(&mut size, &value, 0)
+                .unwrap_err()
+                .to_string()
+                .contains("value tag size overflow"));
+            assert_eq!(size, usize::MAX);
+            let mut size = usize::MAX - 1;
+            if let Some(payload) = payload {
+                assert!(add_value_size(&mut size, &value, 0)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(&format!("{payload} size overflow")));
+            } else {
+                add_value_size(&mut size, &value, 0).unwrap();
+            }
+            assert_eq!(size, usize::MAX);
+        }
+    }
+
+    #[test]
+    fn physical_record_sizing_preserves_fragment_order_nulls_and_slot_errors() {
+        let first =
+            PhysicalRow::from_values(vec![Value::Int(1), Value::Void]).project_slots(&[1, 0]);
+        let row = PhysicalRow::concat(&first, &PhysicalRow::nulls(2)).append_values(vec![
+            Value::Bool(true),
+            Value::Float(-0.0),
+            Value::Str("가".into()),
+        ]);
+        assert_eq!(encoded_physical_row_record_size(&row, 7).unwrap(), 43);
+        assert_eq!(encode_physical_row_record(&row, 7).unwrap().len(), 43);
+        assert!(encoded_physical_row_record_size(&row, 8)
+            .unwrap_err()
+            .to_string()
+            .contains("missing slot 7 of 8"));
+        assert!(encoded_physical_row_record_size(&row, 6)
+            .unwrap_err()
+            .to_string()
+            .contains("more than 6 slots"));
+        let mut many = PhysicalRow::default();
+        for value in 0..128 {
+            many = PhysicalRow::concat(&many, &PhysicalRow::from_values(vec![Value::Int(value)]));
+        }
+        assert_eq!(
+            encoded_physical_row_record_size(&many, 128).unwrap(),
+            8 + 9 * 128
+        );
+        assert_eq!(
+            encode_physical_row_record(&many, 128).unwrap().len(),
+            8 + 9 * 128
+        );
+    }
 }
