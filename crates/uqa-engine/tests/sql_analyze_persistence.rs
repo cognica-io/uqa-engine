@@ -20,6 +20,9 @@ use uqa_storage_sqlite::{ManagedConnection, SQLiteStorageBackend};
 #[path = "sql_analyze_persistence/automatic.rs"]
 mod automatic;
 
+#[path = "sql_analyze_persistence/bounded.rs"]
+mod bounded;
+
 fn exec(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();
 }

@@ -4105,6 +4105,7 @@ dependencies = [
 name = "uqa-planner"
 version = "0.6.0"
 dependencies = [
+ "allocation-counter",
  "criterion",
  "proptest",
  "serde",

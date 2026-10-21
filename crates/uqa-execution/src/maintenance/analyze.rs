@@ -6,6 +6,8 @@
 
 //! Resolve analysis targets, retain their logical locks and recheck identities after waits.
 
+pub mod values;
+
 use uqa_sql::{maintenance::VacuumPrivileges, SQLError};
 use uqa_storage::StorageBackendResult;
 

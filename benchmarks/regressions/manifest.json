@@ -19493,6 +19493,97 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "analyze_capture_bounds_complete_population_and_keeps_column_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/maintenance/analyze/values/tests.rs",
+      "capability": "Bounded exact statistics input",
+      "workload": "32,768 two-column observations with 64KiB input and merge workspace.",
+      "invariant": "Exact column/value order and row counts under a fixed 2MiB peak allocation ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "analyze_capture_preserves_hierarchy_null_and_omission_counts",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/maintenance/analyze/values/tests.rs",
+      "capability": "Bounded exact statistics input",
+      "workload": "Two retained hierarchy snapshots with NULL, omitted values and a newer live replacement.",
+      "invariant": "Full-width identities and the original value generation survive zero-budget spill; NULL and omission counts are exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "analyze_capture_checks_cancellation_before_snapshot_and_distribution_reads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/maintenance/analyze/values/tests.rs",
+      "capability": "Bounded exact statistics input",
+      "workload": "Cancel before snapshot acquisition and after the sorted distribution becomes available.",
+      "invariant": "57014 before acquiring a cancelled snapshot or reading the retained distribution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "sorted_statistics_preserve_complete_population_distributions",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests.rs",
+      "capability": "Bounded exact statistics distributions",
+      "workload": "Empty, singleton, repeated, mixed-representation, NULL and omitted populations.",
+      "invariant": "Distinct, bounds, histogram positions, MCV values and frequency bits match an independent legacy-distribution reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "sorted_statistics_reject_incomplete_and_out_of_order_input",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests.rs",
+      "capability": "Bounded exact statistics distributions",
+      "workload": "Incomplete counts and descending values.",
+      "invariant": "Invalid source observations cannot publish a partial distribution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "sorted_statistics_keep_only_bounded_distribution_outputs",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests.rs",
+      "capability": "Bounded exact statistics distributions",
+      "workload": "65,536 distinct sorted observations supplied by a lazy iterator.",
+      "invariant": "Exact distinct count and 101 histogram boundaries under a fixed 128KiB peak ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "explicit_analyze_bounds_exact_population_and_publishes_complete_statistics",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_analyze_persistence/bounded.rs",
+      "capability": "Bounded explicit ANALYZE",
+      "workload": "Public ANALYZE over 32,768 two-column rows with 64KiB work memory.",
+      "invariant": "Fixed 2MiB peak ceiling; exact distinct/NULL counts, scalar bounds, histogram positions and 0.75 MCV frequency.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

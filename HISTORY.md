@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound exact ANALYZE and cold memory-engine statistics collection with paged snapshots and spill-backed distribution input, preserving distinct/NULL counts, histogram boundaries, MCV frequencies and transaction publication.
+
 - Bound scalar-filter index candidate capture and replay, preserving command masks, tuple rechecks, residual predicates and snapshot results without a complete posting or identity vector.
 
 - Reuse fixed cast source metadata across physical rows while preserving live catalog resolution, routine execution, domain constraints and input schema changes.
