@@ -18,6 +18,8 @@ A group is complete only after implementation, affected PostgreSQL 18 or indepen
 
 No original issue is marked complete by this inventory. All 112 require current-state review; the first active delivery is CI batching and inventory maintenance.
 
+Preparation [PR #1243](https://github.com/cognica-io/uqa-engine/pull/1243) contains the scheduling correction and full inventory as separate logical commits. Its first draft head `f17f6e007` starts zero workflow runs and has zero check runs. The 58 local CI selection/policy tests and ownership/dependency checks pass; ready-transition and final delivery evidence remain pending. Review also excludes the regression inventory README from full-workspace main builds, while preserving benchmark fixtures and runner inputs.
+
 ## Validation batches
 
 Keep group PRs draft while committing and pushing implementation progress. Run focused local checks as fixes are completed. Mark the finished batch ready once to trigger affected PR checks, including Linux/macOS deterministic performance and selected FDW/binding checks. If a product correction follows, return to draft, accumulate the correction batch and mark ready again. Never treat a skipped check or an older different product input as passing evidence. Main retains its configured integration and performance checks. There is no manual workflow dispatch, cancellation or rerun in this process.

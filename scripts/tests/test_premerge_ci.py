@@ -56,6 +56,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             '      - "!scripts/resolve-release-recovery.py"\n'
             '      - "!scripts/tests/test_release_recovery.py"\n'
             '      - "benchmarks/**"\n'
+            '      - "!benchmarks/regressions/README.md"\n'
             '      - ".github/scripts/**"\n'
             '      - "!.github/scripts/install-manylinux-build-deps.sh"\n'
             "      - rust-toolchain.toml\n"
