@@ -2854,13 +2854,799 @@
       ],
       "notices": [],
       "id": "declared_user_record_calls"
+    },
+    {
+      "sql": "CREATE VIEW descriptor_view(a,b) AS SELECT * FROM (VALUES(4,5)) v(x,y)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_view"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_star_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT * FROM (VALUES(4,5)) v(x,y)) f) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_star"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_star_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_qualified_star_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT v.* FROM (VALUES(4,5)) v(x,y)) f) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_qualified_star"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_qualified_star_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_cte_star_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (WITH c AS (SELECT * FROM (VALUES(4,5)) v(x,y)) SELECT * FROM c) f) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_cte_star"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_cte_star_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_cte_partial_alias_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT column2 AS output,nextval('descriptor_calls') AS calls FROM (WITH c(renamed_x) AS (VALUES(4,5)) SELECT * FROM c) f) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_cte_partial_alias"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_cte_partial_alias_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_using_alias_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT j.k AS output,nextval('descriptor_calls') AS calls FROM (VALUES(1,4)) l(k,x) JOIN (VALUES(1,5)) r(k,y) USING(k) AS j) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_using_alias"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_using_alias_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_using_qualified_star_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT r.* FROM (VALUES(1,4)) l(k,x) JOIN (VALUES(1,5)) r(k,y) USING(k)) f) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_using_qualified_star"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_using_qualified_star_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_view_alias_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT b AS output,nextval('descriptor_calls') AS calls FROM descriptor_view) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_view_alias"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_view_alias_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_nested_outer_star_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT q.* FROM (VALUES(4,5)) v(x,y) CROSS JOIN LATERAL (SELECT v.*) q) f) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_nested_outer_star"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_nested_outer_star_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_nested_shadow_star_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT q.* FROM (VALUES(4,5)) v(x,y) CROSS JOIN LATERAL (SELECT v.* FROM (VALUES(6,7)) v(x,y)) q) f) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "7",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_nested_shadow_star"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_nested_shadow_star_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_recursive_cte_star_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT column2 AS output,nextval('descriptor_calls') AS calls FROM (WITH RECURSIVE c AS (VALUES(4,5) UNION ALL SELECT column1+1,column2 FROM c WHERE column1<0) SELECT * FROM c) f) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_recursive_cte_star"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_recursive_cte_star_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_using_partial_alias_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT * FROM (VALUES(1,4)) l(k,x) JOIN (VALUES(1,5)) r(k,y) USING(k)) f(a,b)) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_using_partial_alias"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "wildcard_using_partial_alias_calls"
     }
   ],
   "provenance": {
     "reference": "PostgreSQL 18.4 disposable Docker database",
     "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
     "capture_script_sha256": "1a38f5e5ada449e35014fcda293ecb21e53baea43e49b4fa3418a9d0028e0cdb",
-    "input_sha256": "d80ed3531bf75b1418b58ad7edc8fc210add3154bcc4a683307cf64bbca345c0",
+    "input_sha256": "2354f7752abed942556f49f97b93293434dc0a39fda666fdf442b81d90378d3a",
     "options": [
       "--rows",
       "--details",

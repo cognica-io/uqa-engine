@@ -20952,7 +20952,7 @@
       ],
       "source": "crates/uqa-engine/tests/sql_lateral/functions.rs",
       "capability": "Independent join input demand",
-      "workload": "100 independent PostgreSQL observations across all four providers, including sequence-observed calls and empty inputs.",
+      "workload": "143 independently captured PostgreSQL observations across memory, native SQLite, SQLite Key/Value and redb; nine function/view observations replay after each persistent reopen.",
       "invariant": "Independent functions execute once per demanded join input, unmatched RIGHT/FULL rows appear once, forbidden correlations fail before execution and actual outer dependencies retain their calling rows."
     },
     {
@@ -21087,6 +21087,19 @@
       "capability": "Independent FROM input dependencies",
       "workload": "Six PostgreSQL row/call-count observations for JSON, ordinality, VALUES, derived and joined positional aliases and ROWS FROM, each paired with a true caller-row dependency.",
       "invariant": "Complete local output columns prevent false per-row dependencies without losing actual references to the caller."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wildcard_sources_preserve_independent_join_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/correlation/tests.rs",
+      "capability": "Independent FROM input dependencies",
+      "workload": "Ten independent PostgreSQL row/call-count observations for wildcard, nested LATERAL, CTE, recursive CTE and USING output descriptors, each paired with a true caller-row reference.",
+      "invariant": "Complete source output names distinguish independent inputs from current-row dependencies while preserving lexical shadowing and positional alias tails."
     },
     {
       "package": "uqa-sql",

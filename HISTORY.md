@@ -16,7 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Preserve preceding FROM namespaces through nested explicit joins, including LATERAL items on a nested join's left side. Keep PostgreSQL ambiguity and unavailable-source diagnostics for queries and mutation sources, and retain the same scopes in prepared inputs, stored views and SQL routine binding. Preserve comma-separated FROM syntax in stored view definitions independently of explicit CROSS JOIN, and render existing unconditional inner-join definitions as CROSS JOIN.
 
-- Retain builtin and selected user table-function output columns, WITH ORDINALITY and positional alias tails during correlation analysis, so independent derived inputs do not repeat unmatched rows or volatile calls.
+- Retain builtin and selected user table-function output columns, WITH ORDINALITY, wildcard-derived fields, CTE and USING namespaces, stored view columns and positional alias tails during correlation analysis, so independent derived inputs do not repeat unmatched rows or volatile calls.
 
 ### Changed
 

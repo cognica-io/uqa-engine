@@ -435,6 +435,142 @@
     {
       "id": "declared_user_record_calls",
       "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "wildcard_view",
+      "sql": "CREATE VIEW descriptor_view(a,b) AS SELECT * FROM (VALUES(4,5)) v(x,y)"
+    },
+    {
+      "id": "wildcard_star_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "wildcard_star",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT * FROM (VALUES(4,5)) v(x,y)) f) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "wildcard_star_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "wildcard_qualified_star_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "wildcard_qualified_star",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT v.* FROM (VALUES(4,5)) v(x,y)) f) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "wildcard_qualified_star_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "wildcard_cte_star_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "wildcard_cte_star",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (WITH c AS (SELECT * FROM (VALUES(4,5)) v(x,y)) SELECT * FROM c) f) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "wildcard_cte_star_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "wildcard_cte_partial_alias_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "wildcard_cte_partial_alias",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT column2 AS output,nextval('descriptor_calls') AS calls FROM (WITH c(renamed_x) AS (VALUES(4,5)) SELECT * FROM c) f) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "wildcard_cte_partial_alias_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "wildcard_using_alias_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "wildcard_using_alias",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT j.k AS output,nextval('descriptor_calls') AS calls FROM (VALUES(1,4)) l(k,x) JOIN (VALUES(1,5)) r(k,y) USING(k) AS j) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "wildcard_using_alias_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "wildcard_using_qualified_star_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "wildcard_using_qualified_star",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT r.* FROM (VALUES(1,4)) l(k,x) JOIN (VALUES(1,5)) r(k,y) USING(k)) f) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "wildcard_using_qualified_star_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "wildcard_view_alias_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "wildcard_view_alias",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT b AS output,nextval('descriptor_calls') AS calls FROM descriptor_view) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "wildcard_view_alias_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "wildcard_nested_outer_star_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "wildcard_nested_outer_star",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT q.* FROM (VALUES(4,5)) v(x,y) CROSS JOIN LATERAL (SELECT v.*) q) f) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "wildcard_nested_outer_star_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "wildcard_nested_shadow_star_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "wildcard_nested_shadow_star",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT q.* FROM (VALUES(4,5)) v(x,y) CROSS JOIN LATERAL (SELECT v.* FROM (VALUES(6,7)) v(x,y)) q) f) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "wildcard_nested_shadow_star_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "wildcard_recursive_cte_star_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "wildcard_recursive_cte_star",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT column2 AS output,nextval('descriptor_calls') AS calls FROM (WITH RECURSIVE c AS (VALUES(4,5) UNION ALL SELECT column1+1,column2 FROM c WHERE column1<0) SELECT * FROM c) f) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "wildcard_recursive_cte_star_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "wildcard_using_partial_alias_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "wildcard_using_partial_alias",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT * FROM (VALUES(1,4)) l(k,x) JOIN (VALUES(1,5)) r(k,y) USING(k)) f(a,b)) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "wildcard_using_partial_alias_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
     }
   ]
 }

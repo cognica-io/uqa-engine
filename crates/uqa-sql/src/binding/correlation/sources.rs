@@ -6,10 +6,10 @@
 
 //! Dependencies of FROM inputs before their output namespace becomes visible.
 
+use super::outputs::{admits_preceding, source_scope_in_namespace};
 use super::{
-    enclosing_scope, expression_has_external_reference, query_references_outer, source_scope,
-    BTreeMap, CorrelationContext, QueryPlan, QueryScope, RelationColumns, SQLError, ScalarExpr,
-    SourcePlan,
+    enclosing_scope, expression_has_external_reference, query_references_outer, BTreeMap,
+    CorrelationContext, QueryPlan, QueryScope, RelationColumns, SQLError, ScalarExpr, SourcePlan,
 };
 
 /// Whether a FROM item needs the calling join's current row. An explicit LATERAL marker permits references but does not itself require per-row execution. Enclosing-query identities in `input` remain constant during this join.
@@ -48,15 +48,7 @@ fn source_references_outer_in_scope(
     inherited_lateral: bool,
 ) -> Result<bool, SQLError> {
     let length = scopes.len();
-    if inherited_lateral
-        || matches!(
-            source,
-            SourcePlan::Function { .. }
-                | SourcePlan::FunctionGroup { .. }
-                | SourcePlan::Values { lateral: true, .. }
-                | SourcePlan::Subquery { lateral: true, .. }
-        )
-    {
+    if admits_preceding(source, inherited_lateral) {
         scopes.extend_from_slice(preceding);
     }
     let result = (|| match source {
@@ -73,8 +65,10 @@ fn source_references_outer_in_scope(
             )? {
                 return Ok(true);
             }
+            let left_scope =
+                source_scope_in_namespace(context, left, ctes, scopes, preceding, false)?;
             let mut right_preceding = preceding.to_vec();
-            right_preceding.push(source_scope(context, left, ctes)?);
+            right_preceding.push(left_scope.clone());
             if source_references_outer_in_scope(
                 context,
                 right,
@@ -89,8 +83,16 @@ fn source_references_outer_in_scope(
             let Some(on) = on else {
                 return Ok(false);
             };
-            scopes.push(source_scope(context, left, ctes)?);
-            scopes.push(source_scope(context, right, ctes)?);
+            let right_scope = source_scope_in_namespace(
+                context,
+                right,
+                ctes,
+                scopes,
+                &right_preceding,
+                *lateral,
+            )?;
+            scopes.push(left_scope);
+            scopes.push(right_scope);
             expression_references_outer(context, on, subqueries, scopes, ctes)
         }
         SourcePlan::Values { rows, .. } => {

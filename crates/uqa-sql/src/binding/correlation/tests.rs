@@ -73,7 +73,7 @@ fn table_range_aliases_replace_physical_correlation_names() {
         column_aliases: vec!["key".into(), "value".into()],
         include_descendants: true,
     };
-    let scope = source_scope(context, &source, &BTreeMap::new()).unwrap();
+    let scope = source_scope(context, &source, &BTreeMap::new(), &[]).unwrap();
     assert_eq!(
         scope.columns.names,
         BTreeSet::from(["key".to_string(), "value".to_string()])
@@ -214,8 +214,7 @@ fn lateral_source_dependencies_distinguish_caller_from_local_and_enclosing_names
     }
 }
 
-#[test]
-fn declared_source_columns_preserve_independent_join_inputs() {
+fn verify_independent_join_inputs(ids: &[&str]) {
     let binding = crate::binding::fixture::empty_binding_context();
     let context = CorrelationContext {
         routines: &crate::binding::fixture::NoRoutines,
@@ -235,15 +234,7 @@ fn declared_source_columns_preserve_independent_join_inputs() {
     let mut checked = 0;
     for case in reference["cases"].as_array().unwrap() {
         let id = case["id"].as_str().unwrap();
-        if !matches!(
-            id,
-            "descriptor_json"
-                | "descriptor_ordinality"
-                | "descriptor_values"
-                | "descriptor_derived"
-                | "descriptor_rows_from"
-                | "descriptor_join_alias"
-        ) {
+        if !ids.contains(&id) {
             continue;
         }
         assert!(case["error"].is_null(), "{id}");
@@ -279,5 +270,33 @@ fn declared_source_columns_preserve_independent_join_inputs() {
         }
         checked += 1;
     }
-    assert_eq!(checked, 6);
+    assert_eq!(checked, ids.len());
+}
+
+#[test]
+fn declared_source_columns_preserve_independent_join_inputs() {
+    verify_independent_join_inputs(&[
+        "descriptor_json",
+        "descriptor_ordinality",
+        "descriptor_values",
+        "descriptor_derived",
+        "descriptor_rows_from",
+        "descriptor_join_alias",
+    ]);
+}
+
+#[test]
+fn wildcard_sources_preserve_independent_join_inputs() {
+    verify_independent_join_inputs(&[
+        "wildcard_star",
+        "wildcard_qualified_star",
+        "wildcard_cte_star",
+        "wildcard_cte_partial_alias",
+        "wildcard_using_alias",
+        "wildcard_using_qualified_star",
+        "wildcard_nested_outer_star",
+        "wildcard_nested_shadow_star",
+        "wildcard_recursive_cte_star",
+        "wildcard_using_partial_alias",
+    ]);
 }

@@ -13,11 +13,38 @@
 #[case::redb(3)]
 fn lateral_function_inputs_match_postgresql(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
-    let engine = super::values::open(provider, &directory.path().join("lateral-functions.db"));
+    let path = directory.path().join("lateral-functions.db");
+    let engine = super::values::open(provider, &path);
     crate::pg18_oracle::verify(
         &engine,
         include_str!("../../../../tests/parity/pg18/lateral_functions_oracle.expected.json"),
     );
+    if provider != 0 {
+        drop(engine);
+        let reopened = super::values::open(provider, &path);
+        let reference: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/parity/pg18/lateral_functions_oracle.expected.json"
+        ))
+        .unwrap();
+        let retained = reference["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|case| {
+                case["id"].as_str().is_some_and(|id| {
+                    id.starts_with("declared_user_pair")
+                        || id.starts_with("declared_user_record")
+                        || id.starts_with("wildcard_view_alias")
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(retained.len(), 9);
+        let replay = serde_json::json!({
+            "postgresql_version": reference["postgresql_version"],
+            "cases": retained,
+        });
+        crate::pg18_oracle::verify(&reopened, &replay.to_string());
+    }
 }
 
 #[rstest::rstest]
