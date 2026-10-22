@@ -272,6 +272,7 @@ fn rule_row_source(
         .collect::<Result<Vec<_>, SQLError>>()?;
     Ok(RuleRowSource {
         clause: FromClause::Values {
+            lateral: false,
             rows: values,
             alias: None,
             column_aliases: Vec::new(),
@@ -447,6 +448,7 @@ fn prepend_rule_row_source(
     };
     let lateral = from_references_internal_relation(&existing, relation);
     FromClause::Join {
+        comma: false,
         left: Box::new(source),
         right: Box::new(existing),
         kind: JoinKind::Cross,

@@ -97,7 +97,7 @@ fn compile_partition_key(node: &Node) -> Result<crate::ast::Expr> {
         ));
     }
     if !element.name.is_empty() {
-        return Ok(crate::ast::Expr::Column(element.name.clone()));
+        return Ok(crate::ast::Expr::Column(element.name.clone().into()));
     }
     element
         .expr

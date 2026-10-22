@@ -32,16 +32,16 @@ pub type SubqueryId = usize;
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScalarExpr {
     Star,
-    QualifiedStar(String),
+    QualifiedStar(crate::ast::ReferenceName),
     Default,
-    Column(String),
+    Column(crate::ast::ReferenceName),
     /// Logical position in an already-bound physical row schema. This variant is introduced only after relational binding so duplicate SQL labels remain independently addressable.
     Position(usize),
     /// Structural executor-only attribute, resolved independently of SQL relation and column names.
     InternalColumn(InternalColumnRef),
     QualifiedColumn {
         qualifier: String,
-        column: String,
+        column: crate::ast::ReferenceName,
     },
     Literal(Value),
     /// An already-coerced runtime datum whose declared type must survive lowering.
@@ -231,7 +231,47 @@ pub enum ScalarFrameBound {
 
 impl ScalarExpr {
     #[must_use]
-    pub fn qualified_column(qualifier: impl Into<String>, column: impl Into<String>) -> Self {
+    /// Relation qualifier of a named attribute or qualified wildcard.
+    pub fn reference_qualifier(&self) -> Option<&str> {
+        match self {
+            Self::QualifiedColumn { qualifier, .. } => Some(qualifier),
+            Self::QualifiedStar(qualifier) => Some(qualifier),
+            _ => None,
+        }
+    }
+
+    /// Rename qualification while retaining the original reference position.
+    pub fn reference_qualifier_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::QualifiedColumn { qualifier, .. } => Some(qualifier),
+            Self::QualifiedStar(qualifier) => Some(qualifier),
+            _ => None,
+        }
+    }
+
+    /// Original one-based character position of a named SQL reference.
+    pub fn reference_position(&self) -> Option<u32> {
+        match self {
+            Self::Column(name) | Self::QualifiedStar(name) => name.position(),
+            Self::QualifiedColumn { column, .. } => column.position(),
+            _ => None,
+        }
+    }
+
+    /// Retain the caller's origin when binding replaces a name with its stored reference.
+    pub fn set_reference_position(&mut self, position: Option<u32>) {
+        match self {
+            Self::Column(name)
+            | Self::QualifiedStar(name)
+            | Self::QualifiedColumn { column: name, .. } => name.set_position(position),
+            _ => {}
+        }
+    }
+
+    pub fn qualified_column(
+        qualifier: impl Into<String>,
+        column: impl Into<crate::ast::ReferenceName>,
+    ) -> Self {
         Self::QualifiedColumn {
             qualifier: qualifier.into(),
             column: column.into(),

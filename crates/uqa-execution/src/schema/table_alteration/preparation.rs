@@ -211,7 +211,7 @@ fn prepare_type_change<S: Clone + 'static>(
                 table,
                 qualifier,
                 columns,
-                &Expr::Column(name.clone()),
+                &Expr::Column(name.clone().into()),
             )?);
         }
         if let Some(transform) = &mut transform {

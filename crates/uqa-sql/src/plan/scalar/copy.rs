@@ -70,14 +70,16 @@ impl Lowering<'_> {
         self.check()?;
         Ok(match expression {
             ScalarExpr::Star => ScalarExpr::Star,
-            ScalarExpr::QualifiedStar(name) => ScalarExpr::QualifiedStar(self.copy_text(name)?),
+            ScalarExpr::QualifiedStar(name) => {
+                ScalarExpr::QualifiedStar(self.copy_reference_name(name)?)
+            }
             ScalarExpr::Default => ScalarExpr::Default,
-            ScalarExpr::Column(name) => ScalarExpr::Column(self.copy_text(name)?),
+            ScalarExpr::Column(name) => ScalarExpr::Column(self.copy_reference_name(name)?),
             ScalarExpr::Position(position) => ScalarExpr::Position(*position),
             ScalarExpr::InternalColumn(column) => ScalarExpr::InternalColumn(*column),
             ScalarExpr::QualifiedColumn { qualifier, column } => ScalarExpr::QualifiedColumn {
                 qualifier: self.copy_text(qualifier)?,
-                column: self.copy_text(column)?,
+                column: self.copy_reference_name(column)?,
             },
             ScalarExpr::Literal(value) => ScalarExpr::Literal(self.value(Source::Borrowed(value))?),
             ScalarExpr::RetainedLiteral(literal) => {

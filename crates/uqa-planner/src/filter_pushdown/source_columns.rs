@@ -150,6 +150,7 @@ impl SourceColumns {
                 body,
                 alias,
                 column_aliases,
+                ..
             } => {
                 let output = query_plan_output_columns(body)
                     .filter(|columns| !columns.iter().any(|column| column == "*"));

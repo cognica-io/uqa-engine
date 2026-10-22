@@ -247,7 +247,7 @@ fn direct_source_column(
         }
         _ => None,
     }?;
-    source_columns.get(&column).cloned()
+    source_columns.get(column.as_str()).cloned()
 }
 
 pub fn automatic_view_layer(
@@ -460,7 +460,7 @@ fn view_query_shape_from_definition(
                     visible_source_columns
                         .iter()
                         .cloned()
-                        .map(ScalarExpr::Column),
+                        .map(|column| ScalarExpr::Column(column.into())),
                 );
             }
             ScalarExpr::QualifiedStar(star_qualifier)
@@ -469,7 +469,7 @@ fn view_query_shape_from_definition(
                 expressions.extend(visible_source_columns.iter().cloned().map(|column| {
                     ScalarExpr::QualifiedColumn {
                         qualifier: source_qualifier.clone(),
-                        column,
+                        column: column.into(),
                     }
                 }));
             }

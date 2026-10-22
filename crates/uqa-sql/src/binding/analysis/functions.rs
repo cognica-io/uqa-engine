@@ -30,6 +30,7 @@ pub(super) fn validate_unqualified_column(
     if schema.column_is_ambiguous(column) {
         return Err(SQLError::AmbiguousColumn(column.to_string()));
     }
+    schema.require_lateral_column(column)?;
     if is_pseudo_column(column)
         && !schema.has_unqualified_column(column)
         && pseudo_column_qualifiers(schema, column).len() > 1
@@ -49,6 +50,7 @@ pub(super) fn validate_unqualified_column(
         if fallback.column_is_ambiguous(column) {
             return Err(SQLError::AmbiguousColumn(column.to_string()));
         }
+        fallback.require_lateral_column(column)?;
         if fallback.has_unqualified_column(column) {
             return Ok(());
         }
@@ -57,6 +59,11 @@ pub(super) fn validate_unqualified_column(
         }
         if fallback.columns_are_open(None) {
             return Ok(());
+        }
+    }
+    for candidate in std::iter::once(schema).chain(fallback) {
+        if let Some(error) = candidate.unavailable_column_error(column) {
+            return Err(error);
         }
     }
     Err(SQLError::UnknownColumn(column.to_string()))
@@ -72,6 +79,7 @@ pub(super) fn validate_qualified_column(
         if !candidate.has_qualifier(qualifier) {
             continue;
         }
+        candidate.require_lateral_qualifier(qualifier)?;
         if candidate.qualified_column_is_ambiguous(qualifier, column) {
             return Err(SQLError::AmbiguousColumn(format!("{qualifier}.{column}")));
         }
@@ -81,6 +89,11 @@ pub(super) fn validate_qualified_column(
             return Ok(());
         }
         return Err(SQLError::unknown_qualified_column(qualifier, column));
+    }
+    for candidate in std::iter::once(schema).chain(fallback) {
+        if let Some(error) = candidate.unavailable_qualifier_error(qualifier) {
+            return Err(error);
+        }
     }
     Err(SQLError::Routine {
         sqlstate: "42P01".into(),

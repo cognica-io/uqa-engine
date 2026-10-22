@@ -375,6 +375,7 @@ pub(super) fn compile_create_function(
         return_written_type,
         language,
         body,
+        body_origin: None,
         sql_body_form,
         creation_search_path: Vec::new(),
         volatility,

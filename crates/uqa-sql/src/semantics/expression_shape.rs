@@ -42,11 +42,10 @@ pub fn expr_qualifiers(expr: &ScalarExpr) -> BTreeSet<String> {
 }
 
 pub fn collect_expr_qualifiers(expr: &ScalarExpr, qualifiers: &mut BTreeSet<String>) {
-    expr.visit(&mut |part| match part {
-        ScalarExpr::QualifiedColumn { qualifier, .. } | ScalarExpr::QualifiedStar(qualifier) => {
-            qualifiers.insert(qualifier.clone());
+    expr.visit(&mut |part| {
+        if let Some(qualifier) = part.reference_qualifier() {
+            qualifiers.insert(qualifier.to_owned());
         }
-        _ => {}
     });
 }
 

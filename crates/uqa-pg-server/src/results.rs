@@ -100,12 +100,36 @@ pub(crate) fn sql_error(error: &SQLError) -> ErrorOrNotice {
     response.where_ = error.context().map(str::to_owned);
     response.hint = error.hint().map(str::to_owned);
     response.position = error.position().and_then(|value| value.try_into().ok());
+    response.internal_position = error
+        .internal_position()
+        .and_then(|value| value.try_into().ok());
+    response.internal_query = error.internal_query().map(str::to_owned);
     response
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn routine_diagnostics_keep_internal_and_client_cursors_separate() {
+        let error = SQLError::InternalPosition {
+            source: Box::new(SQLError::UnknownColumn("missing".into())),
+            position: 8,
+            query: "SELECT missing".into(),
+        }
+        .with_context("SQL function");
+        let response = sql_error(&error);
+        assert_eq!(response.position, None);
+        assert_eq!(response.internal_position, Some(8));
+        assert_eq!(response.internal_query.as_deref(), Some("SELECT missing"));
+        assert_eq!(response.where_.as_deref(), Some("SQL function"));
+        let encoded = BackendMessage::ErrorResponse(response).encode().unwrap();
+        assert!(encoded.windows(4).any(|bytes| bytes == b"p8\0q"));
+        assert!(encoded
+            .windows(16)
+            .any(|bytes| bytes == b"qSELECT missing\0"));
+    }
 
     #[test]
     fn preserves_parser_diagnostic_fields() {

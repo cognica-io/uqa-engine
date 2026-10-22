@@ -39,7 +39,9 @@ fn row_references(expression: &ScalarExpr) -> std::collections::HashSet<RowRefer
             )),
             ScalarExpr::Position(position) => Some(RowReference::Position(*position)),
             ScalarExpr::InternalColumn(column) => Some(RowReference::Internal(*column)),
-            ScalarExpr::QualifiedStar(qualifier) => Some(RowReference::WholeRow(qualifier.clone())),
+            ScalarExpr::QualifiedStar(qualifier) => {
+                Some(RowReference::WholeRow(qualifier.to_string()))
+            }
             _ => None,
         };
         if let Some(reference) = reference {

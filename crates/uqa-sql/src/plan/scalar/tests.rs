@@ -20,6 +20,32 @@ fn expression(sql: &str) -> Expr {
 }
 
 #[test]
+fn reference_origins_survive_owned_and_admitted_plan_production() {
+    let budget = MemoryBudget::new(1 << 20);
+    let cancellation = CancellationToken::new();
+    let control = uqa_core::memory::ProductionControl::new(&budget, &cancellation, &cancellation);
+    for sql in [
+        "SELECT a",
+        "SELECT t.a",
+        "SELECT t.*",
+        "/* 한글🙂 */ SELECT t.a",
+    ] {
+        let source = expression(sql);
+        let expected = u32::try_from(sql[..=sql.rfind(' ').unwrap()].chars().count() + 1).unwrap();
+        assert_eq!(source.reference_position(), Some(expected));
+        let owned = ExpressionPlan::lower(source.clone());
+        assert_eq!(owned.scalar.reference_position(), Some(expected));
+        let admitted =
+            ExpressionPlan::lower_column_budgeted(&source, &budget, &cancellation, &cancellation)
+                .unwrap();
+        assert_eq!(admitted.reference_position(), Some(expected));
+        let copied = admitted.clone_with_control(&control).unwrap();
+        assert_eq!(copied.reference_position(), Some(expected));
+    }
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn controlled_column_lowering_preserves_existing_scalar_shapes_and_input() {
     let budget = MemoryBudget::new(1 << 20);
     let original = CancellationToken::new();

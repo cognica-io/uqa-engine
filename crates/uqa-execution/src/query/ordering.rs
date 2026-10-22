@@ -49,7 +49,7 @@ pub fn order_projection(
         if let ScalarExpr::QualifiedStar(qualifier) = &projection.expr {
             let columns = input_schema.qualified_star_position_layout(qualifier);
             if columns.is_empty() {
-                return Err(SQLError::UnknownTable(qualifier.clone()));
+                return Err(SQLError::UnknownTable(qualifier.to_string()));
             }
             for (column, logical, _, _) in columns {
                 if logical.is_some_and(|position| {
@@ -154,7 +154,7 @@ pub fn resolve_order_expression(
                 return Ok(expression.clone());
             };
             if matches.next().is_some() {
-                return Err(SQLError::AmbiguousColumn(name.clone()));
+                return Err(SQLError::AmbiguousColumn(name.to_string()));
             }
             Ok(physical.clone())
         }
@@ -206,7 +206,7 @@ fn output_target_position_for(
                 .filter(|(_, (label, _))| label == name);
             if let Some((position, _)) = matches.next() {
                 if matches.next().is_some() {
-                    return Err(SQLError::AmbiguousColumn(name.clone()));
+                    return Err(SQLError::AmbiguousColumn(name.to_string()));
                 }
                 return Ok(Some(OutputTarget {
                     position,
@@ -369,7 +369,7 @@ pub fn order_projection_targets(
             continue;
         }
         if let ScalarExpr::Column(column) = &expression {
-            let target = ProjectionTarget::Column(column.clone());
+            let target = ProjectionTarget::Column(column.to_string());
             if physical.iter().any(|(candidate, _)| candidate == &target) {
                 required.insert(target);
                 continue;

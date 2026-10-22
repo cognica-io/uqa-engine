@@ -21,6 +21,7 @@ pub(in crate::compiler) fn compile_from_list(nodes: &[Node]) -> Result<Option<Fr
     for node in nodes.iter().skip(1) {
         let lateral = right_is_lateral(node);
         current = FromClause::Join {
+            comma: true,
             left: Box::new(current),
             right: Box::new(compile_from_node(node)?),
             kind: JoinKind::Cross,
@@ -219,6 +220,11 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("JOIN missing right".into()))?;
             let kind = match j.jointype() {
+                pg_query::protobuf::JoinType::JoinInner
+                    if j.quals.is_none() && j.using_clause.is_empty() && !j.is_natural =>
+                {
+                    JoinKind::Cross
+                }
                 pg_query::protobuf::JoinType::JoinInner => JoinKind::Inner,
                 pg_query::protobuf::JoinType::JoinLeft => JoinKind::Left,
                 pg_query::protobuf::JoinType::JoinRight => JoinKind::Right,
@@ -252,6 +258,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
             let lateral = right_is_lateral(right);
             let (alias, column_aliases) = compile_alias(j.alias.as_ref())?;
             Ok(FromClause::Join {
+                comma: false,
                 left: Box::new(compile_from_node(left)?),
                 right: Box::new(compile_from_node(right)?),
                 kind,
@@ -292,6 +299,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 if !s.values_lists.is_empty() {
                     let rows = super::compile_values_lists(&s.values_lists)?;
                     return Ok(FromClause::Values {
+                        lateral: rs.lateral,
                         rows,
                         alias,
                         column_aliases,
@@ -302,6 +310,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 }
             }
             Ok(FromClause::Subquery {
+                lateral: rs.lateral,
                 body: Box::new(select),
                 alias,
                 column_aliases,

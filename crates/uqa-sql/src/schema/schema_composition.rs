@@ -237,6 +237,7 @@ impl RowSchema {
                 wildcard_hidden,
                 binding_only,
                 row_types: super::relation_types::RelationRowTypes::joined(left, right),
+                lateral_restrictions: Self::joined_diagnostic_names(left, right),
                 open_qualifiers,
                 ..SchemaBuildMetadata::default()
             },

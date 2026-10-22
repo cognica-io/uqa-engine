@@ -111,7 +111,30 @@ LATERAL generate_series(1, t.repeat_count) AS series(value)
 ORDER BY t.id, series.value;
 ```
 
-The right side is evaluated for each left row. A table function followed by `WITH ORDINALITY` appends a one-based `BIGINT` column after the function's ordinary output columns; its default name is `ordinality`, a positional column-alias list may rename it, and a LATERAL invocation restarts it at one for each left row.
+`LATERAL (VALUES ...)` evaluates every row expression with the current preceding row. Each output column uses the common type of its VALUES expressions, including mixtures of outer columns, constants and NULL. VALUES inside correlated scalar, EXISTS and IN subqueries uses the same enclosing-row scope.
+
+```sql execute
+SELECT t.a, v.x
+FROM (VALUES (1), (2)) AS t(a),
+LATERAL (VALUES (t.a), (t.a * 10)) AS v(x)
+ORDER BY t.a, v.x;
+```
+
+A right input that references the current left row is evaluated for each such row. An independent table function or LATERAL source is evaluated once for the join, including when its expressions are volatile. RIGHT and FULL joins admit independent inputs and preserve each unmatched right row once; a right input that references the current left relation raises `42P10` because that correlation requires INNER or LEFT JOIN. References to an enclosing query remain available independently of the current join row. Dependency analysis preserves quoted identifier case: a local `"A"` or `"N"` does not hide a preceding `a` relation or `n` column.
+
+Forbidden LATERAL reference diagnostics retain the one-based character position in the complete SQL request, including Unicode prefixes, earlier statements, PREPARE and definition-time view or routine binding. SQL string-body errors use the CREATE statement position when the body has an unambiguous matching literal; otherwise the diagnostic exposes the internal source and cursor, following PostgreSQL's routine error contract.
+
+A LATERAL item anywhere inside a later explicit join can reference earlier comma-separated FROM items, including when it is that join's left operand. These preceding items remain at the same query level: a qualified name provided by both an earlier item and an input of the nested join raises `42P09`. A non-LATERAL subquery cannot read those preceding items; its error retains the unavailable namespace and the applicable LATERAL hint. UPDATE and DELETE source items cannot reference the mutation target, even with LATERAL.
+
+```sql execute
+SELECT a.n, r.n AS repeated, b.m
+FROM (VALUES (1), (3)) AS a(n),
+LATERAL (SELECT a.n) AS r
+JOIN (VALUES (1), (3)) AS b(m) ON r.n = b.m
+ORDER BY 1;
+```
+
+A table function followed by `WITH ORDINALITY` appends a one-based `BIGINT` column after the function's ordinary output columns; its default name is `ordinality`, a positional column-alias list may rename it, and a correlated invocation restarts it at one for each left row.
 
 ```sql execute
 SELECT value, sequence

@@ -103,7 +103,7 @@ pub(super) fn column_labels(projections: &[ProjectionPlan]) -> Vec<Option<String
             ScalarExpr::Column(name) | ScalarExpr::QualifiedColumn { column: name, .. }
                 if projection.alias.is_none() =>
             {
-                Some(name.clone())
+                Some(name.to_string())
             }
             _ => None,
         })

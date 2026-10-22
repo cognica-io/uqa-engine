@@ -639,6 +639,8 @@ fn encodes_error_response_fields() {
     let mut error = ErrorOrNotice::error(sqlstate::SYNTAX_ERROR, "syntax error at or near FROM");
     error.detail = Some("missing select list".to_owned());
     error.position = Some(8);
+    error.internal_position = Some(3);
+    error.internal_query = Some("SELECT missing".to_owned());
 
     let encoded = BackendMessage::ErrorResponse(error)
         .encode()
@@ -647,6 +649,10 @@ fn encodes_error_response_fields() {
     assert_eq!(encoded[0], b'E');
     assert!(encoded.windows(6).any(|window| window == b"SERROR"));
     assert!(encoded.windows(6).any(|window| window == b"C42601"));
+    assert!(encoded.windows(7).any(|window| window == b"P8\0p3\0q"));
+    assert!(encoded
+        .windows(16)
+        .any(|window| window == b"qSELECT missing\0"));
     assert!(encoded.ends_with(&[0, 0]));
 }
 

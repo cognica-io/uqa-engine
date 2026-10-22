@@ -133,7 +133,7 @@ pub fn qualified_column_pair(expr: &ScalarExpr) -> Option<(String, String)> {
     match expr {
         ScalarExpr::QualifiedColumn {
             qualifier, column, ..
-        } => Some((qualifier.clone(), column.clone())),
+        } => Some((qualifier.clone(), column.to_string())),
         _ => None,
     }
 }

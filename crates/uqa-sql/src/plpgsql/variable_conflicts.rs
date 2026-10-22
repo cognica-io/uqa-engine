@@ -63,7 +63,7 @@ impl VariableResolver for VariableSiteMarker<'_> {
 
     fn rewrite_name(&mut self, name: &str) -> Result<Option<Expr>> {
         let binding = self.inner.rewrite_name(name)?;
-        Ok(self.mark(Expr::Column(name.to_string()), binding))
+        Ok(self.mark(Expr::Column(name.to_string().into()), binding))
     }
 
     fn rewrite_qualified(&mut self, qualifier: &str, column: &str) -> Result<Option<Expr>> {
@@ -71,7 +71,7 @@ impl VariableResolver for VariableSiteMarker<'_> {
         Ok(self.mark(
             Expr::QualifiedColumn {
                 qualifier: qualifier.to_string(),
-                column: column.to_string(),
+                column: column.to_string().into(),
             },
             binding,
         ))
@@ -158,7 +158,7 @@ impl VariableResolver for VariableSiteFilter<'_> {
 fn ambiguous_variable_error(reference: &Expr) -> SQLError {
     let name = match reference {
         Expr::QualifiedColumn { qualifier, column } => format!("{qualifier}.{column}"),
-        Expr::Column(name) => name.clone(),
+        Expr::Column(name) => name.to_string(),
         other => format!("{other:?}"),
     };
     SQLError::Diagnostic {

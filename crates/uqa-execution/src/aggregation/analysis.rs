@@ -20,12 +20,12 @@ pub fn group_context_row(stmt: &QueryBlockPlan, group_values: &[Value]) -> Owned
     for (expr, value) in stmt.group_by.iter().zip(group_values) {
         match expr {
             ScalarExpr::Column(column) => {
-                columns.push(column.clone());
+                columns.push(column.to_string());
                 identities.push(ColumnIdentity::unqualified(column.clone()));
                 values.push(value.clone());
             }
             ScalarExpr::QualifiedColumn { qualifier, column } => {
-                columns.push(column.clone());
+                columns.push(column.to_string());
                 identities.push(ColumnIdentity::qualified(qualifier.clone(), column.clone()));
                 values.push(value.clone());
             }

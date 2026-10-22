@@ -8,6 +8,7 @@
 
 use super::{
     overlay_outer_schema, QueryPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope,
+    SourceScope,
 };
 use crate::ast::AssignmentTarget;
 use crate::plan::{
@@ -59,8 +60,25 @@ impl SchemaScope {
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         let subqueries = command.scalar_subqueries().to_vec();
+        let preceding = if command.source_input().is_some() {
+            let target = self.bind_command_target(routines, command, params)?;
+            SourceScope::command_target(command, &target)
+        } else {
+            None
+        };
         if let Some(source) = command.source_input_mut() {
-            self.bind_source_routines_for_storage(routines, source, &subqueries, params, outer)?;
+            self.bind_source_routines_in_scope(
+                routines,
+                source,
+                &subqueries,
+                params,
+                SourceScope {
+                    outer,
+                    preceding: preceding.as_ref(),
+                    inherited_lateral: false,
+                    retain_names: true,
+                },
+            )?;
         }
         let scopes = self.command_scopes(routines, command, params, outer)?;
         let labels = command

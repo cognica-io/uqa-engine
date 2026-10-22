@@ -328,7 +328,7 @@ pub fn validate_trigger_condition_names(
             return true;
         }
         if !columns.iter().any(|definition| definition.name == *column) {
-            *invalid_qualified_reference.borrow_mut() = Some(column.clone());
+            *invalid_qualified_reference.borrow_mut() = Some(column.to_string());
             return true;
         }
         false

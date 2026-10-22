@@ -108,9 +108,9 @@ pub fn rename_schema_expr_column(
             crate::ast::Expr::Star => {
                 return Err("schema expression contains `*` and cannot be rewritten safely".into());
             }
-            crate::ast::Expr::Column(name) if name == from => *name = to.to_string(),
+            crate::ast::Expr::Column(name) if name == from => name.rename(to),
             crate::ast::Expr::QualifiedColumn { column, .. } if column == from => {
-                *column = to.to_string();
+                column.rename(to);
             }
             _ => {}
         }
@@ -156,7 +156,7 @@ pub fn rename_schema_expr_relation(
                     || stored_relation_reference_matches(qualifier, from) =>
             {
                 // Analyzed whole rows use the decoded local range name; DDL supplies a SQL-qualified destination.
-                *qualifier = RelationIdentity::parse_reference(to)?.1;
+                qualifier.rename(&RelationIdentity::parse_reference(to)?.1);
             }
             _ => {}
         }
@@ -173,7 +173,7 @@ pub fn rename_schema_expr_qualified_column(
     walk_schema_expr_mut(expression, &mut |node| {
         if let crate::ast::Expr::QualifiedColumn { qualifier, column } = node {
             if column == from && stored_relation_reference_matches(qualifier, table) {
-                *column = to.to_string();
+                column.rename(to);
             }
         }
         Ok(())

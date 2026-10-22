@@ -279,6 +279,7 @@ pub fn register_sql_function(
             let registry = context.catalog.registry.routines_write();
             let mut next = registry.clone();
             let mut def = def.clone();
+            def.body_origin = None;
             let overloads = next.entry(name.clone()).or_default();
             let mut dependencies = BTreeSet::new();
             let published = if let Some(pos) = overloads

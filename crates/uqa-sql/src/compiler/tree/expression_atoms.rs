@@ -75,6 +75,7 @@ pub(in crate::compiler) fn compile_const(c: &pg_query::protobuf::AConst) -> Resu
 
 pub(in crate::compiler) fn compile_column_ref(c: &pg_query::protobuf::ColumnRef) -> Result<Expr> {
     let mut parts: Vec<String> = Vec::new();
+    let position = crate::compiler::source_positions::position(c.location);
     for (index, f) in c.fields.iter().enumerate() {
         let inner = f
             .node
@@ -92,7 +93,9 @@ pub(in crate::compiler) fn compile_column_ref(c: &pg_query::protobuf::ColumnRef)
                 let qualifier = parts.pop().ok_or_else(|| {
                     SQLError::Internal("qualified wildcard has no relation name".into())
                 })?;
-                return Ok(Expr::QualifiedStar(qualifier));
+                return Ok(Expr::QualifiedStar(
+                    crate::ast::ReferenceName::from(qualifier).with_position(position),
+                ));
             }
             other => {
                 return Err(SQLError::Internal(format!(
@@ -103,9 +106,12 @@ pub(in crate::compiler) fn compile_column_ref(c: &pg_query::protobuf::ColumnRef)
     }
     match parts.len() {
         0 => Err(SQLError::Internal("empty ColumnRef".into())),
-        1 => Ok(Expr::Column(parts.pop().ok_or_else(|| {
-            SQLError::Internal("ColumnRef component disappeared during lowering".into())
-        })?)),
+        1 => Ok(Expr::Column(
+            crate::ast::ReferenceName::from(parts.pop().ok_or_else(|| {
+                SQLError::Internal("ColumnRef component disappeared during lowering".into())
+            })?)
+            .with_position(position),
+        )),
         _ => {
             // `schema.table.col` collapses to `table.col`; `t.col`
             // round-trips as a qualified ref.
@@ -115,7 +121,10 @@ pub(in crate::compiler) fn compile_column_ref(c: &pg_query::protobuf::ColumnRef)
             let qualifier = parts.pop().ok_or_else(|| {
                 SQLError::Internal("ColumnRef qualifier disappeared during lowering".into())
             })?;
-            Ok(Expr::qualified_column(qualifier, column))
+            Ok(Expr::qualified_column(
+                qualifier,
+                crate::ast::ReferenceName::from(column).with_position(position),
+            ))
         }
     }
 }

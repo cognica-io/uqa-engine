@@ -56,10 +56,10 @@ impl ExpressionReferences<'_> {
         let mut found = Found::default();
         let mut expression_nodes = |node: &mut Expr| -> Result<(), SQLError> {
             match node {
-                Expr::Column(name) => found.columns.push((None, name.clone())),
+                Expr::Column(name) => found.columns.push((None, name.to_string())),
                 Expr::QualifiedColumn { qualifier, column } => found
                     .columns
-                    .push((Some(qualifier.clone()), column.clone())),
+                    .push((Some(qualifier.clone()), column.to_string())),
                 Expr::TypedLiteral {
                     value: Value::Int(oid),
                     ty,

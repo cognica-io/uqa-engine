@@ -23,7 +23,7 @@ impl StoredColumnBinder<'_> {
             .map(|scope| scope.unqualified(&stored_name))
             .find(|matches| !matches.is_empty())
         else {
-            self.unresolved.push((None, stored_name));
+            self.unresolved.push((None, stored_name.to_string()));
             return;
         };
         for column in &matches {
@@ -32,6 +32,7 @@ impl StoredColumnBinder<'_> {
         }
         if let [column] = matches.as_slice() {
             *expression = column.reference.clone();
+            expression.set_reference_position(stored_name.position());
         }
     }
 

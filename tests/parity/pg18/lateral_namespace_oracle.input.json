@@ -1,0 +1,356 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "nested_left_query",
+      "sql": "SELECT * FROM (VALUES(1)) a(n), LATERAL (SELECT a.n) r1 JOIN (VALUES(1)) b(m) ON r1.n=b.m"
+    },
+    {
+      "id": "nested_left_values",
+      "sql": "SELECT * FROM (VALUES(1)) a(n), LATERAL (VALUES(a.n)) r1(n) JOIN (VALUES(1)) b(m) ON r1.n=b.m"
+    },
+    {
+      "id": "nested_left_function",
+      "sql": "SELECT * FROM (VALUES(1)) a(n), generate_series(a.n,a.n) r1(n) JOIN (VALUES(1)) b(m) ON r1.n=b.m"
+    },
+    {
+      "id": "ambiguous_relation",
+      "sql": "SELECT * FROM (VALUES(1)) v(x), ((VALUES(2)) v(x) CROSS JOIN LATERAL (SELECT v.x AS y) r) AS j"
+    },
+    {
+      "id": "nonlateral_query",
+      "sql": "SELECT * FROM (VALUES(1)) s(x) CROSS JOIN (SELECT s.x+1 AS y) q"
+    },
+    {
+      "id": "nonlateral_unqualified",
+      "sql": "SELECT * FROM (VALUES(1)) s(x) CROSS JOIN (SELECT x+1 AS y) q"
+    },
+    {
+      "id": "nonlateral_values",
+      "sql": "SELECT * FROM (VALUES(1)) s(x) CROSS JOIN (VALUES(s.x+1)) q(y)"
+    },
+    {
+      "id": "invisible_join_condition",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), (VALUES(1)) b(y) JOIN (VALUES(1)) c(z) ON a.x=c.z"
+    },
+    {
+      "id": "create_target",
+      "sql": "CREATE TABLE target_rows(id INTEGER PRIMARY KEY,value INTEGER)"
+    },
+    {
+      "id": "insert_target",
+      "sql": "INSERT INTO target_rows VALUES(1,10),(2,20)"
+    },
+    {
+      "id": "create_source",
+      "sql": "CREATE TABLE src_one(x INTEGER)"
+    },
+    {
+      "id": "insert_source",
+      "sql": "INSERT INTO src_one VALUES(1)"
+    },
+    {
+      "id": "lateral_update",
+      "sql": "UPDATE target_rows t SET value=99 FROM src_one s CROSS JOIN LATERAL (SELECT t.id AS y) q WHERE t.id=q.y RETURNING t.id,t.value"
+    },
+    {
+      "id": "nonlateral_update",
+      "sql": "UPDATE target_rows t SET value=99 FROM src_one s CROSS JOIN (SELECT t.id AS y) q WHERE t.id=q.y RETURNING t.id,t.value"
+    },
+    {
+      "id": "lateral_delete",
+      "sql": "DELETE FROM target_rows t USING src_one s CROSS JOIN LATERAL (SELECT t.id AS y) q WHERE t.id=q.y RETURNING t.id"
+    },
+    {
+      "id": "nonlateral_delete",
+      "sql": "DELETE FROM target_rows t USING src_one s CROSS JOIN (SELECT t.id AS y) q WHERE t.id=q.y RETURNING t.id"
+    },
+    {
+      "id": "lateral_target_unqualified",
+      "sql": "UPDATE target_rows t SET value=99 FROM LATERAL (SELECT id AS y) q RETURNING t.id"
+    },
+    {
+      "id": "lateral_target_missing_column",
+      "sql": "DELETE FROM target_rows t USING LATERAL (SELECT t.missing AS y) q RETURNING t.id"
+    },
+    {
+      "id": "nested_left_query_rows",
+      "sql": "SELECT a.n,r1.n,b.m FROM (VALUES(1),(3)) a(n), LATERAL (SELECT a.n) r1 JOIN (VALUES(1),(3)) b(m) ON r1.n=b.m ORDER BY 1,2,3"
+    },
+    {
+      "id": "nested_left_values_rows",
+      "sql": "SELECT a.n,r1.n,b.m FROM (VALUES(1),(3)) a(n), LATERAL (VALUES(a.n),(a.n+10)) r1(n) JOIN (VALUES(1),(3)) b(m) ON r1.n=b.m ORDER BY 1,2,3"
+    },
+    {
+      "id": "nested_right_function",
+      "sql": "SELECT a.x,j.* FROM (VALUES(1),(3)) a(x), ((VALUES(2)) b(y) CROSS JOIN generate_series(a.x+b.y,a.x+b.y) c(z)) j ORDER BY 1"
+    },
+    {
+      "id": "nested_left_scalar_argument",
+      "sql": "SELECT a.x,j.* FROM (VALUES(1),(3)) a(x), (generate_series((SELECT a.x),a.x) b(y) JOIN (VALUES(1),(3)) c(z) ON b.y=c.z) j ORDER BY 1"
+    },
+    {
+      "id": "explicit_cross_preceding",
+      "sql": "SELECT * FROM (VALUES(1)) a(x) CROSS JOIN ((VALUES(2)) b(y) JOIN LATERAL (VALUES(a.x+b.y)) c(z) ON true) AS j"
+    },
+    {
+      "id": "nested_nonlateral_query",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), (SELECT a.x) b JOIN (VALUES(2)) c(y) ON true"
+    },
+    {
+      "id": "nested_nonlateral_values",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), (VALUES(a.x)) b(z) JOIN (VALUES(2)) c(y) ON true"
+    },
+    {
+      "id": "ambiguous_different_columns",
+      "sql": "SELECT * FROM (VALUES(1)) v(x), ((VALUES(2)) v(y) CROSS JOIN LATERAL (SELECT v.x AS z) r) AS j"
+    },
+    {
+      "id": "ambiguous_qualified_star",
+      "sql": "SELECT * FROM (VALUES(1)) v(x), ((VALUES(2)) v(y) CROSS JOIN LATERAL (SELECT v.*) r) AS j"
+    },
+    {
+      "id": "ambiguous_column",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), ((VALUES(2)) b(x) CROSS JOIN LATERAL (SELECT x AS z) r) AS j"
+    },
+    {
+      "id": "nested_lexical_shadow",
+      "sql": "SELECT a.x,j.* FROM (VALUES(1),(3)) a(x), (LATERAL (SELECT a.x FROM (VALUES(9)) a(x)) b JOIN (VALUES(9)) c(y) ON b.x=c.y) j ORDER BY 1"
+    },
+    {
+      "id": "nonlateral_multiple_columns",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), (VALUES(2)) b(x), (SELECT x) q"
+    },
+    {
+      "id": "nonlateral_three_columns",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), (VALUES(2)) b(x), (VALUES(3)) c(x), (SELECT x) q"
+    },
+    {
+      "id": "nonlateral_missing_column",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), (VALUES(2)) b(y), (SELECT a.missing) q"
+    },
+    {
+      "id": "nonlateral_star",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), (SELECT a.*) q"
+    },
+    {
+      "id": "nonlateral_unaliased",
+      "sql": "SELECT * FROM (VALUES(1)), (SELECT column1) q"
+    },
+    {
+      "id": "nonlateral_multiple_unaliased",
+      "sql": "SELECT * FROM (VALUES(1)), (VALUES(2)), (SELECT column1) q"
+    },
+    {
+      "id": "lateral_single_update",
+      "sql": "UPDATE target_rows t SET value=99 FROM LATERAL (SELECT t.id AS y) q RETURNING t.id"
+    },
+    {
+      "id": "lateral_single_delete",
+      "sql": "DELETE FROM target_rows t USING LATERAL (SELECT t.id AS y) q RETURNING t.id"
+    },
+    {
+      "id": "nonlateral_single_update",
+      "sql": "UPDATE target_rows t SET value=99 FROM (SELECT t.id AS y) q RETURNING t.id"
+    },
+    {
+      "id": "nonlateral_target_unqualified",
+      "sql": "DELETE FROM target_rows t USING (SELECT id AS y) q RETURNING t.id"
+    },
+    {
+      "id": "valid_lateral_update",
+      "sql": "UPDATE target_rows t SET value=q.y FROM src_one s CROSS JOIN LATERAL (SELECT s.x+10 AS y) q WHERE t.id=s.x RETURNING t.id,t.value"
+    },
+    {
+      "id": "target_after_update",
+      "sql": "SELECT * FROM target_rows ORDER BY id"
+    },
+    {
+      "id": "valid_nested_delete",
+      "sql": "DELETE FROM target_rows t USING src_one s, LATERAL (SELECT s.x) r JOIN (VALUES(1)) b(y) ON r.x=b.y WHERE t.id=r.x RETURNING t.id"
+    },
+    {
+      "id": "target_after_delete",
+      "sql": "SELECT * FROM target_rows ORDER BY id"
+    },
+    {
+      "id": "nested_right_query",
+      "sql": "SELECT * FROM (VALUES(1),(3)) a(x), ((VALUES(2)) b(y) RIGHT JOIN LATERAL (SELECT a.x AS z) c(z) ON true) j ORDER BY 1"
+    },
+    {
+      "id": "nested_right_values",
+      "sql": "SELECT * FROM (VALUES(1),(3)) a(x), ((VALUES(2)) b(y) RIGHT JOIN LATERAL (VALUES(a.x)) c(z) ON true) j ORDER BY 1"
+    },
+    {
+      "id": "forbidden_nested_right_query",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), ((VALUES(2)) b(y) RIGHT JOIN LATERAL (SELECT a.x+b.y AS z) c(z) ON true) j"
+    },
+    {
+      "id": "forbidden_nested_right_values",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), ((VALUES(2)) b(y) RIGHT JOIN LATERAL (VALUES(a.x+b.y)) c(z) ON true) j"
+    },
+    {
+      "id": "nested_full_query",
+      "sql": "SELECT * FROM (VALUES(1),(3)) a(x), ((VALUES(2)) b(y) FULL JOIN LATERAL (SELECT a.x AS z) c(z) ON true) j ORDER BY 1"
+    },
+    {
+      "id": "nested_full_values",
+      "sql": "SELECT * FROM (VALUES(1),(3)) a(x), ((VALUES(2)) b(y) FULL JOIN LATERAL (VALUES(a.x)) c(z) ON true) j ORDER BY 1"
+    },
+    {
+      "id": "forbidden_nested_full_query",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), ((VALUES(2)) b(y) FULL JOIN LATERAL (SELECT a.x+b.y AS z) c(z) ON true) j"
+    },
+    {
+      "id": "forbidden_nested_full_values",
+      "sql": "SELECT * FROM (VALUES(1)) a(x), ((VALUES(2)) b(y) FULL JOIN LATERAL (VALUES(a.x+b.y)) c(z) ON true) j"
+    },
+    {
+      "id": "create_nested_view",
+      "sql": "CREATE VIEW nested_lateral_view AS SELECT a.n,r.n AS repeated,b.m FROM (VALUES(1),(3)) a(n), LATERAL (SELECT a.n) r JOIN (VALUES(1),(3)) b(m) ON r.n=b.m"
+    },
+    {
+      "id": "nested_view_rows",
+      "sql": "SELECT * FROM nested_lateral_view ORDER BY 1"
+    },
+    {
+      "id": "nested_view_definition",
+      "sql": "SELECT pg_get_viewdef('nested_lateral_view'::regclass,false)"
+    },
+    {
+      "id": "nested_view_definition_pretty",
+      "sql": "SELECT pg_get_viewdef('nested_lateral_view'::regclass,true)"
+    },
+    {
+      "id": "nonlateral_duplicate_relation_columns",
+      "sql": "SELECT * FROM (VALUES(1)) v(x), ((VALUES(2)) v(x) CROSS JOIN (SELECT x AS z) r) AS j"
+    },
+    {
+      "id": "nonlateral_duplicate_columns_one_relation",
+      "sql": "SELECT * FROM (SELECT 1 AS x,2 AS x) a, (SELECT x) q"
+    },
+    {
+      "id": "nonlateral_unaliased_after_join",
+      "sql": "SELECT * FROM (VALUES(1)), (VALUES(2)) b(y), (SELECT column1) q"
+    },
+    {
+      "id": "create_namespace_unit_view",
+      "sql": "CREATE VIEW namespace_unit_view AS SELECT 1 AS m"
+    },
+    {
+      "id": "nested_named_input",
+      "sql": "SELECT a.n,r.n AS repeated,b.m FROM (VALUES(1),(3)) a(n), LATERAL (SELECT a.n FROM namespace_unit_view) r JOIN namespace_unit_view b ON true ORDER BY 1"
+    },
+    {
+      "id": "nested_cte_input",
+      "sql": "WITH u AS MATERIALIZED (SELECT 1 AS m) SELECT a.n,r.n AS repeated,b.m FROM (VALUES(1),(3)) a(n), LATERAL (SELECT a.n FROM u) r JOIN u b ON true ORDER BY 1"
+    },
+    {
+      "id": "create_nested_named_view",
+      "sql": "CREATE VIEW nested_named_view AS SELECT a.n,r.n AS repeated,b.m FROM (VALUES(1),(3)) a(n), LATERAL (SELECT a.n FROM namespace_unit_view) r JOIN namespace_unit_view b ON true"
+    },
+    {
+      "id": "nested_named_view_rows",
+      "sql": "SELECT * FROM nested_named_view ORDER BY 1"
+    },
+    {
+      "id": "prepare_nested_names",
+      "sql": "PREPARE nested_names(integer) AS SELECT a.n,r.n AS repeated,b.m FROM (VALUES($1),($1+2)) a(n), LATERAL (SELECT a.n FROM namespace_unit_view) r JOIN namespace_unit_view b ON true ORDER BY 1"
+    },
+    {
+      "id": "execute_nested_names_first",
+      "sql": "EXECUTE nested_names(7)"
+    },
+    {
+      "id": "execute_nested_names_next",
+      "sql": "EXECUTE nested_names(2)"
+    },
+    {
+      "id": "deallocate_nested_names",
+      "sql": "DEALLOCATE nested_names"
+    },
+    {
+      "id": "create_nested_sql_function",
+      "sql": "CREATE FUNCTION nested_sql_function(i integer) RETURNS integer LANGUAGE sql STABLE AS $$ SELECT sum(r.n) FROM (VALUES(i),(i+2)) a(n), LATERAL (SELECT a.n) r JOIN (VALUES(1)) b(m) ON true $$"
+    },
+    {
+      "id": "nested_sql_function_rows",
+      "sql": "SELECT nested_sql_function(7) AS first, nested_sql_function(2) AS second"
+    },
+    {
+      "id": "create_nested_atomic_function",
+      "sql": "CREATE FUNCTION nested_atomic_function(i integer) RETURNS integer LANGUAGE sql STABLE BEGIN ATOMIC SELECT sum(r.n) FROM (VALUES(i),(i+2)) a(n), LATERAL (SELECT a.n) r JOIN (VALUES(1)) b(m) ON true; END"
+    },
+    {
+      "id": "nested_atomic_function_rows",
+      "sql": "SELECT nested_atomic_function(7) AS first, nested_atomic_function(2) AS second"
+    },
+    {
+      "id": "create_nested_star_view",
+      "sql": "CREATE VIEW nested_star_view AS SELECT q.n FROM (VALUES(1),(3)) a(n), LATERAL (SELECT a.*) q"
+    },
+    {
+      "id": "nested_star_view_rows",
+      "sql": "SELECT * FROM nested_star_view ORDER BY 1"
+    },
+    {
+      "id": "create_nested_bare_star_view",
+      "sql": "CREATE VIEW nested_bare_star_view AS SELECT a.n,q.m FROM (VALUES(1),(3)) a(n), LATERAL (SELECT * FROM namespace_unit_view) q"
+    },
+    {
+      "id": "nested_bare_star_view_rows",
+      "sql": "SELECT * FROM nested_bare_star_view ORDER BY 1"
+    },
+    {
+      "id": "create_comma_view",
+      "sql": "CREATE VIEW comma_source_view AS SELECT a.n,b.m FROM (VALUES(1)) a(n), (VALUES(2)) b(m)"
+    },
+    {
+      "id": "create_cross_view",
+      "sql": "CREATE VIEW cross_source_view AS SELECT a.n,b.m FROM (VALUES(1)) a(n) CROSS JOIN (VALUES(2)) b(m)"
+    },
+    {
+      "id": "comma_view_definition",
+      "sql": "SELECT pg_get_viewdef('comma_source_view'::regclass,false)"
+    },
+    {
+      "id": "comma_view_definition_pretty",
+      "sql": "SELECT pg_get_viewdef('comma_source_view'::regclass,true)"
+    },
+    {
+      "id": "cross_view_definition",
+      "sql": "SELECT pg_get_viewdef('cross_source_view'::regclass,false)"
+    },
+    {
+      "id": "cross_view_definition_pretty",
+      "sql": "SELECT pg_get_viewdef('cross_source_view'::regclass,true)"
+    },
+    {
+      "id": "rule_events",
+      "sql": "CREATE TABLE namespace_events(id integer)"
+    },
+    {
+      "id": "rule_rows",
+      "sql": "CREATE TABLE namespace_rule_rows(id integer,n integer,repeated integer,m integer)"
+    },
+    {
+      "id": "create_namespace_rule",
+      "sql": "CREATE RULE namespace_insert AS ON INSERT TO namespace_events DO ALSO INSERT INTO namespace_rule_rows SELECT new.id,a.n,r.n,b.m FROM (VALUES(1),(3)) a(n), LATERAL (SELECT a.n) r JOIN (VALUES(1),(3)) b(m) ON r.n=b.m"
+    },
+    {
+      "id": "namespace_rule_reset",
+      "sql": "TRUNCATE namespace_events, namespace_rule_rows"
+    },
+    {
+      "id": "fire_namespace_rule",
+      "sql": "INSERT INTO namespace_events VALUES(10),(20)"
+    },
+    {
+      "id": "namespace_rule_rows",
+      "sql": "SELECT * FROM namespace_rule_rows ORDER BY 1,2"
+    }
+  ]
+}

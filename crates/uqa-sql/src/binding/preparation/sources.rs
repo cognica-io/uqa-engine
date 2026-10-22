@@ -8,7 +8,7 @@
 
 use super::super::{
     operator_join_relation_schemas, overlay_outer_schema, rename_schema, JoinSchemaBinding,
-    SourcePlan,
+    SourcePlan, SourceScope,
 };
 use super::{Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{FunctionBinding, OperatorJoinRelations};
@@ -21,6 +21,34 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
+        self.source_in_scope(source, subqueries, SourceScope::new(outer))
+    }
+
+    pub(super) fn source_in_scope(
+        &mut self,
+        source: &SourcePlan,
+        subqueries: &[QueryPlan],
+        scope: SourceScope<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        let schema = self.source_in_scope_inner(source, subqueries, scope)?;
+        Ok(if scope.retain_names {
+            SourceScope::describe_output(source, schema)
+        } else {
+            schema
+        })
+    }
+
+    fn source_in_scope_inner(
+        &mut self,
+        source: &SourcePlan,
+        subqueries: &[QueryPlan],
+        scope: SourceScope<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        if matches!(source, SourcePlan::Join { .. }) {
+            return self.join_source(source, subqueries, scope);
+        }
+        let input = scope.input(source);
+        let outer = input.as_ref();
         match source {
             crate::plan::SourcePlan::RetainedRows(source) => return Ok(source.schema().clone()),
             SourcePlan::Table { .. } => {}
@@ -51,6 +79,7 @@ impl Preparation<'_> {
                 body,
                 alias,
                 column_aliases,
+                ..
             } => {
                 let schema = self.query(body, outer)?;
                 return Ok(rename_schema(&schema, column_aliases, alias.as_deref()));
@@ -77,7 +106,7 @@ impl Preparation<'_> {
             SourcePlan::FunctionGroup { functions, .. } => {
                 self.source_functions(functions, subqueries, outer)?;
             }
-            SourcePlan::Join { .. } => return self.join_source(source, subqueries, outer),
+            SourcePlan::Join { .. } => unreachable!("joins retain their preceding namespace"),
         }
         self.scope.bind_source(
             self.routines,
@@ -93,7 +122,7 @@ impl Preparation<'_> {
         &mut self,
         source: &SourcePlan,
         subqueries: &[QueryPlan],
-        outer: Option<&RowSchema>,
+        scope: SourceScope<'_>,
     ) -> Result<RowSchema, SQLError> {
         let SourcePlan::Join {
             left,
@@ -110,14 +139,21 @@ impl Preparation<'_> {
         else {
             unreachable!("join analysis called for a different source kind")
         };
-        let left = self.source(left, subqueries, outer)?;
-        let right_scope = (*lateral
-            || matches!(
-                right.as_ref(),
-                SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
-            ))
-        .then(|| overlay_outer_schema(&left, outer));
-        let right = self.source(right, subqueries, right_scope.as_ref().or(outer))?;
+        let left_source = left;
+        let left = self.source_in_scope(left_source, subqueries, scope.with_names())?;
+        let preceding = scope.right_namespace(left_source, &left, *kind);
+        let right = self.source_in_scope(
+            right,
+            subqueries,
+            SourceScope {
+                outer: scope.outer,
+                preceding: Some(&preceding),
+                inherited_lateral: *lateral,
+                retain_names: true,
+            },
+        )?;
+        let condition = scope.condition();
+        let outer = condition.as_ref();
         if let Some(on) = on {
             let joined = RowSchema::join(&left, &right, std::iter::empty::<String>());
             let input = overlay_outer_schema(&joined, outer);

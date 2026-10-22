@@ -15,6 +15,7 @@ pub(crate) type SchemaSet<T> = HashSet<T, ahash::RandomState>;
 use std::sync::Arc;
 
 mod collations;
+mod lateral;
 mod name_binding;
 mod open_columns;
 mod outer_scope;
@@ -132,6 +133,7 @@ struct SchemaColdMetadata {
     identity_layout: bool,
     /// The physical width of the schema's own columns when [`RowSchema::with_outer_schema`] overlaid an enclosing query's columns after them; `None` when every column is the schema's own.
     local_width: Option<usize>,
+    lateral_restrictions: Option<Arc<lateral::LateralRestrictions>>,
 }
 
 #[derive(Default)]
@@ -151,6 +153,7 @@ struct SchemaBuildMetadata {
     extra_ambiguous_unqualified: SchemaSet<Box<str>>,
     extra_ambiguous_qualified: SchemaSet<ColumnIdentity>,
     local_width: Option<usize>,
+    lateral_restrictions: Option<Arc<lateral::LateralRestrictions>>,
 }
 
 pub struct PhysicalLayout {

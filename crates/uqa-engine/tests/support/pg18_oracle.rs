@@ -87,6 +87,9 @@ pub fn run_case(engine: &Engine, sql: &str) -> serde_json::Value {
             "message": error.to_string(),
             "detail": error.detail(),
             "hint": error.hint(),
+            "position": error.position(),
+            "internal_position": error.internal_position(),
+            "internal_query": error.internal_query(),
             "context": error.context(),
         })
     });

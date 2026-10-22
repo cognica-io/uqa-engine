@@ -198,14 +198,14 @@ fn analyzed_statement_distinguishes_declared_text_and_unknown_parameters() {
 fn query_schema_errors_do_not_evaluate_constants() {
     let scopes = Scopes::default();
     let error = analyze(&scopes, "SELECT missing, 1 / 0").unwrap_err();
-    assert!(matches!(error, SQLError::UnknownColumn(name) if name == "missing"));
+    assert!(matches!(error.primary(), SQLError::UnknownColumn(name) if name == "missing"));
     assert_eq!(*scopes.events.borrow(), ["scope", "binding", "release"]);
 }
 #[test]
 fn explain_retains_its_scope_and_borrows_metadata_only_for_its_body() {
     let scopes = Scopes::default();
     let error = analyze(&scopes, "EXPLAIN SELECT missing, 1 / 0").unwrap_err();
-    assert!(matches!(error, SQLError::UnknownColumn(name) if name == "missing"));
+    assert!(matches!(error.primary(), SQLError::UnknownColumn(name) if name == "missing"));
     assert_eq!(
         *scopes.events.borrow(),
         ["scope", "scope", "binding", "release", "release"]
@@ -222,7 +222,7 @@ fn query_bearing_commands_validate_their_query_schema() {
         let scopes = Scopes::default();
         let error = analyze(&scopes, sql).unwrap_err();
         assert!(
-            matches!(error, SQLError::UnknownColumn(name) if name == "missing"),
+            matches!(error.primary(), SQLError::UnknownColumn(name) if name == "missing"),
             "{sql}"
         );
         assert_eq!(*scopes.events.borrow(), ["scope", "binding", "release"]);

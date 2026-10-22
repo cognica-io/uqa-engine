@@ -18,6 +18,27 @@ pub use context::binding_context;
 mod subqueries;
 pub use subqueries::resolve_scalar_subquery_type;
 
+pub(crate) fn source_depends_on_current_row<S: Clone>(
+    routines: &dyn RoutineResolution,
+    source: &SourcePlan,
+    input: &RowSchema,
+    ctes: &CteScope<S>,
+) -> Result<bool, SQLError> {
+    let catalog = ctes.catalog_read_view()?;
+    let resolution = ctes.relation_name_resolution()?;
+    uqa_sql::binding::correlation::source_depends_on_current_row(
+        uqa_sql::binding::correlation::CorrelationContext {
+            routines,
+            catalog: &catalog,
+            resolution: &resolution,
+            scoped_relations: Some(ctes),
+        },
+        source,
+        &ctes.scalar_subqueries,
+        input,
+    )
+}
+
 pub fn analyze_prepared_command_schema<S: Clone>(
     routines: &dyn RoutineResolution,
     command: &CommandPlan,

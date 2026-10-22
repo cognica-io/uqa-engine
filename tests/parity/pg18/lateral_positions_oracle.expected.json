@@ -1,0 +1,580 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(x) RIGHT JOIN generate_series(t.x,3) g(n) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 63,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "right_function"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(x) FULL JOIN generate_series(t.x,3) g(n) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 62,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "full_function"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(x) RIGHT JOIN generate_series(x,3) g(n) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 63,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "unqualified_function"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN ROWS FROM(generate_series(t.x,3)) g(n) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 69,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "right_rows_from"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 58,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "right_subquery"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.*) q ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 58,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "right_star"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(VALUES(t.x)) q(y) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 58,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "right_values"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN generate_series((SELECT t.x),3) g(n) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 67,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "nested_scalar"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT (SELECT t.x FROM (VALUES(2)) t(x)), t.x) q ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 94,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "repeated_name"
+    },
+    {
+      "sql": "/* \ud55c\uae00\ud83d\ude42 */ SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 68,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "utf8_comment"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1)) \"\ud14c\uc774\ube14\"(\"\uc5f4\") RIGHT JOIN LATERAL(SELECT \"\ud14c\uc774\ube14\".\"\uc5f4\") q ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"\ud14c\uc774\ube14\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 64,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "utf8_name"
+    },
+    {
+      "sql": "SELECT 1; SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 68,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "batch"
+    },
+    {
+      "sql": "SELECT '\ud83d\ude42\ud55c\uae00'; SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 72,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\ud83d\ude42\ud55c\uae00"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "utf8_batch"
+    },
+    {
+      "sql": "PREPARE positioned AS SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 80,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "prepare"
+    },
+    {
+      "sql": "CREATE VIEW positioned_view AS SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 89,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "view"
+    },
+    {
+      "sql": "CREATE FUNCTION positioned_atomic() RETURNS SETOF integer LANGUAGE sql BEGIN ATOMIC SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true; END",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 144,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "atomic_function"
+    },
+    {
+      "sql": "CREATE FUNCTION positioned_source() RETURNS SETOF integer LANGUAGE sql AS $$SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true$$",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 136,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "source_function"
+    },
+    {
+      "sql": "CREATE FUNCTION positioned_quoted() RETURNS SETOF integer LANGUAGE sql AS 'SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 135,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "quoted_source"
+    },
+    {
+      "sql": "CREATE FUNCTION positioned_escaped() RETURNS SETOF integer LANGUAGE sql AS 'SELECT length(''\ud55c\uae00''),t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 151,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "escaped_source"
+    },
+    {
+      "sql": "SELECT '\ud83d\ude42\ud55c\uae00'; CREATE FUNCTION positioned_batch() RETURNS SETOF integer LANGUAGE sql AS $tag$SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true$tag$",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": 152,
+        "internal_position": null,
+        "internal_query": null,
+        "context": null
+      },
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\ud83d\ude42\ud55c\uae00"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "utf8_source_batch"
+    },
+    {
+      "sql": "/* $SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true$ */ CREATE FUNCTION positioned_ambiguous() RETURNS SETOF integer LANGUAGE sql AS $$SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true$$",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": null,
+        "internal_position": 60,
+        "internal_query": "SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true",
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "ambiguous_source"
+    },
+    {
+      "sql": "CREATE FUNCTION positioned_continued() RETURNS SETOF integer LANGUAGE sql AS 'SELECT t.x FROM (VALUES(1)) t(x) '\n'RIGHT JOIN LATERAL(SELECT t.x) q ON true'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": null,
+        "internal_position": 60,
+        "internal_query": "SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true",
+        "context": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "continued_source"
+    },
+    {
+      "sql": "SET check_function_bodies=off",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "checks_off"
+    },
+    {
+      "sql": "CREATE FUNCTION positioned_runtime() RETURNS SETOF integer LANGUAGE sql AS $$SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "create_runtime"
+    },
+    {
+      "sql": "SET check_function_bodies=on",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "checks_on"
+    },
+    {
+      "sql": "SELECT * FROM positioned_runtime()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null,
+        "position": null,
+        "internal_position": 60,
+        "internal_query": "SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true",
+        "context": "SQL function \"positioned_runtime\" statement 1"
+      },
+      "results": [],
+      "notices": [],
+      "id": "runtime_position"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1)) t(x) LEFT JOIN LATERAL(SELECT t.x) q ON true",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "left_control"
+    },
+    {
+      "sql": "SELECT 42 AS healthy",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "healthy"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "final_control"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "b31435858c22029724ee691aaf753be3e79008ea5a14ada02702670ad04024fe",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices",
+      "--positions",
+      "--context"
+    ]
+  }
+}

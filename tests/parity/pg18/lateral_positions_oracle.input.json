@@ -1,0 +1,120 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "right_function",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(x) RIGHT JOIN generate_series(t.x,3) g(n) ON true"
+    },
+    {
+      "id": "full_function",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(x) FULL JOIN generate_series(t.x,3) g(n) ON true"
+    },
+    {
+      "id": "unqualified_function",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(x) RIGHT JOIN generate_series(x,3) g(n) ON true"
+    },
+    {
+      "id": "right_rows_from",
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN ROWS FROM(generate_series(t.x,3)) g(n) ON true"
+    },
+    {
+      "id": "right_subquery",
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true"
+    },
+    {
+      "id": "right_star",
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.*) q ON true"
+    },
+    {
+      "id": "right_values",
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(VALUES(t.x)) q(y) ON true"
+    },
+    {
+      "id": "nested_scalar",
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN generate_series((SELECT t.x),3) g(n) ON true"
+    },
+    {
+      "id": "repeated_name",
+      "sql": "SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT (SELECT t.x FROM (VALUES(2)) t(x)), t.x) q ON true"
+    },
+    {
+      "id": "utf8_comment",
+      "sql": "/* 한글🙂 */ SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true"
+    },
+    {
+      "id": "utf8_name",
+      "sql": "SELECT * FROM (VALUES(1)) \"테이블\"(\"열\") RIGHT JOIN LATERAL(SELECT \"테이블\".\"열\") q ON true"
+    },
+    {
+      "id": "batch",
+      "sql": "SELECT 1; SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true"
+    },
+    {
+      "id": "utf8_batch",
+      "sql": "SELECT '🙂한글'; SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true"
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE positioned AS SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true"
+    },
+    {
+      "id": "view",
+      "sql": "CREATE VIEW positioned_view AS SELECT * FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true"
+    },
+    {
+      "id": "atomic_function",
+      "sql": "CREATE FUNCTION positioned_atomic() RETURNS SETOF integer LANGUAGE sql BEGIN ATOMIC SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true; END"
+    },
+    {
+      "id": "source_function",
+      "sql": "CREATE FUNCTION positioned_source() RETURNS SETOF integer LANGUAGE sql AS $$SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true$$"
+    },
+    {
+      "id": "quoted_source",
+      "sql": "CREATE FUNCTION positioned_quoted() RETURNS SETOF integer LANGUAGE sql AS 'SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true'"
+    },
+    {
+      "id": "escaped_source",
+      "sql": "CREATE FUNCTION positioned_escaped() RETURNS SETOF integer LANGUAGE sql AS 'SELECT length(''한글''),t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true'"
+    },
+    {
+      "id": "utf8_source_batch",
+      "sql": "SELECT '🙂한글'; CREATE FUNCTION positioned_batch() RETURNS SETOF integer LANGUAGE sql AS $tag$SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true$tag$"
+    },
+    {
+      "id": "ambiguous_source",
+      "sql": "/* $SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true$ */ CREATE FUNCTION positioned_ambiguous() RETURNS SETOF integer LANGUAGE sql AS $$SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true$$"
+    },
+    {
+      "id": "continued_source",
+      "sql": "CREATE FUNCTION positioned_continued() RETURNS SETOF integer LANGUAGE sql AS 'SELECT t.x FROM (VALUES(1)) t(x) '\n'RIGHT JOIN LATERAL(SELECT t.x) q ON true'"
+    },
+    {
+      "id": "checks_off",
+      "sql": "SET check_function_bodies=off"
+    },
+    {
+      "id": "create_runtime",
+      "sql": "CREATE FUNCTION positioned_runtime() RETURNS SETOF integer LANGUAGE sql AS $$SELECT t.x FROM (VALUES(1)) t(x) RIGHT JOIN LATERAL(SELECT t.x) q ON true$$"
+    },
+    {
+      "id": "checks_on",
+      "sql": "SET check_function_bodies=on"
+    },
+    {
+      "id": "runtime_position",
+      "sql": "SELECT * FROM positioned_runtime()"
+    },
+    {
+      "id": "left_control",
+      "sql": "SELECT * FROM (VALUES(1)) t(x) LEFT JOIN LATERAL(SELECT t.x) q ON true"
+    },
+    {
+      "id": "final_control",
+      "sql": "SELECT 42 AS healthy"
+    }
+  ]
+}

@@ -64,6 +64,7 @@ pub(super) fn substitute(
     }
     // Capture only attributes, never argument expressions: unused and conditional argument evaluations keep their original demand and error ordering. The inner body cannot shadow opaque attribute identities.
     let source = SourcePlan::Values {
+        lateral: false,
         internal_column_types: vec![None; captures.len()],
         internal_column_collations: Vec::new(),
         rows: vec![captures],
@@ -76,6 +77,7 @@ pub(super) fn substitute(
         unreachable!()
     };
     block.from = Some(SourcePlan::Join {
+        comma: false,
         left: Box::new(source),
         right: Box::new(block.from.take().expect("projected query source")),
         kind: JoinKind::Cross,
@@ -141,11 +143,12 @@ fn project(body: Box<QueryPlan>, width: usize) -> QueryPlan {
             projections: columns
                 .iter()
                 .map(|name| ProjectionPlan {
-                    expr: ScalarExpr::Column(name.clone()),
+                    expr: ScalarExpr::Column(name.clone().into()),
                     alias: Some(name.clone()),
                 })
                 .collect(),
             from: Some(SourcePlan::Subquery {
+                lateral: false,
                 body,
                 alias: None,
                 column_aliases: columns,

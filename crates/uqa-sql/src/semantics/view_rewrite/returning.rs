@@ -24,7 +24,8 @@ pub(super) fn retarget_source_expression(
         let replacement = match node {
             ScalarExpr::Column(column) => Some(ScalarExpr::QualifiedColumn {
                 qualifier: desired_qualifier.to_string(),
-                column: layer.physical_source_column(column).to_string(),
+                column: crate::ast::ReferenceName::from(layer.physical_source_column(column))
+                    .with_position(column.position()),
             }),
             ScalarExpr::QualifiedColumn { qualifier, column }
                 if source_qualifier_matches(
@@ -35,7 +36,8 @@ pub(super) fn retarget_source_expression(
             {
                 Some(ScalarExpr::QualifiedColumn {
                     qualifier: desired_qualifier.to_string(),
-                    column: layer.physical_source_column(column).to_string(),
+                    column: crate::ast::ReferenceName::from(layer.physical_source_column(column))
+                        .with_position(column.position()),
                 })
             }
             _ => None,
@@ -112,11 +114,13 @@ fn top_level_view_column(
     scope: ExpressionScope<'_>,
 ) -> Option<String> {
     match expression {
-        ScalarExpr::Column(column) if layer_column(layer, column).is_some() => Some(column.clone()),
+        ScalarExpr::Column(column) if layer_column(layer, column).is_some() => {
+            Some(column.to_string())
+        }
         ScalarExpr::QualifiedColumn { qualifier, column }
             if scope.target_qualifier(qualifier) && layer_column(layer, column).is_some() =>
         {
-            Some(column.clone())
+            Some(column.to_string())
         }
         _ => None,
     }
@@ -264,7 +268,7 @@ fn expand_qualified_source_stars(
         };
         let layout = source.qualified_star_position_layout(qualifier);
         if layout.is_empty() {
-            return Err(SQLError::UnknownTable(qualifier.clone()));
+            return Err(SQLError::UnknownTable(qualifier.to_string()));
         }
         for (column, logical, _, _) in layout {
             if logical.is_some_and(|position| !source.wildcard_position_visible(position)) {
@@ -273,8 +277,8 @@ fn expand_qualified_source_stars(
             expanded.push(ProjectionPlan {
                 expr: logical.map_or_else(
                     || ScalarExpr::QualifiedColumn {
-                        qualifier: qualifier.clone(),
-                        column: column.clone(),
+                        qualifier: qualifier.to_string(),
+                        column: column.clone().into(),
                     },
                     |position| ScalarExpr::Position(target_width + position),
                 ),

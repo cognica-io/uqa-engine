@@ -472,7 +472,7 @@ impl<'a> ExternalSetOperation<'a> {
             let keys = output
                 .iter()
                 .map(|column| SortKey {
-                    expr: ScalarExpr::Column(column.clone()),
+                    expr: ScalarExpr::Column(column.clone().into()),
                     descending: false,
                     nulls_first: Some(true),
                 })

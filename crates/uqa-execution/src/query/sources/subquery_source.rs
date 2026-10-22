@@ -26,6 +26,7 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
             body,
             alias,
             column_aliases,
+            ..
         } => {
             // During a tuple-local recheck, a derived table named as the lock target pins every base scan of its storage inside this subtree to the candidate's tuples.
             let visible_qualifier = alias.clone().unwrap_or_default();

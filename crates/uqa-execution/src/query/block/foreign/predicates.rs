@@ -142,8 +142,8 @@ pub fn fdw_like_predicate(
 
 pub fn fdw_column_name(expr: &ScalarExpr) -> Option<String> {
     match expr {
-        ScalarExpr::Column(name) => Some(name.clone()),
-        ScalarExpr::QualifiedColumn { column, .. } => Some(column.clone()),
+        ScalarExpr::Column(name) => Some(name.to_string()),
+        ScalarExpr::QualifiedColumn { column, .. } => Some(column.to_string()),
         _ => None,
     }
 }

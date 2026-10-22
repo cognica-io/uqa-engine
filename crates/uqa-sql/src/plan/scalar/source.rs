@@ -66,12 +66,12 @@ impl<'a> Source<'a, (Expr, Expr)> {
 
 pub(super) enum Node<'a> {
     Star,
-    QualifiedStar(Source<'a, String>),
+    QualifiedStar(Source<'a, crate::ast::ReferenceName>),
     Default,
-    Column(Source<'a, String>),
+    Column(Source<'a, crate::ast::ReferenceName>),
     QualifiedColumn {
         qualifier: Source<'a, String>,
-        column: Source<'a, String>,
+        column: Source<'a, crate::ast::ReferenceName>,
     },
     InternalColumn(InternalColumnRef),
     Literal(Source<'a, Value>),

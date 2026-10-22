@@ -288,6 +288,7 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
     let resolution =
         crate::binding::fixture::resolution(vec!["app".into()], "pg_temp_fixture".into());
     let source = SourcePlan::Join {
+        comma: false,
         left: Box::new(SourcePlan::Table {
             executable_query: None,
             bound_columns: None,

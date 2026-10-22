@@ -227,7 +227,7 @@ pub(super) fn try_lower_text_match(
             None
         }
         ScalarExpr::Column(name) | ScalarExpr::QualifiedColumn { column: name, .. } => {
-            Some(name.clone())
+            Some(name.to_string())
         }
         ScalarExpr::Literal(Value::Str(name)) if name.is_empty() || name == "_all" => None,
         _ => {
@@ -594,8 +594,10 @@ impl FtsDefaultField {
 
 fn fts_default_field(expr: &ScalarExpr) -> Option<FtsDefaultField> {
     match expr {
-        ScalarExpr::Column(name) => Some(FtsDefaultField::Field(name.clone())),
-        ScalarExpr::QualifiedColumn { column, .. } => Some(FtsDefaultField::Field(column.clone())),
+        ScalarExpr::Column(name) => Some(FtsDefaultField::Field(name.to_string())),
+        ScalarExpr::QualifiedColumn { column, .. } => {
+            Some(FtsDefaultField::Field(column.to_string()))
+        }
         ScalarExpr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => {
             Some(FtsDefaultField::All)
         }

@@ -13,6 +13,7 @@ use crate::physical::run_to_rows;
 use crate::scan::TableScan;
 
 mod enum_keys;
+mod input_demand;
 mod range_keys;
 
 fn row(values: &[(&str, Value)]) -> ResultRow {
@@ -393,41 +394,57 @@ fn unique_inner_hash_join_streams_probe_batches_after_open() {
         }
     }
 
-    let build = TableScan::from_rows(vec!["l.k".into()], vec![row(&[("l.k", Value::Int(1))])]);
-    let batch_calls = Arc::new(AtomicUsize::new(0));
-    let probe = TableScan::new(Box::new(CountingProbe {
-        schema: vec!["r.k".into(), "r.id".into()],
-        next: 0,
-        end: crate::DEFAULT_BATCH_SIZE * 2,
-        batch_calls: batch_calls.clone(),
-    }));
-    let mut join = HashJoin::new(
-        Box::new(build),
-        Box::new(probe),
-        JoinKind::Inner,
-        vec![ScalarExpr::Column("l.k".into())],
-        vec![ScalarExpr::Column("r.k".into())],
-        evaluator(),
-        ResultRow::new(),
-        ResultRow::new(),
-    );
+    for build_left in [true, false] {
+        let build = TableScan::from_rows(vec!["l.k".into()], vec![row(&[("l.k", Value::Int(1))])]);
+        let batch_calls = Arc::new(AtomicUsize::new(0));
+        let probe = TableScan::new(Box::new(CountingProbe {
+            schema: vec!["r.k".into(), "r.id".into()],
+            next: 0,
+            end: crate::DEFAULT_BATCH_SIZE * 2,
+            batch_calls: batch_calls.clone(),
+        }));
+        let (left, right, left_key, right_key): (
+            Box<dyn PhysicalOperator>,
+            Box<dyn PhysicalOperator>,
+            &str,
+            &str,
+        ) = if build_left {
+            (Box::new(build), Box::new(probe), "l.k", "r.k")
+        } else {
+            (Box::new(probe), Box::new(build), "r.k", "l.k")
+        };
+        let mut join = HashJoin::new(
+            left,
+            right,
+            JoinKind::Inner,
+            vec![ScalarExpr::Column(left_key.into())],
+            vec![ScalarExpr::Column(right_key.into())],
+            evaluator(),
+            ResultRow::new(),
+            ResultRow::new(),
+        );
 
-    join.open().unwrap();
-    assert_eq!(batch_calls.load(Ordering::Relaxed), 0);
-    assert_eq!(
-        join.next().unwrap().unwrap().rows.len(),
-        crate::DEFAULT_BATCH_SIZE
-    );
-    assert_eq!(batch_calls.load(Ordering::Relaxed), 1);
-    assert_eq!(
-        join.next().unwrap().unwrap().rows.len(),
-        crate::DEFAULT_BATCH_SIZE
-    );
-    assert_eq!(batch_calls.load(Ordering::Relaxed), 2);
-    assert!(join.next().unwrap().is_none());
-    assert_eq!(batch_calls.load(Ordering::Relaxed), 3);
-    assert!(!join.output_has_spilled());
-    join.close().unwrap();
+        join.build_left = build_left;
+        join.open().unwrap();
+        assert_eq!(
+            batch_calls.load(Ordering::Relaxed),
+            usize::from(!build_left)
+        );
+        assert_eq!(
+            join.next().unwrap().unwrap().rows.len(),
+            crate::DEFAULT_BATCH_SIZE
+        );
+        assert_eq!(batch_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            join.next().unwrap().unwrap().rows.len(),
+            crate::DEFAULT_BATCH_SIZE
+        );
+        assert_eq!(batch_calls.load(Ordering::Relaxed), 2);
+        assert!(join.next().unwrap().is_none());
+        assert_eq!(batch_calls.load(Ordering::Relaxed), 3);
+        assert!(!join.output_has_spilled());
+        join.close().unwrap();
+    }
 }
 
 #[test]

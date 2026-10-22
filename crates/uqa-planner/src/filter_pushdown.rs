@@ -199,7 +199,7 @@ fn unqualified_column_names(expression: &ScalarExpr) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     expression.visit(&mut |node| {
         if let ScalarExpr::Column(name) = node {
-            names.insert(name.clone());
+            names.insert(name.to_string());
         }
     });
     names
@@ -353,11 +353,11 @@ use subqueries::{
 fn collect_pushdown_outer_columns(expression: &ScalarExpr, output: &mut BTreeSet<String>) -> bool {
     match expression {
         ScalarExpr::Column(column) => {
-            output.insert(column.clone());
+            output.insert(column.to_string());
             true
         }
         ScalarExpr::QualifiedColumn { column, .. } => {
-            output.insert(column.clone());
+            output.insert(column.to_string());
             true
         }
         ScalarExpr::Literal(_)

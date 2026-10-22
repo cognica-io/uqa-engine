@@ -23,6 +23,7 @@ fn with_context<T>(engine: &Engine, action: impl FnOnce(FilterPushdownContext<'_
     action(FilterPushdownContext {
         volatility: engine,
         correlation: uqa_sql::binding::correlation::CorrelationContext {
+            routines: engine,
             catalog: &catalog,
             resolution: &resolution,
             scoped_relations: None,
