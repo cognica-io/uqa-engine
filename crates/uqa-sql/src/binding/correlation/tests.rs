@@ -119,3 +119,79 @@ fn correlation_uses_scoped_relation_descriptors_without_hiding_outer_columns() {
         );
     }
 }
+
+#[test]
+fn lateral_source_dependencies_distinguish_caller_from_local_and_enclosing_names() {
+    let binding = crate::binding::fixture::empty_binding_context();
+    let context = CorrelationContext {
+        catalog: binding.catalog.as_ref(),
+        resolution: &binding.resolution,
+        scoped_relations: None,
+    };
+    let current = crate::RowSchema::with_qualified_types(
+        "t",
+        vec!["a".into()],
+        vec![Some(crate::ColumnType::Integer)],
+    );
+    let outer = crate::RowSchema::with_qualified_types(
+        "ancestor",
+        vec!["n".into()],
+        vec![Some(crate::ColumnType::Integer)],
+    );
+    let input = crate::RowSchema::with_outer_schema(&current, &outer);
+    for (source, expected) in [
+        ("generate_series(1,3) g(x)", false),
+        ("LATERAL generate_series(1,3) g(x)", false),
+        ("generate_series(t.a,3) g(x)", true),
+        ("generate_series(a,3) g(x)", true),
+        ("generate_series((SELECT t.a),3) g(x)", true),
+        (
+            "generate_series((SELECT a FROM (VALUES(2)) v(a)),3) g(x)",
+            false,
+        ),
+        ("generate_series(ancestor.n,3) g(x)", false),
+        ("generate_series((SELECT ancestor.n),3) g(x)", false),
+        (
+            "ROWS FROM(generate_series(1,2),generate_series(t.a,3)) g(x,y)",
+            true,
+        ),
+        (
+            "ROWS FROM(generate_series(1,2),generate_series(2,3)) g(x,y)",
+            false,
+        ),
+        ("LATERAL (VALUES(t.a)) v(x)", true),
+        ("LATERAL (VALUES(ancestor.n)) v(x)", false),
+        ("LATERAL (SELECT t.a) v", true),
+        ("LATERAL (SELECT t.a FROM (VALUES(2)) t(a)) v", false),
+        (
+            "LATERAL (SELECT sum(t.a) FROM generate_series(t.a,t.a+1) t(a)) v",
+            true,
+        ),
+        (
+            "LATERAL (WITH local_cte AS (SELECT 1 AS x) SELECT (SELECT x FROM local_cte)) v",
+            false,
+        ),
+        (
+            "LATERAL (WITH local_cte AS (SELECT t.a AS x) SELECT (SELECT x FROM local_cte)) v",
+            true,
+        ),
+    ] {
+        let sql = format!("SELECT * FROM (VALUES(1)) t(a), {source}");
+        let crate::plan::UnifiedPlan::Query(query) =
+            crate::plan::UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0))
+        else {
+            panic!("query");
+        };
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("block");
+        };
+        let Some(SourcePlan::Join { right, .. }) = &block.from else {
+            panic!("join");
+        };
+        assert_eq!(
+            source_depends_on_current_row(context, right, &block.subqueries, &input).unwrap(),
+            expected,
+            "{sql}"
+        );
+    }
+}

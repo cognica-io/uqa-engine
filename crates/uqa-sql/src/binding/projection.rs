@@ -254,6 +254,7 @@ pub(super) fn projection_star_columns(
                 .collect(),
         )),
         ScalarExpr::QualifiedStar(qualifier) => {
+            schema.require_lateral_qualifier(qualifier)?;
             let columns = schema
                 .qualified_star_position_layout(qualifier)
                 .into_iter()

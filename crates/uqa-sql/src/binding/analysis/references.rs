@@ -63,6 +63,11 @@ pub(super) fn validate_expression(
             validate_qualified_column(schema, fallback, qualifier, column)
         }
         ScalarExpr::QualifiedStar(qualifier) => {
+            if schema.has_qualifier(qualifier) {
+                schema.require_lateral_qualifier(qualifier)?;
+            } else if let Some(fallback) = fallback {
+                fallback.require_lateral_qualifier(qualifier)?;
+            }
             if schema.has_qualifier(qualifier)
                 || fallback.is_some_and(|fallback| fallback.has_qualifier(qualifier))
             {

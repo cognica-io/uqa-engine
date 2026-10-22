@@ -12,7 +12,7 @@ use crate::RowSchema;
 use crate::{SQLError, SQLParam};
 
 use super::{
-    analysis, operator_join_relation_schemas, overlay_outer_schema, projection::rename_schema,
+    analysis, lateral_join_scope, operator_join_relation_schemas, projection::rename_schema,
     BindingContext, ScalarExpr, SchemaScope,
 };
 use crate::routines::RoutineResolution;
@@ -196,7 +196,7 @@ impl SchemaScope {
                     SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
                 );
                 let right_scope = (*lateral || implicit_lateral_function)
-                    .then(|| overlay_outer_schema(&left_schema, outer));
+                    .then(|| lateral_join_scope(left, &left_schema, outer, *kind));
                 let right_schema = self.bind_source_for_execution(
                     routines,
                     right,

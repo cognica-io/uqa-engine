@@ -7,8 +7,8 @@
 //! Ordered FROM analysis, including lateral scopes and join coercion.
 
 use super::super::{
-    operator_join_relation_schemas, overlay_outer_schema, rename_schema, JoinSchemaBinding,
-    SourcePlan,
+    lateral_join_scope, operator_join_relation_schemas, overlay_outer_schema, rename_schema,
+    JoinSchemaBinding, SourcePlan,
 };
 use super::{Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{FunctionBinding, OperatorJoinRelations};
@@ -110,13 +110,14 @@ impl Preparation<'_> {
         else {
             unreachable!("join analysis called for a different source kind")
         };
-        let left = self.source(left, subqueries, outer)?;
+        let left_source = left;
+        let left = self.source(left_source, subqueries, outer)?;
         let right_scope = (*lateral
             || matches!(
                 right.as_ref(),
                 SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
             ))
-        .then(|| overlay_outer_schema(&left, outer));
+        .then(|| lateral_join_scope(left_source, &left, outer, *kind));
         let right = self.source(right, subqueries, right_scope.as_ref().or(outer))?;
         if let Some(on) = on {
             let joined = RowSchema::join(&left, &right, std::iter::empty::<String>());

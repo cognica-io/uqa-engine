@@ -15,6 +15,10 @@ use crate::{ScalarExpr, ScalarFrameBound};
 use crate::catalog::{analysis::AnalysisCatalog, resolution::RelationNameResolution};
 use crate::semantics::projection_columns;
 
+mod sources;
+pub use sources::source_depends_on_current_row;
+use sources::{expression_references_outer, source_references_outer};
+
 /// A single immutable namespace and catalog view used throughout correlation analysis.
 #[derive(Clone, Copy)]
 pub struct CorrelationContext<'a> {
@@ -99,8 +103,13 @@ pub fn decorrelate_exists(
     }
 
     let scope = source_scope(context, source, &BTreeMap::new())?;
-    let mut source_scopes = vec![scope.clone()];
-    if source_has_external_reference(context, source, &mut source_scopes)? {
+    if source_references_outer(
+        context,
+        source,
+        &block.subqueries,
+        &mut Vec::new(),
+        &BTreeMap::new(),
+    )? {
         return Ok(None);
     }
     let Some(predicate) = block.r#where.as_ref() else {
@@ -226,6 +235,10 @@ pub(crate) fn query_depends_on_current_row(
     plan: &QueryPlan,
     input: &crate::RowSchema,
 ) -> Result<bool, SQLError> {
+    query_has_external_reference(context, plan, &mut vec![enclosing_scope(input)])
+}
+
+fn enclosing_scope(input: &crate::RowSchema) -> QueryScope {
     let mut enclosing = QueryScope {
         columns: RelationColumns::empty_known(),
         ..QueryScope::default()
@@ -244,19 +257,28 @@ pub(crate) fn query_depends_on_current_row(
             enclosing.internal_relations.insert(column.relation());
         }
     }
-    query_has_external_reference(context, plan, &mut vec![enclosing])
+    enclosing
+}
+
+fn query_has_external_reference(
+    context: CorrelationContext<'_>,
+    plan: &QueryPlan,
+    scopes: &mut Vec<QueryScope>,
+) -> Result<bool, SQLError> {
+    query_references_outer(context, plan, scopes, &BTreeMap::new())
 }
 
 #[expect(
     clippy::too_many_lines,
     reason = "preserves scope and subquery identity"
 )]
-fn query_has_external_reference(
+fn query_references_outer(
     context: CorrelationContext<'_>,
     plan: &QueryPlan,
     scopes: &mut Vec<QueryScope>,
+    parent_ctes: &BTreeMap<String, RelationColumns>,
 ) -> Result<bool, SQLError> {
-    let mut ctes = BTreeMap::new();
+    let mut ctes = parent_ctes.clone();
     if plan.ctes.iter().any(|cte| cte.recursive) {
         for cte in &plan.ctes {
             let columns = if cte.columns.is_empty() {
@@ -281,7 +303,7 @@ fn query_has_external_reference(
             ctes.insert(cte.name.clone(), columns.clone());
         }
         if cte.body.query().map_or(Ok(true), |query| {
-            query_has_external_reference(context, query, scopes)
+            query_references_outer(context, query, scopes, &ctes)
         })? {
             return Ok(true);
         }
@@ -290,6 +312,12 @@ fn query_has_external_reference(
 
     match &plan.root {
         RelationalPlan::QueryBlock(block) => {
+            // A FROM item's own output is not visible to its arguments. Bind its dependencies before adding the complete query namespace used by projections and predicates.
+            if let Some(source) = block.from.as_ref() {
+                if source_references_outer(context, source, &block.subqueries, scopes, &ctes)? {
+                    return Ok(true);
+                }
+            }
             let scope = match block.from.as_ref() {
                 Some(source) => source_scope(context, source, &ctes)?,
                 None => QueryScope {
@@ -301,17 +329,13 @@ fn query_has_external_reference(
             scopes.push(scope);
             let result = (|| {
                 for expression in block.expressions() {
-                    if expression_has_external_reference(expression, scopes) {
-                        return Ok(true);
-                    }
-                }
-                if let Some(source) = block.from.as_ref() {
-                    if source_has_external_reference(context, source, scopes)? {
-                        return Ok(true);
-                    }
-                }
-                for subquery in &block.subqueries {
-                    if query_has_external_reference(context, subquery, scopes)? {
+                    if expression_references_outer(
+                        context,
+                        expression,
+                        &block.subqueries,
+                        scopes,
+                        &ctes,
+                    )? {
                         return Ok(true);
                     }
                 }
@@ -329,8 +353,8 @@ fn query_has_external_reference(
             subqueries,
             ..
         } => {
-            if query_has_external_reference(context, left, scopes)?
-                || query_has_external_reference(context, right, scopes)?
+            if query_references_outer(context, left, scopes, &ctes)?
+                || query_references_outer(context, right, scopes, &ctes)?
             {
                 return Ok(true);
             }
@@ -341,21 +365,14 @@ fn query_has_external_reference(
             });
             let result = (|| {
                 for expression in order_by.iter().map(|order| &order.expr) {
-                    if expression_has_external_reference(expression, scopes) {
+                    if expression_references_outer(context, expression, subqueries, scopes, &ctes)?
+                    {
                         return Ok(true);
                     }
                 }
-                if limit
-                    .as_deref()
-                    .is_some_and(|expr| expression_has_external_reference(expr, scopes))
-                    || offset
-                        .as_deref()
-                        .is_some_and(|expr| expression_has_external_reference(expr, scopes))
-                {
-                    return Ok(true);
-                }
-                for subquery in subqueries {
-                    if query_has_external_reference(context, subquery, scopes)? {
+                for expression in limit.iter().chain(offset).map(AsRef::as_ref) {
+                    if expression_references_outer(context, expression, subqueries, scopes, &ctes)?
+                    {
                         return Ok(true);
                     }
                 }
@@ -372,12 +389,8 @@ fn query_has_external_reference(
             });
             let result = (|| {
                 for expression in rows.iter().flatten() {
-                    if expression_has_external_reference(expression, scopes) {
-                        return Ok(true);
-                    }
-                }
-                for subquery in subqueries {
-                    if query_has_external_reference(context, subquery, scopes)? {
+                    if expression_references_outer(context, expression, subqueries, scopes, &ctes)?
+                    {
                         return Ok(true);
                     }
                 }
@@ -654,38 +667,6 @@ fn relation_columns(
         ));
     }
     Ok(RelationColumns::default())
-}
-
-fn source_has_external_reference(
-    context: CorrelationContext<'_>,
-    source: &SourcePlan,
-    scopes: &mut Vec<QueryScope>,
-) -> Result<bool, SQLError> {
-    match source {
-        crate::plan::SourcePlan::RetainedRows(_) => Ok(false),
-        SourcePlan::Join {
-            left, right, on, ..
-        } => Ok(source_has_external_reference(context, left, scopes)?
-            || source_has_external_reference(context, right, scopes)?
-            || on
-                .as_ref()
-                .is_some_and(|expr| expression_has_external_reference(expr, scopes))),
-        SourcePlan::Values { rows, .. } => Ok(rows
-            .iter()
-            .flatten()
-            .any(|expr| expression_has_external_reference(expr, scopes))),
-        SourcePlan::Function { args, .. } => Ok(args
-            .iter()
-            .any(|expr| expression_has_external_reference(expr, scopes))),
-        SourcePlan::FunctionGroup { functions, .. } => Ok(functions.iter().any(|function| {
-            function
-                .args
-                .iter()
-                .any(|expr| expression_has_external_reference(expr, scopes))
-        })),
-        SourcePlan::Subquery { body, .. } => query_has_external_reference(context, body, scopes),
-        SourcePlan::Table { .. } => Ok(false),
-    }
 }
 
 fn query_output_columns(plan: &QueryPlan) -> RelationColumns {

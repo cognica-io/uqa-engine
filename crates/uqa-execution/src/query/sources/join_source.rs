@@ -89,22 +89,40 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .propagated_join_filters(filters, left, right, on.as_ref())
             });
             let right_filter_ref = right_filters.as_ref().or(filters);
-            if *lateral || implicit_lateral_function {
+            let lateral_input = (*lateral || implicit_lateral_function).then(|| {
+                ctes.row_lock_outer_row().map_or_else(
+                    || left_operator.row_schema().clone(),
+                    |outer| {
+                        crate::RowSchema::with_outer_schema(
+                            left_operator.row_schema(),
+                            &outer.schema,
+                        )
+                    },
+                )
+            });
+            let dependent = match lateral_input.as_ref() {
+                Some(input) => {
+                    crate::query::binding::source_depends_on_current_row(right, input, ctes)?
+                }
+                None => false,
+            };
+            if dependent {
                 if !matches!(strategy, JoinExecutionStrategy::Auto) {
                     return Err(SQLError::Internal(
                         "optimizer selected a hash strategy for a lateral join".into(),
                     ));
                 }
                 let left_schema = left_operator.row_schema().clone();
+                let input_schema = lateral_input.expect("dependent source has a calling scope");
                 let left_nulls = null_row_for_schema(left_schema.columns());
                 let right_schema = bind_source_plan_schema(
                     context.ctes.routines,
                     right,
                     params,
                     ctes,
-                    Some(&left_schema),
+                    Some(&input_schema),
                 )?;
-                require_lateral_function_execute(context, right, &left_schema, params, ctes)?;
+                require_lateral_function_execute(context, right, &input_schema, params, ctes)?;
                 validate_join_on_schema(
                     context,
                     on.as_ref(),
@@ -187,7 +205,10 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                                         context
                                             .relational
                                             .evaluator(params, ctes)
-                                            .bind_type_introspection(argument.clone(), &left_schema)
+                                            .bind_type_introspection(
+                                                argument.clone(),
+                                                &input_schema,
+                                            )
                                     })
                                     .collect(),
                             ))
@@ -196,6 +217,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     },
                     params,
                     ctes: ctes.clone(),
+                    input_schema,
                     right_schema: right_schema.clone(),
                     pinned_right,
                 };

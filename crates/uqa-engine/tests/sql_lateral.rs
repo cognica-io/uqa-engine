@@ -4,14 +4,16 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `LATERAL` join: right side re-evaluates per left row and the ON
-//! predicate sees both sides.
+//! LATERAL source permissions, actual row dependencies and join output.
 
 use uqa_core::Value;
 use uqa_engine::Engine;
 
 #[path = "sql_lateral/values.rs"]
 mod values;
+
+#[path = "sql_lateral/functions.rs"]
+mod functions;
 
 #[test]
 fn lateral_cross_join_with_generate_series() {

@@ -66,6 +66,7 @@ pub use routine_binding::{
     bind_syntax_query_plan_routines,
 };
 pub use routine_parameters::{bind_routine_parameter_references, RoutineParameterScope};
+use scope::lateral_join_scope;
 pub use scope::{
     analyze_expression_plan_type, analyze_query_plan_schema,
     analyze_query_plan_schema_with_catalog, bind_expression_plan_type, bind_query_plan_schema,
@@ -763,7 +764,7 @@ impl SchemaScope {
                     SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
                 );
                 let right_scope = (*lateral || implicit_lateral_function)
-                    .then(|| overlay_outer_schema(&left_schema, outer));
+                    .then(|| lateral_join_scope(left, &left_schema, outer, *kind));
                 let right_schema = self.bind_source(
                     routines,
                     right,

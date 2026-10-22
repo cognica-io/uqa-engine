@@ -85,6 +85,45 @@ pub fn overlay_outer_schema(current: &RowSchema, outer: Option<&RowSchema>) -> R
     )
 }
 
+pub(super) fn lateral_join_scope(
+    source: &crate::plan::SourcePlan,
+    left: &RowSchema,
+    outer: Option<&RowSchema>,
+    kind: crate::ast::JoinKind,
+) -> RowSchema {
+    if matches!(
+        kind,
+        crate::ast::JoinKind::Right | crate::ast::JoinKind::Full
+    ) {
+        use crate::plan::SourcePlan;
+        // PostgreSQL names unaliased range entries for diagnostics without making that name available for qualified lookup.
+        let namespace = match source {
+            SourcePlan::Table {
+                qualifier, alias, ..
+            } => alias.as_deref().unwrap_or(qualifier),
+            SourcePlan::Function {
+                output_name, alias, ..
+            } => alias.as_deref().unwrap_or(output_name),
+            SourcePlan::FunctionGroup {
+                functions, alias, ..
+            } => alias.as_deref().unwrap_or_else(|| {
+                &functions
+                    .first()
+                    .expect("bound ROWS FROM source has a member")
+                    .output_name
+            }),
+            SourcePlan::Join { alias, .. } => alias.as_deref().unwrap_or("unnamed_join"),
+            SourcePlan::Values { alias, .. } | SourcePlan::Subquery { alias, .. } => {
+                alias.as_deref().unwrap_or("unnamed_subquery")
+            }
+            SourcePlan::RetainedRows(_) => "unnamed_subquery",
+        };
+        overlay_outer_schema(&RowSchema::without_lateral_access(left, namespace), outer)
+    } else {
+        overlay_outer_schema(left, outer)
+    }
+}
+
 pub fn values_types_in_scope(
     routines: &dyn RoutineResolution,
     rows: &[Vec<ScalarExpr>],

@@ -32,9 +32,7 @@ pub enum FromClause {
         #[serde(default = "default_include_descendants")]
         include_descendants: bool,
     },
-    /// `FROM left <kind> right ON predicate`. `lateral` is true when
-    /// the right side is a LATERAL subquery / function -- the engine
-    /// re-evaluates it for every left row.
+    /// `FROM left <kind> right ON predicate`. `lateral` permits the explicit right input to reference preceding sources; actual references determine whether execution needs each left row.
     Join {
         left: Box<FromClause>,
         right: Box<FromClause>,
