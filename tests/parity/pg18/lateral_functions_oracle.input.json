@@ -1,0 +1,284 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "independent_cross",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(5)) t(a) CROSS JOIN generate_series(1,4) g(x) ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "independent_inner",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(5)) t(a) INNER JOIN generate_series(1,4) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "independent_left",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(5)) t(a) LEFT JOIN generate_series(1,4) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "independent_right",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(5)) t(a) RIGHT JOIN generate_series(1,4) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "independent_full",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(5)) t(a) FULL JOIN generate_series(1,4) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "empty_left_left",
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t LEFT JOIN generate_series(1,3) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "empty_right_left",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(2)) t(a) LEFT JOIN generate_series(3,1) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "empty_left_right",
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t RIGHT JOIN generate_series(1,3) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "empty_right_right",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(2)) t(a) RIGHT JOIN generate_series(3,1) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "empty_left_full",
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t FULL JOIN generate_series(1,3) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "empty_right_full",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(2)) t(a) FULL JOIN generate_series(3,1) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "rows_from_cross",
+      "sql": "SELECT t.a,g.x,g.y,g.n FROM (VALUES (1),(5)) t(a) CROSS JOIN ROWS FROM (generate_series(1,3),generate_series(7,8)) WITH ORDINALITY g(x,y,n) ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "rows_from_inner",
+      "sql": "SELECT t.a,g.x,g.y,g.n FROM (VALUES (1),(5)) t(a) INNER JOIN ROWS FROM (generate_series(1,3),generate_series(7,8)) WITH ORDINALITY g(x,y,n) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "rows_from_left",
+      "sql": "SELECT t.a,g.x,g.y,g.n FROM (VALUES (1),(5)) t(a) LEFT JOIN ROWS FROM (generate_series(1,3),generate_series(7,8)) WITH ORDINALITY g(x,y,n) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "rows_from_right",
+      "sql": "SELECT t.a,g.x,g.y,g.n FROM (VALUES (1),(5)) t(a) RIGHT JOIN ROWS FROM (generate_series(1,3),generate_series(7,8)) WITH ORDINALITY g(x,y,n) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "rows_from_full",
+      "sql": "SELECT t.a,g.x,g.y,g.n FROM (VALUES (1),(5)) t(a) FULL JOIN ROWS FROM (generate_series(1,3),generate_series(7,8)) WITH ORDINALITY g(x,y,n) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "independent_lateral_values_right",
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(1),(NULL)) t(a) RIGHT JOIN LATERAL (VALUES (1),(2),(NULL)) v(x) ON t.a=v.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "independent_lateral_query_right",
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(1),(NULL)) t(a) RIGHT JOIN LATERAL (SELECT x FROM generate_series(1,2) g(x)) v ON t.a=v.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "independent_lateral_values_full",
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(1),(NULL)) t(a) FULL JOIN LATERAL (VALUES (1),(2),(NULL)) v(x) ON t.a=v.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "independent_lateral_query_full",
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(1),(NULL)) t(a) FULL JOIN LATERAL (SELECT x FROM generate_series(1,2) g(x)) v ON t.a=v.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "dependent_cross",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(NULL)) t(a) CROSS JOIN generate_series(t.a,t.a+1) g(x) ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "dependent_inner",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(NULL)) t(a) INNER JOIN generate_series(t.a,t.a+1) g(x) ON g.x>t.a ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "dependent_left",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(NULL)) t(a) LEFT JOIN generate_series(t.a,t.a+1) g(x) ON g.x>t.a ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "create_sequence",
+      "sql": "CREATE SEQUENCE lateral_function_calls"
+    },
+    {
+      "id": "independent_volatile_function",
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(2),(3)) t(a) CROSS JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ORDER BY 1,2"
+    },
+    {
+      "id": "independent_calls",
+      "sql": "SELECT currval('lateral_function_calls')"
+    },
+    {
+      "id": "independent_volatile_subquery",
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(2),(3)) t(a) CROSS JOIN LATERAL (SELECT nextval('lateral_function_calls') AS x) v ORDER BY 1,2"
+    },
+    {
+      "id": "independent_subquery_calls",
+      "sql": "SELECT currval('lateral_function_calls')"
+    },
+    {
+      "id": "dependent_volatile_subquery",
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(2),(3)) t(a) CROSS JOIN LATERAL (SELECT nextval('lateral_function_calls')+t.a*0 AS x) v ORDER BY 1,2"
+    },
+    {
+      "id": "dependent_subquery_calls",
+      "sql": "SELECT currval('lateral_function_calls')"
+    },
+    {
+      "id": "grandparent_right",
+      "sql": "SELECT a.n,(SELECT count(*) FROM (VALUES(1),(2)) t(k) RIGHT JOIN generate_series(a.n,a.n+1) g(x) ON true) AS c FROM (VALUES(1),(3)) a(n) ORDER BY 1"
+    },
+    {
+      "id": "grandparent_and_current_function",
+      "sql": "SELECT a.n,(SELECT sum(g.x) FROM (VALUES(2)) b(m), generate_series(a.n,b.m+a.n) g(x)) AS s FROM (VALUES(1),(3)) a(n) ORDER BY 1"
+    },
+    {
+      "id": "grandparent_and_current_values",
+      "sql": "SELECT a.n,(SELECT sum(v.x) FROM (VALUES(2)) b(m), LATERAL (VALUES(a.n+b.m)) v(x)) AS s FROM (VALUES(1),(3)) a(n) ORDER BY 1"
+    },
+    {
+      "id": "grandparent_and_current_query",
+      "sql": "SELECT a.n,(SELECT sum(v.x) FROM (VALUES(2)) b(m), LATERAL (SELECT a.n+b.m AS x) v) AS s FROM (VALUES(1),(3)) a(n) ORDER BY 1"
+    },
+    {
+      "id": "function_output_does_not_shadow_argument",
+      "sql": "SELECT a.x,(SELECT sum(a.x) FROM generate_series(a.x,a.x+1) a(x)) AS s FROM (VALUES(1),(3)) a(x) ORDER BY 1"
+    },
+    {
+      "id": "unqualified_argument_not_own_output",
+      "sql": "SELECT a.x,(SELECT sum(g.x) FROM generate_series(x,x+1) g(x)) AS s FROM (VALUES(1),(3)) a(x) ORDER BY 1"
+    },
+    {
+      "id": "scalar_local_shadow",
+      "sql": "SELECT t.a,g.x FROM (VALUES(1),(2)) t(a) RIGHT JOIN generate_series((SELECT a FROM (VALUES(2)) v(a)),3) g(x) ON true ORDER BY 1,2"
+    },
+    {
+      "id": "forbidden_right_function",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN generate_series(t.a,3) g(x) ON true"
+    },
+    {
+      "id": "forbidden_right_unqualified",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN generate_series(a,3) g(x) ON true"
+    },
+    {
+      "id": "forbidden_right_missing_column",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN generate_series(t.missing,3) g(x) ON true"
+    },
+    {
+      "id": "forbidden_right_scalar",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN generate_series((SELECT t.a),3) g(x) ON true"
+    },
+    {
+      "id": "forbidden_right_rows_from",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN ROWS FROM(generate_series(1,2),generate_series(t.a,3)) g(x,y) ON true"
+    },
+    {
+      "id": "forbidden_right_values",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN LATERAL (VALUES(t.a)) g(x) ON true"
+    },
+    {
+      "id": "forbidden_right_query",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN LATERAL (SELECT t.a AS x) g ON true"
+    },
+    {
+      "id": "forbidden_right_folded",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN LATERAL (SELECT true OR t.a>0 AS x) g ON true"
+    },
+    {
+      "id": "forbidden_full_function",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN generate_series(t.a,3) g(x) ON true"
+    },
+    {
+      "id": "forbidden_full_unqualified",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN generate_series(a,3) g(x) ON true"
+    },
+    {
+      "id": "forbidden_full_missing_column",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN generate_series(t.missing,3) g(x) ON true"
+    },
+    {
+      "id": "forbidden_full_scalar",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN generate_series((SELECT t.a),3) g(x) ON true"
+    },
+    {
+      "id": "forbidden_full_rows_from",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN ROWS FROM(generate_series(1,2),generate_series(t.a,3)) g(x,y) ON true"
+    },
+    {
+      "id": "forbidden_full_values",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN LATERAL (VALUES(t.a)) g(x) ON true"
+    },
+    {
+      "id": "forbidden_full_query",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN LATERAL (SELECT t.a AS x) g ON true"
+    },
+    {
+      "id": "forbidden_full_folded",
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN LATERAL (SELECT true OR t.a>0 AS x) g ON true"
+    },
+    {
+      "id": "forbidden_anonymous_values",
+      "sql": "SELECT * FROM (VALUES(1)) RIGHT JOIN LATERAL (SELECT column1) g ON true"
+    },
+    {
+      "id": "forbidden_join_unqualified",
+      "sql": "SELECT * FROM ((VALUES(1)) a(x) CROSS JOIN (VALUES(2)) b(y)) RIGHT JOIN LATERAL (SELECT x) g ON true"
+    },
+    {
+      "id": "forbidden_join_qualified",
+      "sql": "SELECT * FROM ((VALUES(1)) a(x) CROSS JOIN (VALUES(2)) b(y)) RIGHT JOIN LATERAL (SELECT a.x) g ON true"
+    },
+    {
+      "id": "forbidden_join_ambiguous",
+      "sql": "SELECT * FROM ((VALUES(1)) a(x) CROSS JOIN (VALUES(2)) b(x)) RIGHT JOIN LATERAL (SELECT x) g ON true"
+    },
+    {
+      "id": "forbidden_qualified_star",
+      "sql": "SELECT * FROM (VALUES(1)) t(a) RIGHT JOIN LATERAL (SELECT t.*) g ON true"
+    },
+    {
+      "id": "local_namespace_shadows_forbidden",
+      "sql": "SELECT t.a,g.a AS b FROM (VALUES(1)) t(a) RIGHT JOIN LATERAL (SELECT t.a FROM (VALUES(2)) t(a)) g ON true"
+    },
+    {
+      "id": "empty_volatile_cross",
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t CROSS JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "empty_volatile_cross_calls",
+      "sql": "SELECT currval('lateral_function_calls')"
+    },
+    {
+      "id": "empty_volatile_inner",
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t INNER JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "empty_volatile_inner_calls",
+      "sql": "SELECT currval('lateral_function_calls')"
+    },
+    {
+      "id": "empty_volatile_left",
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t LEFT JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "empty_volatile_left_calls",
+      "sql": "SELECT currval('lateral_function_calls')"
+    },
+    {
+      "id": "empty_volatile_right",
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t RIGHT JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "empty_volatile_right_calls",
+      "sql": "SELECT currval('lateral_function_calls')"
+    },
+    {
+      "id": "empty_volatile_full",
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t FULL JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST"
+    },
+    {
+      "id": "empty_volatile_full_calls",
+      "sql": "SELECT currval('lateral_function_calls')"
+    }
+  ]
+}

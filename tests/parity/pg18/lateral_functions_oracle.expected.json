@@ -1,0 +1,1905 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(5)) t(a) CROSS JOIN generate_series(1,4) g(x) ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 12"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "1",
+              "3"
+            ],
+            [
+              "1",
+              "4"
+            ],
+            [
+              "3",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "3",
+              "3"
+            ],
+            [
+              "3",
+              "4"
+            ],
+            [
+              "5",
+              "1"
+            ],
+            [
+              "5",
+              "2"
+            ],
+            [
+              "5",
+              "3"
+            ],
+            [
+              "5",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_cross"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(5)) t(a) INNER JOIN generate_series(1,4) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_inner"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(5)) t(a) LEFT JOIN generate_series(1,4) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "3",
+              "3"
+            ],
+            [
+              "5",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_left"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(5)) t(a) RIGHT JOIN generate_series(1,4) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "3",
+              "3"
+            ],
+            [
+              null,
+              "2"
+            ],
+            [
+              null,
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_right"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(5)) t(a) FULL JOIN generate_series(1,4) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "3",
+              "3"
+            ],
+            [
+              "5",
+              null
+            ],
+            [
+              null,
+              "2"
+            ],
+            [
+              null,
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_full"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t LEFT JOIN generate_series(1,3) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "empty_left_left"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(2)) t(a) LEFT JOIN generate_series(3,1) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              null
+            ],
+            [
+              "2",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_right_left"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t RIGHT JOIN generate_series(1,3) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              null,
+              "1"
+            ],
+            [
+              null,
+              "2"
+            ],
+            [
+              null,
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_left_right"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(2)) t(a) RIGHT JOIN generate_series(3,1) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "empty_right_right"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t FULL JOIN generate_series(1,3) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              null,
+              "1"
+            ],
+            [
+              null,
+              "2"
+            ],
+            [
+              null,
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_left_full"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(2)) t(a) FULL JOIN generate_series(3,1) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              null
+            ],
+            [
+              "2",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_right_full"
+    },
+    {
+      "sql": "SELECT t.a,g.x,g.y,g.n FROM (VALUES (1),(5)) t(a) CROSS JOIN ROWS FROM (generate_series(1,3),generate_series(7,8)) WITH ORDINALITY g(x,y,n) ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x",
+            "y",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "7",
+              "1"
+            ],
+            [
+              "1",
+              "2",
+              "8",
+              "2"
+            ],
+            [
+              "1",
+              "3",
+              null,
+              "3"
+            ],
+            [
+              "5",
+              "1",
+              "7",
+              "1"
+            ],
+            [
+              "5",
+              "2",
+              "8",
+              "2"
+            ],
+            [
+              "5",
+              "3",
+              null,
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "rows_from_cross"
+    },
+    {
+      "sql": "SELECT t.a,g.x,g.y,g.n FROM (VALUES (1),(5)) t(a) INNER JOIN ROWS FROM (generate_series(1,3),generate_series(7,8)) WITH ORDINALITY g(x,y,n) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x",
+            "y",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "7",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "rows_from_inner"
+    },
+    {
+      "sql": "SELECT t.a,g.x,g.y,g.n FROM (VALUES (1),(5)) t(a) LEFT JOIN ROWS FROM (generate_series(1,3),generate_series(7,8)) WITH ORDINALITY g(x,y,n) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x",
+            "y",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "7",
+              "1"
+            ],
+            [
+              "5",
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "rows_from_left"
+    },
+    {
+      "sql": "SELECT t.a,g.x,g.y,g.n FROM (VALUES (1),(5)) t(a) RIGHT JOIN ROWS FROM (generate_series(1,3),generate_series(7,8)) WITH ORDINALITY g(x,y,n) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x",
+            "y",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "7",
+              "1"
+            ],
+            [
+              null,
+              "2",
+              "8",
+              "2"
+            ],
+            [
+              null,
+              "3",
+              null,
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "rows_from_right"
+    },
+    {
+      "sql": "SELECT t.a,g.x,g.y,g.n FROM (VALUES (1),(5)) t(a) FULL JOIN ROWS FROM (generate_series(1,3),generate_series(7,8)) WITH ORDINALITY g(x,y,n) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x",
+            "y",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "7",
+              "1"
+            ],
+            [
+              "5",
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              "2",
+              "8",
+              "2"
+            ],
+            [
+              null,
+              "3",
+              null,
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "rows_from_full"
+    },
+    {
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(1),(NULL)) t(a) RIGHT JOIN LATERAL (VALUES (1),(2),(NULL)) v(x) ON t.a=v.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1"
+            ],
+            [
+              null,
+              "2"
+            ],
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_lateral_values_right"
+    },
+    {
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(1),(NULL)) t(a) RIGHT JOIN LATERAL (SELECT x FROM generate_series(1,2) g(x)) v ON t.a=v.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1"
+            ],
+            [
+              null,
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_lateral_query_right"
+    },
+    {
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(1),(NULL)) t(a) FULL JOIN LATERAL (VALUES (1),(2),(NULL)) v(x) ON t.a=v.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1"
+            ],
+            [
+              null,
+              "2"
+            ],
+            [
+              null,
+              null
+            ],
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_lateral_values_full"
+    },
+    {
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(1),(NULL)) t(a) FULL JOIN LATERAL (SELECT x FROM generate_series(1,2) g(x)) v ON t.a=v.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1"
+            ],
+            [
+              null,
+              "2"
+            ],
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_lateral_query_full"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(NULL)) t(a) CROSS JOIN generate_series(t.a,t.a+1) g(x) ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "3"
+            ],
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "dependent_cross"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(NULL)) t(a) INNER JOIN generate_series(t.a,t.a+1) g(x) ON g.x>t.a ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "dependent_inner"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(3),(NULL)) t(a) LEFT JOIN generate_series(t.a,t.a+1) g(x) ON g.x>t.a ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "4"
+            ],
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "dependent_left"
+    },
+    {
+      "sql": "CREATE SEQUENCE lateral_function_calls",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "create_sequence"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES (1),(2),(3)) t(a) CROSS JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_volatile_function"
+    },
+    {
+      "sql": "SELECT currval('lateral_function_calls')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "currval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_calls"
+    },
+    {
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(2),(3)) t(a) CROSS JOIN LATERAL (SELECT nextval('lateral_function_calls') AS x) v ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "3"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_volatile_subquery"
+    },
+    {
+      "sql": "SELECT currval('lateral_function_calls')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "currval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_subquery_calls"
+    },
+    {
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(2),(3)) t(a) CROSS JOIN LATERAL (SELECT nextval('lateral_function_calls')+t.a*0 AS x) v ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "4"
+            ],
+            [
+              "2",
+              "5"
+            ],
+            [
+              "3",
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "dependent_volatile_subquery"
+    },
+    {
+      "sql": "SELECT currval('lateral_function_calls')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "currval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "dependent_subquery_calls"
+    },
+    {
+      "sql": "SELECT a.n,(SELECT count(*) FROM (VALUES(1),(2)) t(k) RIGHT JOIN generate_series(a.n,a.n+1) g(x) ON true) AS c FROM (VALUES(1),(3)) a(n) ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "c"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "4"
+            ],
+            [
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "grandparent_right"
+    },
+    {
+      "sql": "SELECT a.n,(SELECT sum(g.x) FROM (VALUES(2)) b(m), generate_series(a.n,b.m+a.n) g(x)) AS s FROM (VALUES(1),(3)) a(n) ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "6"
+            ],
+            [
+              "3",
+              "12"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "grandparent_and_current_function"
+    },
+    {
+      "sql": "SELECT a.n,(SELECT sum(v.x) FROM (VALUES(2)) b(m), LATERAL (VALUES(a.n+b.m)) v(x)) AS s FROM (VALUES(1),(3)) a(n) ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "3",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "grandparent_and_current_values"
+    },
+    {
+      "sql": "SELECT a.n,(SELECT sum(v.x) FROM (VALUES(2)) b(m), LATERAL (SELECT a.n+b.m AS x) v) AS s FROM (VALUES(1),(3)) a(n) ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "3",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "grandparent_and_current_query"
+    },
+    {
+      "sql": "SELECT a.x,(SELECT sum(a.x) FROM generate_series(a.x,a.x+1) a(x)) AS s FROM (VALUES(1),(3)) a(x) ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "3",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "function_output_does_not_shadow_argument"
+    },
+    {
+      "sql": "SELECT a.x,(SELECT sum(g.x) FROM generate_series(x,x+1) g(x)) AS s FROM (VALUES(1),(3)) a(x) ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "3"
+            ],
+            [
+              "3",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "unqualified_argument_not_own_output"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (VALUES(1),(2)) t(a) RIGHT JOIN generate_series((SELECT a FROM (VALUES(2)) v(a)),3) g(x) ON true ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "2",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "scalar_local_shadow"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN generate_series(t.a,3) g(x) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_right_function"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN generate_series(a,3) g(x) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_right_unqualified"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN generate_series(t.missing,3) g(x) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_right_missing_column"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN generate_series((SELECT t.a),3) g(x) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_right_scalar"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN ROWS FROM(generate_series(1,2),generate_series(t.a,3)) g(x,y) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_right_rows_from"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN LATERAL (VALUES(t.a)) g(x) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_right_values"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN LATERAL (SELECT t.a AS x) g ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_right_query"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) RIGHT JOIN LATERAL (SELECT true OR t.a>0 AS x) g ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_right_folded"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN generate_series(t.a,3) g(x) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_full_function"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN generate_series(a,3) g(x) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_full_unqualified"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN generate_series(t.missing,3) g(x) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_full_missing_column"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN generate_series((SELECT t.a),3) g(x) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_full_scalar"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN ROWS FROM(generate_series(1,2),generate_series(t.a,3)) g(x,y) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_full_rows_from"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN LATERAL (VALUES(t.a)) g(x) ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_full_values"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN LATERAL (SELECT t.a AS x) g ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_full_query"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1),(2)) t(a) FULL JOIN LATERAL (SELECT true OR t.a>0 AS x) g ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_full_folded"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1)) RIGHT JOIN LATERAL (SELECT column1) g ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"unnamed_subquery\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_anonymous_values"
+    },
+    {
+      "sql": "SELECT * FROM ((VALUES(1)) a(x) CROSS JOIN (VALUES(2)) b(y)) RIGHT JOIN LATERAL (SELECT x) g ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"unnamed_join\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_join_unqualified"
+    },
+    {
+      "sql": "SELECT * FROM ((VALUES(1)) a(x) CROSS JOIN (VALUES(2)) b(y)) RIGHT JOIN LATERAL (SELECT a.x) g ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"a\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_join_qualified"
+    },
+    {
+      "sql": "SELECT * FROM ((VALUES(1)) a(x) CROSS JOIN (VALUES(2)) b(x)) RIGHT JOIN LATERAL (SELECT x) g ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42702",
+        "message": "column reference \"x\" is ambiguous",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_join_ambiguous"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(1)) t(a) RIGHT JOIN LATERAL (SELECT t.*) g ON true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "invalid reference to FROM-clause entry for table \"t\"",
+        "detail": "The combining JOIN type must be INNER or LEFT for a LATERAL reference.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "forbidden_qualified_star"
+    },
+    {
+      "sql": "SELECT t.a,g.a AS b FROM (VALUES(1)) t(a) RIGHT JOIN LATERAL (SELECT t.a FROM (VALUES(2)) t(a)) g ON true",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "local_namespace_shadows_forbidden"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t CROSS JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "empty_volatile_cross"
+    },
+    {
+      "sql": "SELECT currval('lateral_function_calls')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "currval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_volatile_cross_calls"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t INNER JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "empty_volatile_inner"
+    },
+    {
+      "sql": "SELECT currval('lateral_function_calls')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "currval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_volatile_inner_calls"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t LEFT JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "empty_volatile_left"
+    },
+    {
+      "sql": "SELECT currval('lateral_function_calls')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "currval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_volatile_left_calls"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t RIGHT JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              null,
+              "7"
+            ],
+            [
+              null,
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_volatile_right"
+    },
+    {
+      "sql": "SELECT currval('lateral_function_calls')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "currval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_volatile_right_calls"
+    },
+    {
+      "sql": "SELECT t.a,g.x FROM (SELECT 1 AS a WHERE false) t FULL JOIN generate_series(nextval('lateral_function_calls')::integer,nextval('lateral_function_calls')::integer) g(x) ON t.a=g.x ORDER BY 1 NULLS LAST,2 NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              null,
+              "9"
+            ],
+            [
+              null,
+              "10"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_volatile_full"
+    },
+    {
+      "sql": "SELECT currval('lateral_function_calls')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "currval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "10"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_volatile_full_calls"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "capture_script_sha256": "1a38f5e5ada449e35014fcda293ecb21e53baea43e49b4fa3418a9d0028e0cdb",
+    "input_sha256": "04b7ca2c30a4c7981133da1bbaba84d78b2cf91943254a794ec31d3955620386",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ]
+  }
+}

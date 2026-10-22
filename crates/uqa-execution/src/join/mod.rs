@@ -36,6 +36,16 @@ use canonical_index::{stable_hash, DiskHashIndex, HASH_BUCKETS};
 
 const DEFAULT_JOIN_WORK_MEM_BYTES: usize = 64 * 1024 * 1024;
 
+/// One probe batch establishes whether a join needs its other input, without draining the probe or retaining more than its ordinary batch allowance.
+fn next_nonempty_batch(input: &mut dyn PhysicalOperator) -> ExecResult<Option<Batch>> {
+    while let Some(batch) = input.next()? {
+        if !batch.rows.is_empty() {
+            return Ok(Some(batch));
+        }
+    }
+    Ok(None)
+}
+
 fn output_schema(
     left: &RowSchema,
     right: &RowSchema,
@@ -108,6 +118,7 @@ pub struct HashJoin<'a> {
     work_mem_bytes: usize,
     output: Option<crate::spill::SpillDrain>,
     streaming_unique: Option<UniqueHashJoinState>,
+    prefetched_left: Option<Batch>,
     output_spilled: SpillState,
     right_input_spilled: SpillState,
     hash_index_spilled: SpillState,
@@ -277,6 +288,7 @@ impl<'a> HashJoin<'a> {
             work_mem_bytes,
             output: None,
             streaming_unique: None,
+            prefetched_left: None,
             output_spilled: SpillState::InMemory,
             right_input_spilled: SpillState::InMemory,
             hash_index_spilled: SpillState::InMemory,
@@ -340,6 +352,12 @@ impl<'a> HashJoin<'a> {
 
     pub fn builds_left_input(&self) -> bool {
         self.build_left
+    }
+
+    fn next_left_batch(&mut self) -> ExecResult<Option<Batch>> {
+        self.prefetched_left
+            .take()
+            .map_or_else(|| self.left.next(), |batch| Ok(Some(batch)))
     }
 
     fn rebuild_encoded_index(
@@ -586,7 +604,7 @@ impl<'a> HashJoin<'a> {
             let next = if state.build_left {
                 self.right.next()?
             } else {
-                self.left.next()?
+                self.next_left_batch()?
             };
             let Some(batch) = next else {
                 return Ok(None);
@@ -695,6 +713,7 @@ impl PhysicalOperator for HashJoin<'_> {
             .map(|key| self.evaluator.expression_type(key, self.right.row_schema()))
             .collect::<Result<_, _>>()?;
         self.streaming_unique = None;
+        self.prefetched_left = None;
         self.output_spilled = SpillState::InMemory;
         self.right_input_spilled = SpillState::InMemory;
         self.hash_index_spilled = SpillState::InMemory;
@@ -703,6 +722,14 @@ impl PhysicalOperator for HashJoin<'_> {
         let output_budget = self.work_mem_bytes.saturating_sub(state_budget);
         if self.build_left {
             return self.open_build_left(state_budget, output_budget);
+        }
+        if !matches!(self.kind, JoinKind::Right | JoinKind::Full) {
+            self.left.open()?;
+            self.prefetched_left = next_nonempty_batch(self.left.as_mut())?;
+            if self.prefetched_left.is_none() {
+                self.output = Some(SpillBuffer::new(output_budget).drain()?);
+                return Ok(());
+            }
         }
         let right_budget = state_budget / 2;
         let hash_budget = state_budget.saturating_sub(right_budget);
@@ -769,7 +796,6 @@ impl PhysicalOperator for HashJoin<'_> {
             false
         };
         if direct_is_unique {
-            self.left.open()?;
             self.streaming_unique = Some(UniqueHashJoinState {
                 build_rows: right,
                 hash_index: UniqueHashIndex::Direct(
@@ -802,7 +828,6 @@ impl PhysicalOperator for HashJoin<'_> {
             && !right.has_spilled()
             && right_by_key.is_memory_unique()
         {
-            self.left.open()?;
             self.streaming_unique = Some(UniqueHashJoinState {
                 build_rows: right,
                 hash_index: UniqueHashIndex::Encoded(right_by_key),
@@ -817,8 +842,10 @@ impl PhysicalOperator for HashJoin<'_> {
         let mut output = SpillBuffer::new(output_budget);
         let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
 
-        self.left.open()?;
-        while let Some(batch) = self.left.next()? {
+        if matches!(self.kind, JoinKind::Right | JoinKind::Full) {
+            self.left.open()?;
+        }
+        while let Some(batch) = self.next_left_batch()? {
             for left_row in batch.rows {
                 let mut matched_left = false;
                 if let Some(key) = self.key(
@@ -920,6 +947,7 @@ impl PhysicalOperator for HashJoin<'_> {
         self.left_key_types.clear();
         self.right_key_types.clear();
         self.streaming_unique = None;
+        self.prefetched_left = None;
         let left = self.left.close();
         let right = self.right.close();
         crate::physical::with_cleanup(left, right, "close right hash-join input")
