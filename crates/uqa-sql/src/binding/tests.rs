@@ -267,26 +267,7 @@ fn column(name: &str, ty: ColumnType) -> ColumnDef {
     }
 }
 
-#[test]
-fn complete_query_binding_uses_catalog_fixture_without_engine() {
-    let catalog = crate::binding::fixture::catalog(BTreeMap::from([
-        (
-            RelationIdentity::new("app", "documents"),
-            crate::binding::fixture::table_definition(vec![
-                column("id", ColumnType::BigInteger),
-                column("title", ColumnType::Text),
-            ]),
-        ),
-        (
-            RelationIdentity::new("app", "rankings"),
-            crate::binding::fixture::table_definition(vec![
-                column("document_id", ColumnType::BigInteger),
-                column("score", ColumnType::DoublePrecision),
-            ]),
-        ),
-    ]));
-    let resolution =
-        crate::binding::fixture::resolution(vec!["app".into()], "pg_temp_fixture".into());
+fn joined_catalog_query() -> QueryPlan {
     let source = SourcePlan::Join {
         comma: false,
         left: Box::new(SourcePlan::Table {
@@ -320,7 +301,8 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
         lateral: false,
         strategy: crate::plan::JoinExecutionStrategy::Hash,
     };
-    let plan = QueryPlan {
+    QueryPlan {
+        analyzed_output: None,
         relations_bound: false,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
@@ -353,7 +335,30 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
             access: AccessPathPlan::Row,
             locking: Vec::new(),
         })),
-    };
+    }
+}
+
+#[test]
+fn complete_query_binding_uses_catalog_fixture_without_engine() {
+    let catalog = crate::binding::fixture::catalog(BTreeMap::from([
+        (
+            RelationIdentity::new("app", "documents"),
+            crate::binding::fixture::table_definition(vec![
+                column("id", ColumnType::BigInteger),
+                column("title", ColumnType::Text),
+            ]),
+        ),
+        (
+            RelationIdentity::new("app", "rankings"),
+            crate::binding::fixture::table_definition(vec![
+                column("document_id", ColumnType::BigInteger),
+                column("score", ColumnType::DoublePrecision),
+            ]),
+        ),
+    ]));
+    let resolution =
+        crate::binding::fixture::resolution(vec!["app".into()], "pg_temp_fixture".into());
+    let plan = joined_catalog_query();
 
     let schema = analyze_query_plan_schema_with_catalog(
         &EmptyRoutineResolution,

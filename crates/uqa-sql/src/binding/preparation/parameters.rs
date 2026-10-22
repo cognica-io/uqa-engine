@@ -176,6 +176,7 @@ pub(super) struct InputConstants(
     /// Each analyzed call's input collation, recorded on the binding the call keeps.
     BTreeMap<NonNull<ScalarExpr>, Option<crate::catalog::collations::CollationSelection>>,
     BTreeMap<NonNull<Option<crate::ast::FunctionBinding>>, crate::ast::FunctionBinding>,
+    BTreeMap<NonNull<crate::plan::QueryPlan>, crate::RowSchema>,
 );
 
 impl InputConstants {
@@ -236,6 +237,7 @@ impl InputConstants {
         subqueries: &mut Vec<crate::plan::QueryPlan>,
     ) -> Result<(), SQLError> {
         for query in subqueries.iter_mut() {
+            query.visit_queries_mut(&mut |query| self.apply_query(query));
             query.visit_sources_mut(&mut |source| self.apply_source(source));
         }
         let mut result = Ok(());
@@ -266,6 +268,7 @@ impl InputConstants {
     }
 
     pub(super) fn apply(mut self, plan: &mut UnifiedPlan) -> Result<(), SQLError> {
+        plan.visit_queries_mut(&mut |query| self.apply_query(query));
         // Source selections are consumed before expression rewrites can move their enclosing nodes.
         plan.visit_sources_mut(&mut |source| self.apply_source(source));
         // Children are rewritten before their enclosing clauses move them; every retained identity is consumed at its original address.
@@ -299,6 +302,11 @@ impl InputConstants {
             && self.5.is_empty()
             && self.6.is_empty()
             && self.7.is_empty()
+            && self.8.is_empty()
+    }
+
+    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
+        query.analyzed_output = self.8.remove(&NonNull::from(&*query));
     }
 
     fn apply_source(&mut self, source: &mut crate::plan::SourcePlan) {
@@ -331,6 +339,75 @@ impl InputConstants {
 }
 
 impl<'a> ParameterTypes<'a> {
+    pub(super) fn query_output_schema(
+        &self,
+        query: &crate::plan::QueryPlan,
+    ) -> Option<&crate::RowSchema> {
+        self.input_constants.as_ref()?.8.get(&NonNull::from(query))
+    }
+
+    pub(super) fn retain_set_operand_coercions(
+        &mut self,
+        query: &crate::plan::QueryPlan,
+        positions: &[usize],
+        output: &super::QueryOutput,
+    ) {
+        if positions.is_empty() {
+            return;
+        }
+        let Some(schema) = self
+            .input_constants
+            .as_mut()
+            .and_then(|constants| constants.8.get_mut(&NonNull::from(query)))
+        else {
+            return;
+        };
+        let original = schema.clone();
+        *schema = crate::RowSchema::with_column_metadata(
+            None,
+            original.columns().iter().enumerate().map(|(index, name)| {
+                let (ty, collation) = if positions.contains(&index) {
+                    let value = &output.types[index];
+                    (
+                        value.ty.as_ref().map(ColumnType::without_type_modifiers),
+                        value
+                            .ty
+                            .as_ref()
+                            .filter(|ty| crate::schema::composites::type_is_collatable(ty))
+                            .map(|ty| {
+                                u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(
+                                    ty,
+                                ))
+                                .expect("selected collation is an OID")
+                            }),
+                    )
+                } else {
+                    (
+                        original.column_type(index).cloned(),
+                        original.column_collation(index),
+                    )
+                };
+                (name.clone(), ty, collation)
+            }),
+        )
+        .with_record_metadata((0..original.columns().len()).filter_map(|index| {
+            original
+                .record_metadata(index)
+                .cloned()
+                .map(|metadata| (index, metadata))
+        }));
+    }
+
+    pub(super) fn retain_query_output(
+        &mut self,
+        query: &crate::plan::QueryPlan,
+        output: &super::QueryOutput,
+    ) {
+        if let Some(constants) = &mut self.input_constants {
+            constants.8.insert(NonNull::from(query), output.schema());
+        }
+    }
+
     pub(super) fn retain_input_coercion(&mut self, expression: &ScalarExpr, target: ColumnType) {
         if let Some(constants) = &mut self.input_constants {
             constants.5.insert(NonNull::from(expression), target);

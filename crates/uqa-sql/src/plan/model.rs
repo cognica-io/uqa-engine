@@ -27,6 +27,9 @@ pub enum UnifiedPlan {
 /// A relational query with its CTE scope and one relational root.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryPlan {
+    /// Positional output metadata from this statement's analysis. Stored syntax must be analyzed in its next catalog scope instead of retaining these descriptors.
+    #[serde(skip)]
+    pub analyzed_output: Option<crate::RowSchema>,
     /// Whether relation references in this tree are stored catalog identities rather than names that must be resolved in the executing session.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub relations_bound: bool,

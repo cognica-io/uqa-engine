@@ -9,6 +9,60 @@
 use super::*;
 
 #[test]
+fn nested_output_descriptors_reuse_analysis_and_do_not_enter_stored_syntax() {
+    for sql in [
+        "SELECT count(*) FROM (SELECT id AS x FROM items WHERE true UNION ALL SELECT 2) q",
+        "SELECT count(*) FROM (SELECT NULL AS x WHERE true UNION ALL SELECT 'x') q",
+        "SELECT count(*) FROM (SELECT 1::numeric(5,1) AS x WHERE true UNION ALL SELECT 2::numeric(10,2)) q",
+    ] {
+        let scopes = Scopes::default();
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        crate::binding::preparation::BLOCK_ANALYSES.with(|count| count.set(0));
+        analyze_executable_plan(
+            &StatementAnalysisContext {
+                scopes: &scopes,
+                routines: &NoRoutines,
+                aliases: &NoRoutines,
+            },
+            &mut plan,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            crate::binding::preparation::BLOCK_ANALYSES.with(std::cell::Cell::get),
+            3,
+            "{sql}"
+        );
+        let mut descriptors = Vec::new();
+        plan.visit_queries_mut(&mut |query| {
+            descriptors.push(query.analyzed_output.clone().expect("analyzed query"));
+        });
+        assert_eq!(descriptors.len(), 4, "{sql}");
+        for descriptor in &descriptors[1..3] {
+            assert_eq!(descriptor.columns(), &["x"], "{sql}");
+        }
+        let oid = |descriptor: &RowSchema| {
+            crate::catalog::type_metadata::pg_type_oid(descriptor.column_type(0).unwrap())
+        };
+        assert_eq!(oid(&descriptors[1]), oid(&descriptors[2]), "{sql}");
+        assert_eq!(oid(&descriptors[1]), oid(&descriptors[3]), "{sql}");
+        let mut cloned = plan.clone();
+        let mut index = 0;
+        cloned.visit_queries_mut(&mut |query| {
+            assert!(query
+                .analyzed_output
+                .as_ref()
+                .unwrap()
+                .shares_index(&descriptors[index]));
+            index += 1;
+        });
+        let mut restored: UnifiedPlan =
+            serde_json::from_slice(&serde_json::to_vec(&plan).unwrap()).unwrap();
+        restored.visit_queries_mut(&mut |query| assert!(query.analyzed_output.is_none()));
+    }
+}
+
+#[test]
 fn executable_analysis_derives_each_query_result_once() {
     for sql in [
         "SELECT id FROM items",

@@ -20,6 +20,13 @@ pub(super) fn optimize_unified_plan(
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
+    plan.visit_queries_mut(&mut |query| {
+        if query.analyzed_output.is_none() {
+            if let RelationalPlan::QueryBlock(block) = &mut query.root {
+                block.compute = block.compute_kind(aggregates);
+            }
+        }
+    });
     match plan {
         UnifiedPlan::Query(query) => optimize_query(query, config, aggregates)?,
         UnifiedPlan::Command(command) => optimize_command(command, config, aggregates)?,
@@ -46,7 +53,12 @@ pub(super) fn optimize_query(
 ) -> Result<(), SQLError> {
     super::subqueries::prune_query(query);
     if let Some(routines) = &config.routine_inlining {
-        super::cte_projection::prune(query, aggregates, routines.volatility)?;
+        super::cte_projection::prune(
+            query,
+            aggregates,
+            routines.volatility,
+            Some(routines.routines),
+        )?;
     }
     let reachable = uqa_sql::semantics::reachable_plan_cte_names(query);
     for cte in query
@@ -105,7 +117,18 @@ pub(super) fn optimize_query_block(
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
-    super::derived_projection::prune(block, aggregates);
+    super::derived_projection::prune(
+        block,
+        aggregates,
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.routines),
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.volatility),
+    );
     if let Some(source) = &mut block.from {
         optimize_source(source, config, aggregates)?;
     }
@@ -168,32 +191,10 @@ pub(super) fn optimize_query_block(
     let live_subqueries = super::subqueries::live_slots(block.expressions())?;
     super::subqueries::optimize_live(&mut block.subqueries, &live_subqueries, config, aggregates)?;
 
-    let contains_aggregate = |expression: &ScalarExpr| {
-        uqa_sql::semantics::aggregates::contains_aggregate(aggregates, expression)
-    };
-    let has_aggregate = !block.group_by.is_empty()
-        || !block.grouping_sets.is_empty()
-        || block.having.is_some()
-        || block
-            .projections
-            .iter()
-            .any(|projection| contains_aggregate(&projection.expr))
-        || block
-            .windows
-            .iter()
-            .flat_map(|window| window.spec.expressions())
-            .any(contains_aggregate);
-    let has_window = block
-        .projections
-        .iter()
-        .any(|projection| projection.expr.contains_window());
-    block.compute = if has_aggregate {
-        ComputePlan::Aggregate
-    } else if has_window {
-        ComputePlan::Window
-    } else {
-        ComputePlan::Project
-    };
+    // Removing an unused aggregate's value does not remove its implicit group on empty input.
+    if !matches!(block.compute, ComputePlan::Aggregate) {
+        block.compute = block.compute_kind(aggregates);
+    }
     block.access = choose_access_path(block);
     Ok(())
 }

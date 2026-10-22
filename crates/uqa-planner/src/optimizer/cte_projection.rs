@@ -14,6 +14,7 @@ pub(super) fn prune(
     query: &mut QueryPlan,
     aggregates: &dyn AggregateClassifier,
     volatility: &dyn VolatilityCatalog,
+    routines: Option<&dyn uqa_sql::routines::RoutineResolution>,
 ) -> Result<(), SQLError> {
     let folded = uqa_sql::semantics::cte_strategy::schedule_plan_ctes(volatility, query)?
         .into_iter()
@@ -65,6 +66,8 @@ pub(super) fn prune(
                 &|column| required.contains(column),
                 None,
                 aggregates,
+                routines,
+                Some(volatility),
             );
         }
     }
@@ -243,7 +246,7 @@ mod tests {
             query.rewrite_scalar_expressions(&mut |expression| {
                 *expression = uqa_sql::bind_type_introspection(expression.clone(), &uqa_sql::RowSchema::default(), &[]);
             });
-            prune(&mut query, &Catalog, &Catalog).unwrap();
+            prune(&mut query, &Catalog, &Catalog, None).unwrap();
             let RelationalPlan::QueryBlock(block) = &query.ctes[0].body.query().unwrap().root else { panic!("block"); };
             assert_eq!(matches!(block.projections[1].expr, ScalarExpr::TypedLiteral { value: uqa_core::Value::Null, .. }), removed, "{sql}");
         }
@@ -285,7 +288,7 @@ mod tests {
             else {
                 panic!("query");
             };
-            prune(&mut query, &Catalog, &Catalog).unwrap();
+            prune(&mut query, &Catalog, &Catalog, None).unwrap();
             let RelationalPlan::QueryBlock(inner) = &query.ctes[0].body.query().unwrap().root
             else {
                 panic!("CTE block");

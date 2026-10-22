@@ -1,5 +1,7 @@
 # PG18 differential probes
 
+`union_output_demand_oracle.input.json` and its independent PostgreSQL 18.4 transcript contain 56 observations for unused UNION ALL/derived outputs, conditional and unconditional members, LIMIT/OFFSET/WITH boundaries, type coercion and numeric modifiers, positional aliases, DISTINCT, ordering, aggregate cardinality, SRFs and sequence effects. Capture with `capture_command_completion_oracle.py --rows --details` in a disposable Docker database. The expected fixture records input and collector hashes; machine reports remain outside git. The existing `queries::projection_demand` integration submodule owns the four-provider replay.
+
 The [official upstream regression harness](upstream/README.md) separately imports all 354 PostgreSQL 18.4 core and isolation tests, preserves their original scripts and expected files, validates the PostgreSQL reference with the official drivers, and accounts for every UQA test in a complete burn-down ledger.
 
 `run_diff.py` validates `manifest.json`, executes every probe in `probes.sql` against a real PostgreSQL 18 instance and against the `usql` release binary, then reports divergences in four categories:

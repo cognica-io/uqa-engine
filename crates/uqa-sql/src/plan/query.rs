@@ -16,6 +16,36 @@ use super::{
 };
 
 impl QueryBlockPlan {
+    /// Select the computation from resolved calls before output-demand rewrites remove unobserved aggregate values.
+    pub fn compute_kind(&self, aggregates: &dyn AggregateClassifier) -> ComputePlan {
+        let contains_aggregate = |expression: &ScalarExpr| {
+            crate::semantics::aggregates::contains_aggregate(aggregates, expression)
+        };
+        let has_aggregate = !self.group_by.is_empty()
+            || !self.grouping_sets.is_empty()
+            || self.having.is_some()
+            || self
+                .projections
+                .iter()
+                .any(|projection| contains_aggregate(&projection.expr))
+            || self
+                .windows
+                .iter()
+                .flat_map(|window| window.spec.expressions())
+                .any(contains_aggregate);
+        let has_window = self
+            .projections
+            .iter()
+            .any(|projection| projection.expr.contains_window());
+        if has_aggregate {
+            ComputePlan::Aggregate
+        } else if has_window {
+            ComputePlan::Window
+        } else {
+            ComputePlan::Project
+        }
+    }
+
     /// One scalar SELECT with no relational clauses or subplans. The caller must also reject set-returning routines using its selected catalog.
     pub fn is_single_expression(&self) -> bool {
         matches!(self.compute, ComputePlan::Project)
@@ -66,6 +96,7 @@ impl QueryPlan {
         statement.with.clear();
         let root = lower_relational_root(statement, aggregates);
         let mut plan = Self {
+            analyzed_output: None,
             relations_bound: false,
             ctes,
             root,
@@ -238,6 +269,7 @@ pub(super) fn lower_relational_root(
         QueryPlan::lower_with(*left, aggregates)
     } else {
         QueryPlan {
+            analyzed_output: None,
             relations_bound: false,
             ctes: Vec::new(),
             root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan::lower_with(
@@ -291,30 +323,7 @@ impl QueryBlockPlan {
                 ),
             })
             .collect();
-        let contains_aggregate = |expression: &ScalarExpr| {
-            crate::semantics::aggregates::contains_aggregate(aggregates, expression)
-        };
-        let has_aggregate = !statement.group_by.is_empty()
-            || !statement.grouping_sets.is_empty()
-            || statement.having.is_some()
-            || projections
-                .iter()
-                .any(|projection| contains_aggregate(&projection.expr))
-            || windows
-                .iter()
-                .flat_map(|window| window.spec.expressions())
-                .any(contains_aggregate);
-        let has_window = projections
-            .iter()
-            .any(|projection| projection.expr.contains_window());
-        let compute = if has_aggregate {
-            ComputePlan::Aggregate
-        } else if has_window {
-            ComputePlan::Window
-        } else {
-            ComputePlan::Project
-        };
-        Self {
+        let mut block = Self {
             windows,
             projections,
             privilege_columns: std::collections::BTreeSet::default(),
@@ -324,7 +333,7 @@ impl QueryBlockPlan {
             r#where: statement
                 .r#where
                 .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries)),
-            compute,
+            compute: ComputePlan::Project,
             group_by: statement
                 .group_by
                 .into_iter()
@@ -364,7 +373,9 @@ impl QueryBlockPlan {
             subqueries,
             access: AccessPathPlan::Row,
             locking: statement.locking,
-        }
+        };
+        block.compute = block.compute_kind(aggregates);
+        block
     }
 
     /// Expression nodes evaluated while executing this query block. Query

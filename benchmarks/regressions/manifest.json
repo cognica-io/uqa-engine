@@ -21220,6 +21220,61 @@
       "capability": "Projection and consumer demand",
       "workload": "4097 input values through system-qualified count, sum and extrema.",
       "invariant": "Qualified builtin kernels retain no per-input rows or spill records and return the same aggregate values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_output_descriptors_reuse_analysis_and_do_not_enter_stored_syntax",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Nested derived UNION queries with integer, unknown and numeric-modifier outputs.",
+      "invariant": "Each block is analyzed once, clones share descriptors, unknown input coercions retain their selected type and stored syntax omits transient metadata."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unused_append_outputs_preserve_postgresql_member_boundaries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/union_projection.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "UNION ALL members with WHERE, LIMIT, OFFSET and DISTINCT boundaries.",
+      "invariant": "Only unused outputs behind retained member boundaries are discarded; unconditional append members preserve constant errors."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "discarded_aggregate_values_keep_the_implicit_group",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/union_projection.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "An unused aggregate contains a failing constant argument.",
+      "invariant": "Removing an unobserved aggregate value keeps the block aggregate and its implicit empty-input group."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "union_output_demand_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Fifty-six independent PostgreSQL observations across four storage providers.",
+      "invariant": "Typed results, errors, aggregate cardinality, ordering, type coercion, SRF multiplicity and sequence effects match the independent PostgreSQL reference."
     }
   ]
 }

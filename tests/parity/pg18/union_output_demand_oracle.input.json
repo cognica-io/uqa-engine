@@ -1,0 +1,228 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "constant",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z) UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "constant_true",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z WHERE true) UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "constant_false",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z WHERE false) UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "values",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z FROM (VALUES(1)) t(n)) UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "values_true",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z FROM (VALUES(1)) t(n) WHERE true) UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "values_false",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z FROM (VALUES(1)) t(n) WHERE false) UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "values_condition",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z FROM (VALUES(1)) t(n) WHERE n=1) UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "values_offset",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z FROM (VALUES(1)) t(n) OFFSET 0) UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "values_limit",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z FROM (VALUES(1)) t(n) LIMIT 1) UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "values_limit_zero",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z FROM (VALUES(1)) t(n) LIMIT 0) UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "union_all_count",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "union_all_positions",
+      "sql": "SELECT sum(id) FROM (SELECT 1 AS id,1/0 AS z UNION ALL SELECT 2,3) q"
+    },
+    {
+      "id": "union_all_aliases",
+      "sql": "SELECT sum(a) FROM (SELECT 1 AS id,1/0 AS z UNION ALL SELECT 2,3) q(a,b)"
+    },
+    {
+      "id": "union_distinct_values",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z UNION SELECT 2) q"
+    },
+    {
+      "id": "union_common_type",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS z UNION ALL SELECT 'bad') q"
+    },
+    {
+      "id": "union_mismatched_type",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS z UNION ALL SELECT true) q"
+    },
+    {
+      "id": "union_order_uses_output",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z UNION ALL SELECT 2 ORDER BY z) q"
+    },
+    {
+      "id": "set_limit",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z WHERE false UNION ALL SELECT 2 LIMIT 1) q"
+    },
+    {
+      "id": "set_offset",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z WHERE false UNION ALL SELECT 2 OFFSET 0) q"
+    },
+    {
+      "id": "set_with",
+      "sql": "SELECT count(*) FROM (WITH unused AS (SELECT 1) SELECT 1/0 AS z WHERE false UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "set_type_coercion",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z WHERE false UNION ALL SELECT 2.0) q"
+    },
+    {
+      "id": "set_explicit_same_type",
+      "sql": "SELECT count(*) FROM (SELECT (1/0)::numeric AS z WHERE false UNION ALL SELECT 2.0) q"
+    },
+    {
+      "id": "branch_order_used",
+      "sql": "SELECT sum(id) FROM ((SELECT 1 AS id,1/0 AS z WHERE true ORDER BY id) UNION ALL SELECT 2,3) q"
+    },
+    {
+      "id": "branch_order_bad",
+      "sql": "SELECT sum(id) FROM ((SELECT 1 AS id,1/0 AS z WHERE true ORDER BY z) UNION ALL SELECT 2,3) q"
+    },
+    {
+      "id": "branch_distinct",
+      "sql": "SELECT count(*) FROM (SELECT DISTINCT 1/0 AS z WHERE false UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "branch_aggregate",
+      "sql": "SELECT count(*) FROM (SELECT sum(1/0) AS z UNION ALL SELECT 2::bigint) q"
+    },
+    {
+      "id": "branch_group",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z FROM (VALUES(1),(2)) v(x) GROUP BY x UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "branch_join",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z FROM (VALUES(1)) a(x) CROSS JOIN (VALUES(2)) b(y) UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "branch_srf",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z, generate_series(1,2) AS n WHERE true UNION ALL SELECT 2,3) q"
+    },
+    {
+      "id": "schema",
+      "sql": "CREATE SCHEMA union_demand_probe"
+    },
+    {
+      "id": "sequence",
+      "sql": "CREATE SEQUENCE union_demand_probe.effects"
+    },
+    {
+      "id": "branch_volatile",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z,nextval('union_demand_probe.effects') AS effect UNION ALL SELECT 2,3::bigint) q"
+    },
+    {
+      "id": "branch_volatile_effects",
+      "sql": "SELECT last_value,is_called FROM union_demand_probe.effects"
+    },
+    {
+      "id": "referenced_slot",
+      "sql": "SELECT z FROM (SELECT 1/0 AS z WHERE false UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "whole_row",
+      "sql": "SELECT count(q) FROM (SELECT 1/0 AS z WHERE false UNION ALL SELECT 2) q"
+    },
+    {
+      "id": "positional_aliases",
+      "sql": "SELECT sum(a) FROM (SELECT 1 AS id,1/0 AS z WHERE true UNION ALL SELECT 2,3) q(a,b)"
+    },
+    {
+      "id": "different_branch_names",
+      "sql": "SELECT sum(id) FROM (SELECT 1 AS id,1/0 AS z WHERE true UNION ALL SELECT 2 AS other,3 AS renamed) q"
+    },
+    {
+      "id": "union_then_intersect",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z WHERE false UNION ALL SELECT 2) INTERSECT SELECT 2) q"
+    },
+    {
+      "id": "nested_union",
+      "sql": "SELECT count(*) FROM ((SELECT 1/0 AS z WHERE false UNION ALL SELECT 2) UNION ALL SELECT 3) q"
+    },
+    {
+      "id": "unknown_types",
+      "sql": "SELECT count(*) FROM (SELECT NULL AS x,1/0 AS z WHERE false UNION ALL SELECT 'x',2) q"
+    },
+    {
+      "id": "numeric_modifiers",
+      "sql": "SELECT count(*) FROM (SELECT 1::numeric(5,1) AS x,1/0 AS z WHERE false UNION ALL SELECT 2::numeric(10,2),3) q"
+    },
+    {
+      "id": "aggregate_empty",
+      "sql": "SELECT count(*) FROM (SELECT sum(x) FROM (VALUES(1),(2)) t(x) WHERE false) q"
+    },
+    {
+      "id": "aggregate_unused_error",
+      "sql": "SELECT count(*) FROM (SELECT sum(1/0)) q"
+    },
+    {
+      "id": "order_ordinal",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id,1/0 AS z ORDER BY 2) q"
+    },
+    {
+      "id": "order_used_only",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id,1/0 AS z ORDER BY 1) q"
+    },
+    {
+      "id": "nested_set_limit",
+      "sql": "SELECT count(*) FROM (((SELECT 1/0 AS z WHERE false) UNION ALL SELECT 2 LIMIT 1) UNION ALL SELECT 3) q"
+    },
+    {
+      "id": "nested_set_offset",
+      "sql": "SELECT count(*) FROM (((SELECT 1/0 AS z WHERE false) UNION ALL SELECT 2 OFFSET 0) UNION ALL SELECT 3) q"
+    },
+    {
+      "id": "effect_subquery_output",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z,(SELECT 1) AS x UNION ALL SELECT 2,3) q"
+    },
+    {
+      "id": "effect_row_output",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z,ROW(1,2) AS x UNION ALL SELECT 2,ROW(3,4)) q"
+    },
+    {
+      "id": "effect_stable_cast",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z,'2020-01-01'::date AS x UNION ALL SELECT 2,DATE '2020-01-02') q"
+    },
+    {
+      "id": "effect_schema",
+      "sql": "CREATE SCHEMA effects"
+    },
+    {
+      "id": "effect_stable_function",
+      "sql": "CREATE FUNCTION effects.stable_value() RETURNS integer LANGUAGE SQL STABLE AS 'SELECT 1'"
+    },
+    {
+      "id": "effect_stable_user",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z,effects.stable_value() AS x UNION ALL SELECT 2,3) q"
+    },
+    {
+      "id": "effect_volatile_function",
+      "sql": "CREATE FUNCTION effects.volatile_value() RETURNS integer LANGUAGE plpgsql VOLATILE AS $$BEGIN RETURN 1; END$$"
+    },
+    {
+      "id": "effect_volatile_user",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z,effects.volatile_value() AS x UNION ALL SELECT 2,3) q"
+    }
+  ]
+}

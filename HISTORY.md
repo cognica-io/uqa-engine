@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve PostgreSQL output demand through eligible UNION ALL members, including positional aliases, type-coercion barriers, ordering and unused aggregate values. Discarding an aggregate value keeps its group and empty-input row cardinality.
+
 - Preserve selected aggregate identities through SQL lowering, optimization and execution, including `pg_catalog` qualification and same-name user scalar functions. Resolve a bare function `*` as aggregate syntax with no value arguments, retaining whole-row arguments and PostgreSQL diagnostics for scalar misuse.
 
 - Distinguish row-count demand from whole-row values when pruning unused direct derived-table and folded-CTE outputs, retaining aggregate filters, ordering and relation-name column shadowing.
@@ -25,6 +27,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Preserve PostgreSQL LATERAL reference error positions through SQL lowering, plan copies and stored-definition binding, including Unicode and multiple-statement requests. SQL function source errors retain creation-statement positions or the separate internal-query cursor when PostgreSQL cannot transpose them.
 
 ### Changed
+
+- Custom Rust `QueryPlan` constructors initialize `analyzed_output: None`. Executable plans share positional descriptors from statement analysis; serialized definitions omit them and resolve their next catalog scope normally. Custom `prune_query_outputs` callers also pass optional selected-routine and volatility catalogs for UNION-member boundaries.
 
 - Custom Rust correlation and subquery adapters now supply the invoking routine catalog so declared TABLE and composite results preserve the selected function identity and full output schema.
 

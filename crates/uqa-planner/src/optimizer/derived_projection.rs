@@ -6,14 +6,17 @@
 
 //! Eliminate unused scalar outputs of a simple derived source before constant evaluation.
 
-use crate::{
-    AggregateClassifier, ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan,
-};
+use crate::{AggregateClassifier, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
 use std::collections::BTreeSet;
 use uqa_core::Value;
 use uqa_sql::{ast::FunctionVolatility, RowSchema, ScalarExpr};
 
-pub(super) fn prune(block: &mut QueryBlockPlan, aggregates: &dyn AggregateClassifier) {
+pub(super) fn prune(
+    block: &mut QueryBlockPlan,
+    aggregates: &dyn AggregateClassifier,
+    routines: Option<&dyn uqa_sql::routines::RoutineResolution>,
+    volatility: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
+) {
     let Some(SourcePlan::Subquery {
         body,
         alias,
@@ -66,10 +69,19 @@ pub(super) fn prune(block: &mut QueryBlockPlan, aggregates: &dyn AggregateClassi
         &|name| required.contains(name),
         None,
         aggregates,
+        routines,
+        volatility,
     );
 }
 
 fn has_named_output(query: &QueryPlan, aliases: &[String], name: &str) -> bool {
+    if let Some(schema) = &query.analyzed_output {
+        return schema
+            .columns()
+            .iter()
+            .enumerate()
+            .any(|(index, column)| aliases.get(index).unwrap_or(column) == name);
+    }
     let RelationalPlan::QueryBlock(block) = &query.root else {
         // Other relational roots are not pruned by this direct-source path.
         return true;
@@ -93,17 +105,27 @@ pub fn prune_outputs(
     required: &dyn Fn(&str) -> bool,
     schema: Option<&RowSchema>,
     aggregates: &dyn AggregateClassifier,
+    routines: Option<&dyn uqa_sql::routines::RoutineResolution>,
+    volatility: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
 ) {
+    if query.analyzed_output.is_none() {
+        if let Some(schema) = schema {
+            query.analyzed_output = Some(schema.clone());
+            if let RelationalPlan::QueryBlock(block) = &mut query.root {
+                block.compute = block.compute_kind(aggregates);
+            }
+        }
+    }
+    if matches!(query.root, RelationalPlan::SetOp { .. }) {
+        super::union_projection::prune(query, aliases, required, aggregates, routines, volatility);
+        return;
+    }
+    let schema = schema.or(query.analyzed_output.as_ref());
     let RelationalPlan::QueryBlock(inner) = &mut query.root else {
         return;
     };
     if inner.distinct
         || !inner.distinct_on.is_empty()
-        || !matches!(inner.compute, ComputePlan::Project)
-        || !inner.group_by.is_empty()
-        || !inner.grouping_sets.is_empty()
-        || inner.having.is_some()
-        || !inner.order_by.is_empty()
         || !inner.windows.is_empty()
         || inner
             .projections
@@ -125,7 +147,10 @@ pub fn prune_outputs(
         .collect::<Vec<_>>();
     let mut replacements = Vec::new();
     for (index, projection) in inner.projections.iter().enumerate() {
-        if required(&names[index]) || !removable(&projection.expr, aggregates) {
+        if required(&names[index])
+            || needed_by_ordering(inner, index)
+            || !removable(&projection.expr, aggregates)
+        {
             continue;
         }
         // Retain the schema even though the enclosing query never reads this slot.
@@ -177,6 +202,17 @@ pub fn prune_outputs(
     }
 }
 
+fn needed_by_ordering(block: &QueryBlockPlan, index: usize) -> bool {
+    let projection = &block.projections[index];
+    let name = uqa_sql::semantics::projection_label_at(projection);
+    block.order_by.iter().any(|order| {
+        matches!(&order.expr, ScalarExpr::Column(column) if *column == name)
+            || matches!(order.expr, ScalarExpr::Position(position) if position == index)
+            || matches!(order.expr, ScalarExpr::Literal(Value::Int(position)) if uqa_sql::semantics::query_output_position(position, block.projections.len(), "ORDER BY").is_ok_and(|position| position == index))
+            || uqa_sql::semantics::aggregates::exprs_match(&order.expr, &projection.expr)
+    })
+}
+
 fn removable(expression: &ScalarExpr, aggregates: &dyn AggregateClassifier) -> bool {
     let mut removable = true;
     expression.visit(&mut |part| match part {
@@ -186,9 +222,12 @@ fn removable(expression: &ScalarExpr, aggregates: &dyn AggregateClassifier) -> b
             args,
             ..
         } => {
+            if uqa_sql::semantics::aggregates::is_builtin_aggregate(part) {
+                // The aggregate's arguments are still visited for volatile effects; its row cardinality belongs to the block's compute phase.
+                return;
+            }
             let name = uqa_sql::semantics::builtin_function_dispatch_name(name);
-            if crate::unified_plan::is_builtin_aggregate(&name)
-                || aggregates.is_registered_aggregate(&name)
+            if aggregates.is_registered_aggregate(&name)
                 || uqa_sql::semantics::sets::validation::builtin_returns_set(&name)
                 || binding.as_ref().is_none_or(|binding| !binding.builtin)
                 || uqa_sql::semantics::volatility::builtin_function_volatility(
@@ -248,6 +287,8 @@ mod tests {
             &|name| name == "selected",
             Some(&schema),
             &NoAggregates,
+            None,
+            None,
         );
         let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("block");
@@ -285,7 +326,14 @@ mod tests {
                 "SELECT 1 FROM (SELECT lower(v) AS x FROM data ORDER BY x) q",
                 false,
             ),
-            ("SELECT 1 FROM (SELECT sum(v) AS x FROM data) q", false),
+            (
+                "SELECT 1 FROM (SELECT lower(v) AS x FROM data ORDER BY 1) q",
+                false,
+            ),
+            (
+                "SELECT 1 FROM (SELECT lower(v) AS x FROM data ORDER BY 0+1) q",
+                true,
+            ),
             (
                 "SELECT 1 FROM (SELECT generate_series(1,2) AS x FROM data) q",
                 false,
@@ -310,7 +358,7 @@ mod tests {
                 RowSchema::with_types(vec!["v".into()], vec![Some(uqa_sql::ColumnType::Text)]);
             inner.projections[0].expr =
                 uqa_sql::bind_type_introspection(inner.projections[0].expr.clone(), &schema, &[]);
-            prune(block, &NoAggregates);
+            prune(block, &NoAggregates, None, None);
             let Some(SourcePlan::Subquery { body, .. }) = &block.from else {
                 unreachable!()
             };
@@ -369,7 +417,7 @@ mod tests {
             let RelationalPlan::QueryBlock(outer) = &mut query.root else {
                 panic!("outer block");
             };
-            prune(outer, &NoAggregates);
+            prune(outer, &NoAggregates, None, None);
             let Some(SourcePlan::Subquery { body, .. }) = &outer.from else {
                 panic!("derived source");
             };

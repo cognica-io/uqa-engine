@@ -83,6 +83,7 @@ pub(crate) fn read_prepared_inputs(
     let constants = analysis.parameters.take_input_constants();
     let parameters = analysis.parameters.finish()?;
     constants.apply(plan)?;
+    retain_compute_kinds(routines, plan);
     let params = crate::prepared::analysis_parameters(&parameters);
     super::composite_inputs::retain_composite_inputs(routines, plan, &params, ctes)?;
     plan.normalize_window_definitions()?;
@@ -172,6 +173,7 @@ fn read_executable_inputs_inner(
     }
     let reusable = constants.reusable_across_messages();
     constants.apply(plan)?;
+    retain_compute_kinds(routines, plan);
     super::composite_inputs::retain_composite_inputs(routines, plan, params, binding)?;
     plan.normalize_window_definitions()?;
     let mut dependencies = analysis
@@ -339,6 +341,15 @@ fn analyze_expression_inputs<'a>(
         .take_input_constants()
         .apply_expression_with_subqueries(&mut expression.scalar, &mut expression.subqueries)?;
     Ok(ty)
+}
+
+fn retain_compute_kinds(routines: &dyn RoutineResolution, plan: &mut UnifiedPlan) {
+    let aggregates = |name: &str| routines.has_registered_aggregate_function(name);
+    plan.visit_queries_mut(&mut |query| {
+        if let crate::plan::RelationalPlan::QueryBlock(block) = &mut query.root {
+            block.compute = block.compute_kind(&aggregates);
+        }
+    });
 }
 
 struct Preparation<'a> {

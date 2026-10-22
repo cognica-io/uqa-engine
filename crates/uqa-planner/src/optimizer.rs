@@ -35,6 +35,7 @@ mod scalar;
 mod source_constants;
 mod subqueries;
 mod traversal;
+mod union_projection;
 
 pub use access_path::contains_retrieval;
 pub(crate) use api::ConstantStorageFactory;

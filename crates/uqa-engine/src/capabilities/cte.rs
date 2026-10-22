@@ -89,6 +89,8 @@ impl QueryOutputRewriter for Engine {
             &|name| projection.contains(name),
             Some(schema),
             self,
+            Some(self),
+            Some(self),
         );
     }
 
