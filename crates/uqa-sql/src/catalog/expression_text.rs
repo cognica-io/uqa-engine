@@ -34,7 +34,7 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
         Expr::Star => "*".into(),
         Expr::QualifiedStar(qualifier) => format!("{qualifier}.*"),
         Expr::Default => "DEFAULT".into(),
-        Expr::Column(name) => name.clone(),
+        Expr::Column(name) => name.to_string(),
         Expr::QualifiedColumn {
             qualifier, column, ..
         } => format!("{qualifier}.{column}"),

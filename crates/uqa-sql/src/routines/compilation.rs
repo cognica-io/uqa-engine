@@ -192,7 +192,10 @@ fn compile_body(
             let (statements, bind_catalog_dependencies) = match &def.body {
                 FunctionBody::Source(source) => {
                     stored_regrole_constants.reject_with(context.regroles)?;
-                    (crate::compile(source)?, false)
+                    (
+                        crate::compile(source).map_err(|error| def.source_body_error(error))?,
+                        false,
+                    )
                 }
                 FunctionBody::Statements(statements) => (statements.clone(), true),
             };

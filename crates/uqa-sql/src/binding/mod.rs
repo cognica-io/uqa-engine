@@ -34,6 +34,7 @@ mod routine_parameters;
 mod scope;
 mod source_schemas;
 mod sources;
+pub use sources::bind_source_plan_schema_in_scope;
 pub mod statements;
 mod type_resolution;
 mod variable_sites;
@@ -66,6 +67,7 @@ pub use routine_binding::{
     bind_syntax_query_plan_routines,
 };
 pub use routine_parameters::{bind_routine_parameter_references, RoutineParameterScope};
+pub use scope::SourceScope;
 pub use scope::{
     analyze_expression_plan_type, analyze_query_plan_schema,
     analyze_query_plan_schema_with_catalog, bind_expression_plan_type, bind_query_plan_schema,
@@ -360,8 +362,12 @@ impl SchemaScope {
         source: &SourcePlan,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
-        outer: Option<&RowSchema>,
+        scope: SourceScope<'_>,
     ) -> Result<RowSchema, SQLError> {
+        let input = (!matches!(source, SourcePlan::Join { .. }))
+            .then(|| scope.input(source))
+            .flatten();
+        let outer = input.as_ref();
         match source {
             SourcePlan::Table {
                 name,
@@ -741,6 +747,7 @@ impl SchemaScope {
                 body,
                 alias,
                 column_aliases,
+                ..
             } => {
                 let schema = self.bind_query(routines, body, params, outer)?;
                 Ok(rename_schema(&schema, column_aliases, alias.as_deref()))
@@ -757,20 +764,27 @@ impl SchemaScope {
                 lateral,
                 ..
             } => {
-                let left_schema = self.bind_source(routines, left, subqueries, params, outer)?;
-                let implicit_lateral_function = matches!(
-                    right.as_ref(),
-                    SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
-                );
-                let right_scope = (*lateral || implicit_lateral_function)
-                    .then(|| overlay_outer_schema(&left_schema, outer));
-                let right_schema = self.bind_source(
+                let left_schema = self.bind_source_in_scope(
+                    routines,
+                    left,
+                    subqueries,
+                    params,
+                    scope.with_names(),
+                )?;
+                let preceding = scope.right_namespace(left, &left_schema, *kind);
+                let right_schema = self.bind_source_in_scope(
                     routines,
                     right,
                     subqueries,
                     params,
-                    right_scope.as_ref().or(outer),
+                    SourceScope {
+                        outer: scope.outer,
+                        preceding: Some(&preceding),
+                        inherited_lateral: *lateral,
+                        retain_names: true,
+                    },
                 )?;
+                let condition = scope.condition();
                 self.bind_join_output_schema(JoinSchemaBinding {
                     routines,
                     kind: *kind,
@@ -783,7 +797,7 @@ impl SchemaScope {
                     right: &right_schema,
                     subqueries,
                     params,
-                    outer,
+                    outer: condition.as_ref(),
                 })
             }
         }

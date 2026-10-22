@@ -135,7 +135,7 @@ impl Collector<'_> {
                     .position(|alias| alias.eq_ignore_ascii_case(column))
                 {
                     if let Some(physical) = columns.get(position) {
-                        column.clone_from(physical);
+                        column.rename(physical);
                     }
                 }
             }

@@ -34,7 +34,7 @@ pub fn key_names(keys: &[IndexKey]) -> Vec<String> {
 fn expression_name(expression: &Expr) -> Option<(String, bool)> {
     match expression {
         Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => {
-            Some((name.clone(), true))
+            Some((name.to_string(), true))
         }
         Expr::Func {
             binding: Some(binding),
@@ -186,7 +186,7 @@ fn finish_index_keys(
                     _ => None,
                 };
                 if let Some(column) = column {
-                    *key = IndexKey::Column(column);
+                    *key = IndexKey::Column(column.to_string());
                 }
                 types.push(ty);
             }

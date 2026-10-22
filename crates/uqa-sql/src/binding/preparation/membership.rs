@@ -172,6 +172,7 @@ impl Preparation<'_> {
                 })?;
                 dependent |= crate::binding::correlation::query_depends_on_current_row(
                     crate::binding::correlation::CorrelationContext {
+                        routines: self.routines,
                         catalog: self.scope.catalog.as_ref(),
                         resolution: &self.scope.resolution,
                         scoped_relations: None,

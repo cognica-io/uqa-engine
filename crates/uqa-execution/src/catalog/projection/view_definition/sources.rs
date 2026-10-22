@@ -13,6 +13,9 @@ use uqa_sql::plan::{QueryPlan, SourcePlan, TableFunctionPlan};
 
 use super::{query_columns, quote_ident, Column, Deparser, RelationIdentity, SQLError, Scope};
 
+#[cfg(test)]
+mod tests;
+
 impl Deparser<'_> {
     pub fn relation_name(&self, name: &str, scope: &Scope) -> Result<String, SQLError> {
         let (schema, local) =
@@ -98,6 +101,7 @@ impl Deparser<'_> {
                 body,
                 alias,
                 column_aliases,
+                ..
             } => {
                 let alias = alias.clone().unwrap_or_else(|| "unnamed_subquery".into());
                 (query_columns(body), alias.clone(), alias, column_aliases)
@@ -243,19 +247,26 @@ impl Deparser<'_> {
                 body,
                 alias,
                 column_aliases,
+                lateral,
             } => {
-                let mut rendered = format!("({})", self.query(body, &scope.named_child(), None)?);
+                let mut rendered = format!(
+                    "{}({})",
+                    if *lateral { "LATERAL " } else { "" },
+                    self.query(body, &scope.named_child(), None)?
+                );
                 relation_alias(&mut rendered, alias.as_deref(), column_aliases);
                 Ok(rendered)
             }
             SourcePlan::Values {
+                lateral,
                 rows,
                 alias,
                 column_aliases,
                 ..
             } => {
                 let mut rendered = format!(
-                    "({}VALUES {})",
+                    "{}({}VALUES {})",
+                    if *lateral { "LATERAL " } else { "" },
                     if self.indent { " " } else { "" },
                     self.values(rows, scope, subqueries)?
                 );
@@ -333,6 +344,7 @@ impl Deparser<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
         let SourcePlan::Join {
+            comma,
             left,
             right,
             kind,
@@ -349,14 +361,29 @@ impl Deparser<'_> {
         };
         let left_sql = self.source(left, scope, subqueries)?;
         let right_sql = self.source(right, scope, subqueries)?;
+        let lateral = if *lateral && !right.is_explicitly_lateral() {
+            "LATERAL "
+        } else {
+            ""
+        };
+        if *comma {
+            return Ok(if self.indent {
+                format!(
+                    "{left_sql},\n{}    {lateral}{right_sql}",
+                    " ".repeat(scope.indent)
+                )
+            } else {
+                format!("{left_sql}, {lateral}{right_sql}")
+            });
+        }
         let keyword = match kind {
+            JoinKind::Inner if on.is_none() && using.is_none() && !*natural => "CROSS JOIN",
             JoinKind::Inner => "JOIN",
             JoinKind::Left => "LEFT JOIN",
             JoinKind::Right => "RIGHT JOIN",
             JoinKind::Full => "FULL JOIN",
             JoinKind::Cross => "CROSS JOIN",
         };
-        let lateral = if *lateral { "LATERAL " } else { "" };
         let mut rendered = if self.indent {
             format!(
                 "{left_sql}\n{}     {keyword} {lateral}{right_sql}",

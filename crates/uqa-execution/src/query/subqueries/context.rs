@@ -30,6 +30,7 @@ pub trait ScopedSubqueryHooks<S: Clone>: Sync {
 
 #[derive(Clone)]
 pub struct SubqueryServices<'a, S: Clone + 'static> {
+    pub routines: &'a dyn uqa_sql::routines::RoutineResolution,
     pub catalog: &'a dyn CatalogSnapshotSource,
     pub session: &'a dyn CatalogSession,
     pub volatility: &'a dyn VolatilityCatalog,

@@ -86,6 +86,8 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) function_arguments: Option<crate::scalar::PreparedExpressions<Vec<ScalarExpr>>>,
     pub(super) params: &'a [SQLParam],
     pub(super) ctes: CteScope<S>,
+    /// Calling join row followed by any enclosing-query values. Only the join's own row changes between calls.
+    pub(super) input_schema: crate::RowSchema,
     pub(super) right_schema: crate::RowSchema,
     pub(super) pinned_right: Option<crate::OwnedPhysicalRow>,
 }
@@ -121,6 +123,16 @@ impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSour
         if let Some(row) = self.pinned_right.as_ref() {
             return Ok(Box::new(std::iter::once(Ok(row.clone()))));
         }
+        let combined;
+        let left_row = if let Some(outer) = self.ctes.row_lock_outer_row() {
+            combined = crate::OwnedPhysicalRow::new(
+                self.input_schema.clone(),
+                crate::PhysicalRow::concat_left_owned(left_row.row.clone(), &outer.row),
+            );
+            &combined
+        } else {
+            left_row
+        };
         if matches!(&self.right, SourcePlan::FunctionGroup { .. }) {
             let mut scoped_ctes = self.ctes.clone();
             scoped_ctes.set_row_lock_outer_row(left_row.clone());
@@ -241,11 +253,13 @@ impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSour
                 )))
             }
             source => {
+                let mut scoped_ctes = self.ctes.clone();
+                scoped_ctes.set_row_lock_outer_row(left_row.clone());
                 let operator = build_join_operator_with_ctes(
                     &self.context,
                     source,
                     self.params,
-                    &mut self.ctes,
+                    &mut scoped_ctes,
                     None,
                     None,
                 )?;

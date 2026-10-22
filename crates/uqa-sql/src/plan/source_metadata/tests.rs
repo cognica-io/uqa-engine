@@ -11,6 +11,7 @@ use crate::{ast::InternalRelationId, ColumnType};
 fn captured_attributes_keep_caller_types_and_collations_without_exposing_names() {
     let relation = InternalRelationId::allocate();
     let source = SourcePlan::Values {
+        lateral: false,
         rows: Vec::new(),
         alias: None,
         column_aliases: Vec::new(),
@@ -41,6 +42,7 @@ fn captured_attributes_keep_caller_types_and_collations_without_exposing_names()
 fn internal_values_metadata_restores_legacy_defaults_and_rejects_invalid_collations() {
     let relation = InternalRelationId::allocate();
     let source = SourcePlan::Values {
+        lateral: false,
         rows: Vec::new(),
         alias: None,
         column_aliases: Vec::new(),

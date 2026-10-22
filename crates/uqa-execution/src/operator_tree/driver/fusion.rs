@@ -98,7 +98,12 @@ impl PhysicalRetrievalDriver<'_> {
             .is_none_or(|first| queries.iter().all(|query| query == first));
         let mut args = Vec::new();
         if all_queries_equal {
-            args.extend(fields.iter().cloned().map(ScalarExpr::Column));
+            args.extend(
+                fields
+                    .iter()
+                    .cloned()
+                    .map(|column| ScalarExpr::Column(column.into())),
+            );
             if let Some(query) = queries.first() {
                 args.push(ScalarExpr::Literal(Value::Str(query.clone())));
             }
@@ -110,7 +115,7 @@ impl PhysicalRetrievalDriver<'_> {
                 ));
             }
             for (field, query) in fields.iter().zip(queries) {
-                args.push(ScalarExpr::Column(field.clone()));
+                args.push(ScalarExpr::Column(field.clone().into()));
                 args.push(ScalarExpr::Literal(Value::Str(query.clone())));
             }
         }
@@ -138,9 +143,9 @@ impl PhysicalRetrievalDriver<'_> {
         mode: ExternalPriorMode,
     ) -> DriverResult<PostingList> {
         let args = vec![
-            ScalarExpr::Column(field.to_string()),
+            ScalarExpr::Column(field.to_string().into()),
             ScalarExpr::Literal(Value::Str(query.to_string())),
-            ScalarExpr::Column(prior_field.to_string()),
+            ScalarExpr::Column(prior_field.to_string().into()),
             ScalarExpr::Literal(Value::Str(
                 match mode {
                     ExternalPriorMode::Authority => "authority",

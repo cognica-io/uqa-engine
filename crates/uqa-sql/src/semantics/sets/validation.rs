@@ -731,30 +731,65 @@ pub fn validate_source_set_contexts_before_build(
     if !placing_set_calls() {
         return Ok(());
     }
+    validate_source_set_contexts_in_scope(
+        engine,
+        resolver,
+        source,
+        params,
+        ctes,
+        crate::binding::SourceScope::new(outer),
+    )
+}
+
+fn validate_source_set_contexts_in_scope(
+    engine: &dyn SetFunctionCatalog,
+    resolver: &dyn FunctionTypeResolver,
+    source: &SourcePlan,
+    params: &[SQLParam],
+    ctes: &BindingContext<'_>,
+    scope: crate::binding::SourceScope<'_>,
+) -> Result<(), SQLError> {
+    let input = (!matches!(source, SourcePlan::Join { .. }))
+        .then(|| scope.input(source))
+        .flatten();
+    let outer = input.as_ref();
     match source {
         crate::plan::SourcePlan::RetainedRows(_) => Ok(()),
         SourcePlan::Join {
             left,
             right,
             lateral,
+            kind,
             ..
         } => {
-            validate_source_set_contexts_before_build(engine, resolver, left, params, ctes, outer)?;
-            let left_schema =
-                crate::binding::bind_source_plan_schema(engine, left, params, ctes, outer)?;
-            let implicit_lateral_function = matches!(
-                right.as_ref(),
-                SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
-            );
-            let right_scope = (*lateral || implicit_lateral_function)
-                .then(|| overlay_set_validation_scope(&left_schema, outer));
-            validate_source_set_contexts_before_build(
+            validate_source_set_contexts_in_scope(
+                engine,
+                resolver,
+                left,
+                params,
+                ctes,
+                scope.with_names(),
+            )?;
+            let left_schema = crate::binding::bind_source_plan_schema_in_scope(
+                engine,
+                left,
+                params,
+                ctes,
+                scope.with_names(),
+            )?;
+            let preceding = scope.right_namespace(left, &left_schema, *kind);
+            validate_source_set_contexts_in_scope(
                 engine,
                 resolver,
                 right,
                 params,
                 ctes,
-                right_scope.as_ref().or(outer),
+                crate::binding::SourceScope {
+                    outer: scope.outer,
+                    preceding: Some(&preceding),
+                    inherited_lateral: *lateral,
+                    retain_names: true,
+                },
             )
         }
         SourcePlan::Values { rows, .. } => {
@@ -788,19 +823,6 @@ pub fn validate_source_set_contexts_before_build(
         }
         SourcePlan::Subquery { .. } | SourcePlan::Table { .. } => Ok(()),
     }
-}
-
-fn overlay_set_validation_scope(current: &RowSchema, outer: Option<&RowSchema>) -> RowSchema {
-    let Some(outer) = outer else {
-        return current.clone();
-    };
-    let columns = outer
-        .identities()
-        .iter()
-        .enumerate()
-        .map(|(position, identity)| (identity.clone(), outer.column_type(position).cloned()))
-        .collect::<Vec<_>>();
-    RowSchema::with_typed_outer_identities(current, &columns)
 }
 
 pub fn validate_values_set_contexts(

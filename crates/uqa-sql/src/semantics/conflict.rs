@@ -73,7 +73,7 @@ pub fn prepare_inference_predicate<'a>(
         let expressions = std::mem::take(&mut conflict.expressions);
         for expression in expressions {
             if let Expr::Column(column) = expression {
-                conflict.conflict_columns.push(column);
+                conflict.conflict_columns.push(column.to_string());
             } else {
                 conflict.expressions.push(expression);
             }

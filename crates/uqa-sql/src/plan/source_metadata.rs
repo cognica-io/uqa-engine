@@ -13,6 +13,14 @@ use crate::{RowSchema, SQLError};
 mod tests;
 
 impl SourcePlan {
+    /// Explicit LATERAL permission retained by a range item independently of its parent join.
+    pub fn is_explicitly_lateral(&self) -> bool {
+        matches!(
+            self,
+            Self::Values { lateral: true, .. } | Self::Subquery { lateral: true, .. }
+        )
+    }
+
     /// Recover an internal VALUES schema from its declarations without sampling a row or exposing SQL-visible attributes.
     pub fn internal_values_schema(&self) -> Result<Option<RowSchema>, SQLError> {
         self.internal_values_schema_with_inference(None)

@@ -49,9 +49,21 @@ impl Preparation<'_> {
         let target =
             self.scope
                 .bind_command_target(self.routines, command, &self.parameters.values())?;
+        let preceding = crate::binding::SourceScope::command_target(command, &target);
         let source = command
             .source_input()
-            .map(|source| self.source(source, command.scalar_subqueries(), outer))
+            .map(|source| {
+                self.source_in_scope(
+                    source,
+                    command.scalar_subqueries(),
+                    crate::binding::SourceScope {
+                        outer,
+                        preceding: preceding.as_ref(),
+                        inherited_lateral: false,
+                        retain_names: true,
+                    },
+                )
+            })
             .transpose()?;
         let input = super::SchemaScope::command_input_schema(command, &target, source.as_ref())?;
         let input = outer.map_or(input.clone(), |outer| {

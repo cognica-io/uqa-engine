@@ -79,6 +79,7 @@ fn retained_sources_bind_complete_types_without_sampling_or_exposing_names() {
         assert_eq!(bound.column_collation(1), Some(950));
         assert!(!crate::binding::correlation::query_depends_on_outer_row(
             crate::binding::correlation::CorrelationContext {
+                routines: &super::EmptyRoutineResolution,
                 catalog: context.catalog.as_ref(),
                 resolution: &context.resolution,
                 scoped_relations: None,

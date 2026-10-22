@@ -20922,6 +20922,197 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "lateral_values_match_postgresql_in_live_and_reopened_scopes",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/sql_lateral/values.rs",
+      "capability": "Outer-row VALUES evaluation",
+      "workload": "26 independent PostgreSQL observations and four durable reopen observations across all four providers.",
+      "invariant": "Admitted outer values retain PostgreSQL row types, errors and scalar, EXISTS, IN, routine and stored-view behavior."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "lateral_function_inputs_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/sql_lateral/functions.rs",
+      "capability": "Independent join input demand",
+      "workload": "143 independently captured PostgreSQL observations across memory, native SQLite, SQLite Key/Value and redb; nine function/view observations replay after each persistent reopen.",
+      "invariant": "Independent functions execute once per demanded join input, unmatched RIGHT/FULL rows appear once, forbidden correlations fail before execution and actual outer dependencies retain their calling rows."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "nested_lateral_namespaces_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/sql_lateral/functions.rs",
+      "capability": "Nested LATERAL namespace preservation",
+      "workload": "81 independent PostgreSQL observations across all four providers and eight observations after each durable reopen.",
+      "invariant": "Nested source permissions, same-level ambiguity, mutation target exclusions and unavailable-source diagnostics agree with PostgreSQL through direct, prepared, routine and stored-view execution."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "empty_left_inputs_request_right_rows_only_when_the_join_preserves_them",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/tests/input_demand.rs",
+      "capability": "Bounded demand for independent join inputs",
+      "workload": "Instrumented empty and nonempty probes for nested-loop and hash joins, both streaming build directions and spill budgets.",
+      "invariant": "At most one probe batch establishes demand; empty INNER/LEFT/CROSS joins consume no right rows, while RIGHT/FULL joins preserve their required input."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "lateral_source_dependencies_distinguish_caller_from_local_and_enclosing_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/correlation/tests.rs",
+      "capability": "Scoped join dependency analysis",
+      "workload": "Independent, caller-dependent, enclosing and shadowed references, including exact quoted identifiers.",
+      "invariant": "Explicit permission alone does not create a dependency; lexical locals and enclosing references remain distinct from the current join row."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "lateral_outer_join_permissions_match_postgresql_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/lateral.rs",
+      "capability": "Outer join correlation permissions",
+      "workload": "Independent PostgreSQL forbidden qualified, unqualified, nested and wildcard references.",
+      "invariant": "SQLSTATE, primary and DETAIL/HINT diagnostics remain exact before argument evaluation or folding."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_lateral_namespaces_match_postgresql_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/lateral.rs",
+      "capability": "Shared preparation and storage namespaces",
+      "workload": "Every error in the independent nested namespace fixture through preparation and stored routine binding.",
+      "invariant": "Both analysis paths retain PostgreSQL unavailable names, mutation target permissions and same-level ambiguity."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_lateral_view_keeps_preceding_namespaces",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/lateral.rs",
+      "capability": "Stored LATERAL output descriptor",
+      "workload": "A stored view with LATERAL as the left operand of a nested join after a comma.",
+      "invariant": "Stored binding retains the independently captured PostgreSQL result columns."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_lateral_join_tracks_preceding_columns_across_rename",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/stored_columns/tests.rs",
+      "capability": "Retained LATERAL column dependencies",
+      "workload": "Nested subquery, VALUES and implicit function inputs before and after column rename and serialization.",
+      "invariant": "Every preceding column remains a resolved dependency on its current catalog identity."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "lateral_range_items_retain_permission_inside_nested_join_operands",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/compiler/tests/relations.rs",
+      "capability": "Range-item LATERAL permission",
+      "workload": "Query and VALUES leaves through parsing, rendering, lowering and current/legacy serialization.",
+      "invariant": "Range-item permission survives nested-left placement and is rendered exactly once."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "view_source_lists_preserve_postgresql_comma_and_join_syntax",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/projection/view_definition/sources/tests.rs",
+      "capability": "Stored FROM source syntax",
+      "workload": "Five independently captured PostgreSQL view definitions with nested lateral items, comma lists and explicit CROSS JOIN in both pretty modes.",
+      "invariant": "Rendering preserves original comma and explicit join syntax without evaluating expressions or changing the query input set."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_source_columns_preserve_independent_join_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/correlation/tests.rs",
+      "capability": "Independent FROM input dependencies",
+      "workload": "Six PostgreSQL row/call-count observations for JSON, ordinality, VALUES, derived and joined positional aliases and ROWS FROM, each paired with a true caller-row dependency.",
+      "invariant": "Complete local output columns prevent false per-row dependencies without losing actual references to the caller."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wildcard_sources_preserve_independent_join_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/correlation/tests.rs",
+      "capability": "Independent FROM input dependencies",
+      "workload": "Ten independent PostgreSQL row/call-count observations for wildcard, nested LATERAL, CTE, recursive CTE and USING output descriptors, each paired with a true caller-row reference.",
+      "invariant": "Complete source output names distinguish independent inputs from current-row dependencies while preserving lexical shadowing and positional alias tails."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "correlation_uses_selected_routine_output_without_evaluating_its_body",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/routines/inlining/tests/table.rs",
+      "capability": "Independent FROM input dependencies",
+      "workload": "Overloaded user table functions with partial positional aliases and independent versus caller-dependent projected columns.",
+      "invariant": "Correlation reads the selected routine identity and complete declared output without parsing or executing the routine body."
     }
   ]
 }

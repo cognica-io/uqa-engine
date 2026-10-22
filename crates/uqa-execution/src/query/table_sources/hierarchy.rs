@@ -89,7 +89,7 @@ pub fn build_hierarchy_retrieval_operator<'a, S: Clone>(
             .find(|(_, alias)| alias.eq_ignore_ascii_case(column))
         {
             if let Some(physical) = physical_columns.get(position) {
-                column.clone_from(physical);
+                column.rename(physical);
             }
         }
     });

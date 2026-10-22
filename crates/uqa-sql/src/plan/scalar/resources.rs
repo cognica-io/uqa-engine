@@ -106,6 +106,24 @@ impl Lowering<'_> {
         }
     }
 
+    pub(super) fn reference_name(
+        &mut self,
+        source: Source<'_, crate::ast::ReferenceName>,
+    ) -> Result<crate::ast::ReferenceName> {
+        self.check()?;
+        match source {
+            Source::Owned(name) => Ok(name),
+            Source::Borrowed(name) => self.copy_reference_name(name),
+        }
+    }
+
+    pub(super) fn copy_reference_name(
+        &mut self,
+        name: &crate::ast::ReferenceName,
+    ) -> Result<crate::ast::ReferenceName> {
+        Ok(crate::ast::ReferenceName::from(self.copy_text(name)?).with_position(name.position()))
+    }
+
     pub(super) fn copy_text(&mut self, text: &str) -> Result<String> {
         let control = self
             .control

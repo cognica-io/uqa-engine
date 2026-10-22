@@ -75,7 +75,7 @@ pub(super) fn propagate_source_constants(
             if let ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. } =
                 &projection.expr
             {
-                projection.alias = Some(column.clone());
+                projection.alias = Some(column.to_string());
             }
         }
         rewrite(&mut projection.expr, &mut replace);
@@ -131,6 +131,7 @@ fn constant_view_source(
     }
     // Inspect literal outputs without removing the view source: its authorization, row count and dependency observations still execute normally.
     Ok(Some(SourcePlan::Subquery {
+        lateral: false,
         body: Box::new(body),
         alias: None,
         column_aliases: names,

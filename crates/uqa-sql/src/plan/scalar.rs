@@ -78,12 +78,12 @@ impl Lowering<'_> {
         self.check()?;
         Ok(match expression.node() {
             Node::Star => ScalarExpr::Star,
-            Node::QualifiedStar(name) => ScalarExpr::QualifiedStar(self.text(name)?),
+            Node::QualifiedStar(name) => ScalarExpr::QualifiedStar(self.reference_name(name)?),
             Node::Default => ScalarExpr::Default,
-            Node::Column(name) => ScalarExpr::Column(self.text(name)?),
+            Node::Column(name) => ScalarExpr::Column(self.reference_name(name)?),
             Node::QualifiedColumn { qualifier, column } => ScalarExpr::QualifiedColumn {
                 qualifier: self.text(qualifier)?,
-                column: self.text(column)?,
+                column: self.reference_name(column)?,
             },
             Node::InternalColumn(column) => ScalarExpr::InternalColumn(column),
             Node::Literal(value) => ScalarExpr::Literal(self.value(value)?),

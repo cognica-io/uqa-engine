@@ -672,6 +672,7 @@ fn bind_from(
         FromClause::Table { .. } => from.clone(),
         FromClause::Join { .. } => bind_join_from(from, resolver, inherited, context)?,
         FromClause::Values {
+            lateral,
             rows,
             alias,
             column_aliases,
@@ -679,6 +680,7 @@ fn bind_from(
             internal_column_types,
             internal_column_collations,
         } => FromClause::Values {
+            lateral: *lateral,
             rows: rows
                 .iter()
                 .map(|row| bind_exprs(row, resolver, inherited, context))
@@ -735,10 +737,12 @@ fn bind_from(
             ordinality: *ordinality,
         },
         FromClause::Subquery {
+            lateral,
             body,
             alias,
             column_aliases,
         } => FromClause::Subquery {
+            lateral: *lateral,
             body: Box::new(bind_select_with_scope(body, resolver, inherited, context)?),
             alias: alias.clone(),
             column_aliases: column_aliases.clone(),
@@ -753,6 +757,7 @@ fn bind_join_from(
     context: &RuleBindingContext<'_>,
 ) -> Result<FromClause, SQLError> {
     let FromClause::Join {
+        comma,
         left,
         right,
         kind,
@@ -776,6 +781,7 @@ fn bind_join_from(
     collect_visible_scope(left, context, &mut on_scope)?;
     collect_visible_scope(right, context, &mut on_scope)?;
     Ok(FromClause::Join {
+        comma: *comma,
         left: Box::new(bound_left),
         right: Box::new(bound_right),
         kind: *kind,

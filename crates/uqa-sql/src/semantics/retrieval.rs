@@ -36,8 +36,8 @@ pub fn expect_field_name_or_string(
     evaluate: &mut ArgumentEvaluator<'_>,
 ) -> Result<String, SQLError> {
     match expr {
-        ScalarExpr::Column(name) => Ok(name.clone()),
-        ScalarExpr::QualifiedColumn { column, .. } => Ok(column.clone()),
+        ScalarExpr::Column(name) => Ok(name.to_string()),
+        ScalarExpr::QualifiedColumn { column, .. } => Ok(column.to_string()),
         _ => expect_string(expr, label, evaluate),
     }
 }
@@ -187,8 +187,8 @@ pub fn text_match_field(args: &[ScalarExpr], function_name: &str) -> Result<Stri
         });
     }
     match &args[0] {
-        ScalarExpr::Column(name) => Ok(name.clone()),
-        ScalarExpr::QualifiedColumn { column, .. } => Ok(column.clone()),
+        ScalarExpr::Column(name) => Ok(name.to_string()),
+        ScalarExpr::QualifiedColumn { column, .. } => Ok(column.to_string()),
         ScalarExpr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => Ok("_all".into()),
         other => Err(SQLError::TypeMismatch(format!(
             "{function_name}.field must be a column reference, got {other:?}"

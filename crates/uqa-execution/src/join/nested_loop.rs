@@ -11,7 +11,8 @@ use uqa_sql::expr::truthy;
 use uqa_sql::ResultRow;
 
 use super::{
-    output_schema, push_output_row, HybridRowStore, MatchFlags, DEFAULT_JOIN_WORK_MEM_BYTES,
+    next_nonempty_batch, output_schema, push_output_row, HybridRowStore, MatchFlags,
+    DEFAULT_JOIN_WORK_MEM_BYTES,
 };
 use crate::{
     Batch, ExecError, ExecResult, PhysicalOperator, PhysicalRow, RowSchema, ScalarExpr,
@@ -134,6 +135,16 @@ impl PhysicalOperator for NestedLoopJoin<'_> {
 
         let right_budget = self.work_mem_bytes / 2;
         let output_budget = self.work_mem_bytes.saturating_sub(right_budget);
+        let preserve_right = matches!(self.kind, JoinKind::Right | JoinKind::Full);
+        let mut first_left = None;
+        if !preserve_right {
+            self.left.open()?;
+            first_left = next_nonempty_batch(self.left.as_mut())?;
+            if first_left.is_none() {
+                self.output = Some(SpillBuffer::new(output_budget).drain()?);
+                return Ok(());
+            }
+        }
         let right_schema = self.right.row_schema().clone();
         let mut right = HybridRowStore::new(right_schema, right_budget);
         self.right.open()?;
@@ -149,8 +160,13 @@ impl PhysicalOperator for NestedLoopJoin<'_> {
         let mut output = SpillBuffer::new(output_budget);
         let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
 
-        self.left.open()?;
-        while let Some(batch) = self.left.next()? {
+        if preserve_right {
+            self.left.open()?;
+        }
+        while let Some(batch) = match first_left.take() {
+            Some(batch) => Some(batch),
+            None => self.left.next()?,
+        } {
             for left_row in batch.rows {
                 let mut matched_left = false;
                 for right_index in 0..right.len() {

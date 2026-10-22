@@ -573,7 +573,7 @@ pub(super) fn expand_stars(projections: &[ProjectionPlan], scope: &Scope) -> Vec
                 .map(|column| ProjectionPlan {
                     expr: ScalarExpr::QualifiedColumn {
                         qualifier: column.qualifier.clone(),
-                        column: column.name.clone(),
+                        column: column.name.clone().into(),
                     },
                     alias: None,
                 })

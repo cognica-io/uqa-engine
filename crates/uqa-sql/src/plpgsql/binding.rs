@@ -463,6 +463,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
         crate::ast::FromClause::RetainedRows(_) => from.clone(),
         FromClause::Table { .. } => from.clone(),
         FromClause::Join {
+            comma,
             left,
             right,
             kind,
@@ -473,6 +474,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             column_aliases,
             lateral,
         } => FromClause::Join {
+            comma: *comma,
             left: Box::new(bind_from(left, r)?),
             right: Box::new(bind_from(right, r)?),
             kind: *kind,
@@ -484,6 +486,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             lateral: *lateral,
         },
         FromClause::Values {
+            lateral,
             rows,
             alias,
             column_aliases,
@@ -491,6 +494,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             internal_column_types,
             internal_column_collations,
         } => FromClause::Values {
+            lateral: *lateral,
             rows: bind_rows(rows, r)?,
             alias: alias.clone(),
             column_aliases: column_aliases.clone(),
@@ -544,10 +548,12 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             ordinality: *ordinality,
         },
         FromClause::Subquery {
+            lateral,
             body,
             alias,
             column_aliases,
         } => FromClause::Subquery {
+            lateral: *lateral,
             body: Box::new(bind_select(body, r)?),
             alias: alias.clone(),
             column_aliases: column_aliases.clone(),

@@ -32,6 +32,67 @@ impl Catalog {
 }
 
 #[test]
+fn stored_lateral_join_tracks_preceding_columns_across_rename() {
+    let original = Catalog(vec!["original".into(), "unused".into()]);
+    let renamed = Catalog(vec!["renamed".into(), "unused".into()]);
+    let relation = RelationIdentity::from_legacy_name("public.inputs").unwrap();
+    for source in [
+        "LATERAL (SELECT i.original AS n) r",
+        "LATERAL (VALUES (i.original)) r(n)",
+        "generate_series(i.original, i.original) r(n)",
+    ] {
+        let sql =
+            format!("SELECT r.n FROM public.inputs i, {source} JOIN (VALUES (1)) b(m) ON true");
+        let mut statement = crate::compile(&sql).unwrap().remove(0);
+        bind_stored_statement_source_columns(&mut statement, |name| {
+            original.stored_relation_column_names(name)
+        })
+        .unwrap();
+        let reference = stored_statement_references(original.context(), &statement).unwrap();
+        assert!(
+            reference.unresolved.is_empty(),
+            "{sql}: {:?}",
+            reference.unresolved
+        );
+        assert_eq!(
+            reference.dependencies,
+            BTreeSet::from([RuleColumnDependency {
+                relation: relation.clone(),
+                column: "original".into(),
+            }]),
+            "{sql}"
+        );
+        assert!(
+            rewrite_stored_statement_column(
+                renamed.context(),
+                &mut statement,
+                &relation,
+                "original",
+                "renamed",
+            )
+            .unwrap(),
+            "{sql}"
+        );
+        let restored: Statement =
+            serde_json::from_str(&serde_json::to_string(&statement).unwrap()).unwrap();
+        let reference = stored_statement_references(renamed.context(), &restored).unwrap();
+        assert!(
+            reference.unresolved.is_empty(),
+            "{sql}: {:?}",
+            reference.unresolved
+        );
+        assert_eq!(
+            reference.dependencies,
+            BTreeSet::from([RuleColumnDependency {
+                relation: relation.clone(),
+                column: "renamed".into(),
+            }]),
+            "{sql}"
+        );
+    }
+}
+
+#[test]
 fn stored_values_bind_parameters_and_preserve_column_identity_across_rename() {
     let original = Catalog(vec!["original".into(), "unused".into()]);
     let relation = RelationIdentity::from_legacy_name("public.inputs").unwrap();

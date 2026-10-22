@@ -31,7 +31,7 @@ pub(super) fn key_columns(
             let ty = key_type(resolver, key, columns)?;
             Ok(match key {
                 Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => KeyColumn {
-                    name: name.clone(),
+                    name: name.to_string(),
                     expression: false,
                     ty,
                 },
@@ -56,7 +56,7 @@ pub fn key_type(
             .iter()
             .find(|column| column.name == *name)
             .map(|column| column.ty.clone())
-            .ok_or_else(|| SQLError::UnknownColumn(name.clone()));
+            .ok_or_else(|| SQLError::UnknownColumn(name.to_string()));
     }
     let schema = crate::RowSchema::with_types(
         columns.iter().map(|column| column.name.clone()).collect(),

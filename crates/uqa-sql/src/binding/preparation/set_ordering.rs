@@ -76,7 +76,7 @@ impl QueryOutput {
     }
 
     fn set_column_error(&self, error: SQLError) -> SQLError {
-        let SQLError::UnknownColumn(column) = &error else {
+        let SQLError::UnknownColumn(column) = error.primary() else {
             return error;
         };
         let mut matches = self
@@ -98,5 +98,6 @@ impl QueryOutput {
             }),
             hint: multiple.then(|| "Try using a table-qualified name.".into()),
         }
+        .at_position(error.position())
     }
 }

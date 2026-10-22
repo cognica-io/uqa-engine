@@ -208,6 +208,7 @@ fn from_sql(source: &FromClause) -> Result<String, SQLError> {
             rendered
         }
         FromClause::Join {
+            comma,
             left,
             right,
             kind,
@@ -218,6 +219,18 @@ fn from_sql(source: &FromClause) -> Result<String, SQLError> {
             column_aliases,
             lateral,
         } => {
+            if *comma {
+                let permission = if *lateral && !right.is_explicitly_lateral() {
+                    "LATERAL "
+                } else {
+                    ""
+                };
+                return Ok(format!(
+                    "{}, {permission}{}",
+                    from_sql(left)?,
+                    from_sql(right)?
+                ));
+            }
             let mut rendered = String::from("(");
             rendered.push_str(&from_sql(left)?);
             rendered.push(' ');
@@ -225,6 +238,7 @@ fn from_sql(source: &FromClause) -> Result<String, SQLError> {
                 rendered.push_str("NATURAL ");
             }
             rendered.push_str(match kind {
+                JoinKind::Inner if on.is_none() && using.is_none() && !*natural => "CROSS JOIN",
                 JoinKind::Inner => "JOIN",
                 JoinKind::Left => "LEFT JOIN",
                 JoinKind::Right => "RIGHT JOIN",
@@ -232,7 +246,7 @@ fn from_sql(source: &FromClause) -> Result<String, SQLError> {
                 JoinKind::Cross => "CROSS JOIN",
             });
             rendered.push(' ');
-            if *lateral {
+            if *lateral && !right.is_explicitly_lateral() {
                 rendered.push_str("LATERAL ");
             }
             rendered.push_str(&from_sql(right)?);
@@ -253,12 +267,17 @@ fn from_sql(source: &FromClause) -> Result<String, SQLError> {
             rendered
         }
         FromClause::Values {
+            lateral,
             rows,
             alias,
             column_aliases,
             ..
         } => {
-            let mut rendered = format!("(VALUES {})", rows_sql(rows)?);
+            let mut rendered = format!(
+                "{}(VALUES {})",
+                if *lateral { "LATERAL " } else { "" },
+                rows_sql(rows)?
+            );
             render_relation_alias(&mut rendered, alias.as_deref(), column_aliases);
             rendered
         }
@@ -306,11 +325,16 @@ fn from_sql(source: &FromClause) -> Result<String, SQLError> {
             rendered
         }
         FromClause::Subquery {
+            lateral,
             body,
             alias,
             column_aliases,
         } => {
-            let mut rendered = format!("({})", select_sql(body)?);
+            let mut rendered = format!(
+                "{}({})",
+                if *lateral { "LATERAL " } else { "" },
+                select_sql(body)?
+            );
             render_relation_alias(&mut rendered, alias.as_deref(), column_aliases);
             rendered
         }

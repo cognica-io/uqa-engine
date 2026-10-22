@@ -21,6 +21,7 @@ mod domain_collations;
 mod field_collations;
 mod input_collations;
 mod json_operators;
+mod lateral;
 mod literal_collations;
 mod operator_joins;
 mod ordered_calls;

@@ -66,7 +66,7 @@ fn analyze_key_expression(
             if !columns.iter().any(|column| column.name == *name)
                 && !POSTGRES_SYSTEM_COLUMNS.contains(&name.as_str()) =>
         {
-            return Err(SQLError::UnknownColumn(name.clone()));
+            return Err(SQLError::UnknownColumn(name.to_string()));
         }
         ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }

@@ -38,6 +38,7 @@ pub(super) struct Services {
 impl Services {
     pub fn services(&self) -> SubqueryServices<'_, ()> {
         SubqueryServices {
+            routines: self,
             catalog: self,
             session: self,
             volatility: self,
@@ -220,3 +221,17 @@ pub(super) fn materialized(values: Vec<Value>, budget: usize) -> CachedScalarSub
         rows: spill.into_shared(schema).unwrap(),
     }
 }
+
+impl uqa_sql::FunctionTypeResolver for Services {
+    fn resolve_function_type(
+        &self,
+        _name: &str,
+        _binding: Option<&uqa_sql::ast::FunctionBinding>,
+        _argument_names: &[Option<String>],
+        _argument_types: &[Option<uqa_sql::ColumnType>],
+        _explicit_variadic: bool,
+    ) -> Result<Option<uqa_sql::ColumnType>, uqa_sql::SQLError> {
+        Ok(None)
+    }
+}
+impl uqa_sql::routines::RoutineResolution for Services {}

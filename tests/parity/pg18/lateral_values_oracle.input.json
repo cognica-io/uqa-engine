@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "lateral_rows",
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(2)) t(a), LATERAL (VALUES (t.a),(t.a*10)) v(x) ORDER BY 1,2"
+    },
+    {
+      "id": "lateral_common_type",
+      "sql": "SELECT t.a,v.x,pg_typeof(v.x)::text AS ty FROM (VALUES (1::smallint),(2::smallint)) t(a) CROSS JOIN LATERAL (VALUES (t.a),(2.5::numeric),(NULL)) v(x) ORDER BY 1,2 NULLS LAST"
+    },
+    {
+      "id": "lateral_text_type",
+      "sql": "SELECT t.a,v.x,pg_typeof(v.x)::text AS ty FROM (VALUES ('one'::varchar(4)),('two'::varchar(4))) t(a) CROSS JOIN LATERAL (VALUES (t.a),('fixed')) v(x) ORDER BY 1,2"
+    },
+    {
+      "id": "lateral_left_filter",
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(2),(3)) t(a) LEFT JOIN LATERAL (VALUES (t.a),(NULL)) v(x) ON v.x>1 ORDER BY 1,2"
+    },
+    {
+      "id": "lateral_qualified_filter",
+      "sql": "SELECT t.a,v.x FROM (VALUES (1),(2)) t(a), LATERAL (VALUES (t.a),(t.a*10)) v(x) WHERE v.x>5 ORDER BY 1,2"
+    },
+    {
+      "id": "correlated_max",
+      "sql": "SELECT a,(SELECT max(x) FROM (VALUES (a),(2)) v(x)) AS m FROM (VALUES (1),(3)) t(a) ORDER BY 1"
+    },
+    {
+      "id": "correlated_count",
+      "sql": "SELECT a,(SELECT count(*) FROM (VALUES (a)) v(x) WHERE x>1) AS n FROM (VALUES (1),(3)) t(a) ORDER BY 1"
+    },
+    {
+      "id": "correlated_exists",
+      "sql": "SELECT a,EXISTS(SELECT 1 FROM (VALUES (a),(NULL)) v(x) WHERE x>1) AS found FROM (VALUES (1),(3)) t(a) ORDER BY 1"
+    },
+    {
+      "id": "correlated_in",
+      "sql": "SELECT a,2 IN (SELECT x FROM (VALUES (a),(NULL)) v(x)) AS found FROM (VALUES (1),(2)) t(a) ORDER BY 1"
+    },
+    {
+      "id": "correlated_common_type",
+      "sql": "SELECT a,(SELECT max(x) FROM (VALUES (a),(2.5::numeric)) v(x)) AS m FROM (VALUES (1::smallint),(3::smallint)) t(a) ORDER BY 1"
+    },
+    {
+      "id": "lateral_type_error",
+      "sql": "SELECT v.x FROM (VALUES (1)) t(a),LATERAL (VALUES (t.a),(true)) v(x)"
+    },
+    {
+      "id": "lateral_row_width_error",
+      "sql": "SELECT v.x FROM (VALUES (1)) t(a),LATERAL (VALUES (t.a),(2,3)) v(x)"
+    },
+    {
+      "id": "lateral_missing_column",
+      "sql": "SELECT v.x FROM (VALUES (1)) t(a),LATERAL (VALUES (t.missing)) v(x)"
+    },
+    {
+      "id": "setup_table",
+      "sql": "CREATE TABLE lateral_values_input(a integer PRIMARY KEY)"
+    },
+    {
+      "id": "setup_rows",
+      "sql": "INSERT INTO lateral_values_input VALUES (1),(3)"
+    },
+    {
+      "id": "setup_view",
+      "sql": "CREATE VIEW lateral_values_view AS SELECT t.a,v.x FROM lateral_values_input t,LATERAL (VALUES (t.a),(t.a*10)) v(x)"
+    },
+    {
+      "id": "view_rows",
+      "sql": "SELECT a,x FROM lateral_values_view ORDER BY 1,2"
+    },
+    {
+      "id": "setup_routine",
+      "sql": "CREATE FUNCTION lateral_values_routine(n integer) RETURNS TABLE(x integer) LANGUAGE SQL AS 'SELECT v.x FROM (VALUES (n),(n*10)) v(x) ORDER BY v.x'"
+    },
+    {
+      "id": "routine_rows",
+      "sql": "SELECT * FROM lateral_values_routine(7)"
+    },
+    {
+      "id": "routine_lateral",
+      "sql": "SELECT t.a,r.x FROM lateral_values_input t CROSS JOIN LATERAL lateral_values_routine(t.a) r ORDER BY 1,2"
+    },
+    {
+      "id": "begin_transaction",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "transaction_insert",
+      "sql": "INSERT INTO lateral_values_input VALUES(5)"
+    },
+    {
+      "id": "transaction_rows",
+      "sql": "SELECT a,x FROM lateral_values_view ORDER BY 1,2"
+    },
+    {
+      "id": "rollback_transaction",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "rollback_rows",
+      "sql": "SELECT a,x FROM lateral_values_view ORDER BY 1,2"
+    }
+  ]
+}

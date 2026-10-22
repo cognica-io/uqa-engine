@@ -333,19 +333,10 @@ fn merge_action_syntax_retains_identity_without_binding_ordinary_calls() {
 fn mutation_source_lists_preserve_every_input_and_lateral_marker() {
     fn canonical_cross_join(source: &mut FromClause) {
         if let FromClause::Join {
-            left,
-            right,
-            kind,
-            on,
-            using,
-            natural,
-            ..
+            comma, left, right, ..
         } = source
         {
-            // The parser represents explicit CROSS JOIN as INNER without qualifications.
-            if *kind == JoinKind::Inner && on.is_none() && using.is_none() && !*natural {
-                *kind = JoinKind::Cross;
-            }
+            *comma = false;
             canonical_cross_join(left);
             canonical_cross_join(right);
         }
@@ -373,15 +364,26 @@ fn mutation_source_lists_preserve_every_input_and_lateral_marker() {
             panic!("expected SELECT");
         };
         canonical_cross_join(expected.from.as_mut().expect("source"));
-        let Statement::Update(update) =
+        let Statement::Update(mut update) =
             first(&format!("UPDATE target_rows SET value=99 FROM {listed}"))
         else {
             panic!("expected UPDATE");
         };
-        let Statement::Delete(delete) = first(&format!("DELETE FROM target_rows USING {listed}"))
+        let Statement::Delete(mut delete) =
+            first(&format!("DELETE FROM target_rows USING {listed}"))
         else {
             panic!("expected DELETE");
         };
+        let Statement::Select(listed_select) = first(&format!("SELECT 1 FROM {listed}")) else {
+            panic!("listed SELECT");
+        };
+        assert_eq!(update.from, listed_select.from, "UPDATE preserves {listed}");
+        assert_eq!(
+            delete.using, listed_select.from,
+            "DELETE preserves {listed}"
+        );
+        canonical_cross_join(update.from.as_mut().expect("source"));
+        canonical_cross_join(delete.using.as_mut().expect("source"));
         assert_eq!(update.from, expected.from, "UPDATE {listed}");
         assert_eq!(delete.using, expected.from, "DELETE {listed}");
     }

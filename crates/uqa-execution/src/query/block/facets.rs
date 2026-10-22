@@ -152,7 +152,7 @@ pub fn build_facet_output<'a, S: Clone + Send + Sync + 'static>(
     };
     let group_keys = facet_columns
         .iter()
-        .map(|column| (column.clone(), ScalarExpr::Column(column.clone())))
+        .map(|column| (column.clone(), ScalarExpr::Column(column.clone().into())))
         .collect::<Vec<_>>();
     let work_mem = physical_work_mem_bytes(context.relational.runtime)?;
     let aggregate: Box<dyn PhysicalOperator + '_> = Box::new(HashAggregate::new_with_work_mem(
@@ -170,7 +170,7 @@ pub fn build_facet_output<'a, S: Clone + Send + Sync + 'static>(
     let sort_keys = facet_columns
         .iter()
         .map(|column| SortKey {
-            expr: ScalarExpr::Column(column.clone()),
+            expr: ScalarExpr::Column(column.clone().into()),
             descending: false,
             nulls_first: None,
         })

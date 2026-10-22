@@ -51,6 +51,7 @@ impl Fixture {
         FilterPushdownContext {
             volatility: self,
             correlation: uqa_sql::binding::correlation::CorrelationContext {
+                routines: self,
                 catalog: self,
                 resolution: &self.resolution,
                 scoped_relations: None,
@@ -128,3 +129,17 @@ impl VolatilityCatalog for Fixture {
         Ok(None)
     }
 }
+
+impl uqa_sql::FunctionTypeResolver for Fixture {
+    fn resolve_function_type(
+        &self,
+        _name: &str,
+        _binding: Option<&uqa_sql::ast::FunctionBinding>,
+        _argument_names: &[Option<String>],
+        _argument_types: &[Option<uqa_sql::ColumnType>],
+        _explicit_variadic: bool,
+    ) -> Result<Option<uqa_sql::ColumnType>, uqa_sql::SQLError> {
+        Ok(None)
+    }
+}
+impl uqa_sql::routines::RoutineResolution for Fixture {}

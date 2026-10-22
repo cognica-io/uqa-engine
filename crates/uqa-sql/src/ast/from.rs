@@ -32,10 +32,11 @@ pub enum FromClause {
         #[serde(default = "default_include_descendants")]
         include_descendants: bool,
     },
-    /// `FROM left <kind> right ON predicate`. `lateral` is true when
-    /// the right side is a LATERAL subquery / function -- the engine
-    /// re-evaluates it for every left row.
+    /// `FROM left <kind> right ON predicate`. `lateral` permits the explicit right input to reference preceding sources; actual references determine whether execution needs each left row.
     Join {
+        /// Preserve separate FROM/USING list entries when their Cartesian product is represented by a join.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        comma: bool,
         left: Box<FromClause>,
         right: Box<FromClause>,
         kind: JoinKind,
@@ -64,6 +65,9 @@ pub enum FromClause {
     },
     /// `FROM (VALUES (...)...) [AS <alias>(<col_aliases>)]`.
     Values {
+        /// Whether this range item may read preceding FROM items at its query level.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        lateral: bool,
         rows: Vec<Vec<Expr>>,
         alias: Option<String>,
         column_aliases: Vec<String>,
@@ -130,6 +134,9 @@ pub enum FromClause {
     /// The body re-runs as if a CTE; the alias renames the result
     /// columns when supplied.
     Subquery {
+        /// Whether this range item may read preceding FROM items at its query level.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        lateral: bool,
         body: Box<SelectStmt>,
         alias: Option<String>,
         column_aliases: Vec<String>,
@@ -177,6 +184,14 @@ pub struct JoinUsing {
 }
 
 impl FromClause {
+    /// Explicit LATERAL permission belongs to the range item, including a left operand inside a nested join.
+    pub fn is_explicitly_lateral(&self) -> bool {
+        matches!(
+            self,
+            Self::Values { lateral: true, .. } | Self::Subquery { lateral: true, .. }
+        )
+    }
+
     /// All table names referenced under this clause, in declaration
     /// order. Used by the compiler to resolve unqualified column refs.
     pub fn collect_tables(&self, out: &mut Vec<(String, Option<String>)>) {

@@ -53,10 +53,10 @@ pub enum DirectColumnKey {
 impl DirectColumnKey {
     pub fn compile(expression: &ScalarExpr) -> Option<Self> {
         match expression {
-            ScalarExpr::Column(column) => Some(Self::Column(column.clone())),
+            ScalarExpr::Column(column) => Some(Self::Column(column.to_string())),
             ScalarExpr::QualifiedColumn { qualifier, column } => Some(Self::Qualified {
                 qualifier: qualifier.clone(),
-                column: column.clone(),
+                column: column.to_string(),
             }),
             _ => None,
         }

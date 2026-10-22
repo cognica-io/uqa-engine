@@ -406,8 +406,8 @@ pub fn retrieval_function(name: &str) -> bool {
 
 pub fn expect_column_name(expr: &ScalarExpr, label: &str) -> Result<String, SQLError> {
     match expr {
-        ScalarExpr::Column(name) => Ok(name.clone()),
-        ScalarExpr::QualifiedColumn { column, .. } => Ok(column.clone()),
+        ScalarExpr::Column(name) => Ok(name.to_string()),
+        ScalarExpr::QualifiedColumn { column, .. } => Ok(column.to_string()),
         other => Err(SQLError::TypeMismatch(format!(
             "{label} must be a column reference, got {other:?}"
         ))),

@@ -29,6 +29,7 @@ use uqa_sql::{plan::QueryPlan, SQLError, SQLParam};
 impl Engine {
     pub(crate) fn subquery_services(&self) -> SubqueryServices<'_, StatementReadSnapshot> {
         SubqueryServices {
+            routines: self,
             catalog: self,
             session: self,
             volatility: self,

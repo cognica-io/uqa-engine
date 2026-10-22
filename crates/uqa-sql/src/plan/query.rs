@@ -469,6 +469,7 @@ impl SourcePlan {
                 include_descendants,
             },
             FromClause::Join {
+                comma,
                 left,
                 right,
                 kind,
@@ -479,6 +480,7 @@ impl SourcePlan {
                 column_aliases,
                 lateral,
             } => Self::Join {
+                comma,
                 left: Box::new(Self::lower_with(*left, aggregates, subqueries)),
                 right: Box::new(Self::lower_with(*right, aggregates, subqueries)),
                 kind,
@@ -491,6 +493,7 @@ impl SourcePlan {
                 strategy: JoinExecutionStrategy::Auto,
             },
             FromClause::Values {
+                lateral,
                 rows,
                 alias,
                 column_aliases,
@@ -498,6 +501,7 @@ impl SourcePlan {
                 internal_column_types,
                 internal_column_collations,
             } => Self::Values {
+                lateral,
                 rows: rows
                     .into_iter()
                     .map(|row| {
@@ -563,10 +567,12 @@ impl SourcePlan {
                 ordinality,
             },
             FromClause::Subquery {
+                lateral,
                 body,
                 alias,
                 column_aliases,
             } => Self::Subquery {
+                lateral,
                 body: Box::new(QueryPlan::lower_with(*body, aggregates)),
                 alias,
                 column_aliases,

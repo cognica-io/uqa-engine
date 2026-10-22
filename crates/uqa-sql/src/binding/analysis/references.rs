@@ -14,11 +14,26 @@ use crate::ast::RuleEvent;
 use crate::routines::RoutineResolution;
 use crate::{FunctionTypeResolver, RowSchema, ScalarFrameBound};
 
+pub(super) fn validate_expression(
+    rule_event: Option<RuleEvent>,
+    routines: &dyn RoutineResolution,
+    expression: &ScalarExpr,
+    schema: &RowSchema,
+    fallback: Option<&RowSchema>,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<(), SQLError> {
+    validate_expression_inner(
+        rule_event, routines, expression, schema, fallback, params, resolver,
+    )
+    .map_err(|error| error.at_position(expression.reference_position()))
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "preserves SELECT schema and row identity"
 )]
-pub(super) fn validate_expression(
+fn validate_expression_inner(
     rule_event: Option<RuleEvent>,
     routines: &dyn RoutineResolution,
     expression: &ScalarExpr,
@@ -63,6 +78,11 @@ pub(super) fn validate_expression(
             validate_qualified_column(schema, fallback, qualifier, column)
         }
         ScalarExpr::QualifiedStar(qualifier) => {
+            if schema.has_qualifier(qualifier) {
+                schema.require_lateral_qualifier(qualifier)?;
+            } else if let Some(fallback) = fallback {
+                fallback.require_lateral_qualifier(qualifier)?;
+            }
             if schema.has_qualifier(qualifier)
                 || fallback.is_some_and(|fallback| fallback.has_qualifier(qualifier))
             {
@@ -76,7 +96,12 @@ pub(super) fn validate_expression(
                     ),
                 )
             } else {
-                Err(SQLError::UnknownTable(qualifier.clone()))
+                for candidate in std::iter::once(schema).chain(fallback) {
+                    if let Some(error) = candidate.unavailable_qualifier_error(qualifier) {
+                        return Err(error);
+                    }
+                }
+                Err(SQLError::UnknownTable(qualifier.to_string()))
             }
         }
         ScalarExpr::Func {

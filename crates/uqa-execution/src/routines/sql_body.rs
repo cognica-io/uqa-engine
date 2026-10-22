@@ -108,7 +108,7 @@ pub fn execute_sql_language(
         };
         let statement = statements
             .prepare(plan, position, check)
-            .map_err(|error| error.with_context(frame()))?;
+            .map_err(|error| def.source_body_error(error).with_context(frame()))?;
         let _direct_routine_command = matches!(
             statement.plan(),
             UnifiedPlan::Command(command)
@@ -120,7 +120,7 @@ pub fn execute_sql_language(
         .then(|| DirectRoutineCommandGuard::enter(context.session));
         last = statement
             .execute(context, &params, check)
-            .map_err(|error| error.with_context(frame()))?;
+            .map_err(|error| def.source_body_error(error).with_context(frame()))?;
     }
     let layout = layout
         .into_inner()

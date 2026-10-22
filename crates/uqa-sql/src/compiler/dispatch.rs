@@ -39,6 +39,8 @@ use pg_query::protobuf::SelectStmt;
 #[derive(Debug, Clone)]
 pub struct ParsedStatement<'sql> {
     sql: &'sql str,
+    message: &'sql str,
+    positions: std::sync::Arc<super::source_positions::SourcePositions>,
     node: Box<Node>,
     settings: crate::parser::ParserSettings,
 }
@@ -60,7 +62,16 @@ impl<'sql> ParsedStatement<'sql> {
     /// Compile this statement into the engine's internal SQL representation.
     pub fn compile(&self) -> Result<Statement> {
         crate::parser::with_settings(self.settings, || {
-            let mut statement = compile_stmt(&self.node)?;
+            let mut statement = super::source_positions::with_source(
+                std::sync::Arc::clone(&self.positions),
+                || compile_stmt(&self.node),
+            )?;
+            if let Statement::CreateFunction(definition) = &mut statement {
+                if let crate::ast::FunctionBody::Source(body) = &definition.body {
+                    definition.body_origin =
+                        crate::ast::RoutineBodyOrigin::capture(body, self.message);
+                }
+            }
             if let Statement::CreateForeignServer(server) = &mut statement {
                 super::foreign_servers::retain_string_presence(self.sql, server)?;
             }
@@ -74,6 +85,7 @@ impl<'sql> ParsedStatement<'sql> {
 pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement<'_>>> {
     let parsed = crate::parser::parse(sql)?;
     let mut out = Vec::with_capacity(parsed.protobuf.stmts.len());
+    let positions = std::sync::Arc::new(super::source_positions::SourcePositions::new(sql));
     for raw in parsed.protobuf.stmts {
         let node = raw
             .stmt
@@ -96,6 +108,8 @@ pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement<'_>>> {
         })?;
         out.push(ParsedStatement {
             sql: source,
+            message: sql,
+            positions: std::sync::Arc::clone(&positions),
             node,
             settings: crate::parser::settings(),
         });

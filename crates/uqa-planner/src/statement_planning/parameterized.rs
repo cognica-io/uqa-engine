@@ -99,7 +99,7 @@ fn index_rows(
     else {
         return None;
     };
-    if !fields.contains(column)
+    if !fields.contains(column.as_str())
         || !matches!(
             parameter,
             ScalarExpr::Param(_) | ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. }

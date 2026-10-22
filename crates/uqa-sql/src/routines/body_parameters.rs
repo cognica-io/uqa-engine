@@ -134,7 +134,7 @@ impl ParameterSites {
                     && self.position(&projection.expr).is_some()
                     && chosen.contains(&ordinal.get())
                 {
-                    projection.alias = Some(name.clone());
+                    projection.alias = Some(name.to_string());
                 }
                 Ok(())
             },

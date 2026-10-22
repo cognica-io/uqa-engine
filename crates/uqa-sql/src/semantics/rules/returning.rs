@@ -73,10 +73,11 @@ impl RuleReturningRequest {
             ScalarExpr::Star | ScalarExpr::Column(_) | ScalarExpr::Position(_) => {
                 self.images.insert(RuleReturningImages::CURRENT);
             }
-            ScalarExpr::QualifiedStar(qualifier)
-            | ScalarExpr::QualifiedColumn { qualifier, .. }
-                if !shadowed.contains(&qualifier.to_ascii_lowercase()) =>
-            {
+            ScalarExpr::QualifiedStar(_) | ScalarExpr::QualifiedColumn { .. } => {
+                let qualifier = node.reference_qualifier().expect("qualified reference");
+                if shadowed.contains(&qualifier.to_ascii_lowercase()) {
+                    return;
+                }
                 if qualifier.eq_ignore_ascii_case(&aliases.old) {
                     self.images.insert(RuleReturningImages::OLD);
                 } else if qualifier.eq_ignore_ascii_case(&aliases.new) {
@@ -399,9 +400,12 @@ fn rewrite_rule_returning_image(
         .iter()
         .map(|projection| {
             let expr = match &projection.expr {
-                Expr::Star => Expr::QualifiedStar(image_qualifier.to_string()),
+                Expr::Star => Expr::QualifiedStar(image_qualifier.to_string().into()),
                 Expr::QualifiedStar(qualifier) if resolver.retargets_qualifier(qualifier) => {
-                    Expr::QualifiedStar(image_qualifier.to_string())
+                    Expr::QualifiedStar(
+                        crate::ast::ReferenceName::from(image_qualifier)
+                            .with_position(qualifier.position()),
+                    )
                 }
                 expr => super::action_binding::bind_rule_expr_scoped(
                     expr,

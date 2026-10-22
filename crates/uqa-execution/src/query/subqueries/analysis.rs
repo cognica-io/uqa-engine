@@ -20,6 +20,7 @@ pub(super) fn decorrelate_exists<S: Clone + 'static>(
     let resolution = services.session.relation_name_resolution();
     uqa_sql::binding::correlation::decorrelate_exists(
         CorrelationContext {
+            routines: services.routines,
             catalog: &catalog,
             resolution: &resolution,
             scoped_relations: Some(scope),
@@ -37,6 +38,7 @@ pub(super) fn query_depends_on_outer_row<S: Clone + 'static>(
     let resolution = services.session.relation_name_resolution();
     uqa_sql::binding::correlation::query_depends_on_outer_row(
         CorrelationContext {
+            routines: services.routines,
             catalog: &catalog,
             resolution: &resolution,
             scoped_relations: Some(scope),

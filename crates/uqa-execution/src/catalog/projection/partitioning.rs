@@ -427,7 +427,7 @@ fn partition_key_types(
                     .iter()
                     .find(|column| column.name == *name)
                     .map(|column| column.ty.clone())
-                    .ok_or_else(|| SQLError::UnknownColumn(name.clone()));
+                    .ok_or_else(|| SQLError::UnknownColumn(name.to_string()));
             }
             let expression = uqa_sql::plan::ExpressionPlan::lower(key.clone());
             crate::common_context_expression_type(

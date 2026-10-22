@@ -193,6 +193,9 @@ pub struct CreateFunction {
     /// Lower-cased language name (`plpgsql`, `sql`).
     pub language: String,
     pub body: FunctionBody,
+    /// Original client source mapping, cleared before catalog publication.
+    #[serde(skip)]
+    pub body_origin: Option<super::RoutineBodyOrigin>,
     /// The written form of a SQL-standard body. Definitions stored before the form was recorded omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sql_body_form: Option<SQLBodyForm>,

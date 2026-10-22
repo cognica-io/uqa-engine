@@ -10,7 +10,7 @@ use super::{
     cte_references_own_name, extend_cte_generated_schema, extend_recursive_cte_binding_schema,
     operator_join_relation_schemas, overlay_outer_schema, rename_schema, BindingContext,
     ColumnType, QueryPlan, RelationalPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope,
-    SourcePlan,
+    SourcePlan, SourceScope,
 };
 use crate::ast::FunctionBinding;
 use crate::plan::ExpressionPlan;
@@ -289,10 +289,12 @@ impl SchemaScope {
                 if self.preserve_syntax_shape {
                     // Stored syntax keeps `*` and output-name references as written; expanding a copy still reports their errors.
                     let mut expanded = (**block).clone();
-                    expanded.projections = crate::semantics::expand_bound_projection_stars(
-                        &block.projections,
-                        &source_schema,
-                    )?;
+                    expanded.projections =
+                        crate::semantics::expand_bound_projection_stars_in_scope(
+                            &block.projections,
+                            &source_schema,
+                            &expression_schema,
+                        )?;
                     self.bind_grouping_variable_sites(&mut expanded, &source_schema);
                     crate::semantics::grouping_sets::bind_grouping_names(
                         routines,
@@ -302,9 +304,10 @@ impl SchemaScope {
                         params,
                     )?;
                 } else {
-                    block.projections = crate::semantics::expand_bound_projection_stars(
+                    block.projections = crate::semantics::expand_bound_projection_stars_in_scope(
                         &block.projections,
                         &source_schema,
+                        &expression_schema,
                     )?;
                     self.bind_grouping_variable_sites(block, &source_schema);
                     crate::semantics::grouping_sets::bind_grouping_names(
@@ -458,10 +461,6 @@ impl SchemaScope {
         self.bind_root(routines, root, params, outer)
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "preserves SELECT schema and row identity"
-    )]
     pub(super) fn bind_source_routines_for_storage(
         &mut self,
         engine: &dyn RoutineResolution,
@@ -470,6 +469,31 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
+        self.bind_source_routines_in_scope(
+            engine,
+            source,
+            subqueries,
+            params,
+            SourceScope::new(outer),
+        )
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves SELECT schema and row identity"
+    )]
+    pub(super) fn bind_source_routines_in_scope(
+        &mut self,
+        engine: &dyn RoutineResolution,
+        source: &mut SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        scope: SourceScope<'_>,
+    ) -> Result<(), SQLError> {
+        let input = (!matches!(source, SourcePlan::Join { .. }))
+            .then(|| scope.input(source))
+            .flatten();
+        let outer = input.as_ref();
         match source {
             crate::plan::SourcePlan::RetainedRows(_) => Ok(()),
             SourcePlan::Join {
@@ -477,29 +501,37 @@ impl SchemaScope {
                 right,
                 on,
                 lateral,
+                kind,
                 ..
             } => {
-                self.bind_source_routines_for_storage(engine, left, subqueries, params, outer)?;
-                let left_schema = self.bind_source(engine, left, subqueries, params, outer)?;
-                let implicit_lateral_function = matches!(
-                    right.as_ref(),
-                    SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
-                );
-                let right_scope = (*lateral || implicit_lateral_function)
-                    .then(|| overlay_outer_schema(&left_schema, outer));
-                let right_outer = right_scope.as_ref().or(outer);
-                self.bind_source_routines_for_storage(
+                self.bind_source_routines_in_scope(
                     engine,
-                    right,
+                    left,
                     subqueries,
                     params,
-                    right_outer,
+                    scope.with_names(),
                 )?;
+                let left_schema = self.bind_source_in_scope(
+                    engine,
+                    left,
+                    subqueries,
+                    params,
+                    scope.with_names(),
+                )?;
+                let preceding = scope.right_namespace(left, &left_schema, *kind);
+                let right_scope = SourceScope {
+                    outer: scope.outer,
+                    preceding: Some(&preceding),
+                    inherited_lateral: *lateral,
+                    retain_names: true,
+                };
+                self.bind_source_routines_in_scope(engine, right, subqueries, params, right_scope)?;
                 if let Some(on) = on {
                     let right_schema =
-                        self.bind_source(engine, right, subqueries, params, right_outer)?;
+                        self.bind_source_in_scope(engine, right, subqueries, params, right_scope)?;
                     let input = RowSchema::join(&left_schema, &right_schema, std::iter::empty());
-                    let input = overlay_outer_schema(&input, outer);
+                    let condition = scope.condition();
+                    let input = overlay_outer_schema(&input, condition.as_ref());
                     self.bind_scalar_routines_for_storage(engine, on, &input, subqueries, params)?;
                 }
                 Ok(())

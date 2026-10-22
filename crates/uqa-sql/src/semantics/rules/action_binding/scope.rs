@@ -128,6 +128,7 @@ fn source_names(
             body,
             alias,
             column_aliases,
+            ..
         } => Ok(aliased_source_names(
             select_output_columns(body, context)?,
             alias.as_deref(),
@@ -399,7 +400,7 @@ fn projection_output_columns(
                 }
             }
             Expr::Column(column) | Expr::QualifiedColumn { column, .. } => {
-                columns.push(column.clone());
+                columns.push(column.to_string());
             }
             Expr::Func {
                 name,
