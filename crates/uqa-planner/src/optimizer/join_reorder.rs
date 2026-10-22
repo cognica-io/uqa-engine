@@ -416,6 +416,7 @@ fn flatten_reorderable_inner_join(
             column_aliases,
             lateral: false,
             strategy: _,
+            ..
         } => {
             if !column_aliases.is_empty() {
                 return false;
@@ -740,6 +741,7 @@ fn materialize_join_order(
             right,
             ..
         } => Ok(SourcePlan::Join {
+            comma: false,
             left: Box::new(materialize_join_order(*left, atoms)?),
             right: Box::new(materialize_join_order(*right, atoms)?),
             kind: uqa_sql::ast::JoinKind::Inner,
@@ -754,6 +756,7 @@ fn materialize_join_order(
             },
         }),
         JoinOrderTree::Cross { left, right } => Ok(SourcePlan::Join {
+            comma: false,
             left: Box::new(materialize_join_order(*left, atoms)?),
             right: Box::new(materialize_join_order(*right, atoms)?),
             kind: uqa_sql::ast::JoinKind::Inner,

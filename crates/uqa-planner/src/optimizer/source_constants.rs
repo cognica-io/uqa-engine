@@ -131,6 +131,7 @@ fn constant_view_source(
     }
     // Inspect literal outputs without removing the view source: its authorization, row count and dependency observations still execute normally.
     Ok(Some(SourcePlan::Subquery {
+        lateral: false,
         body: Box::new(body),
         alias: None,
         column_aliases: names,

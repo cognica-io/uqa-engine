@@ -80,6 +80,7 @@ pub(in crate::compiler) fn compile_select(
     // A bare VALUES statement can use the compact Statement::Values path, but ordering or slicing turns VALUES into a complete query expression. Put its rows below a star projection so those clauses are planned instead of being discarded by the standalone VALUES executor.
     if !values.is_empty() && (!order_by.is_empty() || limit.is_some() || offset.is_some()) {
         from = Some(FromClause::Values {
+            lateral: false,
             rows: std::mem::take(&mut values),
             alias: None,
             column_aliases: Vec::new(),

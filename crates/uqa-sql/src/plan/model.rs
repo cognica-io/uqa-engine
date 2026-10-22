@@ -255,6 +255,9 @@ pub enum SourcePlan {
         include_descendants: bool,
     },
     Join {
+        /// Whether this Cartesian product retains a comma-separated source list.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        comma: bool,
         left: Box<SourcePlan>,
         right: Box<SourcePlan>,
         kind: crate::ast::JoinKind,
@@ -272,6 +275,9 @@ pub enum SourcePlan {
         strategy: JoinExecutionStrategy,
     },
     Values {
+        /// Whether this range item may read preceding FROM items at its query level.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        lateral: bool,
         rows: Vec<Vec<ScalarExpr>>,
         alias: Option<String>,
         column_aliases: Vec<String>,
@@ -305,6 +311,9 @@ pub enum SourcePlan {
         ordinality: bool,
     },
     Subquery {
+        /// Whether this range item may read preceding FROM items at its query level.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        lateral: bool,
         body: Box<QueryPlan>,
         alias: Option<String>,
         column_aliases: Vec<String>,

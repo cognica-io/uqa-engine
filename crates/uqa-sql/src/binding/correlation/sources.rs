@@ -35,7 +35,31 @@ pub(super) fn source_references_outer(
     scopes: &mut Vec<QueryScope>,
     ctes: &BTreeMap<String, RelationColumns>,
 ) -> Result<bool, SQLError> {
-    match source {
+    source_references_outer_in_scope(context, source, subqueries, scopes, ctes, &[], false)
+}
+
+fn source_references_outer_in_scope(
+    context: CorrelationContext<'_>,
+    source: &SourcePlan,
+    subqueries: &[QueryPlan],
+    scopes: &mut Vec<QueryScope>,
+    ctes: &BTreeMap<String, RelationColumns>,
+    preceding: &[QueryScope],
+    inherited_lateral: bool,
+) -> Result<bool, SQLError> {
+    let length = scopes.len();
+    if inherited_lateral
+        || matches!(
+            source,
+            SourcePlan::Function { .. }
+                | SourcePlan::FunctionGroup { .. }
+                | SourcePlan::Values { lateral: true, .. }
+                | SourcePlan::Subquery { lateral: true, .. }
+        )
+    {
+        scopes.extend_from_slice(preceding);
+    }
+    let result = (|| match source {
         SourcePlan::RetainedRows(_) | SourcePlan::Table { .. } => Ok(false),
         SourcePlan::Join {
             left,
@@ -44,35 +68,30 @@ pub(super) fn source_references_outer(
             lateral,
             ..
         } => {
-            if source_references_outer(context, left, subqueries, scopes, ctes)? {
+            if source_references_outer_in_scope(
+                context, left, subqueries, scopes, ctes, preceding, false,
+            )? {
                 return Ok(true);
             }
-            let sees_left = *lateral
-                || matches!(
-                    right.as_ref(),
-                    SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
-                );
-            if sees_left {
-                scopes.push(source_scope(context, left, ctes)?);
-            }
-            let result = source_references_outer(context, right, subqueries, scopes, ctes);
-            if sees_left {
-                scopes.pop();
-            }
-            if result? {
+            let mut right_preceding = preceding.to_vec();
+            right_preceding.push(source_scope(context, left, ctes)?);
+            if source_references_outer_in_scope(
+                context,
+                right,
+                subqueries,
+                scopes,
+                ctes,
+                &right_preceding,
+                *lateral,
+            )? {
                 return Ok(true);
             }
             let Some(on) = on else {
                 return Ok(false);
             };
-            let left_scope = source_scope(context, left, ctes)?;
-            let right_scope = source_scope(context, right, ctes)?;
-            scopes.push(left_scope);
-            scopes.push(right_scope);
-            let result = expression_references_outer(context, on, subqueries, scopes, ctes);
-            scopes.pop();
-            scopes.pop();
-            result
+            scopes.push(source_scope(context, left, ctes)?);
+            scopes.push(source_scope(context, right, ctes)?);
+            expression_references_outer(context, on, subqueries, scopes, ctes)
         }
         SourcePlan::Values { rows, .. } => {
             for expression in rows.iter().flatten() {
@@ -94,7 +113,9 @@ pub(super) fn source_references_outer(
             Ok(false)
         }
         SourcePlan::Subquery { body, .. } => query_references_outer(context, body, scopes, ctes),
-    }
+    })();
+    scopes.truncate(length);
+    result
 }
 
 fn arguments_reference_outer(

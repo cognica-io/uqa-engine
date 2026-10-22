@@ -42,6 +42,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
             column_aliases,
             lateral,
             strategy,
+            ..
         } => {
             // A join alias hides the joined relations from the enclosing query block. The projections and predicates that block placed by relation name therefore cannot address any relation inside the alias, including one that reuses an outer name; conjuncts on the alias itself stay in the block's residual filter.
             let (prune, filters) = if alias.is_some() {
@@ -89,7 +90,15 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .propagated_join_filters(filters, left, right, on.as_ref())
             });
             let right_filter_ref = right_filters.as_ref().or(filters);
-            let lateral_input = (*lateral || implicit_lateral_function).then(|| {
+            let lateral_input = (*lateral
+                || implicit_lateral_function
+                || matches!(
+                    right.as_ref(),
+                    SourcePlan::Join { .. }
+                        | SourcePlan::Values { lateral: true, .. }
+                        | SourcePlan::Subquery { lateral: true, .. }
+                ))
+            .then(|| {
                 ctes.row_lock_outer_row().map_or_else(
                     || left_operator.row_schema().clone(),
                     |outer| {

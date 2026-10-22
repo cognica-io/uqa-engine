@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Empty probes preserve PostgreSQL's demand for independent function inputs.
+//! Empty probes preserve `PostgreSQL`'s demand for independent function inputs.
 
 use super::*;
 

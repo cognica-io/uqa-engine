@@ -1,6 +1,10 @@
 # Upgrading UQA Engine
 
-This page describes UQA Engine 0.6.1 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.1/docs/manual/reference/10-upgrading.md) when installing the 0.6.1 packages.
+This page describes unreleased changes and UQA Engine 0.6.1 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.1/docs/manual/reference/10-upgrading.md) when installing the 0.6.1 packages.
+
+## Unreleased
+
+Custom Rust AST and plan builders now provide `lateral: bool` in `FromClause::Values`, `FromClause::Subquery`, `SourcePlan::Values` and `SourcePlan::Subquery`. Set it on the range item that may reference preceding FROM inputs, including a left operand inside a nested join. This is permission to reference a preceding row, not a requirement to execute an independent input repeatedly. Existing serialized nodes default the absent flag to `false`; the older right-input `Join::lateral` flag remains honored. Use updated binaries when creating and reading newly supported nested LATERAL definitions. The `Join` variants of both enums also require `comma: bool`: use `true` for a join compiled from a comma-separated FROM list and `false` for an explicit JOIN. Absent serialized flags decode as `false`; old definitions have already lost that syntax distinction. Newly stored definitions preserve it for `pg_get_viewdef`.
 
 ## 0.6.1
 

@@ -8,7 +8,7 @@
 
 use crate::semantics::{join_alias_input_schemas, resolve_join_using};
 use crate::{
-    binding::{bind_source_plan_schema, context::BindingContext},
+    binding::{bind_source_plan_schema_in_scope, context::BindingContext, SourceScope},
     plan::SourcePlan,
     routines::RoutineResolution,
     RowSchema, SQLError, SQLParam, ScalarExpr,
@@ -33,7 +33,7 @@ pub fn reduce_null_rejected_outer_joins_to_fixpoint(
                 qualification,
                 params,
                 context,
-                None,
+                SourceScope::new(None),
             )?;
         }
         if !changed {
@@ -72,7 +72,7 @@ fn reduce_null_rejected_outer_joins(
     predicate: &ScalarExpr,
     params: &[SQLParam],
     context: &BindingContext<'_>,
-    outer: Option<&RowSchema>,
+    scope: SourceScope<'_>,
 ) -> Result<bool, SQLError> {
     let SourcePlan::Join {
         left,
@@ -88,15 +88,17 @@ fn reduce_null_rejected_outer_joins(
     else {
         return Ok(false);
     };
-    let left_schema = bind_source_plan_schema(routines, left, params, context, outer)?;
-    let implicit_lateral_function = matches!(
-        right.as_ref(),
-        SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
-    );
-    let right_scope =
-        (*lateral || implicit_lateral_function).then(|| overlay_outer_schema(&left_schema, outer));
-    let right_outer = right_scope.as_ref().or(outer);
-    let right_schema = bind_source_plan_schema(routines, right, params, context, right_outer)?;
+    let left_schema =
+        bind_source_plan_schema_in_scope(routines, left, params, context, scope.with_names())?;
+    let preceding = scope.right_namespace(left, &left_schema, *kind);
+    let right_scope = SourceScope {
+        outer: scope.outer,
+        preceding: Some(&preceding),
+        inherited_lateral: *lateral,
+        retain_names: true,
+    };
+    let right_schema =
+        bind_source_plan_schema_in_scope(routines, right, params, context, right_scope)?;
     let resolved_using = resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
     let (left_predicate_schema, right_predicate_schema) = match alias.as_deref() {
         Some(alias) => join_alias_input_schemas(
@@ -134,23 +136,10 @@ fn reduce_null_rejected_outer_joins(
     };
     let mut changed = reduced != *kind;
     *kind = reduced;
-    changed |= reduce_null_rejected_outer_joins(routines, left, predicate, params, context, outer)?;
+    changed |= reduce_null_rejected_outer_joins(routines, left, predicate, params, context, scope)?;
     changed |=
-        reduce_null_rejected_outer_joins(routines, right, predicate, params, context, right_outer)?;
+        reduce_null_rejected_outer_joins(routines, right, predicate, params, context, right_scope)?;
     Ok(changed)
-}
-
-fn overlay_outer_schema(current: &RowSchema, outer: Option<&RowSchema>) -> RowSchema {
-    let Some(outer) = outer else {
-        return current.clone();
-    };
-    let columns = outer
-        .identities()
-        .iter()
-        .enumerate()
-        .map(|(position, identity)| (identity.clone(), outer.column_type(position).cloned()))
-        .collect::<Vec<_>>();
-    RowSchema::with_typed_outer_identities(current, &columns)
 }
 
 const TRUTH_FALSE: u8 = 1;

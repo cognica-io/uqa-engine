@@ -27,6 +27,7 @@ fn qualified_literal_equality(qualifier: &str, column: &str, value: &str) -> Sca
 
 fn joined_source(kind: JoinKind, on: ScalarExpr) -> SourcePlan {
     SourcePlan::Join {
+        comma: false,
         left: Box::new(SourcePlan::Table {
             executable_query: None,
             bound_columns: None,
@@ -151,6 +152,7 @@ fn unaliased_relations_keep_their_columns_from_the_only_named_relation() {
     let one = || ScalarExpr::Literal(Value::Int(1));
     for unaliased in [
         SourcePlan::Values {
+            lateral: false,
             rows: vec![vec![one()]],
             alias: None,
             column_aliases: Vec::new(),
@@ -159,12 +161,14 @@ fn unaliased_relations_keep_their_columns_from_the_only_named_relation() {
             internal_column_collations: Vec::new(),
         },
         SourcePlan::Subquery {
+            lateral: false,
             body: body.clone(),
             alias: None,
             column_aliases: Vec::new(),
         },
     ] {
         let from = SourcePlan::Join {
+            comma: false,
             left: Box::new(SourcePlan::Table {
                 executable_query: None,
                 bound_columns: None,
@@ -363,6 +367,7 @@ fn outer_join_marks_only_null_extended_qualifiers_as_unsafe_for_pushdown() {
 
     let nested_outer = joined_source(JoinKind::Left, equality("l.key", "r.key"));
     let nested_alias = SourcePlan::Join {
+        comma: false,
         left: Box::new(nested_outer),
         right: Box::new(SourcePlan::Table {
             executable_query: None,

@@ -584,6 +584,7 @@ fn analyze_source_lineage(
             body,
             alias,
             column_aliases,
+            ..
         } => {
             analyze_query_plan(body, ctes, outer_scopes, universe, required)?;
             let mut columns =

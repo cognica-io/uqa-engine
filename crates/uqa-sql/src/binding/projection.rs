@@ -267,6 +267,9 @@ pub(super) fn projection_star_columns(
                 })
                 .collect::<Vec<_>>();
             if columns.is_empty() {
+                if let Some(error) = schema.unavailable_qualifier_error(qualifier) {
+                    return Err(error);
+                }
                 return Err(SQLError::UnknownTable(qualifier.clone()));
             }
             Ok(Some(columns))

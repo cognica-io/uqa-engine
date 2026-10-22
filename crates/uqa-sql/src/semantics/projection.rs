@@ -209,6 +209,15 @@ pub fn expand_bound_projection_stars(
     projections: &[ProjectionPlan],
     schema: &RowSchema,
 ) -> Result<Vec<ProjectionPlan>, SQLError> {
+    expand_bound_projection_stars_in_scope(projections, schema, schema)
+}
+
+/// Bare stars expand the local FROM output, while qualified stars can select an admitted enclosing namespace.
+pub fn expand_bound_projection_stars_in_scope(
+    projections: &[ProjectionPlan],
+    schema: &RowSchema,
+    expression_schema: &RowSchema,
+) -> Result<Vec<ProjectionPlan>, SQLError> {
     let mut expanded = Vec::new();
     for projection in projections {
         match &projection.expr {
@@ -224,8 +233,13 @@ pub fn expand_bound_projection_stars(
                 }
             }
             ScalarExpr::QualifiedStar(qualifier) => {
+                let schema = expression_schema;
+                schema.require_lateral_qualifier(qualifier)?;
                 let layout = schema.qualified_star_position_layout(qualifier);
                 if layout.is_empty() {
+                    if let Some(error) = schema.unavailable_qualifier_error(qualifier) {
+                        return Err(error);
+                    }
                     return Err(SQLError::UnknownTable(qualifier.clone()));
                 }
                 for (column, logical, _, _) in layout {

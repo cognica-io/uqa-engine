@@ -291,6 +291,7 @@ fn merge_statement_routine_inputs(plan: &MergePlan) -> CommandRoutineInputs {
         include_descendants: plan.include_descendants,
     };
     let source = SourcePlan::Join {
+        comma: false,
         left: Box::new(target),
         right: plan.source.clone(),
         kind: crate::ast::JoinKind::Cross,
@@ -393,6 +394,7 @@ fn insert_statement_routine_inputs(
             .map(|projection| projection.expr.clone()),
     );
     let source = plan.source.as_ref().map(|source| SourcePlan::Subquery {
+        lateral: false,
         body: Box::new((**source).clone()),
         alias: Some("__uqa_catalog_statement_source".into()),
         column_aliases: Vec::new(),

@@ -436,6 +436,7 @@ fn add_all_source_columns_to_prune(
             body,
             alias,
             column_aliases,
+            ..
         } => {
             let Some(columns) = alias.as_ref().and_then(|alias| prune.get_mut(alias)) else {
                 return Ok(());

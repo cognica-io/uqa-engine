@@ -81,6 +81,11 @@ pub(super) fn validate_expression(
                     ),
                 )
             } else {
+                for candidate in std::iter::once(schema).chain(fallback) {
+                    if let Some(error) = candidate.unavailable_qualifier_error(qualifier) {
+                        return Err(error);
+                    }
+                }
                 Err(SQLError::UnknownTable(qualifier.clone()))
             }
         }

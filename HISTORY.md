@@ -14,6 +14,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Preserve quoted identifier identity when detecting correlated LATERAL inputs, scalar subqueries and EXISTS predicates, including differently cased CTE names.
 
+- Preserve preceding FROM namespaces through nested explicit joins, including LATERAL items on a nested join's left side. Keep PostgreSQL ambiguity and unavailable-source diagnostics for queries and mutation sources, and retain the same scopes in prepared inputs, stored views and SQL routine binding. Preserve comma-separated FROM syntax in stored view definitions independently of explicit CROSS JOIN, and render existing unconditional inner-join definitions as CROSS JOIN.
+
+### Changed
+
+- Rust constructors for `FromClause::Values`, `FromClause::Subquery`, `SourcePlan::Values` and `SourcePlan::Subquery` now supply a `lateral` flag belonging to that range item. Existing serialized nodes without the field still decode; legacy right-side permission on `Join::lateral` remains supported. `FromClause::Join` and `SourcePlan::Join` also supply `comma` to distinguish source lists from explicit joins.
+
 ## [0.6.1] - 2026-10-22
 
 ### Added

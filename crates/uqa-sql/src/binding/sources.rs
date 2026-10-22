@@ -12,8 +12,8 @@ use crate::RowSchema;
 use crate::{SQLError, SQLParam};
 
 use super::{
-    analysis, lateral_join_scope, operator_join_relation_schemas, projection::rename_schema,
-    BindingContext, ScalarExpr, SchemaScope,
+    analysis, operator_join_relation_schemas, projection::rename_schema, BindingContext,
+    ScalarExpr, SchemaScope, SourceScope,
 };
 use crate::routines::RoutineResolution;
 
@@ -99,6 +99,23 @@ pub fn bind_source_plan_schema(
     )
 }
 
+/// Bind a FROM item while retaining the distinction between lexical ancestors and preceding peers for consumers which traverse a source tree.
+pub fn bind_source_plan_schema_in_scope(
+    routines: &dyn RoutineResolution,
+    source: &SourcePlan,
+    params: &[SQLParam],
+    ctes: &BindingContext,
+    scope: SourceScope<'_>,
+) -> Result<RowSchema, SQLError> {
+    SchemaScope::from_context(ctes)?.bind_source_in_scope(
+        routines,
+        source,
+        ctes.scalar_subqueries,
+        params,
+        scope,
+    )
+}
+
 /// Add query-block pseudo columns after the complete source scope is known, so `_meta` is exposed only for one unambiguous local-table source and never shadows a real relation alias.
 pub fn with_query_table_pseudo_columns(schema: &RowSchema) -> RowSchema {
     analysis::with_unqualified_table_pseudo_columns(schema)
@@ -147,6 +164,23 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
+        self.bind_source_in_scope(
+            routines,
+            source,
+            subqueries,
+            params,
+            SourceScope::new(outer),
+        )
+    }
+
+    pub(super) fn bind_source_in_scope(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        source: &SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        scope: SourceScope<'_>,
+    ) -> Result<RowSchema, SQLError> {
         let bound = matches!(
             source,
             SourcePlan::Table {
@@ -158,11 +192,17 @@ impl SchemaScope {
             self.resolution
                 .set_lookup_mode(crate::catalog::resolution::RelationLookupMode::Bound)
         });
-        let result = self.bind_source_inner(routines, source, subqueries, params, outer);
+        let result = self.bind_source_inner(routines, source, subqueries, params, scope);
         if let Some(previous) = previous {
             self.resolution.set_lookup_mode(previous);
         }
-        result
+        result.map(|schema| {
+            if scope.retain_names {
+                SourceScope::describe_output(source, schema)
+            } else {
+                schema
+            }
+        })
     }
 }
 
@@ -175,6 +215,45 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
+        self.bind_source_for_execution_in_scope(
+            routines,
+            source,
+            subqueries,
+            params,
+            SourceScope::new(outer),
+        )
+    }
+
+    fn bind_source_for_execution_in_scope(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        source: &mut SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        scope: SourceScope<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        let schema = self.bind_source_for_execution_in_scope_inner(
+            routines, source, subqueries, params, scope,
+        )?;
+        Ok(if scope.retain_names {
+            SourceScope::describe_output(source, schema)
+        } else {
+            schema
+        })
+    }
+
+    fn bind_source_for_execution_in_scope_inner(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        source: &mut SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        scope: SourceScope<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        let input = (!matches!(source, SourcePlan::Join { .. }))
+            .then(|| scope.input(source))
+            .flatten();
+        let outer = input.as_ref();
         match source {
             crate::plan::SourcePlan::RetainedRows(_) => {}
             SourcePlan::Join {
@@ -189,21 +268,27 @@ impl SchemaScope {
                 lateral,
                 ..
             } => {
-                let left_schema =
-                    self.bind_source_for_execution(routines, left, subqueries, params, outer)?;
-                let implicit_lateral_function = matches!(
-                    right.as_ref(),
-                    SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
-                );
-                let right_scope = (*lateral || implicit_lateral_function)
-                    .then(|| lateral_join_scope(left, &left_schema, outer, *kind));
-                let right_schema = self.bind_source_for_execution(
+                let left_schema = self.bind_source_for_execution_in_scope(
+                    routines,
+                    left,
+                    subqueries,
+                    params,
+                    scope.with_names(),
+                )?;
+                let preceding = scope.right_namespace(left, &left_schema, *kind);
+                let right_schema = self.bind_source_for_execution_in_scope(
                     routines,
                     right,
                     subqueries,
                     params,
-                    right_scope.as_ref().or(outer),
+                    SourceScope {
+                        outer: scope.outer,
+                        preceding: Some(&preceding),
+                        inherited_lateral: *lateral,
+                        retain_names: true,
+                    },
                 )?;
+                let condition = scope.condition();
                 return self.bind_join_output_schema(JoinSchemaBinding {
                     routines,
                     kind: *kind,
@@ -216,7 +301,7 @@ impl SchemaScope {
                     right: &right_schema,
                     subqueries,
                     params,
-                    outer,
+                    outer: condition.as_ref(),
                 });
             }
             SourcePlan::Function {

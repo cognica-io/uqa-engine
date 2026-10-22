@@ -671,10 +671,36 @@ impl<'a> StoredColumnBinder<'a> {
         outer: &[ColumnScope],
         context: &ColumnBindingContext,
     ) -> Result<ColumnScope, SQLError> {
+        self.bind_from_in_scope(source, outer, None, false, context)
+    }
+
+    fn bind_from_in_scope(
+        &mut self,
+        source: &mut FromClause,
+        outer: &[ColumnScope],
+        preceding: Option<&ColumnScope>,
+        inherited_lateral: bool,
+        context: &ColumnBindingContext,
+    ) -> Result<ColumnScope, SQLError> {
+        if matches!(source, FromClause::Join { .. }) {
+            return self.bind_join(source, outer, preceding, context);
+        }
+        let active = inherited_lateral
+            || source.is_explicitly_lateral()
+            || matches!(
+                source,
+                FromClause::Function { .. } | FromClause::FunctionGroup { .. }
+            );
+        let mut input = Vec::new();
+        if active {
+            input.extend(preceding.cloned());
+        }
+        input.extend_from_slice(outer);
+        let outer = input.as_slice();
         match source {
             crate::ast::FromClause::RetainedRows(_) => Ok(opaque_scope(&[], None)),
             source @ FromClause::Table { .. } => self.bind_table_source(source, context),
-            source @ FromClause::Join { .. } => self.bind_join(source, outer, context),
+            FromClause::Join { .. } => unreachable!("joins retain their preceding namespace"),
             FromClause::Values {
                 rows,
                 alias,
@@ -746,6 +772,7 @@ impl<'a> StoredColumnBinder<'a> {
                 body,
                 alias,
                 column_aliases,
+                ..
             } => {
                 self.bind_select(body, outer, context)?;
                 let mut columns = select_output_names(body);
@@ -759,6 +786,7 @@ impl<'a> StoredColumnBinder<'a> {
         &mut self,
         source: &mut FromClause,
         outer: &[ColumnScope],
+        preceding: Option<&ColumnScope>,
         context: &ColumnBindingContext,
     ) -> Result<ColumnScope, SQLError> {
         let FromClause::Join {
@@ -788,13 +816,13 @@ impl<'a> StoredColumnBinder<'a> {
                 preserve_table_column_name(self.catalog, right, relation, from, to)?;
             }
         }
-        let left_scope = self.bind_from(left, outer, context)?;
-        let mut right_outer = Vec::new();
-        if *lateral {
-            right_outer.push(left_scope.clone());
-        }
-        right_outer.extend_from_slice(outer);
-        let right_scope = self.bind_from(right, &right_outer, context)?;
+        let left_scope = self.bind_from_in_scope(left, outer, preceding, false, context)?;
+        let right_preceding = preceding.map_or_else(
+            || left_scope.clone(),
+            |preceding| ColumnScope::combined(preceding, &left_scope),
+        );
+        let right_scope =
+            self.bind_from_in_scope(right, outer, Some(&right_preceding), *lateral, context)?;
         let input_scope = ColumnScope::combined(&left_scope, &right_scope);
         let mut on_scopes = vec![input_scope];
         on_scopes.extend_from_slice(outer);

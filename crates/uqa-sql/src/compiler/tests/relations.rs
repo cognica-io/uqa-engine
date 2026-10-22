@@ -9,6 +9,63 @@
 use super::*;
 
 #[test]
+fn lateral_range_items_retain_permission_inside_nested_join_operands() {
+    for item in ["LATERAL (SELECT a.x AS y) b", "LATERAL (VALUES(a.x)) b(y)"] {
+        let sql =
+            format!("SELECT * FROM (VALUES(1)) a(x), {item} JOIN (VALUES(1)) c(z) ON b.y=c.z");
+        let statement = first(&sql);
+        let Statement::Select(select) = &statement else {
+            panic!("select");
+        };
+        let FromClause::Join { comma, right, .. } = select.from.as_ref().unwrap() else {
+            panic!("comma join");
+        };
+        assert!(*comma);
+        let FromClause::Join { left, .. } = right.as_ref() else {
+            panic!("nested join");
+        };
+        assert!(left.is_explicitly_lateral());
+        let restored: FromClause =
+            serde_json::from_value(serde_json::to_value(left).unwrap()).unwrap();
+        assert!(restored.is_explicitly_lateral());
+        let mut legacy = serde_json::to_value(left).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+            .next()
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("lateral");
+        let restored: FromClause = serde_json::from_value(legacy).unwrap();
+        assert!(!restored.is_explicitly_lateral());
+        let rendered = crate::render::statement_sql(&statement).unwrap();
+        assert_eq!(rendered.matches("LATERAL").count(), 1, "{rendered}");
+        let crate::plan::UnifiedPlan::Query(query) =
+            crate::plan::UnifiedPlan::lower(first(&rendered))
+        else {
+            panic!("query");
+        };
+        let crate::plan::RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("block");
+        };
+        let crate::plan::SourcePlan::Join { comma, right, .. } = block.from.as_ref().unwrap()
+        else {
+            panic!("join");
+        };
+        assert!(*comma);
+        let crate::plan::SourcePlan::Join { left, .. } = right.as_ref() else {
+            panic!("nested join");
+        };
+        assert!(left.is_explicitly_lateral());
+        let restored: crate::plan::SourcePlan =
+            serde_json::from_value(serde_json::to_value(left).unwrap()).unwrap();
+        assert!(restored.is_explicitly_lateral());
+    }
+}
+
+#[test]
 fn table_range_alias_preserves_positional_column_names() {
     let Statement::Select(select) = first("SELECT t.left_id FROM source AS t(left_id, label)")
     else {

@@ -176,10 +176,22 @@ impl SchemaScope {
         outer: Option<&RowSchema>,
     ) -> Result<(RowSchema, RowSchema, RowSchema), SQLError> {
         let target = self.bind_command_target(routines, command, params)?;
+        let preceding = super::SourceScope::command_target(command, &target);
         let source = command
             .source_input()
             .map(|source| {
-                self.bind_source(routines, source, command.scalar_subqueries(), params, outer)
+                self.bind_source_in_scope(
+                    routines,
+                    source,
+                    command.scalar_subqueries(),
+                    params,
+                    super::SourceScope {
+                        outer,
+                        preceding: preceding.as_ref(),
+                        inherited_lateral: false,
+                        retain_names: true,
+                    },
+                )
             })
             .transpose()?;
         let expression = Self::command_input_schema(command, &target, source.as_ref())?;

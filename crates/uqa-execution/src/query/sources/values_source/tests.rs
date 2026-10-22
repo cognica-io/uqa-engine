@@ -79,6 +79,7 @@ fn values_sources_keep_each_outer_row_and_only_expose_their_own_columns() {
 fn internal_values_capture_a_typed_outer_attribute_in_its_original_scope() {
     let relation = uqa_sql::ast::InternalRelationId::allocate();
     let source = SourcePlan::Values {
+        lateral: false,
         rows: vec![vec![ScalarExpr::qualified_column("caller", "value")]],
         alias: None,
         column_aliases: vec![],
@@ -157,6 +158,7 @@ fn values_from_sources_preserve_postgresql_collations_through_qualification() {
         assert!(subqueries.is_empty());
         for alias in [None, Some("v".to_string())] {
             let source = SourcePlan::Values {
+                lateral: false,
                 rows: rows.clone(),
                 alias: alias.clone(),
                 column_aliases: alias.as_ref().map(|_| vec!["x".into()]).unwrap_or_default(),
@@ -230,6 +232,7 @@ fn values_sources_apply_only_the_predicates_placed_on_their_qualifier() {
         ),
     ]);
     let source = SourcePlan::Values {
+        lateral: false,
         rows,
         alias: Some("v".into()),
         column_aliases: vec!["x".into()],
@@ -270,6 +273,7 @@ fn values_sources_fail_instead_of_reading_an_unproduced_column() {
         panic!("VALUES")
     };
     let source = SourcePlan::Values {
+        lateral: false,
         rows,
         alias: Some("v".into()),
         column_aliases: vec!["x".into()],

@@ -14,6 +14,7 @@ impl RowSchema {
     /// Whether this schema exposes any SQL name or whole-row namespace, including hidden aliases and names without physical slots.
     pub(crate) fn has_sql_bindings(&self) -> bool {
         !self.index.columns.is_empty()
+            || self.index.cold.lateral_restrictions.is_some()
             || !self.index.aliases.is_empty()
             || !self.index.ambiguous_unqualified.is_empty()
             || !self.index.ambiguous_qualified.is_empty()
@@ -68,12 +69,14 @@ impl RowSchema {
     /// Whether a visible or hidden lookup identity belongs to `qualifier`.
     #[must_use]
     pub fn has_qualifier(&self, qualifier: &str) -> bool {
-        self.index
-            .identities
-            .iter()
-            .chain(self.index.aliases.keys())
-            .chain(self.index.cold.binding_only.keys())
-            .any(|identity| identity.qualifier() == Some(qualifier))
+        self.lateral_qualifier_is_ambiguous(qualifier)
+            || self
+                .index
+                .identities
+                .iter()
+                .chain(self.index.aliases.keys())
+                .chain(self.index.cold.binding_only.keys())
+                .any(|identity| identity.qualifier() == Some(qualifier))
             || self.columns_are_open(Some(qualifier))
             || self.index.cold.row_types.get(qualifier).is_some()
     }

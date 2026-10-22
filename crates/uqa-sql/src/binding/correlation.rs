@@ -583,6 +583,7 @@ fn source_scope(
             body,
             alias,
             column_aliases,
+            ..
         } => {
             let qualifiers = alias.iter().cloned().collect();
             let columns = if column_aliases.is_empty() {

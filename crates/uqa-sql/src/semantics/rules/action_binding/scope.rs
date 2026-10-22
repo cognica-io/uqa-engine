@@ -128,6 +128,7 @@ fn source_names(
             body,
             alias,
             column_aliases,
+            ..
         } => Ok(aliased_source_names(
             select_output_columns(body, context)?,
             alias.as_deref(),

@@ -4,31 +4,73 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! FROM namespaces which exist during binding but cannot supply a LATERAL input.
+//! FROM namespaces which are forbidden or invisible at a particular binding boundary.
 
 use super::{RowSchema, SchemaMap, SchemaSet};
 use crate::SQLError;
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Denial {
+    Join,
+    MutationTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiagnosticNamespace {
+    name: Box<str>,
+    columns: Vec<Box<str>>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct LateralRestrictions {
-    qualifiers: SchemaSet<Box<str>>,
-    columns: SchemaMap<Box<str>, Box<str>>,
+    qualifiers: SchemaMap<Box<str>, Denial>,
+    columns: SchemaMap<Box<str>, (Box<str>, Denial)>,
+    ambiguous_qualifiers: SchemaSet<Box<str>>,
+    namespaces: Vec<Arc<DiagnosticNamespace>>,
+    unavailable_ambiguous_columns: SchemaSet<Box<str>>,
+    unavailable_qualifiers: SchemaMap<Box<str>, bool>,
+    unavailable_columns: SchemaMap<Box<str>, Vec<(Box<str>, bool)>>,
 }
 
 impl RowSchema {
-    /// Retain the left namespace while rejecting its use by the right input of a RIGHT or FULL join. The namespace must remain present so even an unknown qualified column reports the forbidden relation first.
-    pub(crate) fn without_lateral_access(input: &Self, namespace: &str) -> Self {
-        let mut restrictions = input
-            .index
+    pub(super) fn lateral_qualifier_is_ambiguous(&self, qualifier: &str) -> bool {
+        self.index
             .cold
             .lateral_restrictions
-            .as_deref()
-            .cloned()
-            .unwrap_or_default();
-        restrictions
-            .qualifiers
-            .extend(input.relation_qualifiers().map(Box::<str>::from));
+            .as_ref()
+            .is_some_and(|r| r.ambiguous_qualifiers.contains(qualifier))
+    }
+
+    pub(super) fn joined_diagnostic_names(
+        left: &Self,
+        right: &Self,
+    ) -> Option<Arc<LateralRestrictions>> {
+        let mut restrictions = LateralRestrictions::default();
+        for input in [left, right] {
+            if let Some(input) = input.index.cold.lateral_restrictions.as_ref() {
+                restrictions
+                    .namespaces
+                    .extend(input.namespaces.iter().cloned());
+            }
+        }
+        (!restrictions.namespaces.is_empty()).then(|| Arc::new(restrictions))
+    }
+
+    /// Retain the left namespace while rejecting its use by the right input of a RIGHT or FULL join. The namespace must remain present so even an unknown qualified column reports the forbidden relation first.
+    pub(crate) fn without_lateral_access(input: &Self, namespace: &str) -> Self {
+        Self::with_lateral_denial(input, namespace, Denial::Join)
+    }
+
+    pub(crate) fn without_target_lateral_access(input: &Self, namespace: &str) -> Self {
+        Self::with_lateral_denial(input, namespace, Denial::MutationTarget)
+    }
+
+    fn with_lateral_denial(input: &Self, namespace: &str, reason: Denial) -> Self {
+        let mut restrictions = input.restrictions();
+        for qualifier in input.relation_qualifiers() {
+            restrictions.qualifiers.insert(qualifier.into(), reason);
+        }
         for identity in input
             .identities()
             .iter()
@@ -37,82 +79,249 @@ impl RowSchema {
         {
             restrictions
                 .columns
-                .insert(identity.column().into(), namespace.into());
+                .insert(identity.column().into(), (namespace.into(), reason));
         }
-        let mut schema = input.clone();
-        Arc::make_mut(&mut schema.index).cold.lateral_restrictions = Some(Arc::new(restrictions));
-        schema
+        input.with_restrictions(restrictions)
+    }
+
+    /// Combine namespaces at the same query level. A preceding FROM item does not become a shadowable lexical ancestor merely because the next item contains a join.
+    pub(crate) fn with_peer_scope(left: &Self, right: &Self) -> Self {
+        let mut restrictions = Self::merged_restrictions(left, right, false);
+        for qualifier in left.relation_qualifiers() {
+            if right.has_qualifier(qualifier) {
+                restrictions.ambiguous_qualifiers.insert(qualifier.into());
+            }
+        }
+        Self::join(left, right, std::iter::empty::<String>()).with_restrictions(restrictions)
+    }
+
+    pub(crate) fn with_source_diagnostic_namespace(input: &Self, namespace: &str) -> Self {
+        let mut restrictions = input.restrictions();
+        restrictions.namespaces = vec![Arc::new(DiagnosticNamespace {
+            name: namespace.into(),
+            columns: input
+                .identities()
+                .iter()
+                .map(|identity| identity.column().into())
+                .collect(),
+        })];
+        input.with_restrictions(restrictions)
+    }
+
+    /// Keep unavailable names only for diagnostics; they never gain value slots, wildcard columns or successful lookup identities.
+    pub(crate) fn with_unavailable_names(
+        input: &Self,
+        unavailable: &Self,
+        lateral_hint: bool,
+    ) -> Self {
+        let mut restrictions = input.restrictions();
+        let denied = unavailable.index.cold.lateral_restrictions.as_deref();
+        for qualifier in unavailable.relation_qualifiers() {
+            let target = denied
+                .is_some_and(|r| r.qualifiers.get(qualifier) == Some(&Denial::MutationTarget));
+            restrictions
+                .unavailable_qualifiers
+                .insert(qualifier.into(), lateral_hint && !target);
+        }
+        if let Some(denied) = denied {
+            for namespace in &denied.namespaces {
+                let target =
+                    denied.qualifiers.get(&namespace.name) == Some(&Denial::MutationTarget);
+                let mut seen = SchemaSet::default();
+                for column in &namespace.columns {
+                    if !seen.insert(column.clone()) {
+                        restrictions
+                            .unavailable_ambiguous_columns
+                            .insert(column.clone());
+                        continue;
+                    }
+                    restrictions
+                        .unavailable_columns
+                        .entry(column.clone())
+                        .or_default()
+                        .push((namespace.name.clone(), lateral_hint && !target));
+                }
+            }
+        }
+        input.with_restrictions(restrictions)
     }
 
     pub(crate) fn require_lateral_qualifier(&self, qualifier: &str) -> Result<(), SQLError> {
-        if self
-            .index
-            .cold
-            .lateral_restrictions
-            .as_ref()
-            .is_some_and(|restriction| restriction.qualifiers.contains(qualifier))
-        {
-            return Err(forbidden_reference(qualifier));
+        if let Some(restrictions) = self.index.cold.lateral_restrictions.as_ref() {
+            if restrictions.ambiguous_qualifiers.contains(qualifier) {
+                return Err(SQLError::Routine {
+                    sqlstate: "42P09".into(),
+                    message: format!("table reference \"{qualifier}\" is ambiguous"),
+                });
+            }
+            if let Some(reason) = restrictions.qualifiers.get(qualifier) {
+                return Err(forbidden_reference(qualifier, *reason));
+            }
         }
         Ok(())
     }
 
     pub(crate) fn require_lateral_column(&self, column: &str) -> Result<(), SQLError> {
         if let Some(restrictions) = self.index.cold.lateral_restrictions.as_ref() {
-            if let Some(qualifier) = restrictions.columns.get(column) {
-                return Err(forbidden_reference(qualifier));
+            if let Some((qualifier, reason)) = restrictions.columns.get(column) {
+                return Err(forbidden_reference(qualifier, *reason));
             }
-            if restrictions.qualifiers.contains(column) {
-                return Err(forbidden_reference(column));
+            if !self.has_unqualified_column(column) {
+                self.require_lateral_qualifier(column)?;
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn unavailable_qualifier_error(&self, qualifier: &str) -> Option<SQLError> {
+        let lateral = *self
+            .index
+            .cold
+            .lateral_restrictions
+            .as_ref()?
+            .unavailable_qualifiers
+            .get(qualifier)?;
+        Some(SQLError::Diagnostic {
+            sqlstate: "42P01".into(),
+            message: format!("invalid reference to FROM-clause entry for table \"{qualifier}\""),
+            detail: Some(unavailable_entry(qualifier)),
+            hint: lateral.then(|| {
+                "To reference that table, you must mark this subquery with LATERAL.".into()
+            }),
+        })
+    }
+
+    pub(crate) fn unavailable_column_error(&self, column: &str) -> Option<SQLError> {
+        if self
+            .index
+            .cold
+            .lateral_restrictions
+            .as_ref()?
+            .unavailable_ambiguous_columns
+            .contains(column)
+        {
+            return Some(SQLError::AmbiguousColumn(column.to_owned()));
+        }
+        let names = self
+            .index
+            .cold
+            .lateral_restrictions
+            .as_ref()?
+            .unavailable_columns
+            .get(column)?;
+        let (detail, hint) = match names.as_slice() {
+            [(qualifier, lateral)] => (
+                format!("There is a column named \"{column}\" in table \"{qualifier}\", but it cannot be referenced from this part of the query."),
+                lateral.then(|| "To reference that column, you must mark this subquery with LATERAL.".into()),
+            ),
+            [_, _, ..] => (
+                format!("There are columns named \"{column}\", but they are in tables that cannot be referenced from this part of the query."),
+                Some("Try using a table-qualified name.".into()),
+            ),
+            [] => return None,
+        };
+        Some(SQLError::Diagnostic {
+            sqlstate: "42703".into(),
+            message: format!("column \"{column}\" does not exist"),
+            detail: Some(detail),
+            hint,
+        })
+    }
+
+    fn restrictions(&self) -> LateralRestrictions {
+        self.index
+            .cold
+            .lateral_restrictions
+            .as_deref()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn with_restrictions(&self, restrictions: LateralRestrictions) -> Self {
+        if restrictions == LateralRestrictions::default() {
+            return self.clone();
+        }
+        let mut schema = self.clone();
+        Arc::make_mut(&mut schema.index).cold.lateral_restrictions = Some(Arc::new(restrictions));
+        schema
+    }
+
+    fn merged_restrictions(input: &Self, outer: &Self, shadows: bool) -> LateralRestrictions {
+        let mut restrictions = input.restrictions();
+        if let Some(outer) = outer.index.cold.lateral_restrictions.as_deref() {
+            restrictions.qualifiers.extend(
+                outer
+                    .qualifiers
+                    .iter()
+                    .filter(|(name, _)| !shadows || !input.has_qualifier(name))
+                    .map(|(name, reason)| (name.clone(), *reason)),
+            );
+            restrictions.columns.extend(
+                outer
+                    .columns
+                    .iter()
+                    .filter(|(name, _)| {
+                        !shadows
+                            || (!input.has_unqualified_column(name)
+                                && !input.column_is_ambiguous(name)
+                                && !input.has_qualifier(name))
+                    })
+                    .map(|(name, value)| (name.clone(), value.clone())),
+            );
+            restrictions.ambiguous_qualifiers.extend(
+                outer
+                    .ambiguous_qualifiers
+                    .iter()
+                    .filter(|name| !shadows || !input.has_qualifier(name))
+                    .cloned(),
+            );
+            if !shadows {
+                restrictions
+                    .namespaces
+                    .extend(outer.namespaces.iter().cloned());
+            }
+            restrictions
+                .unavailable_ambiguous_columns
+                .extend(outer.unavailable_ambiguous_columns.iter().cloned());
+            for (name, lateral) in &outer.unavailable_qualifiers {
+                restrictions
+                    .unavailable_qualifiers
+                    .entry(name.clone())
+                    .or_insert(*lateral);
+            }
+            for (name, values) in &outer.unavailable_columns {
+                restrictions
+                    .unavailable_columns
+                    .entry(name.clone())
+                    .or_insert_with(|| values.clone());
+            }
+        }
+        restrictions
     }
 
     pub(super) fn outer_lateral_restrictions(
         input: &Self,
         outer: &Self,
     ) -> Option<Arc<LateralRestrictions>> {
-        let Some(outer) = outer.index.cold.lateral_restrictions.as_ref() else {
+        if outer.index.cold.lateral_restrictions.is_none() {
             return input.index.cold.lateral_restrictions.clone();
-        };
-        let mut restrictions = input
-            .index
-            .cold
-            .lateral_restrictions
-            .as_deref()
-            .cloned()
-            .unwrap_or_default();
-        restrictions.qualifiers.extend(
-            outer
-                .qualifiers
-                .iter()
-                .filter(|name| !input.has_qualifier(name))
-                .cloned(),
-        );
-        restrictions.columns.extend(
-            outer
-                .columns
-                .iter()
-                .filter(|(name, _)| {
-                    !input.has_unqualified_column(name)
-                        && !input.column_is_ambiguous(name)
-                        && !input.has_qualifier(name)
-                })
-                .map(|(name, qualifier)| (name.clone(), qualifier.clone())),
-        );
-        (!restrictions.qualifiers.is_empty() || !restrictions.columns.is_empty())
-            .then(|| Arc::new(restrictions))
+        }
+        let restrictions = Self::merged_restrictions(input, outer, true);
+        (restrictions != LateralRestrictions::default()).then(|| Arc::new(restrictions))
     }
 }
 
-fn forbidden_reference(qualifier: &str) -> SQLError {
+fn unavailable_entry(qualifier: &str) -> String {
+    format!("There is an entry for table \"{qualifier}\", but it cannot be referenced from this part of the query.")
+}
+
+fn forbidden_reference(qualifier: &str, reason: Denial) -> SQLError {
     SQLError::Diagnostic {
         sqlstate: "42P10".into(),
         message: format!("invalid reference to FROM-clause entry for table \"{qualifier}\""),
-        detail: Some(
-            "The combining JOIN type must be INNER or LEFT for a LATERAL reference.".into(),
-        ),
-        hint: None,
+        detail: (reason == Denial::Join).then(|| {
+            "The combining JOIN type must be INNER or LEFT for a LATERAL reference.".into()
+        }),
+        hint: (reason == Denial::MutationTarget).then(|| unavailable_entry(qualifier)),
     }
 }

@@ -9,6 +9,7 @@
 use super::{ColumnPrune, CteScope, RowSchema, SourceContext};
 use std::{borrow::Cow, collections::BTreeSet};
 use uqa_sql::{
+    binding::SourceScope,
     plan::{QueryPlan, RelationalPlan, SourcePlan},
     SQLError, SQLParam,
 };
@@ -187,7 +188,7 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
                     &scope,
                     &folded,
                     prune.as_ref(),
-                    outer,
+                    SourceScope::new(outer),
                 )?;
             }
             let expression_schema = uqa_sql::binding::overlay_outer_schema(&source_schema, outer);
@@ -230,8 +231,12 @@ fn prepare_source<S: Clone + Send + Sync + 'static>(
     parent: &CteScope<S>,
     folded: &BTreeSet<String>,
     prune: Option<&ColumnPrune>,
-    outer: Option<&RowSchema>,
+    names: SourceScope<'_>,
 ) -> Result<(), SQLError> {
+    let input = (!matches!(source, SourcePlan::Join { .. }))
+        .then(|| names.input(source))
+        .flatten();
+    let outer = input.as_ref();
     match source {
         SourcePlan::Table { .. } => {
             prepare_named_source(context, source, params, parent, folded, prune, outer)?;
@@ -240,25 +245,26 @@ fn prepare_source<S: Clone + Send + Sync + 'static>(
             left,
             right,
             lateral,
+            kind,
             ..
         } => {
-            prepare_source(context, left, params, parent, folded, prune, outer)?;
-            let implicit_lateral_function = matches!(
-                right.as_ref(),
-                SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
-            );
-            let right_outer = if *lateral || implicit_lateral_function {
-                let left_schema = crate::query::binding::bind_source_plan_schema(
-                    context.ctes.routines,
-                    left,
-                    params,
-                    parent,
-                    outer,
-                )?;
-                Some(uqa_sql::binding::overlay_outer_schema(&left_schema, outer))
-            } else {
-                None
-            };
+            prepare_source(
+                context,
+                left,
+                params,
+                parent,
+                folded,
+                prune,
+                names.with_names(),
+            )?;
+            let left_schema = uqa_sql::binding::bind_source_plan_schema_in_scope(
+                context.ctes.routines,
+                left,
+                params,
+                &crate::query::binding::binding_context(parent)?,
+                names.with_names(),
+            )?;
+            let preceding = names.right_namespace(left, &left_schema, *kind);
             prepare_source(
                 context,
                 right,
@@ -266,7 +272,12 @@ fn prepare_source<S: Clone + Send + Sync + 'static>(
                 parent,
                 folded,
                 prune,
-                right_outer.as_ref().or(outer),
+                SourceScope {
+                    outer: names.outer,
+                    preceding: Some(&preceding),
+                    inherited_lateral: *lateral,
+                    retain_names: true,
+                },
             )?;
         }
         SourcePlan::Subquery { body, .. } => {
