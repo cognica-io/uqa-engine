@@ -372,6 +372,104 @@ fn statistics_commit_preserves_unpublished_document_id_reservations() {
     }
 }
 
+#[rstest::rstest]
+fn an_empty_sample_keeps_the_insert_committed_before_its_publication_pending(
+    #[values(0, 1, 2)] provider: usize,
+) {
+    let (_directory, writer, worker) = sessions_for(provider);
+    writer.sql("TRUNCATE t", &[]).unwrap();
+    worker.begin().unwrap();
+    let sample = worker
+        .collect_automatic_analysis("public.t")
+        .unwrap()
+        .unwrap();
+    assert_eq!(sample.row_count, 0);
+    writer
+        .sql(
+            "INSERT INTO t SELECT n FROM generate_series(1, 5000) AS g(n)",
+            &[],
+        )
+        .unwrap();
+    assert!(worker
+        .publish_automatic_analysis("public.t", sample)
+        .unwrap());
+    worker.commit().unwrap();
+    let catalog = worker.storage.catalog.as_ref().unwrap();
+    let pending = MaintenanceState::load(catalog.as_ref(), "public.t").unwrap();
+    assert!(
+        pending.due(
+            false,
+            now_ms(),
+            crate::statistics::value_size::FORMAT_VERSION
+        ),
+        "state: {pending:?}"
+    );
+    assert!(worker.run_automatic_analyze("public.t").unwrap());
+    assert_eq!(
+        catalog.load_column_stats("public.t").unwrap()[0].row_count,
+        5000
+    );
+}
+
+#[rstest::rstest]
+fn insert_rows_survive_statistics_publication_during_input_evaluation(
+    #[values(0, 1, 2)] provider: usize,
+) {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    use uqa_core::Value;
+
+    let (_directory, writer, worker) = sessions_for(provider);
+    writer.sql("TRUNCATE t", &[]).unwrap();
+    let (request, requested) = mpsc::sync_channel(1);
+    let (completion, completed) = mpsc::sync_channel(1);
+    let completed = parking_lot::Mutex::new(completed);
+    let task = std::thread::spawn(move || {
+        requested.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert!(worker.run_automatic_analyze("public.t").unwrap());
+        let catalog = worker.storage.catalog.as_ref().unwrap();
+        assert_eq!(
+            catalog.load_column_stats("public.t").unwrap()[0].row_count,
+            0
+        );
+        completion.send(()).unwrap();
+        worker
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    writer
+        .register_scalar_function("publish_statistics", move |arguments: &[Value]| {
+            if observed.fetch_add(1, Ordering::AcqRel) == 2047 {
+                request.send(()).unwrap();
+                completed
+                    .lock()
+                    .recv_timeout(Duration::from_secs(30))
+                    .unwrap();
+            }
+            Ok::<_, uqa_sql::SQLError>(arguments[0].clone())
+        })
+        .unwrap();
+    writer
+        .sql(
+            "INSERT INTO t SELECT publish_statistics(n) FROM generate_series(1, 5000) AS g(n)",
+            &[],
+        )
+        .unwrap();
+    let worker = task.join().unwrap();
+    assert_eq!(calls.load(Ordering::Acquire), 5000);
+    let rows = writer.sql("SELECT count(*) AS n FROM t", &[]).unwrap();
+    assert_eq!(rows.rows[0]["n"], Value::Int(5000));
+    assert!(worker.run_automatic_analyze("public.t").unwrap());
+    let catalog = worker.storage.catalog.as_ref().unwrap();
+    let state = MaintenanceState::load(catalog.as_ref(), "public.t").unwrap();
+    assert_eq!(
+        catalog.load_column_stats("public.t").unwrap()[0].row_count,
+        5000,
+        "maintenance state: {state:?}"
+    );
+}
+
 #[test]
 fn copy_preserves_all_rows_when_statistics_commit_during_staging() {
     use std::sync::atomic::AtomicUsize;

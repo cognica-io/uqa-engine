@@ -231,3 +231,52 @@ fn unchanged_statistics_poll_needs_no_catalog_records() {
         uqa_core::Value::Int(1)
     );
 }
+
+#[rstest::rstest]
+fn a_committed_insert_invalidates_an_empty_statistics_publication(
+    #[values(0, 1, 2)] provider: usize,
+    #[values(false, true)] insert_started: bool,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = persistent(provider, &directory.path().join("empty-sample.db"));
+    manual_worker(&writer);
+    writer
+        .sql(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, category TEXT)",
+            &[],
+        )
+        .unwrap();
+    let worker = writer.new_session().unwrap();
+    manual_worker(&worker);
+    let insert = || {
+        writer
+            .sql(
+                "BEGIN; INSERT INTO items SELECT n, 'same' FROM generate_series(1, 5000) AS g(n)",
+                &[],
+            )
+            .unwrap();
+    };
+    if insert_started {
+        insert();
+    }
+    let mut cache = cache::MaintenanceCache::default();
+    refresh_due_tables(&worker, &mut cache).unwrap();
+    let catalog = worker.storage.catalog.as_ref().unwrap();
+    assert_eq!(
+        catalog.load_column_stats("public.items").unwrap()[0].row_count,
+        0
+    );
+    if !insert_started {
+        insert();
+    }
+    writer.sql("COMMIT", &[]).unwrap();
+    refresh_due_tables(&worker, &mut cache).unwrap();
+    let state = MaintenanceState::load(catalog.as_ref(), "public.items").unwrap();
+    assert_eq!(
+        catalog.load_column_stats("public.items").unwrap()[0].row_count,
+        5000,
+        "pending state: {state:?}; status: {:?}",
+        worker.automatic_statistics_status(),
+    );
+    assert!(!state.dirty(), "pending state: {state:?}");
+}

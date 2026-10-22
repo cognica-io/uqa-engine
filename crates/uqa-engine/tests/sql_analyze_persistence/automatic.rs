@@ -23,15 +23,18 @@ fn stored_rows(path: &Path, table: &str) -> Option<i64> {
 fn wait_for_rows(engine: &Engine, path: &Path, table: &str, expected: i64) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        if stored_rows(path, table) == Some(expected)
-            && !engine.automatic_statistics_status().running
-        {
+        let observed = stored_rows(path, table);
+        let status = engine.automatic_statistics_status();
+        if observed == Some(expected) && !status.running {
             return;
         }
         assert!(
             Instant::now() < deadline,
-            "automatic statistics did not reach {expected}: {:?}",
-            engine.automatic_statistics_status()
+            "automatic statistics did not reach {expected}: observed={observed:?}, status={status:?}, current={:?}, maintenance={:?}",
+            stored_rows(path, table),
+            crate::native_storage::catalog(ManagedConnection::open(path).unwrap())
+                .unwrap()
+                .get_metadata(&format!("uqa.statistics.maintenance.v1:{table}")),
         );
         std::thread::sleep(Duration::from_millis(20));
     }

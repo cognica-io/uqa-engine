@@ -34,6 +34,8 @@ The next logical correction resolves a bare function star without allocating or 
 
 Concurrent main monitoring found [#1248](https://github.com/cognica-io/uqa-engine/issues/1248): the automatic sampled-statistics test fails on Linux with one completed publication but without the expected persisted count. Main's Linux/macOS performance artifacts pass their exact source and case checks; that evidence does not waive the separate workspace failure. Investigation and correction are required before this delivery's final qualification. No workflow rerun or timeout increase is used.
 
+The #1248 investigation adds twelve deterministic cases across native SQLite, SQLite Key/Value and redb: empty-table publication before or during an uncommitted INSERT, publication from a separate thread during row evaluation, and an INSERT committed between sampling and publication. All 45 related owner tests and strict Engine library/integration Clippy pass. The original nine automatic-statistics integrations and a fixed eight-process replay of the reported failing case also pass locally. The timeout diagnostic now retains the observed count, worker status, current count and maintenance record instead of reporting status alone. The CI failure has not been reproduced or explained, so #1248 remains open and these passing controls are not a root-cause fix. Continue the independent demand correction without rerunning CI or changing its timeout.
+
 ## Owning interfaces
 
 SQL owns bound names, selected routine identity, typed scalar traversal, source descriptors and expression semantics. Reuse `ScalarExpr::try_visit` and the established SQL identity/type interfaces; do not create another exhaustive expression walker or classify a selected aggregate by a display name alone.
