@@ -56,7 +56,7 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
         if !scheduled.deferred {
             if let Some(query) = scheduled.plan.body.query() {
                 let definition = scope
-                    .definition_scope(&scheduled.plan.name)
+                    .definition_scope_for_name(&scheduled.plan.name)
                     .expect("declared CTE scope");
                 initialize(context, permissions, query, params, &definition, outer)?;
             }

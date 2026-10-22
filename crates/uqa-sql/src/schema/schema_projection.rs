@@ -12,6 +12,33 @@ use super::{
 };
 
 impl RowSchema {
+    /// Capture positional outputs through opaque identities without retaining their SQL names or copying values. Existing internal score and record metadata remain attached to their physical slots. An implicit NULL output owns one appended NULL slot, which the physical selector must materialize.
+    pub fn capture_output(input: &Self, relation: crate::ast::InternalRelationId) -> Self {
+        let mut has_null = false;
+        let attributes = (0..input.len())
+            .map(|position| {
+                (
+                    relation.column(position),
+                    input.column_type(position).cloned(),
+                    input.physical_slot(position).map_or_else(
+                        || {
+                            has_null = true;
+                            ProjectedSlot::Computed {
+                                position: 0,
+                                collation: input.column_collation(position),
+                            }
+                        },
+                        |physical| ProjectedSlot::BoundInput {
+                            physical: Some(physical),
+                            collation: input.column_collation(position),
+                        },
+                    ),
+                )
+            })
+            .collect();
+        Self::project_with_sources(input, Vec::new(), attributes, usize::from(has_null), false)
+    }
+
     /// Remove selected executor-only identities after their consumer has run.
     /// The physical fragments remain shareable until the next canonical
     /// boundary, where now-unreferenced slots are naturally discarded.
@@ -593,5 +620,63 @@ impl RowSchema {
                 ..SchemaBuildMetadata::default()
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+    use crate::ast::InternalRelationId;
+    use std::sync::Arc;
+
+    #[test]
+    fn output_capture_keeps_positional_metadata_without_sql_aliases() {
+        let fields: crate::schema::RecordFields = Arc::from([Some(ColumnType::SmallInteger)]);
+        let input = RowSchema::with_qualified_types(
+            "source",
+            vec!["unused".into(), "text".into(), "record".into()],
+            vec![
+                Some(ColumnType::Integer),
+                Some(ColumnType::Text),
+                Some(ColumnType::Record),
+            ],
+        )
+        .with_column_collations([None, Some(950), None])
+        .with_record_fields([(2, Arc::clone(&fields))]);
+        let selected =
+            RowSchema::remap_positions(&input, &[("same".into(), 2), ("same".into(), 1)], &[]);
+        let relation = InternalRelationId::allocate();
+        let captured = RowSchema::capture_output(&selected, relation);
+        assert!(captured.is_empty());
+        assert_eq!(captured.physical_width(), 3);
+        assert_eq!(captured.internal_slot(relation.column(0)), Some(2));
+        assert_eq!(captured.internal_slot(relation.column(1)), Some(1));
+        assert_eq!(
+            captured.internal_type(relation.column(0)),
+            Some(&ColumnType::Record)
+        );
+        assert_eq!(captured.internal_collation(relation.column(1)), Some(950));
+        assert!(Arc::ptr_eq(
+            captured.physical_record_fields(2).unwrap(),
+            &fields
+        ));
+        assert_eq!(captured.qualified_slot("source", "record"), None);
+        assert_eq!(captured.position("same"), None);
+        let other = InternalRelationId::allocate();
+        let second = RowSchema::capture_output(&selected, other);
+        let joined = RowSchema::join(&captured, &second, []);
+        assert_eq!(joined.internal_slot(relation.column(0)), Some(2));
+        assert_eq!(joined.internal_slot(other.column(0)), Some(5));
+    }
+
+    #[test]
+    fn output_capture_assigns_a_slot_to_implicit_null_values() {
+        let input = RowSchema::new(vec!["present".into()]);
+        let selected = RowSchema::select(&input, &[("missing".into(), "absent".into())]);
+        let relation = InternalRelationId::allocate();
+        let captured = RowSchema::capture_output(&selected, relation);
+        assert_eq!(captured.internal_slot(relation.column(0)), Some(1));
+        assert_eq!(captured.physical_width(), 2);
+        assert!(captured.is_empty());
     }
 }

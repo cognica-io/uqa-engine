@@ -150,6 +150,7 @@ fn project(body: Box<QueryPlan>, width: usize) -> QueryPlan {
                 })
                 .collect(),
             from: Some(SourcePlan::Subquery {
+                captured_output: None,
                 lateral: false,
                 body,
                 alias: None,

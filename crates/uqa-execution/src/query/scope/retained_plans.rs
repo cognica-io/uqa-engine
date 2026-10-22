@@ -155,3 +155,19 @@ fn shared_scalar_plans_preserve_arena_cache_separation_and_restoration() {
     let sibling = scope.enter_scalar_subqueries(&[query("SELECT 11")]);
     assert!(sibling.cached_subquery(0).is_none());
 }
+
+#[test]
+fn definition_declarations_do_not_reparse_quoted_names_as_references() {
+    for (name, reference) in [("Q.CTE", "\"Q.CTE\""), ("Q.\"CTE", "\"Q.\"\"CTE\"")] {
+        let mut definition = query(&format!(
+            "WITH {reference} AS MATERIALIZED (SELECT 1 AS value) SELECT * FROM {reference}"
+        ));
+        assert_eq!(definition.ctes[0].name, name);
+        let mut scope = CteScope::<()>::new();
+        scope.insert_preparation_cte(definition.ctes.remove(0), false);
+        assert!(scope.definition_scope_for_name(name).is_some());
+        assert!(scope.definition_scope(reference).is_some());
+        assert!(scope.definition_scope(name).is_none());
+        assert!(scope.definition_scope("public.\"Q.CTE\"").is_none());
+    }
+}

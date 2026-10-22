@@ -43,7 +43,7 @@ pub use commands::analyze_prepared_command_schema;
 pub use execution::bind_query_block_for_execution;
 pub use preparation::{
     analyze_column_type_transform, assign_stored_query_input_collations,
-    infer_prepared_parameter_types,
+    infer_prepared_parameter_types, restore_query_layouts,
 };
 pub(crate) use preparation::{
     analyze_default_inputs, analyze_routine_body_argument, analyze_routine_body_inputs,
@@ -750,7 +750,13 @@ impl SchemaScope {
                 ..
             } => {
                 let schema = self.bind_query(routines, body, params, outer)?;
-                Ok(rename_schema(&schema, column_aliases, alias.as_deref()))
+                Ok(match source {
+                    SourcePlan::Subquery {
+                        captured_output: Some(relation),
+                        ..
+                    } => RowSchema::capture_output(&schema, *relation),
+                    _ => rename_schema(&schema, column_aliases, alias.as_deref()),
+                })
             }
             SourcePlan::Join {
                 left,

@@ -19,8 +19,10 @@ mod json_operators;
 mod membership;
 mod parameters;
 mod queries;
+mod query_layouts;
 #[cfg(test)]
 pub(crate) use queries::BLOCK_ANALYSES;
+pub use query_layouts::restore_query_layouts;
 mod routines;
 mod rows;
 pub(crate) use routines::{

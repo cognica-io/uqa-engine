@@ -291,7 +291,17 @@ pub(super) fn source_scope_in_namespace(
             }
             let mut columns = query_output_columns(context, body, ctes, &outer)?;
             columns.apply_positional_aliases(column_aliases);
-            Ok(QueryScope::relation(alias.as_deref(), columns))
+            if let SourcePlan::Subquery {
+                captured_output: Some(relation),
+                ..
+            } = source
+            {
+                let mut scope = QueryScope::relation(None, RelationColumns::empty_known());
+                scope.internal_relations.insert(*relation);
+                Ok(scope)
+            } else {
+                Ok(QueryScope::relation(alias.as_deref(), columns))
+            }
         }
     }
 }

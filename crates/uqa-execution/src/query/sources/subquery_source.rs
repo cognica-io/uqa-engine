@@ -9,8 +9,8 @@
 use super::{
     attach_closed_qualifier_filter, execute_view_plan_output_with_parent_cache,
     qualify_source_operator_with_columns, query_cte_names, try_build_streaming_subquery_operator,
-    ColumnPrune, CteScope, PhysicalOperator, QualifierFilters, SQLError, SQLParam, SourceContext,
-    SourcePlan,
+    ColumnPrune, CteScope, PhysicalOperator, QualifierFilters, QueryPlan, SQLError, SQLParam,
+    SourceContext, SourcePlan,
 };
 
 pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'static>(
@@ -44,6 +44,15 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
             if let Some(operator) =
                 try_build_streaming_subquery_operator(context, body, params, ctes)?
             {
+                if let SourcePlan::Subquery {
+                    captured_output: Some(relation),
+                    ..
+                } = from
+                {
+                    return Ok(Box::new(crate::ColumnSelection::capturing_output(
+                        operator, *relation,
+                    )));
+                }
                 let source_columns = operator.schema().to_vec();
                 let qualifier = alias.as_deref().unwrap_or_default();
                 let operator = qualify_source_operator_with_columns(
@@ -58,54 +67,16 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
                     operator, qualifier, filters, context, params, ctes,
                 ));
             }
-            let schema = crate::query::binding::bind_query_plan_schema(
-                context.ctes.routines,
-                body,
-                params,
-                ctes,
-                ctes.row_lock_outer_row().map(|row| &row.schema),
-            )?;
-            let context_copy = *context;
-            let body = body.clone();
-            let mut scope = ctes.clone();
-            let bound_output = (!schema.columns_are_open(None)).then_some(schema);
-            let deferred_schema = if bound_output.is_some()
-                && !super::output_descriptor::requires_physical_descriptor(&body, &scope)?
+            let operator = deferred_subquery_operator(context, body, params, ctes)?;
+            if let SourcePlan::Subquery {
+                captured_output: Some(relation),
+                ..
+            } = from
             {
-                bound_output.clone()
-            } else {
-                None
-            };
-            let operator = crate::query::deferred::DeferredOperator::from_bound_schema(
-                deferred_schema,
-                Box::new(move || {
-                    let local_cte_names = query_cte_names(&body);
-                    let output = execute_view_plan_output_with_parent_cache(
-                        &context_copy,
-                        &body,
-                        params,
-                        &mut scope,
-                        &local_cte_names,
-                    )?;
-                    let columns = output
-                        .columns
-                        .iter()
-                        .cloned()
-                        .enumerate()
-                        .map(|(position, name)| (name, position))
-                        .collect::<Vec<_>>();
-                    let source = output.into_operator();
-                    let source = match bound_output {
-                        Some(schema) => {
-                            crate::ColumnSelection::with_bound_output(source, &columns, schema)
-                                .map_err(crate::physical::physical_exec_error)?
-                        }
-                        None => crate::ColumnSelection::compacting_with_positions(source, columns)
-                            .preserving_lock_origins(),
-                    };
-                    Ok(Box::new(source))
-                }),
-            )?;
+                return Ok(Box::new(crate::ColumnSelection::capturing_output(
+                    operator, *relation,
+                )));
+            }
             let source_columns = operator.schema().to_vec();
             let qualifier = alias.as_deref().unwrap_or_default();
             let operator = qualify_source_operator_with_columns(
@@ -122,4 +93,59 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
         }
         _ => unreachable!("subquery source builder called for a different source kind"),
     }
+}
+
+fn deferred_subquery_operator<'a, S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'a, S>,
+    body: &QueryPlan,
+    params: &'a [SQLParam],
+    ctes: &CteScope<S>,
+) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    let schema = crate::query::binding::bind_query_plan_schema(
+        context.ctes.routines,
+        body,
+        params,
+        ctes,
+        ctes.row_lock_outer_row().map(|row| &row.schema),
+    )?;
+    let context_copy = *context;
+    let body = body.clone();
+    let mut scope = ctes.clone();
+    let bound_output = (!schema.columns_are_open(None)).then_some(schema);
+    let deferred_schema = if bound_output.is_some()
+        && !super::output_descriptor::requires_physical_descriptor(&body, &scope)?
+    {
+        bound_output.clone()
+    } else {
+        None
+    };
+    let operator = crate::query::deferred::DeferredOperator::from_bound_schema(
+        deferred_schema,
+        Box::new(move || {
+            let local_cte_names = query_cte_names(&body);
+            let output = execute_view_plan_output_with_parent_cache(
+                &context_copy,
+                &body,
+                params,
+                &mut scope,
+                &local_cte_names,
+            )?;
+            let columns = output
+                .columns
+                .iter()
+                .cloned()
+                .enumerate()
+                .map(|(position, name)| (name, position))
+                .collect::<Vec<_>>();
+            let source = output.into_operator();
+            let source = match bound_output {
+                Some(schema) => crate::ColumnSelection::with_bound_output(source, &columns, schema)
+                    .map_err(crate::physical::physical_exec_error)?,
+                None => crate::ColumnSelection::compacting_with_positions(source, columns)
+                    .preserving_lock_origins(),
+            };
+            Ok(Box::new(source))
+        }),
+    )?;
+    Ok(operator)
 }

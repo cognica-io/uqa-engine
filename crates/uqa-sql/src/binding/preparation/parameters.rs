@@ -154,6 +154,7 @@ pub(super) struct ParameterTypes<'a> {
     enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
     catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
     call_collations: Option<CallCollations>,
+    query_schemas: Option<QuerySchemas>,
 }
 
 /// Original expression identities for input constants and selected fixed calls, used only while one prepared plan remains in place. No pointer is dereferenced. Analysis borrows the original expressions (including grouping aliases and table-function arguments), so neither repeated text nor CTE analysis order can conflate two inputs.
@@ -186,6 +187,18 @@ struct QuerySchemas {
 }
 
 impl QuerySchemas {
+    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
+        query.analyzed_output = self.outputs.remove(&NonNull::from(&*query));
+        query.analyzed_source = match &query.root {
+            crate::plan::RelationalPlan::QueryBlock(block) => block
+                .from
+                .as_ref()
+                .and_then(|source| self.take_source(source))
+                .map(std::sync::Arc::new),
+            _ => None,
+        };
+    }
+
     fn take_source(
         &mut self,
         source: &crate::plan::SourcePlan,
@@ -330,15 +343,7 @@ impl InputConstants {
     }
 
     fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
-        query.analyzed_output = self.8.outputs.remove(&NonNull::from(&*query));
-        query.analyzed_source = match &query.root {
-            crate::plan::RelationalPlan::QueryBlock(block) => block
-                .from
-                .as_ref()
-                .and_then(|source| self.8.take_source(source))
-                .map(std::sync::Arc::new),
-            _ => None,
-        };
+        self.8.apply_query(query);
     }
 
     fn apply_source(&mut self, source: &mut crate::plan::SourcePlan) {
@@ -373,14 +378,37 @@ impl InputConstants {
 }
 
 impl<'a> ParameterTypes<'a> {
+    pub(super) fn with_query_schemas(mut self) -> Self {
+        self.query_schemas = Some(QuerySchemas::default());
+        self
+    }
+
+    pub(super) fn apply_query_schemas(self, query: &mut crate::plan::QueryPlan) {
+        let mut schemas = self.query_schemas.unwrap_or_default();
+        query.visit_queries_mut(&mut |query| schemas.apply_query(query));
+    }
+
+    fn query_schemas(&self) -> Option<&QuerySchemas> {
+        self.input_constants
+            .as_ref()
+            .map(|constants| &constants.8)
+            .or(self.query_schemas.as_ref())
+    }
+
+    fn query_schemas_mut(&mut self) -> Option<&mut QuerySchemas> {
+        self.input_constants
+            .as_mut()
+            .map(|constants| &mut constants.8)
+            .or(self.query_schemas.as_mut())
+    }
+
     pub(super) fn retain_source_schema(
         &mut self,
         source: &crate::plan::SourcePlan,
         schema: &crate::RowSchema,
     ) {
-        if let Some(constants) = &mut self.input_constants {
-            constants
-                .8
+        if let Some(schemas) = self.query_schemas_mut() {
+            schemas
                 .sources
                 .insert(NonNull::from(source), schema.clone());
         }
@@ -390,11 +418,7 @@ impl<'a> ParameterTypes<'a> {
         &self,
         query: &crate::plan::QueryPlan,
     ) -> Option<&crate::RowSchema> {
-        self.input_constants
-            .as_ref()?
-            .8
-            .outputs
-            .get(&NonNull::from(query))
+        self.query_schemas()?.outputs.get(&NonNull::from(query))
     }
 
     pub(super) fn retain_set_operand_coercions(
@@ -407,9 +431,8 @@ impl<'a> ParameterTypes<'a> {
             return;
         }
         let Some(schema) = self
-            .input_constants
-            .as_mut()
-            .and_then(|constants| constants.8.outputs.get_mut(&NonNull::from(query)))
+            .query_schemas_mut()
+            .and_then(|schemas| schemas.outputs.get_mut(&NonNull::from(query)))
         else {
             return;
         };
@@ -454,9 +477,8 @@ impl<'a> ParameterTypes<'a> {
         query: &crate::plan::QueryPlan,
         output: &super::QueryOutput,
     ) {
-        if let Some(constants) = &mut self.input_constants {
-            constants
-                .8
+        if let Some(schemas) = self.query_schemas_mut() {
+            schemas
                 .outputs
                 .insert(NonNull::from(query), output.schema());
         }
@@ -527,6 +549,7 @@ impl<'a> ParameterTypes<'a> {
             enum_labels: None,
             catalog_inputs: None,
             call_collations: None,
+            query_schemas: None,
         }
     }
 

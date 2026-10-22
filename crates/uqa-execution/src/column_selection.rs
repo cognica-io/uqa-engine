@@ -53,6 +53,25 @@ pub struct ColumnSelection<'a> {
 }
 
 impl<'a> ColumnSelection<'a> {
+    /// Hide a derived input's SQL namespace while sharing its physical values through positional structural references.
+    pub(crate) fn capturing_output(
+        child: Box<dyn PhysicalOperator + 'a>,
+        relation: uqa_sql::ast::InternalRelationId,
+    ) -> Self {
+        let schema = RowSchema::capture_output(child.row_schema(), relation);
+        let width = child.row_schema().physical_width();
+        let compact_slots =
+            (schema.physical_width() > width).then(|| (0..width).map(Some).chain([None]).collect());
+        Self {
+            child,
+            schema,
+            ordering: Vec::new(),
+            rebind_lock_qualifier: None,
+            discard_lock_origins: false,
+            compact_slots,
+        }
+    }
+
     /// Keep the visible layout unchanged while retiring consumed executor-only
     /// attributes from the schema namespace.
     pub fn dropping_internal_attributes(
@@ -562,6 +581,48 @@ mod tests {
             batch.schema.view(&batch.rows[0]).get("value"),
             Some(&Value::Int(7))
         );
+    }
+
+    #[test]
+    fn captured_output_shares_values_without_exposing_input_names() {
+        let relation = uqa_sql::ast::InternalRelationId::allocate();
+        let source = RowSchema::with_types(
+            vec!["unused".into(), "payload".into()],
+            vec![
+                Some(uqa_sql::ColumnType::Integer),
+                Some(uqa_sql::ColumnType::Text),
+            ],
+        );
+        let selected = RowSchema::select(&source, &[("payload".into(), "payload".into())]);
+        let row =
+            crate::PhysicalRow::from_values(vec![Value::Int(7), Value::Str("shared".repeat(1000))]);
+        let retained = row.clone();
+        let mut output = ColumnSelection::capturing_output(
+            Box::new(TableScan::from_physical_rows(selected, vec![row])),
+            relation,
+        );
+        let batches = crate::physical::run_to_batches(&mut output).unwrap();
+        assert_eq!(batches.len(), 1);
+        let batch = &batches[0];
+        assert!(batch.schema.is_empty());
+        assert_eq!(batch.schema.position("payload"), None);
+        let slot = batch.schema.internal_slot(relation.column(0)).unwrap();
+        assert!(std::ptr::eq(
+            batch.rows[0].value(slot).unwrap(),
+            retained.value(1).unwrap()
+        ));
+        assert_eq!(
+            batch.schema.internal_type(relation.column(0)),
+            Some(&uqa_sql::ColumnType::Text)
+        );
+        let selected = RowSchema::select(&source, &[("missing".into(), "absent".into())]);
+        let mut output = ColumnSelection::capturing_output(
+            Box::new(TableScan::from_physical_rows(selected, vec![retained])),
+            relation,
+        );
+        let batches = crate::physical::run_to_batches(&mut output).unwrap();
+        let slot = batches[0].schema.internal_slot(relation.column(0)).unwrap();
+        assert_eq!(batches[0].rows[0].value(slot), Some(&Value::Null));
     }
 
     #[test]

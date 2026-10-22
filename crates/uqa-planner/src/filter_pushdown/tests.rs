@@ -162,6 +162,7 @@ fn unaliased_relations_keep_their_columns_from_the_only_named_relation() {
             internal_column_collations: Vec::new(),
         },
         SourcePlan::Subquery {
+            captured_output: None,
             lateral: false,
             body: body.clone(),
             alias: None,

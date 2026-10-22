@@ -131,6 +131,7 @@ fn constant_view_source(
     }
     // Inspect literal outputs without removing the view source: its authorization, row count and dependency observations still execute normally.
     Ok(Some(SourcePlan::Subquery {
+        captured_output: None,
         lateral: false,
         body: Box::new(body),
         alias: None,
@@ -150,6 +151,7 @@ fn single_constant_row<'a>(
             ..
         } if rows.len() == 1 => Some((Cow::Borrowed(&rows[0]), Cow::Borrowed(column_aliases))),
         SourcePlan::Subquery {
+            captured_output: None,
             body,
             column_aliases,
             ..

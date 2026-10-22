@@ -21525,15 +21525,15 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
-      "test": "repeated_input_qualifiers_are_not_captured_by_a_different_query_scope",
+      "test": "independent_inputs_keep_distinct_structural_identities",
       "cases": 1,
       "case_names": [
         ""
       ],
       "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
       "capability": "Derived projection placement",
-      "workload": "Derived input uses an alias already occupied in its consumer.",
-      "invariant": "No source identity is captured by another lexical scope."
+      "workload": "Two independently captured producers with identical SQL aliases and output names.",
+      "invariant": "Each producer has distinct structural attribute identities, and its lifted outputs keep their own owner."
     },
     {
       "package": "uqa-planner",
@@ -21589,6 +21589,126 @@
       "capability": "Derived projection placement",
       "workload": "Repeat projection placement over an analyzed ordinary source with a qualification.",
       "invariant": "A query without a derived source allocates no pull-up workspace: zero allocations and zero bytes."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "output_capture_keeps_positional_metadata_without_sql_aliases",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/schema_projection.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Noncompact duplicate-label outputs with record types and collations, captured twice and joined.",
+      "invariant": "Opaque attributes preserve positional types, collations, record descriptors and physical offsets without SQL-visible names."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "output_capture_assigns_a_slot_to_implicit_null_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/schema_projection.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "A selected missing value represented by an implicit NULL slot.",
+      "invariant": "Capture assigns implicit NULL to an appended owned slot while preserving existing value and score slots."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_output_shares_values_without_exposing_input_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/column_selection.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Capture a wide payload behind a noncompact physical layout.",
+      "invariant": "Captured attributes share original value storage, materialize implicit NULL and hide the input SQL namespace."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "input_capture_reads_only_demanded_values_and_keeps_producer_filter",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Pure derived outputs over a wider input with a producer qualification.",
+      "invariant": "Capture reads only demanded attributes and preserves producer filtering; it does not broaden column authority or payload reads."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "captured_source_keeps_pure_predicates_at_its_scan_without_duplicate_evaluation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "A pure condition over a lifted derived output.",
+      "invariant": "The predicate reaches original scan columns exactly once, retaining index planning rather than forcing a post-scan internal-attribute filter."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_query_definitions_never_retain_transient_input_captures",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Analyzed CREATE VIEW, CREATE MATERIALIZED VIEW and PREPARE definitions.",
+      "invariant": "Serialized definitions remain unchanged by transient execution capture; optimization occurs when their queries execute."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "derived_input_capture_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Seventeen independent PostgreSQL observations on four providers; fifteen repeated after persistent reopen.",
+      "invariant": "Cross-level aliases, duplicate input names, nested producers, nullable/composite/collated values, views, prepared execution and quoted materialized/recursive CTEs retain exact PostgreSQL results and descriptors."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_query_layouts_preserve_syntax_scopes_and_parameter_types",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/stored_inputs.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Stored query syntax with outer inputs, explicit parameters, CTE shadowing and set coercions.",
+      "invariant": "Restoration attaches transient source and output layouts without changing serialized syntax or selected constants and calls."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "definition_declarations_do_not_reparse_quoted_names_as_references",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/scope/retained_plans.rs",
+      "capability": "CTE declaration identity",
+      "workload": "Decoded declaration names containing dots and embedded quotes, with quoted and schema-qualified references.",
+      "invariant": "Declarations resolve by exact owned names, quoted references resolve through SQL syntax, and schema-qualified references do not select CTE declarations."
     }
   ]
 }

@@ -324,6 +324,9 @@ pub enum SourcePlan {
         ordinality: bool,
     },
     Subquery {
+        /// Transient positional input capture for a lifted pure projection. Its attributes have no SQL-visible names and never enter stored syntax.
+        #[serde(skip)]
+        captured_output: Option<crate::ast::InternalRelationId>,
         /// Whether this range item may read preceding FROM items at its query level.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         lateral: bool,

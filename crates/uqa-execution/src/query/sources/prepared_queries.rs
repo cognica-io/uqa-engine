@@ -200,7 +200,7 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
             continue;
         }
         let definition_scope = scope
-            .definition_scope(&cte.name)
+            .definition_scope_for_name(&cte.name)
             .expect("declared CTE scope");
         if let Some(body) = cte.body.query_mut() {
             prepare_query(context, body, params, &definition_scope, outer)?;
@@ -380,6 +380,15 @@ fn prepare_named_source<S: Clone + Send + Sync + 'static>(
     };
     let _stored = optimize
         .then(uqa_sql::semantics::sets::placement_scope::SetPlacementScope::stored_definition);
+    if optimize {
+        crate::query::binding::restore_query_layouts(
+            context.ctes.routines,
+            &mut query,
+            params,
+            &scope,
+            outer,
+        )?;
+    }
     if let Some(projection) = prune.and_then(|prune| prune.get(qualifier)) {
         super::table_source::prune_query_outputs(
             context, &mut query, &aliases, projection, params, &scope, outer,

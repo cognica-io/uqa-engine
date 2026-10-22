@@ -343,6 +343,15 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .or(specialized_plan.as_ref())
                     .unwrap_or(plan);
                 let mut execution_plan = execution_plan.clone();
+                if executable_query.is_none() {
+                    crate::query::binding::restore_query_layouts(
+                        context.ctes.routines,
+                        &mut execution_plan,
+                        params,
+                        ctes,
+                        ctes.row_lock_outer_row().map(|row| &row.schema),
+                    )?;
+                }
                 if let Some(projection) = prune
                     .and_then(|prune| prune.get(&qualifier))
                     .filter(|_| executable_query.is_none())

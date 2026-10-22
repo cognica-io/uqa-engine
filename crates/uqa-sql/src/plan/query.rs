@@ -597,6 +597,7 @@ impl SourcePlan {
                 alias,
                 column_aliases,
             } => Self::Subquery {
+                captured_output: None,
                 lateral,
                 body: Box::new(QueryPlan::lower_with(*body, aggregates)),
                 alias,

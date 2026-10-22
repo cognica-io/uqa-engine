@@ -114,3 +114,39 @@ fn rule_whole_inputs_expand_only_in_the_event_namespace() {
         assert_eq!(casts, 1, "{local}");
     }
 }
+
+#[test]
+fn restored_query_layouts_preserve_syntax_scopes_and_parameter_types() {
+    for sql in [
+        "SELECT s.k,$1 AS p,outer_scope.x FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE s.k=(SELECT 2)",
+        "WITH c(x) AS (SELECT 2::smallint) SELECT s.k FROM (SELECT x AS k FROM c) s CROSS JOIN (SELECT 1 AS x) c WHERE s.k>0",
+        "SELECT x FROM (SELECT NULL AS x UNION ALL SELECT 2::smallint) s WHERE x>0",
+    ] {
+        let UnifiedPlan::Query(mut query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0)) else {
+            panic!("query");
+        };
+        let before = serde_json::to_value(&query).unwrap();
+        let outer = RowSchema::with_qualified_types(
+            "outer_scope", vec!["x".into()], vec![Some(ColumnType::BigInteger)],
+        );
+        restore_query_layouts(
+            &NoRoutines,
+            &mut query,
+            &[crate::SQLParam::typed_scalar(uqa_core::Value::Int(9), ColumnType::BigInteger)],
+            &crate::binding::fixture::empty_binding_context(),
+            Some(&outer),
+        ).unwrap();
+        assert_eq!(serde_json::to_value(&query).unwrap(), before, "{sql}");
+        query.visit_queries_mut(&mut |query| {
+            assert!(query.analyzed_output.is_some(), "{sql}");
+            if matches!(&query.root, crate::plan::RelationalPlan::QueryBlock(block) if block.from.is_some()) {
+                assert!(query.analyzed_source.is_some(), "{sql}");
+            }
+        });
+        if sql.contains("AS p") {
+            let output = query.analyzed_output.as_ref().unwrap();
+            assert_eq!(output.column_type(1), Some(&ColumnType::BigInteger));
+            assert_eq!(output.column_type(2), Some(&ColumnType::BigInteger));
+        }
+    }
+}

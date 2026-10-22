@@ -100,10 +100,16 @@ fn volatile_and_subquery_qualifications_precede_pure_outputs() {
         let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("block")
         };
-        assert!(matches!(block.from, Some(SourcePlan::Values { .. })));
+        let Some(SourcePlan::Subquery {
+            captured_output: Some(relation),
+            ..
+        }) = &block.from
+        else {
+            panic!("captured source")
+        };
         assert_eq!(
             block.projections[0].expr,
-            ScalarExpr::qualified_column("v", "x")
+            ScalarExpr::InternalColumn(relation.column(0))
         );
         assert_eq!(block.projections[1].alias.as_deref(), Some("z"));
         assert_eq!(
@@ -141,7 +147,7 @@ fn observable_producer_boundaries_keep_their_query_level() {
 }
 
 #[test]
-fn repeated_input_qualifiers_are_not_captured_by_a_different_query_scope() {
+fn independent_inputs_keep_distinct_structural_identities() {
     let query = analyzed(
         "SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)",
         "k=(SELECT 2)",
@@ -152,15 +158,51 @@ fn repeated_input_qualifiers_are_not_captured_by_a_different_query_scope() {
     let candidate = candidate(
         block.from.as_ref().unwrap(),
         query.analyzed_source.as_ref().unwrap(),
-        &BTreeSet::from(["s".into(), "v".into()]),
         &Context {
             routines: &Catalog,
             volatility: &Catalog,
             relations_bound: false,
         },
+        &mut Vec::new(),
     )
     .unwrap();
-    assert!(candidate.is_none());
+    let first = candidate.expect("capture independent source identities");
+    let second = super::candidate(
+        block.from.as_ref().unwrap(),
+        query.analyzed_source.as_ref().unwrap(),
+        &Context {
+            routines: &Catalog,
+            volatility: &Catalog,
+            relations_bound: false,
+        },
+        &mut Vec::new(),
+    )
+    .unwrap()
+    .unwrap();
+    let SourcePlan::Subquery {
+        captured_output: Some(first_id),
+        ..
+    } = first.source
+    else {
+        panic!("first capture")
+    };
+    let SourcePlan::Subquery {
+        captured_output: Some(second_id),
+        ..
+    } = second.source
+    else {
+        panic!("second capture")
+    };
+    assert_ne!(first_id, second_id);
+    let key = ColumnIdentity::qualified("s", "k");
+    assert_eq!(
+        first.outputs[&key],
+        ScalarExpr::InternalColumn(first_id.column(0))
+    );
+    assert_eq!(
+        second.outputs[&key],
+        ScalarExpr::InternalColumn(second_id.column(0))
+    );
 }
 
 #[test]
@@ -216,4 +258,106 @@ fn ordinary_sources_require_no_pullup_workspace() {
     });
     assert_eq!(allocations.count_total, 0);
     assert_eq!(allocations.bytes_total, 0);
+}
+
+#[test]
+fn input_capture_reads_only_demanded_values_and_keeps_producer_filter() {
+    let mut query = analyzed(
+        "SELECT x AS k,10/x AS z FROM (VALUES(0,99),(2,99)) v(x,unused) WHERE x IS NOT NULL",
+        "k=(SELECT 2)",
+    );
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
+        panic!("block")
+    };
+    let Some(SourcePlan::Subquery { body, .. }) = &mut block.from else {
+        panic!("derived")
+    };
+    body.analyzed_source = Some(std::sync::Arc::new(AnalyzedSource {
+        schema: RowSchema::with_qualified_types(
+            "v",
+            vec!["x".into(), "unused".into()],
+            vec![Some(ColumnType::Integer); 2],
+        ),
+        children: None,
+    }));
+    lift(&mut query);
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("block")
+    };
+    let Some(SourcePlan::Subquery {
+        body,
+        captured_output: Some(_),
+        ..
+    }) = &block.from
+    else {
+        panic!("capture")
+    };
+    let RelationalPlan::QueryBlock(input) = &body.root else {
+        panic!("input")
+    };
+    assert_eq!(input.projections.len(), 1);
+    assert_eq!(
+        input.projections[0].expr,
+        ScalarExpr::qualified_column("v", "x")
+    );
+    assert!(input.r#where.is_some());
+    assert_eq!(body.analyzed_output.as_ref().unwrap().columns(), ["x"]);
+}
+
+#[test]
+fn captured_source_keeps_pure_predicates_at_its_scan_without_duplicate_evaluation() {
+    let mut query = analyzed("SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)", "k>0");
+    lift(&mut query);
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("block")
+    };
+    assert!(block.r#where.is_none());
+    let Some(SourcePlan::Subquery {
+        body,
+        captured_output: Some(_),
+        ..
+    }) = &block.from
+    else {
+        panic!("capture")
+    };
+    let RelationalPlan::QueryBlock(input) = &body.root else {
+        panic!("input")
+    };
+    assert!(input.r#where.is_some());
+    let mut columns = Vec::new();
+    input.r#where.as_ref().unwrap().visit(&mut |node| {
+        if let ScalarExpr::QualifiedColumn { qualifier, column } = node {
+            columns.push((qualifier.clone(), column.to_string()));
+        }
+        assert!(!matches!(node, ScalarExpr::InternalColumn(_)));
+    });
+    assert_eq!(columns, [("v".to_owned(), "x".to_owned())]);
+}
+
+#[test]
+fn stored_query_definitions_never_retain_transient_input_captures() {
+    for sql in [
+        "CREATE VIEW retained_capture AS SELECT 1",
+        "CREATE MATERIALIZED VIEW retained_capture AS SELECT 1",
+        "PREPARE retained_capture AS SELECT 1",
+    ] {
+        let mut plan = UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0));
+        plan.visit_query_roots_mut(&mut |query| {
+            *query = analyzed(
+                "SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)",
+                "k=(SELECT 2)",
+            );
+        });
+        let before = serde_json::to_value(&plan).unwrap();
+        rewrite_plan(
+            &mut plan,
+            &Context {
+                routines: &Catalog,
+                volatility: &Catalog,
+                relations_bound: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_value(&plan).unwrap(), before, "{sql}");
+    }
 }

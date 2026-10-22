@@ -32,10 +32,23 @@ pub(super) fn rewrite(
         volatility: catalog.volatility,
         relations_bound: false,
     };
+    rewrite_plan(plan, &context)
+}
+
+fn rewrite_plan(plan: &mut UnifiedPlan, context: &Context<'_>) -> Result<(), SQLError> {
+    if let UnifiedPlan::Command(command) = plan {
+        match command.as_mut() {
+            uqa_sql::plan::CommandPlan::CreateView { .. }
+            | uqa_sql::plan::CommandPlan::CreateMaterializedView { .. }
+            | uqa_sql::plan::CommandPlan::Prepare { .. } => return Ok(()),
+            uqa_sql::plan::CommandPlan::Explain { body, .. } => return rewrite_plan(body, context),
+            _ => {}
+        }
+    }
     let mut result = Ok(());
     plan.visit_queries_mut(&mut |query| {
         if result.is_ok() {
-            result = query_block(query, &context);
+            result = query_block(query, context);
         }
     });
     result
@@ -72,18 +85,6 @@ fn query_block(query: &mut QueryPlan, context: &Context<'_>) -> Result<(), SQLEr
     {
         return Ok(());
     }
-    let from = block.from.as_ref().expect("source checked");
-    let mut lifted = Vec::new();
-    candidates(
-        from,
-        input,
-        &from_qualifier_set(from),
-        &context,
-        &mut lifted,
-    )?;
-    if lifted.is_empty() {
-        return Ok(());
-    }
     let mut changed = block.clone();
     let Ok(projections) =
         uqa_sql::semantics::expand_bound_projection_stars(&changed.projections, &input.schema)
@@ -100,6 +101,26 @@ fn query_block(query: &mut QueryPlan, context: &Context<'_>) -> Result<(), SQLEr
     for (projection, label) in changed.projections.iter_mut().zip(output.columns()) {
         projection.alias = Some(label.clone());
     }
+    let mut predicates = changed
+        .r#where
+        .as_ref()
+        .map(uqa_sql::semantics::flatten_and_filter_parts)
+        .unwrap_or_default()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut lifted = Vec::new();
+    candidates(
+        changed.from.as_ref().expect("source checked"),
+        input,
+        &context,
+        &mut predicates,
+        &mut lifted,
+    )?;
+    if lifted.is_empty() {
+        return Ok(());
+    }
+    changed.r#where = crate::filter_pushdown::combine_filter_parts(predicates);
     for candidate in lifted {
         rewrite_expressions(&mut changed, &mut |node| {
             let identity = column_identity(node);
@@ -113,65 +134,31 @@ fn query_block(query: &mut QueryPlan, context: &Context<'_>) -> Result<(), SQLEr
             &candidate.qualifier,
             candidate.source,
         );
-        changed
-            .privilege_columns
-            .extend(candidate.privilege_columns);
-        if let Some(predicate) = candidate.predicate {
-            changed.r#where = Some(match changed.r#where.take() {
-                Some(outer) => ScalarExpr::And(vec![filter_acceptance(predicate), outer]),
-                None => predicate,
-            });
-        }
     }
     query.root = RelationalPlan::QueryBlock(changed);
     Ok(())
-}
-
-/// A producer's WHERE has already rejected NULL. Scalar AND alone would still evaluate a volatile consumer for that NULL input.
-fn filter_acceptance(predicate: ScalarExpr) -> ScalarExpr {
-    let binding = uqa_sql::ast::FunctionBinding::dispatched(
-        uqa_sql::ast::FunctionDispatch::BooleanTest(uqa_sql::ast::BooleanTest::IsTrue),
-    );
-    ScalarExpr::Func {
-        name: binding.name.clone(),
-        binding: Some(binding),
-        args: vec![predicate],
-        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
-        distinct: false,
-        order_by: Vec::new(),
-        filter: None,
-    }
 }
 
 struct Lifted {
     qualifier: String,
     source: SourcePlan,
     outputs: BTreeMap<ColumnIdentity, ScalarExpr>,
-    predicate: Option<ScalarExpr>,
-    privilege_columns: BTreeSet<ColumnIdentity>,
 }
 
 fn candidates(
     source: &SourcePlan,
     analyzed: &AnalyzedSource,
-    occupied: &BTreeSet<String>,
     context: &Context<'_>,
+    predicates: &mut Vec<ScalarExpr>,
     output: &mut Vec<Lifted>,
 ) -> Result<(), SQLError> {
     if let SourcePlan::Join { left, right, .. } = source {
         if let Some(children) = &analyzed.children {
-            candidates(left, &children.0, occupied, context, output)?;
-            candidates(right, &children.1, occupied, context, output)?;
+            candidates(left, &children.0, context, predicates, output)?;
+            candidates(right, &children.1, context, predicates, output)?;
         }
-    } else if let Some(candidate) = candidate(source, analyzed, occupied, context)? {
-        // Two independently scoped producers may use the same input alias. Their identities cannot be merged without an opaque input namespace.
-        let introduced = from_qualifier_set(&candidate.source);
-        if output
-            .iter()
-            .all(|prior| from_qualifier_set(&prior.source).is_disjoint(&introduced))
-        {
-            output.push(candidate);
-        }
+    } else if let Some(candidate) = candidate(source, analyzed, context, predicates)? {
+        output.push(candidate);
     }
     Ok(())
 }
@@ -179,11 +166,12 @@ fn candidates(
 fn candidate(
     source: &SourcePlan,
     analyzed: &AnalyzedSource,
-    occupied: &BTreeSet<String>,
     context: &Context<'_>,
+    predicates: &mut Vec<ScalarExpr>,
 ) -> Result<Option<Lifted>, SQLError> {
     let SourcePlan::Subquery {
         body,
+        captured_output: None,
         alias: Some(qualifier),
         lateral: false,
         ..
@@ -221,13 +209,7 @@ fn candidate(
     {
         return Ok(None);
     }
-    let Some(from) = &block.from else {
-        return Ok(None);
-    };
-    if from_qualifier_set(from)
-        .iter()
-        .any(|name| name != qualifier && occupied.contains(name))
-    {
+    if block.from.is_none() || input.schema.columns_are_open(None) {
         return Ok(None);
     }
     let mut block = block.clone();
@@ -251,32 +233,148 @@ fn candidate(
     if !qualify_block(&mut block, &input.schema) {
         return Ok(None);
     }
-    let outputs = analyzed
-        .schema
-        .identities()
-        .iter()
-        .cloned()
-        .zip(
-            block
-                .projections
-                .into_iter()
-                .map(|projection| projection.expr),
-        )
-        .collect();
-    let mut privilege_columns = BTreeSet::new();
-    for identity in block.privilege_columns {
-        let Some(identity) = qualified_identity(&identity, &input.schema) else {
-            return Ok(None);
-        };
-        privilege_columns.insert(identity);
-    }
+    let Some(capture) = capture_expressions(&block, &input.schema, &analyzed.schema) else {
+        return Ok(None);
+    };
+    move_scan_predicates(
+        &mut block,
+        qualifier,
+        analyzed.schema.columns(),
+        context,
+        predicates,
+    );
+    let source = capture.source(body, block, &input.schema, qualifier);
     Ok(Some(Lifted {
         qualifier: qualifier.clone(),
-        source: block.from.expect("source checked"),
-        outputs,
-        predicate: block.r#where,
-        privilege_columns,
+        source,
+        outputs: capture.outputs,
     }))
+}
+
+struct CapturedOutput {
+    relation: uqa_sql::ast::InternalRelationId,
+    captures: Vec<usize>,
+    outputs: BTreeMap<ColumnIdentity, ScalarExpr>,
+}
+
+impl CapturedOutput {
+    // Keep producer names, authorization and qualification in their original scope. Only demanded raw attributes cross its output boundary.
+    fn source(
+        &self,
+        body: &QueryPlan,
+        mut block: Box<QueryBlockPlan>,
+        input: &RowSchema,
+        qualifier: &str,
+    ) -> SourcePlan {
+        block.projections = self
+            .captures
+            .iter()
+            .map(|position| {
+                let identity = &input.identities()[*position];
+                uqa_sql::plan::ProjectionPlan {
+                    expr: identity_expression(identity),
+                    alias: Some(identity.column().to_owned()),
+                }
+            })
+            .collect();
+        let columns = self
+            .captures
+            .iter()
+            .map(|position| (input.columns()[*position].clone(), *position))
+            .collect::<Vec<_>>();
+        let descriptor = RowSchema::remap_positions(input, &columns, &[]);
+        let mut captured = body.clone();
+        captured.analyzed_output = Some(descriptor.for_result_columns(descriptor.columns()));
+        captured.root = RelationalPlan::QueryBlock(block);
+        SourcePlan::Subquery {
+            captured_output: Some(self.relation),
+            lateral: false,
+            body: Box::new(captured),
+            alias: Some(qualifier.to_owned()),
+            column_aliases: Vec::new(),
+        }
+    }
+}
+
+fn capture_expressions(
+    block: &QueryBlockPlan,
+    input: &RowSchema,
+    output: &RowSchema,
+) -> Option<CapturedOutput> {
+    let relation = uqa_sql::ast::InternalRelationId::allocate();
+    let mut outputs = BTreeMap::new();
+    let mut captures = Vec::new();
+    let mut attributes = BTreeMap::new();
+    for (identity, projection) in output.identities().iter().zip(&block.projections) {
+        let mut expression = projection.expr.clone();
+        let mut valid = true;
+        uqa_sql::plan::rewrite_scalar_expression(&mut expression, &mut |node| {
+            if let Some(identity) = column_identity(node) {
+                let position = input.qualified_position(
+                    identity.qualifier().expect("qualified input"),
+                    identity.column(),
+                );
+                if let Some(position) = position {
+                    let attribute = *attributes.entry(position).or_insert_with(|| {
+                        captures.push(position);
+                        captures.len() - 1
+                    });
+                    *node = ScalarExpr::InternalColumn(relation.column(attribute));
+                } else {
+                    valid = false;
+                }
+            } else if matches!(node, ScalarExpr::InternalColumn(_)) {
+                valid = false;
+            }
+        });
+        if !valid {
+            return None;
+        }
+        outputs.insert(identity.clone(), expression);
+    }
+    Some(CapturedOutput {
+        relation,
+        captures,
+        outputs,
+    })
+}
+
+fn move_scan_predicates(
+    block: &mut QueryBlockPlan,
+    qualifier: &str,
+    columns: &[String],
+    context: &Context<'_>,
+    predicates: &mut Vec<ScalarExpr>,
+) {
+    // A pure qualification with only this producer's outputs belongs at its scan. Move, rather than duplicate, it so existing indexes and stable-call counts keep their original boundary.
+    let mut retained = Vec::new();
+    for predicate in std::mem::take(predicates) {
+        let mut used = BTreeSet::new();
+        let rewritten = if !uqa_sql::semantics::expr_contains_subquery(&predicate)
+            && !uqa_sql::semantics::volatility::expr_contains_volatile_function(
+                context.volatility,
+                &predicate,
+            ) {
+            crate::filter_pushdown::rewrite_output_filter(
+                &predicate,
+                qualifier,
+                columns,
+                &block.projections,
+                &mut used,
+            )
+        } else {
+            None
+        };
+        if let Some(rewritten) = rewritten.filter(|_| !used.is_empty()) {
+            block.r#where = Some(match block.r#where.take() {
+                Some(existing) => ScalarExpr::And(vec![existing, rewritten]),
+                None => rewritten,
+            });
+        } else {
+            retained.push(predicate);
+        }
+    }
+    *predicates = retained;
 }
 
 fn contains_derived_source(source: &SourcePlan) -> bool {

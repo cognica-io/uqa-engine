@@ -84,7 +84,13 @@ impl Preparation<'_> {
                 ..
             } => {
                 let schema = self.query(body, outer)?;
-                return Ok(rename_schema(&schema, column_aliases, alias.as_deref()));
+                return Ok(match source {
+                    SourcePlan::Subquery {
+                        captured_output: Some(relation),
+                        ..
+                    } => RowSchema::capture_output(&schema, *relation),
+                    _ => rename_schema(&schema, column_aliases, alias.as_deref()),
+                });
             }
             SourcePlan::Function {
                 name,

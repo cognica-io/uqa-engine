@@ -66,7 +66,12 @@ impl<S: Clone> CteScope<S> {
     /// Prepare a definition in its original lexical bindings while retaining the invoking statement's catalog, row locks, scalar arena and transaction controls.
     pub fn definition_scope(&self, reference: &str) -> Option<Self> {
         let name = uqa_sql::semantics::cte_reference_name(reference)?;
-        let retained = self.definition_scopes.get(&name)?;
+        self.definition_scope_for_name(&name)
+    }
+
+    /// A declaration already owns its decoded identifier; dots and quotes in that name are not SQL qualification syntax.
+    pub(crate) fn definition_scope_for_name(&self, name: &str) -> Option<Self> {
+        let retained = self.definition_scopes.get(name)?;
         let mut scope = self.clone();
         scope.rows.clone_from(&retained.rows);
         scope.deferred_ctes.clone_from(&retained.deferred);
@@ -77,10 +82,12 @@ impl<S: Clone> CteScope<S> {
             .recursive_control_widths
             .clone_from(&retained.recursive_widths);
         scope.visible_cte_names.clone_from(&retained.names);
-        if let Some(plan) = self.deferred_ctes.get(&name) {
+        if let Some(plan) = self.deferred_ctes.get(name) {
             if uqa_sql::semantics::cte_references_own_name(plan) {
-                scope.deferred_ctes.insert(name.clone(), Arc::clone(plan));
-                scope.visible_cte_names.insert(name);
+                scope
+                    .deferred_ctes
+                    .insert(name.to_owned(), Arc::clone(plan));
+                scope.visible_cte_names.insert(name.to_owned());
             }
         }
         Some(scope)
