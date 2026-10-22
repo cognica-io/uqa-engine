@@ -4,6 +4,8 @@ This page describes unreleased changes and UQA Engine 0.6.1 and earlier releases
 
 ## Unreleased
 
+Custom Rust adapters constructing `uqa_sql::binding::correlation::CorrelationContext` or `uqa_execution::query::subqueries::SubqueryServices` now supply the caller's `routines: &dyn RoutineResolution`. Correlation analysis uses the selected routine identity and declared result schema without executing its body. The Execution `source_depends_on_current_row` helper also receives that routine capability before its analysis catalog.
+
 Custom Rust AST and plan builders now provide `lateral: bool` in `FromClause::Values`, `FromClause::Subquery`, `SourcePlan::Values` and `SourcePlan::Subquery`. Set it on the range item that may reference preceding FROM inputs, including a left operand inside a nested join. This is permission to reference a preceding row, not a requirement to execute an independent input repeatedly. Existing serialized nodes default the absent flag to `false`; the older right-input `Join::lateral` flag remains honored. Use updated binaries when creating and reading newly supported nested LATERAL definitions. The `Join` variants of both enums also require `comma: bool`: use `true` for a join compiled from a comma-separated FROM list and `false` for an explicit JOIN. Absent serialized flags decode as `false`; old definitions have already lost that syntax distinction. Newly stored definitions preserve it for `pg_get_viewdef`.
 
 ## 0.6.1

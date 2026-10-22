@@ -123,3 +123,18 @@ pub(crate) fn empty_binding_context() -> super::context::BindingContext<'static>
         scalar_subqueries: &[],
     }
 }
+
+pub(crate) struct NoRoutines;
+impl crate::FunctionTypeResolver for NoRoutines {
+    fn resolve_function_type(
+        &self,
+        _name: &str,
+        _binding: Option<&crate::ast::FunctionBinding>,
+        _argument_names: &[Option<String>],
+        _argument_types: &[Option<crate::ColumnType>],
+        _explicit_variadic: bool,
+    ) -> Result<Option<crate::ColumnType>, crate::SQLError> {
+        Ok(None)
+    }
+}
+impl crate::routines::RoutineResolution for NoRoutines {}

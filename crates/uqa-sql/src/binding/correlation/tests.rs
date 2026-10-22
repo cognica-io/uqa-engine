@@ -10,6 +10,7 @@ use super::*;
 fn implicit_action_inputs_preserve_their_enclosing_row_identity() {
     let binding = crate::binding::fixture::empty_binding_context();
     let context = CorrelationContext {
+        routines: &crate::binding::fixture::NoRoutines,
         catalog: binding.catalog.as_ref(),
         resolution: &binding.resolution,
         scoped_relations: None,
@@ -58,6 +59,7 @@ fn table_range_aliases_replace_physical_correlation_names() {
     )]));
     let resolution = crate::binding::fixture::resolution(vec!["public".into()], "pg_temp_1".into());
     let context = CorrelationContext {
+        routines: &crate::binding::fixture::NoRoutines,
         catalog: catalog.as_ref(),
         resolution: &resolution,
         scoped_relations: None,
@@ -91,6 +93,7 @@ fn correlation_uses_scoped_relation_descriptors_without_hiding_outer_columns() {
     let binding = crate::binding::fixture::empty_binding_context();
     let relations = ScopedColumns(BTreeMap::from([("new_rows".into(), vec!["id".into()])]));
     let context = CorrelationContext {
+        routines: &crate::binding::fixture::NoRoutines,
         catalog: binding.catalog.as_ref(),
         resolution: &binding.resolution,
         scoped_relations: Some(&relations),
@@ -136,6 +139,7 @@ fn correlation_uses_scoped_relation_descriptors_without_hiding_outer_columns() {
 fn lateral_source_dependencies_distinguish_caller_from_local_and_enclosing_names() {
     let binding = crate::binding::fixture::empty_binding_context();
     let context = CorrelationContext {
+        routines: &crate::binding::fixture::NoRoutines,
         catalog: binding.catalog.as_ref(),
         resolution: &binding.resolution,
         scoped_relations: None,
@@ -214,6 +218,7 @@ fn lateral_source_dependencies_distinguish_caller_from_local_and_enclosing_names
 fn declared_source_columns_preserve_independent_join_inputs() {
     let binding = crate::binding::fixture::empty_binding_context();
     let context = CorrelationContext {
+        routines: &crate::binding::fixture::NoRoutines,
         catalog: binding.catalog.as_ref(),
         resolution: &binding.resolution,
         scoped_relations: None,

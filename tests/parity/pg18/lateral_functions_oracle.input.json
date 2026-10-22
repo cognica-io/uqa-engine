@@ -399,6 +399,42 @@
     {
       "id": "descriptor_join_alias_calls",
       "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "declared_pair",
+      "sql": "CREATE FUNCTION descriptor_pair() RETURNS TABLE(x integer,y integer) LANGUAGE plpgsql AS $$ BEGIN RETURN QUERY SELECT 4,5; END $$"
+    },
+    {
+      "id": "declared_composite",
+      "sql": "CREATE TYPE descriptor_record AS (x integer,y integer)"
+    },
+    {
+      "id": "declared_record",
+      "sql": "CREATE FUNCTION descriptor_record_function() RETURNS SETOF descriptor_record LANGUAGE plpgsql AS $$ BEGIN RETURN NEXT ROW(4,5)::descriptor_record; END $$"
+    },
+    {
+      "id": "declared_user_pair_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "declared_user_pair",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM descriptor_pair() f(x)) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "declared_user_pair_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "declared_user_record_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "declared_user_record",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM descriptor_record_function() f(x)) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "declared_user_record_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
     }
   ]
 }

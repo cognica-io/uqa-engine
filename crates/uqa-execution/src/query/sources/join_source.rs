@@ -110,9 +110,12 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 )
             });
             let dependent = match lateral_input.as_ref() {
-                Some(input) => {
-                    crate::query::binding::source_depends_on_current_row(right, input, ctes)?
-                }
+                Some(input) => crate::query::binding::source_depends_on_current_row(
+                    context.ctes.routines,
+                    right,
+                    input,
+                    ctes,
+                )?,
                 None => false,
             };
             if dependent {

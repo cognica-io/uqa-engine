@@ -21087,6 +21087,19 @@
       "capability": "Independent FROM input dependencies",
       "workload": "Six PostgreSQL row/call-count observations for JSON, ordinality, VALUES, derived and joined positional aliases and ROWS FROM, each paired with a true caller-row dependency.",
       "invariant": "Complete local output columns prevent false per-row dependencies without losing actual references to the caller."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "correlation_uses_selected_routine_output_without_evaluating_its_body",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/routines/inlining/tests/table.rs",
+      "capability": "Independent FROM input dependencies",
+      "workload": "Overloaded user table functions with partial positional aliases and independent versus caller-dependent projected columns.",
+      "invariant": "Correlation reads the selected routine identity and complete declared output without parsing or executing the routine body."
     }
   ]
 }

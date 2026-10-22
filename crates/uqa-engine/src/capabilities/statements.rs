@@ -90,6 +90,7 @@ impl context::PhysicalExplainPlanning for Engine {
                 filters: uqa_planner::filter_pushdown::context::FilterPushdownContext {
                     volatility: self,
                     correlation: uqa_sql::binding::correlation::CorrelationContext {
+                        routines: self,
                         catalog: &catalog,
                         resolution: &resolution,
                         scoped_relations: None,

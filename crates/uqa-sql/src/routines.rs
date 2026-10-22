@@ -222,6 +222,25 @@ pub trait RoutineResolution: FunctionTypeResolver {
     }
 }
 
+/// Select the exact retained routine identity and declared signature without rebinding its name or executing its body.
+pub fn selected_bound_function(
+    routines: &dyn RoutineResolution,
+    binding: &FunctionBinding,
+) -> Option<std::sync::Arc<SQLUserFunction>> {
+    if binding.builtin || binding.resolution_error.is_some() {
+        return None;
+    }
+    let identity = binding.object_id?;
+    routines
+        .lookup_bound_sql_functions_by_binding(binding)?
+        .into_iter()
+        .find(|function| {
+            !function.def.is_procedure
+                && function.def.object_id == Some(identity)
+                && routine_signature_types(&function.def) == binding.argument_types
+        })
+}
+
 pub fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
     def.identity_params()
         .iter()

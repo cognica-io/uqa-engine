@@ -380,18 +380,7 @@ impl RoutineInliningContext<'_> {
         &self,
         binding: &FunctionBinding,
     ) -> Option<std::sync::Arc<super::SQLUserFunction>> {
-        if binding.builtin || binding.resolution_error.is_some() {
-            return None;
-        }
-        let identity = binding.object_id?;
-        self.routines
-            .lookup_bound_sql_functions_by_binding(binding)?
-            .into_iter()
-            .find(|function| {
-                !function.def.is_procedure
-                    && function.def.object_id == Some(identity)
-                    && super::routine_signature_types(&function.def) == binding.argument_types
-            })
+        super::selected_bound_function(self.routines, binding)
     }
 
     /// Ordinary messages repeat optimizer-time routine work. Prepared plans

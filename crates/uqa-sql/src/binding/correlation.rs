@@ -22,6 +22,7 @@ use sources::{expression_references_outer, source_references_outer};
 /// A single immutable namespace and catalog view used throughout correlation analysis.
 #[derive(Clone, Copy)]
 pub struct CorrelationContext<'a> {
+    pub routines: &'a dyn crate::routines::RoutineResolution,
     pub catalog: &'a dyn AnalysisCatalog,
     pub resolution: &'a RelationNameResolution,
     pub scoped_relations: Option<&'a dyn CorrelationRelations>,
@@ -507,6 +508,24 @@ fn source_scope(
             let qualifiers = [alias.as_ref().unwrap_or(output_name).clone()]
                 .into_iter()
                 .collect();
+            if let Some((binding, function)) = binding.as_ref().and_then(|binding| {
+                crate::routines::selected_bound_function(context.routines, binding)
+                    .map(|function| (binding, function))
+            }) {
+                return Ok(QueryScope {
+                    qualifiers,
+                    internal_relations: BTreeSet::new(),
+                    columns: RelationColumns::known(crate::semantics::user_table_function_columns(
+                        context.routines,
+                        &function,
+                        binding.invocation.as_deref(),
+                        output_name,
+                        alias.as_deref(),
+                        column_aliases,
+                        *ordinality,
+                    )?),
+                });
+            }
             let builtin = binding.as_ref().is_none_or(|binding| binding.builtin)
                 && crate::semantics::is_builtin_table_function(
                     &crate::semantics::builtin_function_dispatch_name(name),

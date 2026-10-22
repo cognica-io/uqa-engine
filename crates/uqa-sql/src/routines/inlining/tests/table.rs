@@ -7,6 +7,45 @@
 use super::*;
 
 #[test]
+fn correlation_uses_selected_routine_output_without_evaluating_its_body() {
+    use crate::binding::correlation::{query_depends_on_outer_row, CorrelationContext};
+    use crate::plan::SourcePlan;
+
+    let catalog = Catalog::new(
+        "CREATE FUNCTION picked(value bigint) RETURNS TABLE(other integer) LANGUAGE plpgsql AS $$BEGIN RETURN QUERY SELECT 8; END$$;
+         CREATE FUNCTION picked(value integer) RETURNS TABLE(x integer, y integer) LANGUAGE plpgsql AS $$BEGIN RETURN QUERY SELECT 4, 5; END$$",
+    );
+    let binding_context = crate::binding::fixture::empty_binding_context();
+    let context = CorrelationContext {
+        routines: &catalog,
+        catalog: binding_context.catalog.as_ref(),
+        resolution: &binding_context.resolution,
+        scoped_relations: None,
+    };
+    for (expression, dependent) in [("y", false), ("caller_value", true)] {
+        let sql = format!("SELECT {expression} FROM picked(1) f(renamed_x)");
+        let UnifiedPlan::Query(mut query) =
+            UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        let RelationalPlan::QueryBlock(block) = &mut query.root else {
+            panic!("block")
+        };
+        let Some(SourcePlan::Function { binding, .. }) = &mut block.from else {
+            panic!("function")
+        };
+        *binding = Some(catalog.binding("picked", &[Some(ColumnType::Integer)]));
+        assert_eq!(
+            query_depends_on_outer_row(context, &query).unwrap(),
+            dependent,
+            "{sql}",
+        );
+    }
+    assert_eq!(catalog.evaluations.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn result_assignment_follows_body_distinct_grouping_and_ordering() {
     for body in [
         "SELECT DISTINCT v FROM (VALUES (1.2),(1.4)) d(v)",
