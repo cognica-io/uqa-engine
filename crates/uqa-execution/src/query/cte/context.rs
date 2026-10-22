@@ -65,6 +65,17 @@ pub trait QueryOutputRewriter: Sync {
         filter: &ScalarExpr,
         output_columns: Option<&[String]>,
     ) -> Result<Option<QueryPlan>, SQLError>;
+
+    /// Place a predicate inside an ordinary derived source. Recursive specialization keeps its separate effect boundary through `push_output_filter`.
+    fn push_derived_output_filter(
+        &self,
+        query: &QueryPlan,
+        qualifier: &str,
+        filter: &ScalarExpr,
+        output_columns: Option<&[String]>,
+    ) -> Result<Option<QueryPlan>, SQLError> {
+        self.push_output_filter(query, qualifier, filter, output_columns)
+    }
 }
 
 #[derive(Clone)]

@@ -8,6 +8,30 @@
 
 use uqa_engine::Engine;
 
+#[test]
+fn explaining_derived_filters_keeps_output_effects_at_execution() {
+    let engine = Engine::new();
+    engine.sql("CREATE SEQUENCE explain_effect", &[]).unwrap();
+    engine.sql("CREATE VIEW explain_derived AS SELECT x AS k,nextval('explain_effect') AS z FROM (VALUES(0),(2)) v(x)", &[]).unwrap();
+    for sql in [
+        "SELECT * FROM (SELECT x AS k,nextval('explain_effect') AS z FROM (VALUES(0),(2)) v(x)) s WHERE k>0",
+        "SELECT * FROM explain_derived s(j) WHERE j>0",
+        "WITH q AS NOT MATERIALIZED (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) SELECT * FROM q WHERE k>0",
+    ] {
+        engine.sql("SELECT setval('explain_effect',1,false)", &[]).unwrap();
+        engine.sql(&format!("EXPLAIN (FORMAT JSON) {sql}"), &[]).unwrap();
+        assert_eq!(engine.sql("SELECT is_called FROM explain_effect", &[]).unwrap().rows[0]["is_called"], uqa_core::Value::Bool(false));
+        let result = engine.sql(&format!("EXPLAIN (ANALYZE, FORMAT JSON) {sql}"), &[]).unwrap();
+        let uqa_core::Value::Str(payload) = &result.rows[0]["plan"] else {
+            panic!("JSON plan");
+        };
+        let plan: serde_json::Value = serde_json::from_str(payload).unwrap();
+        assert_eq!(plan["Actual Rows"], 1, "{sql}: {plan}");
+        let expected = if sql.starts_with("WITH") { 1 } else { 2 };
+        assert_eq!(engine.sql("SELECT nextval('explain_effect') AS n", &[]).unwrap().rows[0]["n"], uqa_core::Value::Int(expected));
+    }
+}
+
 fn open(provider: usize, path: &std::path::Path) -> Engine {
     match provider {
         0 => Engine::new(),
@@ -95,6 +119,40 @@ fn original_output_demand_matches_postgresql(#[case] provider: usize) {
         &engine,
         include_str!("../../../../tests/parity/pg18/projection_output_oracle.expected.json"),
     );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn derived_predicate_order_matches_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("derived-predicates.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/derived_predicate_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    restored["cases"].as_array_mut().unwrap().retain(|case| {
+        matches!(
+            case["id"].as_str().unwrap(),
+            "view_output"
+                | "view_alias_tail"
+                | "stored_read"
+                | "stored_lateral_read"
+                | "volatile_view_reset"
+                | "volatile_view_read"
+                | "volatile_view_effects"
+        )
+    });
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 7);
+    crate::pg18_oracle::verify(&engine, &restored.to_string());
 }
 
 #[rstest::rstest]

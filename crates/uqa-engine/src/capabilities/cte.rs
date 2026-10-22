@@ -109,4 +109,14 @@ impl QueryOutputRewriter for Engine {
             self, query, qualifier, filter, columns,
         )
     }
+
+    fn push_derived_output_filter(
+        &self,
+        query: &QueryPlan,
+        qualifier: &str,
+        filter: &ScalarExpr,
+        columns: Option<&[String]>,
+    ) -> Result<Option<QueryPlan>, SQLError> {
+        super::query_planning::push_derived_output_filter(self, query, qualifier, filter, columns)
+    }
 }

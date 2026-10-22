@@ -6,7 +6,7 @@
 //! Physical assembly for tables, CTEs, views, catalogs, and foreign tables.
 
 use super::{
-    apply_propagated_view_lock, attach_qualifier_filter, combine_filters,
+    apply_propagated_view_lock, attach_qualifier_filter,
     execute_view_plan_output_with_parent_cache, qualifier_filter, qualifier_for,
     qualify_source_operator_with_columns, query_cte_names, query_output_shared,
     try_build_streaming_subquery_operator, ColumnPrune, CteScope, PhysicalOperator,
@@ -140,6 +140,26 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         definition_scope.row_lock_outer_row().map(|row| &row.schema),
                     )?;
                 }
+                let specialized = plan
+                    .body
+                    .query()
+                    .map(|query| {
+                        super::output_filter::specialize_source_filter(
+                            context,
+                            query,
+                            &qualifier,
+                            &output_aliases(&plan.columns, column_aliases),
+                            filters,
+                        )
+                    })
+                    .transpose()?
+                    .flatten();
+                let filters = if let Some(specialized) = specialized {
+                    *plan.body.query_mut().expect("query specialization") = specialized;
+                    None
+                } else {
+                    filters
+                };
                 let streamed = {
                     let mut scoped_ctes = definition_scope.enter_lock_identity_emission(false);
                     match plan.body.query() {
@@ -300,23 +320,13 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 // During a tuple-local recheck, a view named as the lock target pins every base scan of its storage inside this subtree to the candidate's tuples.
                 let mut recheck_scope = ctes.enter_recheck_storage_pins(&qualifier);
                 let ctes: &mut CteScope<S> = &mut recheck_scope;
-                let specialized_plan = column_aliases
-                    .is_empty()
-                    .then_some(filters)
-                    .flatten()
-                    .and_then(|filters| filters.get(&qualifier))
-                    .filter(|filters| !filters.is_empty())
-                    .and_then(|filters| combine_filters(filters.iter().cloned()))
-                    .map(|filter| {
-                        context.ctes.rewrites.push_output_filter(
-                            plan,
-                            &qualifier,
-                            &filter,
-                            (!output_columns.is_empty()).then_some(output_columns),
-                        )
-                    })
-                    .transpose()?
-                    .flatten();
+                let specialized_plan = super::output_filter::specialize_source_filter(
+                    context,
+                    plan,
+                    &qualifier,
+                    &output_aliases(output_columns, column_aliases),
+                    filters,
+                )?;
                 // Successful specialization applies this complete predicate inside the view; retrieval leaves cannot be evaluated again as scalar functions.
                 let filters = if specialized_plan.is_some() {
                     None

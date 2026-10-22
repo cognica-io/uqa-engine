@@ -1,0 +1,244 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "table",
+      "sql": "CREATE TABLE demand_rows (x integer)"
+    },
+    {
+      "id": "rows",
+      "sql": "INSERT INTO demand_rows VALUES (2),(0)"
+    },
+    {
+      "id": "sequence",
+      "sql": "CREATE SEQUENCE demand_sequence START 1"
+    },
+    {
+      "id": "view",
+      "sql": "CREATE VIEW demand_view AS SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)"
+    },
+    {
+      "id": "derived_output",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "function_derived_output",
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM generate_series(0,2,2) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "derived_unread_output",
+      "sql": "SELECT k FROM (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "view_output",
+      "sql": "SELECT * FROM demand_view WHERE k>0"
+    },
+    {
+      "id": "inline_cte_output",
+      "sql": "WITH q AS (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) SELECT * FROM q WHERE k>0"
+    },
+    {
+      "id": "not_materialized_output",
+      "sql": "WITH q AS NOT MATERIALIZED (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) SELECT * FROM q WHERE k>0"
+    },
+    {
+      "id": "materialized_output",
+      "sql": "WITH q AS MATERIALIZED (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) SELECT * FROM q WHERE k>0"
+    },
+    {
+      "id": "limit_barrier",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x) LIMIT 2) s WHERE s.k>0"
+    },
+    {
+      "id": "set_output",
+      "sql": "SELECT * FROM (SELECT x AS k,unnest(ARRAY[10/x]) AS z FROM (VALUES (0),(2)) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "volatile_derived_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_derived",
+      "sql": "SELECT * FROM (SELECT x AS k,nextval('demand_sequence') AS z FROM (VALUES(0),(2)) v(x)) q WHERE k>0"
+    },
+    {
+      "id": "volatile_derived_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "volatile_unread_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_unread",
+      "sql": "SELECT k FROM (SELECT x AS k,nextval('demand_sequence') AS z FROM (VALUES(0),(2)) v(x)) q WHERE k>0"
+    },
+    {
+      "id": "volatile_unread_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "alias_tail",
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s(j) WHERE s.j>0"
+    },
+    {
+      "id": "quoted_output",
+      "sql": "SELECT s.z FROM (SELECT 0 AS k,x AS \"K\",10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE s.\"K\">0"
+    },
+    {
+      "id": "quoted_range",
+      "sql": "SELECT \"S\".z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) \"S\" WHERE \"S\".k>0"
+    },
+    {
+      "id": "cte_alias_tail",
+      "sql": "WITH q(j) AS (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) SELECT r.z FROM q r(k) WHERE r.k>0"
+    },
+    {
+      "id": "view_alias_tail",
+      "sql": "SELECT d.z FROM demand_view d(j) WHERE d.j>0"
+    },
+    {
+      "id": "offset_barrier",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x) OFFSET 0) s WHERE s.k>0"
+    },
+    {
+      "id": "set_value_filter",
+      "sql": "SELECT * FROM (SELECT x AS k,unnest(ARRAY[10/x]) AS z FROM (VALUES(0),(2)) v(x)) s WHERE s.z>0"
+    },
+    {
+      "id": "distinct_key",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "distinct_on_key",
+      "sql": "SELECT * FROM (SELECT DISTINCT ON (x) x AS k,10/x AS z FROM (VALUES(0),(2)) v(x) ORDER BY x) s WHERE s.k>0"
+    },
+    {
+      "id": "group_key",
+      "sql": "SELECT * FROM (SELECT x AS k,sum(10/x) AS z FROM (VALUES(0),(2)) v(x) GROUP BY x) s WHERE s.k>0"
+    },
+    {
+      "id": "window_partition_key",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z,row_number() OVER (PARTITION BY x) AS n FROM (VALUES(0),(2)) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "window_unpartitioned",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z,row_number() OVER () AS n FROM (VALUES(0),(2)) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "union_member_filters",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x) UNION ALL SELECT x AS k,10/x AS z FROM (VALUES(0),(4)) v(x)) s WHERE s.k>0 ORDER BY k"
+    },
+    {
+      "id": "correlated_lateral",
+      "sql": "SELECT a.id,s.z FROM (VALUES(10)) a(id),LATERAL (SELECT x AS k,10/x+a.id AS z FROM (VALUES(0),(2)) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "volatile_view",
+      "sql": "CREATE VIEW demand_volatile_view AS SELECT x AS k,nextval('demand_sequence') AS z FROM (VALUES(0),(2)) v(x)"
+    },
+    {
+      "id": "volatile_view_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_view_read",
+      "sql": "SELECT * FROM demand_volatile_view WHERE k>0"
+    },
+    {
+      "id": "volatile_view_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "volatile_value_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_value_filter",
+      "sql": "SELECT * FROM (SELECT x AS k,nextval('demand_sequence') AS z FROM (VALUES(0),(2)) v(x)) s WHERE s.z>1"
+    },
+    {
+      "id": "volatile_value_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "volatile_cte_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_cte",
+      "sql": "WITH q AS NOT MATERIALIZED (SELECT x AS k,nextval('demand_sequence') AS z FROM (VALUES(0),(2)) v(x)) SELECT * FROM q WHERE k>0"
+    },
+    {
+      "id": "volatile_cte_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "distinct_on_nonkey",
+      "sql": "SELECT * FROM (SELECT DISTINCT ON (k) k,z FROM (VALUES(1,0),(1,2)) v(k,z) ORDER BY k,z) s WHERE z>0"
+    },
+    {
+      "id": "window_mixed_partitions",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z,row_number() OVER (PARTITION BY x) AS n,row_number() OVER () AS m FROM (VALUES(0),(2)) v(x)) s WHERE k>0"
+    },
+    {
+      "id": "coerced_union_filter",
+      "sql": "SELECT * FROM (SELECT 16777217::integer AS k UNION ALL SELECT 0::real AS k) s WHERE k::double precision=16777217.0::double precision"
+    },
+    {
+      "id": "prepared_predicate",
+      "sql": "PREPARE filtered(integer) AS SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k>$1"
+    },
+    {
+      "id": "prepared_read",
+      "sql": "EXECUTE filtered(0)"
+    },
+    {
+      "id": "stored_predicate",
+      "sql": "CREATE VIEW demand_filtered_view AS SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k>0"
+    },
+    {
+      "id": "stored_read",
+      "sql": "SELECT * FROM demand_filtered_view"
+    },
+    {
+      "id": "stored_lateral",
+      "sql": "CREATE VIEW demand_lateral_view AS SELECT a.id,s.z FROM (VALUES(10)) a(id),LATERAL (SELECT x AS k,10/x+a.id AS z FROM (VALUES(0),(2)) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "stored_lateral_read",
+      "sql": "SELECT * FROM demand_lateral_view"
+    },
+    {
+      "id": "distinct_volatile_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "distinct_volatile",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,nextval('demand_sequence') AS z FROM (VALUES(0),(2)) v(x)) s WHERE k>0"
+    },
+    {
+      "id": "distinct_volatile_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "distinct_on_volatile_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "distinct_on_volatile",
+      "sql": "SELECT * FROM (SELECT DISTINCT ON(x) x AS k,nextval('demand_sequence') AS z FROM (VALUES(0),(2)) v(x) ORDER BY x) s WHERE k>0"
+    },
+    {
+      "id": "distinct_on_volatile_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "distinct_erroring_call",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,abs(10/x) AS z FROM (VALUES(0),(2)) v(x)) s WHERE k>0"
+    }
+  ]
+}

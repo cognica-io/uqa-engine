@@ -148,6 +148,14 @@ ORDER BY sequence;
 
 Supported expression and relation subqueries include scalar subqueries, correlated subqueries, `EXISTS`, `IN`, and derived tables.
 
+Eligible pure predicates on one derived-table, view or folded-CTE source select its input rows before evaluating outputs that the predicate discards, including correlated LATERAL inputs. A pure condition on one output can therefore avoid a different output's division-by-zero error or volatile/set-returning call for an excluded row. A predicate that reads a volatile or set-returning output stays outside that output's evaluation; LIMIT/OFFSET, materialized CTEs, set-member type conversions and predicates that split DISTINCT ON groups or window partitions preserve their respective boundaries. Partial source aliases retain the remaining output names.
+
+```sql execute
+SELECT s.z
+FROM (SELECT x AS k, 10 / x AS z FROM (VALUES (0), (2)) v(x)) s
+WHERE s.k > 0;
+```
+
 ```sql
 SELECT e.employee_id, e.name
 FROM employees AS e

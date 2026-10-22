@@ -11,19 +11,19 @@ use uqa_sql::semantics::volatility::{
     expr_contains_volatile_function, query_contains_volatile_function,
 };
 use uqa_sql::semantics::{
-    expr_contains_function, expr_contains_subquery, expr_qualifiers, flatten_and_filter_parts,
-    from_qualifier_set, projection_columns, qualify_unqualified_columns, TABLE_OID_COLUMN,
-    XMIN_COLUMN,
+    expr_contains_subquery, expr_qualifiers, flatten_and_filter_parts, from_qualifier_set,
+    projection_columns, qualify_unqualified_columns, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
 use uqa_sql::{
     plan::{
-        source_projection::QualifierFilters, ComputePlan, ProjectionPlan, QueryBlockPlan,
-        QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan,
+        source_projection::QualifierFilters, ProjectionPlan, QueryBlockPlan, QueryPlan,
+        RelationalPlan, SourcePlan, UnifiedPlan,
     },
     SQLError, ScalarExpr,
 };
 pub mod context;
 use context::{FilterPushdownContext, FilterPushdownScope};
+mod output_boundary;
 mod source_columns;
 
 use source_columns::{ColumnOwners, SourceColumns};
@@ -492,9 +492,41 @@ pub fn push_output_filter_into_query_plan(
     filter: &ScalarExpr,
     output_columns_override: Option<&[String]>,
 ) -> Result<Option<QueryPlan>, SQLError> {
+    if query_contains_volatile_function(context.volatility, plan)? {
+        return Ok(None);
+    }
+    push_derived_output_filter(context, plan, qualifier, filter, output_columns_override)
+}
+
+/// Place an ordinary source predicate before its outputs. Unobserved volatile outputs do not prevent a pure predicate on other columns from selecting their input rows.
+pub fn push_derived_output_filter(
+    context: FilterPushdownContext<'_>,
+    plan: &QueryPlan,
+    qualifier: &str,
+    filter: &ScalarExpr,
+    output_columns_override: Option<&[String]>,
+) -> Result<Option<QueryPlan>, SQLError> {
+    let Some(mut columns) = plan
+        .analyzed_output
+        .as_ref()
+        .filter(|schema| !schema.columns_are_open(None))
+        .map(|schema| schema.columns().to_vec())
+        .or_else(|| query_plan_output_columns(plan))
+    else {
+        return Ok(None);
+    };
+    if let Some(aliases) = output_columns_override {
+        if aliases.len() > columns.len() {
+            return Ok(None);
+        }
+        for (column, alias) in columns.iter_mut().zip(aliases) {
+            column.clone_from(alias);
+        }
+    }
+    let output_columns_override = Some(columns.as_slice());
     if expr_contains_subquery(filter)
         || expr_contains_volatile_function(context.volatility, filter)
-        || query_contains_volatile_function(context.volatility, plan)?
+        || !output_boundary::preserves_set_types(plan, qualifier, filter, output_columns_override)
     {
         return Ok(None);
     }
@@ -589,21 +621,18 @@ pub fn specialize_query_block_output_filter(
     filter: &ScalarExpr,
     output_columns_override: Option<&[String]>,
 ) -> Option<()> {
-    if block.limit.is_some()
-        || block.offset.is_some()
-        || matches!(block.compute, ComputePlan::Window)
-        || !block.distinct_on.is_empty()
-        || !block.grouping_sets.is_empty()
-    {
+    if block.limit.is_some() || block.offset.is_some() || !block.grouping_sets.is_empty() {
         return None;
     }
 
-    let output_columns = output_columns_override.map_or_else(
-        || projection_columns(&block.projections),
-        <[String]>::to_vec,
-    );
-    if output_columns.len() != block.projections.len() {
-        return None;
+    let mut output_columns = projection_columns(&block.projections);
+    if let Some(aliases) = output_columns_override {
+        if aliases.len() > output_columns.len() {
+            return None;
+        }
+        for (column, alias) in output_columns.iter_mut().zip(aliases) {
+            column.clone_from(alias);
+        }
     }
     let mut used = BTreeSet::new();
     let rewritten = rewrite_output_filter(
@@ -623,25 +652,16 @@ pub fn specialize_query_block_output_filter(
             || expression.contains_window()
             || expr_contains_subquery(expression)
             || expr_contains_volatile_function(context.volatility, expression)
+            || uqa_sql::semantics::sets::static_setness::expression_may_return_set_statically(
+                context.correlation.routines,
+                expression,
+            )
         {
             return None;
         }
-        if matches!(block.compute, ComputePlan::Aggregate)
-            && !block.group_by.iter().any(|group| group == expression)
-        {
+        if !output_boundary::preserves_groups(block, expression) {
             return None;
         }
-    }
-    if block.distinct
-        && block
-            .projections
-            .iter()
-            .enumerate()
-            .any(|(index, projection)| {
-                !used.contains(&index) && expr_contains_function(&projection.expr)
-            })
-    {
-        return None;
     }
 
     block.r#where = match block.r#where.take() {
@@ -665,7 +685,7 @@ pub fn rewrite_output_filter(
     let map_column = |column: &str, used: &mut BTreeSet<usize>| {
         let index = output_columns
             .iter()
-            .position(|candidate| candidate.eq_ignore_ascii_case(column))?;
+            .position(|candidate| candidate == column)?;
         used.insert(index);
         Some(projections[index].expr.clone())
     };
@@ -679,7 +699,7 @@ pub fn rewrite_output_filter(
             qualifier: expression_qualifier,
             column,
             ..
-        } if expression_qualifier.eq_ignore_ascii_case(qualifier) => map_column(column, used)?,
+        } if expression_qualifier == qualifier => map_column(column, used)?,
         ScalarExpr::Default
         | ScalarExpr::Position(_)
         | ScalarExpr::InternalColumn(_)

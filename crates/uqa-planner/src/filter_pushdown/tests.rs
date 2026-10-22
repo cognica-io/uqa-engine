@@ -8,6 +8,7 @@ use super::*;
 use crate::{AccessPathPlan, JoinExecutionStrategy};
 use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, JoinKind};
+use uqa_sql::plan::ComputePlan;
 
 fn equality(left: &str, right: &str) -> ScalarExpr {
     ScalarExpr::Binary {
@@ -403,4 +404,5 @@ fn outer_join_marks_only_null_extended_qualifiers_as_unsafe_for_pushdown() {
 
 mod fixture;
 use fixture::Fixture;
+mod output_filters;
 mod relation_columns;

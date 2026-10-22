@@ -46,6 +46,7 @@ mod join_source;
 mod join_validation;
 mod lateral_source;
 mod output_descriptor;
+mod output_filter;
 pub(crate) mod prepared_queries;
 pub mod retained_source;
 mod source_operator;

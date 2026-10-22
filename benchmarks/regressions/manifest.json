@@ -21414,6 +21414,87 @@
       "capability": "CTE definition scopes",
       "workload": "56 independent PostgreSQL observations on four providers and 11 observations after persistent reopen.",
       "invariant": "Typed values, diagnostics, materialization, recursive references, prepared/stored definitions and routine privileges retain the definition namespace."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "ordinary_predicates_select_inputs_before_unrelated_volatile_and_set_outputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/output_filters.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "Pure predicates select inputs before independent erroring, volatile and set-returning outputs.",
+      "invariant": "Ordinary source specialization preserves selected output expressions and the recursive volatile barrier."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "referenced_effects_and_slicing_keep_the_output_predicate_outside",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/output_filters.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "Predicates read volatile/SRF outputs or cross LIMIT, OFFSET and window boundaries.",
+      "invariant": "Unsafe substitutions retain the original output boundary."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "output_substitution_preserves_quoted_identity_and_alias_tails",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/output_filters.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "Quoted names, differently cased qualifiers and a partial source alias list.",
+      "invariant": "Only the exact visible output is substituted and unlisted aliases keep their original tail."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "predicates_preserve_complete_distinct_groups_and_window_partitions",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/output_filters.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "Whole-group filters and filters that split DISTINCT ON groups or window partitions.",
+      "invariant": "Only complete groups and every affected window partition can be removed before output evaluation."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "derived_predicate_order_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "60 independent PostgreSQL observations across four providers and seven stored-definition observations after every persistent reopen.",
+      "invariant": "Predicates preserve typed rows, required errors, exact sequence effects, aliases, materialization, grouping, windows and set coercions."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "explaining_derived_filters_keeps_output_effects_at_execution",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "Static and executing JSON plans over derived, aliased view and folded CTE filters.",
+      "invariant": "Static EXPLAIN consumes no sequence values; ANALYZE executes one original query with the corrected output demand."
     }
   ]
 }

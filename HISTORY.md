@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Apply eligible predicates before derived-table, view and folded-CTE output evaluation, including correlated LATERAL inputs. Preserve volatile and set-returning effects, slicing, group/window boundaries, positional aliases and set-operation type conversions.
+
 - Preserve each nonrecursive CTE's enclosing and preceding definitions across folding, materialization, prepared execution and stored-view reopening. Later same-name declarations no longer change its inputs or output types, and unavailable forward references retain PostgreSQL diagnostics.
 
 - Propagate unused-output demand through joined and lateral sources and folded CTEs, preserving join keys, outer-join rows, positional aliases and CTE dependency order.

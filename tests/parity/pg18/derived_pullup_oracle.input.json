@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "sequence",
+      "sql": "CREATE SEQUENCE pullup_effect"
+    },
+    {
+      "id": "volatile_qualification",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE nextval('pullup_effect')%2=0"
+    },
+    {
+      "id": "volatile_effects",
+      "sql": "SELECT nextval('pullup_effect') AS n"
+    },
+    {
+      "id": "subquery_qualification",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "joined_qualification",
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) a(y) WHERE s.k+a.y>0"
+    }
+  ]
+}
