@@ -82,6 +82,9 @@ fn nested_lateral_namespaces_match_postgresql(#[case] provider: usize) {
                             | "nested_atomic_function_rows"
                             | "nested_star_view_rows"
                             | "nested_bare_star_view_rows"
+                            | "namespace_rule_reset"
+                            | "fire_namespace_rule"
+                            | "namespace_rule_rows"
                     )
                 )
             })

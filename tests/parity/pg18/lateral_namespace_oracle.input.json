@@ -323,6 +323,30 @@
     {
       "id": "cross_view_definition_pretty",
       "sql": "SELECT pg_get_viewdef('cross_source_view'::regclass,true)"
+    },
+    {
+      "id": "rule_events",
+      "sql": "CREATE TABLE namespace_events(id integer)"
+    },
+    {
+      "id": "rule_rows",
+      "sql": "CREATE TABLE namespace_rule_rows(id integer,n integer,repeated integer,m integer)"
+    },
+    {
+      "id": "create_namespace_rule",
+      "sql": "CREATE RULE namespace_insert AS ON INSERT TO namespace_events DO ALSO INSERT INTO namespace_rule_rows SELECT new.id,a.n,r.n,b.m FROM (VALUES(1),(3)) a(n), LATERAL (SELECT a.n) r JOIN (VALUES(1),(3)) b(m) ON r.n=b.m"
+    },
+    {
+      "id": "namespace_rule_reset",
+      "sql": "TRUNCATE namespace_events, namespace_rule_rows"
+    },
+    {
+      "id": "fire_namespace_rule",
+      "sql": "INSERT INTO namespace_events VALUES(10),(20)"
+    },
+    {
+      "id": "namespace_rule_rows",
+      "sql": "SELECT * FROM namespace_rule_rows ORDER BY 1,2"
     }
   ]
 }
