@@ -442,18 +442,16 @@ fn source_scope(
             let mut internal_relations = left.internal_relations;
             internal_relations.extend(right.internal_relations);
             if let Some(alias) = alias {
-                if !column_aliases.is_empty() {
-                    names = column_aliases.iter().cloned().collect();
-                    ordered.clone_from(column_aliases);
-                }
+                let mut columns = RelationColumns {
+                    names,
+                    ordered,
+                    complete,
+                };
+                columns.apply_positional_aliases(column_aliases);
                 return Ok(QueryScope {
                     qualifiers: [alias.clone()].into_iter().collect(),
                     internal_relations,
-                    columns: RelationColumns {
-                        names,
-                        ordered,
-                        complete: complete && column_aliases.is_empty(),
-                    },
+                    columns,
                 });
             }
             let mut qualifiers = left.qualifiers;
@@ -483,48 +481,59 @@ fn source_scope(
                 });
             }
             let qualifiers = alias.iter().cloned().collect();
-            let columns = if column_aliases.is_empty() {
+            let mut columns = RelationColumns::known(
                 (0..rows.first().map_or(0, Vec::len))
                     .map(|index| format!("column{}", index + 1))
-                    .collect::<Vec<_>>()
-            } else {
-                column_aliases.clone()
-            };
+                    .collect(),
+            );
+            columns.apply_positional_aliases(column_aliases);
             Ok(QueryScope {
                 qualifiers,
                 internal_relations: BTreeSet::new(),
-                columns: RelationColumns::known(columns),
+                columns,
             })
         }
         SourcePlan::Function {
             name,
+            binding,
+            args,
             output_name,
             alias,
             column_aliases,
+            column_types,
+            ordinality,
             ..
         } => {
             let qualifiers = [alias.as_ref().unwrap_or(output_name).clone()]
                 .into_iter()
                 .collect();
-            let mut names: BTreeSet<String> = column_aliases.iter().cloned().collect();
-            let complete = !column_aliases.is_empty()
-                || matches!(
-                    name.to_ascii_lowercase().as_str(),
-                    "generate_series"
-                        | "unnest"
-                        | "regexp_matches"
-                        | "regexp_split_to_table"
-                        | "string_to_table"
+            let builtin = binding.as_ref().is_none_or(|binding| binding.builtin)
+                && crate::semantics::is_builtin_table_function(
+                    &crate::semantics::builtin_function_dispatch_name(name),
                 );
-            if names.is_empty() && complete {
-                names.insert(output_name.clone());
-            }
+            let complete = builtin || !column_types.is_empty();
+            let ordered = if builtin {
+                crate::semantics::table_function_empty_schema(
+                    name,
+                    output_name,
+                    alias.as_deref(),
+                    column_aliases,
+                    args.len(),
+                    *ordinality,
+                )
+            } else {
+                crate::semantics::apply_table_function_aliases(
+                    column_aliases.clone(),
+                    &[],
+                    *ordinality,
+                )
+            };
             Ok(QueryScope {
                 qualifiers,
                 internal_relations: BTreeSet::new(),
                 columns: RelationColumns {
-                    ordered: names.iter().cloned().collect(),
-                    names,
+                    names: ordered.iter().cloned().collect(),
+                    ordered,
                     complete,
                 },
             })
@@ -541,40 +550,25 @@ fn source_scope(
                     .map(|function| function.output_name.clone())
             });
             let qualifiers = qualifier.into_iter().collect();
-            let mut names = Vec::new();
+            let mut ordered = Vec::new();
             let mut complete = true;
             for function in functions {
-                if function.column_aliases.is_empty() {
-                    let local = crate::semantics::builtin_function_dispatch_name(&function.name);
-                    if matches!(
-                        local.as_str(),
-                        "generate_series"
-                            | "unnest"
-                            | "regexp_matches"
-                            | "regexp_split_to_table"
-                            | "string_to_table"
-                    ) {
-                        names.push(function.output_name.clone());
-                    } else {
-                        complete = false;
-                    }
-                } else {
-                    names.extend(function.column_aliases.iter().cloned());
-                }
+                let member = crate::binding::sources::table_function_member_source(function);
+                let columns = source_scope(context, &member, ctes)?.columns;
+                complete &= columns.complete;
+                ordered.extend(columns.ordered);
             }
-            if *ordinality {
-                names.push("ordinality".into());
-            }
-            for (name, alias) in names.iter_mut().zip(column_aliases) {
-                name.clone_from(alias);
-            }
-            let column_names = names.iter().cloned().collect();
+            let ordered = crate::semantics::apply_table_function_aliases(
+                ordered,
+                column_aliases,
+                *ordinality,
+            );
             Ok(QueryScope {
                 qualifiers,
                 internal_relations: BTreeSet::new(),
                 columns: RelationColumns {
-                    names: column_names,
-                    ordered: names,
+                    names: ordered.iter().cloned().collect(),
+                    ordered,
                     complete,
                 },
             })
@@ -586,15 +580,8 @@ fn source_scope(
             ..
         } => {
             let qualifiers = alias.iter().cloned().collect();
-            let columns = if column_aliases.is_empty() {
-                query_output_columns(body)
-            } else {
-                RelationColumns {
-                    names: column_aliases.iter().cloned().collect(),
-                    ordered: column_aliases.clone(),
-                    complete: true,
-                }
-            };
+            let mut columns = query_output_columns(body);
+            columns.apply_positional_aliases(column_aliases);
             Ok(QueryScope {
                 qualifiers,
                 internal_relations: BTreeSet::new(),

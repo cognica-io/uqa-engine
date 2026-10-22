@@ -209,3 +209,70 @@ fn lateral_source_dependencies_distinguish_caller_from_local_and_enclosing_names
         );
     }
 }
+
+#[test]
+fn declared_source_columns_preserve_independent_join_inputs() {
+    let binding = crate::binding::fixture::empty_binding_context();
+    let context = CorrelationContext {
+        catalog: binding.catalog.as_ref(),
+        resolution: &binding.resolution,
+        scoped_relations: None,
+    };
+    let input = crate::RowSchema::with_qualified_types(
+        "a",
+        vec!["n".into()],
+        vec![Some(crate::ColumnType::Integer)],
+    );
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/parity/pg18/lateral_functions_oracle.expected.json"
+    ))
+    .unwrap();
+    let mut checked = 0;
+    for case in reference["cases"].as_array().unwrap() {
+        let id = case["id"].as_str().unwrap();
+        if !matches!(
+            id,
+            "descriptor_json"
+                | "descriptor_ordinality"
+                | "descriptor_values"
+                | "descriptor_derived"
+                | "descriptor_rows_from"
+                | "descriptor_join_alias"
+        ) {
+            continue;
+        }
+        assert!(case["error"].is_null(), "{id}");
+        assert_eq!(
+            case["results"][0]["rows"].as_array().unwrap().len(),
+            1,
+            "{id}"
+        );
+        assert_eq!(case["results"][0]["rows"][0][2], "1", "{id}");
+        for dependent in [false, true] {
+            let sql = case["sql"].as_str().unwrap();
+            let sql = if dependent {
+                sql.replace("nextval('descriptor_calls')", "a.n")
+            } else {
+                sql.to_owned()
+            };
+            let crate::plan::UnifiedPlan::Query(query) =
+                crate::plan::UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0))
+            else {
+                panic!("query");
+            };
+            let RelationalPlan::QueryBlock(block) = &query.root else {
+                panic!("block");
+            };
+            let Some(SourcePlan::Join { right, .. }) = &block.from else {
+                panic!("join");
+            };
+            assert_eq!(
+                source_depends_on_current_row(context, right, &block.subqueries, &input).unwrap(),
+                dependent,
+                "{sql}",
+            );
+        }
+        checked += 1;
+    }
+    assert_eq!(checked, 6);
+}

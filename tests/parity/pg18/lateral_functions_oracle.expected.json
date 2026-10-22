@@ -2230,13 +2230,449 @@
       ],
       "notices": [],
       "id": "quoted_cte_descriptor"
+    },
+    {
+      "sql": "CREATE SEQUENCE descriptor_calls",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_sequence"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_json_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT key AS output,nextval('descriptor_calls') AS calls FROM jsonb_each('{\"k\":1}'::jsonb) f) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "k",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_json"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_json_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_ordinality_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT ordinality AS output,nextval('descriptor_calls') AS calls FROM unnest(ARRAY[4]) WITH ORDINALITY f(x)) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_ordinality"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_ordinality_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_values_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT column2 AS output,nextval('descriptor_calls') AS calls FROM (VALUES(4,5)) f(x)) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_values"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_values_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_derived_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT 4 AS x,5 AS y) f(z)) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_derived"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_derived_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_rows_from_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT ordinality AS output,nextval('descriptor_calls') AS calls FROM ROWS FROM(jsonb_each('{\"k\":1}'::jsonb),generate_series(4,4)) WITH ORDINALITY f(renamed)) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_rows_from"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_rows_from_calls"
+    },
+    {
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_join_alias_reset"
+    },
+    {
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM ((VALUES(4)) a(x) CROSS JOIN (VALUES(5)) b(y)) f(z)) q ON false ORDER BY 2,3",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "output",
+            "calls"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_join_alias"
+    },
+    {
+      "sql": "SELECT last_value FROM descriptor_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "descriptor_join_alias_calls"
     }
   ],
   "provenance": {
     "reference": "PostgreSQL 18.4 disposable Docker database",
     "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
     "capture_script_sha256": "1a38f5e5ada449e35014fcda293ecb21e53baea43e49b4fa3418a9d0028e0cdb",
-    "input_sha256": "7a477608fc13052b13254e49bcc52aa4a8e1316de004dc0badccfd4a42caf0ef",
+    "input_sha256": "b9fc050a9502826e2d54090436fc539deaa304dbe958d62c65aa2dd8e4da7fe8",
     "options": [
       "--rows",
       "--details",

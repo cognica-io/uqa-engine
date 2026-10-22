@@ -20952,7 +20952,7 @@
       ],
       "source": "crates/uqa-engine/tests/sql_lateral/functions.rs",
       "capability": "Independent join input demand",
-      "workload": "81 independent PostgreSQL observations across all four providers, including sequence-observed calls and empty inputs.",
+      "workload": "100 independent PostgreSQL observations across all four providers, including sequence-observed calls and empty inputs.",
       "invariant": "Independent functions execute once per demanded join input, unmatched RIGHT/FULL rows appear once, forbidden correlations fail before execution and actual outer dependencies retain their calling rows."
     },
     {
@@ -21074,6 +21074,19 @@
       "capability": "Stored FROM source syntax",
       "workload": "Five independently captured PostgreSQL view definitions with nested lateral items, comma lists and explicit CROSS JOIN in both pretty modes.",
       "invariant": "Rendering preserves original comma and explicit join syntax without evaluating expressions or changing the query input set."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_source_columns_preserve_independent_join_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/correlation/tests.rs",
+      "capability": "Independent FROM input dependencies",
+      "workload": "Six PostgreSQL row/call-count observations for JSON, ordinality, VALUES, derived and joined positional aliases and ROWS FROM, each paired with a true caller-row dependency.",
+      "invariant": "Complete local output columns prevent false per-row dependencies without losing actual references to the caller."
     }
   ]
 }

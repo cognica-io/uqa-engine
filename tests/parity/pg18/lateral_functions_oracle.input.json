@@ -323,6 +323,82 @@
     {
       "id": "quoted_cte_descriptor",
       "sql": "WITH \"T\" AS (SELECT 99 AS n),t AS (SELECT 100 AS \"N\") SELECT n,r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (SELECT n AS x FROM t) r ORDER BY 1"
+    },
+    {
+      "id": "descriptor_sequence",
+      "sql": "CREATE SEQUENCE descriptor_calls"
+    },
+    {
+      "id": "descriptor_json_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "descriptor_json",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT key AS output,nextval('descriptor_calls') AS calls FROM jsonb_each('{\"k\":1}'::jsonb) f) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "descriptor_json_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "descriptor_ordinality_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "descriptor_ordinality",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT ordinality AS output,nextval('descriptor_calls') AS calls FROM unnest(ARRAY[4]) WITH ORDINALITY f(x)) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "descriptor_ordinality_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "descriptor_values_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "descriptor_values",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT column2 AS output,nextval('descriptor_calls') AS calls FROM (VALUES(4,5)) f(x)) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "descriptor_values_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "descriptor_derived_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "descriptor_derived",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM (SELECT 4 AS x,5 AS y) f(z)) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "descriptor_derived_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "descriptor_rows_from_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "descriptor_rows_from",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT ordinality AS output,nextval('descriptor_calls') AS calls FROM ROWS FROM(jsonb_each('{\"k\":1}'::jsonb),generate_series(4,4)) WITH ORDINALITY f(renamed)) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "descriptor_rows_from_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
+    },
+    {
+      "id": "descriptor_join_alias_reset",
+      "sql": "ALTER SEQUENCE descriptor_calls RESTART WITH 1"
+    },
+    {
+      "id": "descriptor_join_alias",
+      "sql": "SELECT a.n,q.output,q.calls FROM (VALUES(1),(2)) a(n) RIGHT JOIN LATERAL (SELECT y AS output,nextval('descriptor_calls') AS calls FROM ((VALUES(4)) a(x) CROSS JOIN (VALUES(5)) b(y)) f(z)) q ON false ORDER BY 2,3"
+    },
+    {
+      "id": "descriptor_join_alias_calls",
+      "sql": "SELECT last_value FROM descriptor_calls"
     }
   ]
 }
