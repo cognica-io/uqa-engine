@@ -27,6 +27,7 @@ on:
       - "!scripts/resolve-release-recovery.py"
       - "!scripts/tests/test_release_recovery.py"
       - "benchmarks/**"
+      - "!benchmarks/regressions/README.md"
       - ".github/scripts/**"
       - "!.github/scripts/install-manylinux-build-deps.sh"
       - rust-toolchain.toml

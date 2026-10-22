@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import textwrap
@@ -55,6 +56,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             '      - "!scripts/resolve-release-recovery.py"\n'
             '      - "!scripts/tests/test_release_recovery.py"\n'
             '      - "benchmarks/**"\n'
+            '      - "!benchmarks/regressions/README.md"\n'
             '      - ".github/scripts/**"\n'
             '      - "!.github/scripts/install-manylinux-build-deps.sh"\n'
             "      - rust-toolchain.toml\n"
@@ -68,6 +70,26 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         )[0]
 
         self.assertEqual(push_trigger, expected_trigger)
+
+    def test_pull_request_validation_runs_only_for_completed_batches(self) -> None:
+        expected = {"pr-checks.yml", "performance-checks.yml", "dependency-checks.yml",
+                    "regular-expression-checks.yml", "http-carrier-parity.yml",
+                    "fdw-features.yml", "wasm-build-checks.yml", "usql-release-checks.yml"}
+        actual = set()
+        for path in (ROOT / ".github/workflows").glob("*.yml"):
+            workflow = path.read_text(encoding="utf-8")
+            event = re.search(r"(?m)^  pull_request:\n((?:    .*\n|\n)*)", workflow)
+            if event is None:
+                continue
+            actual.add(path.name)
+            with self.subTest(workflow=path.name):
+                declared = re.search(r"(?m)^    types: \[([^\]]+)\]$", event[1])
+                self.assertIsNotNone(declared, "default PR events rerun CI on every push")
+                events = {name.strip() for name in declared[1].split(",")}
+                self.assertEqual(events, {"ready_for_review"})
+                for update in ("opened", "synchronize", "reopened", "edited", "labeled"):
+                    self.assertNotIn(update, events)
+        self.assertEqual(actual, expected)
 
     def test_rust_jobs_run_for_main_push_or_selected_dispatch(self) -> None:
         condition = (
