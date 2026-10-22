@@ -34,8 +34,6 @@ pub(super) fn prune(
             result = context.query(query);
         }
     });
-    // Source layouts describe the analyzed topology only. Later join reordering or function expansion must not reuse that topology in a second optimizer invocation.
-    plan.visit_queries_mut(&mut |query| query.analyzed_source = None);
     result
 }
 

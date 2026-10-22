@@ -21495,6 +21495,100 @@
       "capability": "Derived predicate evaluation order",
       "workload": "Static and executing JSON plans over derived, aliased view and folded CTE filters.",
       "invariant": "Static EXPLAIN consumes no sequence values; ANALYZE executes one original query with the corrected output demand."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "volatile_and_subquery_qualifications_precede_pure_outputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "Volatile and scalar-subquery qualifications over analyzed derived arithmetic.",
+      "invariant": "Lifted expressions preserve public labels and descriptors and leave scalar-subquery slots in the original consumer arena."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "observable_producer_boundaries_keep_their_query_level",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "LIMIT, OFFSET, DISTINCT, volatile calls, SRFs and window outputs.",
+      "invariant": "Observable producer boundaries are not erased by projection pull-up."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "repeated_input_qualifiers_are_not_captured_by_a_different_query_scope",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "Derived input uses an alias already occupied in its consumer.",
+      "invariant": "No source identity is captured by another lexical scope."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "quoted_column_identity_and_whole_row_references_remain_distinct",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "Differently cased output columns and a relation whole-row name.",
+      "invariant": "Binding uses exact structured column identities and does not reinterpret a whole row as an arbitrary field."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_relation_lookup_modes_keep_their_definition_boundary",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "A stored-identity producer inside a name-resolving consumer.",
+      "invariant": "Pull-up cannot change the relation lookup mode of a definition."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "derived_query_pullup_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived projection placement",
+      "workload": "25 independent PostgreSQL observations on four providers; twenty-one repeated after each persistent reopen, including stored views, prepared inputs and NULL producer qualification.",
+      "invariant": "Simple pure derived outputs are evaluated after volatile, scalar-subquery and joined qualifications, preserving labels, types, sequence effects and required boundary errors. A producer qualification that rejects NULL consumes no volatile consumer effect."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "ordinary_sources_require_no_pullup_workspace",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "Repeat projection placement over an analyzed ordinary source with a qualification.",
+      "invariant": "A query without a derived source allocates no pull-up workspace: zero allocations and zero bytes."
     }
   ]
 }

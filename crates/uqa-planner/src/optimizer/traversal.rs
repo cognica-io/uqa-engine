@@ -28,6 +28,9 @@ pub(super) fn optimize_unified_plan(
         }
     });
     super::source_demand::prune(plan, config, aggregates)?;
+    super::derived_pullup::rewrite(plan, config)?;
+    // Analyzed layouts describe the original topology, not later source expansion or join order.
+    plan.visit_queries_mut(&mut |query| query.analyzed_source = None);
     match plan {
         UnifiedPlan::Query(query) => optimize_query(query, config, aggregates)?,
         UnifiedPlan::Command(command) => optimize_command(command, config, aggregates)?,

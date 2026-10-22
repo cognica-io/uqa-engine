@@ -23,6 +23,82 @@
     {
       "id": "joined_qualification",
       "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) a(y) WHERE s.k+a.y>0"
+    },
+    {
+      "id": "partial_aliases",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s(j) WHERE j=(SELECT 2)"
+    },
+    {
+      "id": "quoted_identity",
+      "sql": "SELECT \"S\".\"K\",\"S\".z FROM (SELECT 0 AS k,x AS \"K\",10/x AS z FROM (VALUES(0),(2)) v(x)) \"S\" WHERE \"S\".\"K\"=(SELECT 2)"
+    },
+    {
+      "id": "joined_shared_column_name",
+      "sql": "SELECT s.z,a.x FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) a(x) WHERE s.k+a.x>0"
+    },
+    {
+      "id": "inner_join_qualification",
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s JOIN (VALUES(0)) a(y) ON s.k+a.y>0 WHERE s.k=(SELECT 2)"
+    },
+    {
+      "id": "two_derived_inputs",
+      "sql": "SELECT s.z,t.w FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (SELECT y AS l,20/y AS w FROM (VALUES(0),(2)) a(y)) t WHERE s.k=(SELECT 2) AND t.l=(SELECT 2)"
+    },
+    {
+      "id": "producer_qualification",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x) WHERE x>0) s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "offset_boundary",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x) OFFSET 0) s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "distinct_boundary",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE nextval('pullup_effect')%2=0"
+    },
+    {
+      "id": "stored_view",
+      "sql": "CREATE VIEW pullup_view AS SELECT s.z,a.x FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) a(x) WHERE s.k+a.x>0"
+    },
+    {
+      "id": "stored_read",
+      "sql": "SELECT * FROM pullup_view"
+    },
+    {
+      "id": "prepared",
+      "sql": "PREPARE pullup_prepared(integer) AS SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT $1)"
+    },
+    {
+      "id": "prepared_execute",
+      "sql": "EXECUTE pullup_prepared(2)"
+    },
+    {
+      "id": "reset_reopen",
+      "sql": "SELECT setval('pullup_effect',1,false) AS n"
+    },
+    {
+      "id": "nullable_sequence",
+      "sql": "CREATE SEQUENCE pullup_nullable"
+    },
+    {
+      "id": "null_filter",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x) WHERE NULL::boolean) s WHERE nextval('pullup_nullable')>0"
+    },
+    {
+      "id": "no_effect",
+      "sql": "SELECT is_called FROM pullup_nullable"
+    },
+    {
+      "id": "nullable_filter",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x) WHERE CASE WHEN x=0 THEN NULL ELSE true END) s WHERE nextval('pullup_nullable')>0"
+    },
+    {
+      "id": "effects",
+      "sql": "SELECT nextval('pullup_nullable') AS n"
+    },
+    {
+      "id": "reset_nullable_reopen",
+      "sql": "SELECT setval('pullup_nullable',1,false) AS n"
     }
   ]
 }

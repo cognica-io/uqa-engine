@@ -27,6 +27,7 @@ mod api;
 mod command;
 mod cte_projection;
 mod derived_projection;
+mod derived_pullup;
 mod function_source;
 mod implicit_fusion;
 mod join_reorder;
