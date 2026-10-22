@@ -1,0 +1,1113 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TABLE demand_rows (x integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "table"
+    },
+    {
+      "sql": "INSERT INTO demand_rows VALUES (2),(0)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "rows"
+    },
+    {
+      "sql": "CREATE SEQUENCE demand_sequence START 1",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "sequence"
+    },
+    {
+      "sql": "CREATE VIEW demand_view AS SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "view"
+    },
+    {
+      "sql": "SELECT x FROM demand_rows WHERE 10/x>1 LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "table_filter"
+    },
+    {
+      "sql": "SELECT x FROM (VALUES (2),(0)) v(x) WHERE 10/x>1 LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "values_filter"
+    },
+    {
+      "sql": "SELECT x FROM generate_series(2,0,-2) v(x) WHERE 10/x>1 LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "function_filter"
+    },
+    {
+      "sql": "SELECT a.x FROM (VALUES (2),(0)) a(x),LATERAL (SELECT a.x AS z) r WHERE 10/r.z>1 LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "lateral_filter"
+    },
+    {
+      "sql": "SELECT a.x FROM (VALUES (2),(0)) a(x) CROSS JOIN (VALUES (1)) b(y) WHERE 10/a.x>1 LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "join_filter"
+    },
+    {
+      "sql": "SELECT 10/x AS z FROM demand_rows LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "project_limit"
+    },
+    {
+      "sql": "SELECT unnest(ARRAY[10/x]) AS z FROM demand_rows LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "set_projection_limit"
+    },
+    {
+      "sql": "SELECT EXISTS(SELECT 1 FROM demand_rows WHERE 10/x>1) AS found",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "found"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "exists_filter"
+    },
+    {
+      "sql": "SELECT x FROM demand_rows WHERE 10/x>1 OFFSET 0 LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "offset_filter"
+    },
+    {
+      "sql": "SELECT x FROM demand_rows WHERE 10/x>1 ORDER BY x DESC LIMIT 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "sort_barrier"
+    },
+    {
+      "sql": "SELECT count(*) FROM demand_rows WHERE 10/x>1 LIMIT 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "aggregate_barrier"
+    },
+    {
+      "sql": "SELECT x FROM demand_rows WHERE 10/x>1 LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "limit_zero"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) s WHERE s.k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "derived_output"
+    },
+    {
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM generate_series(0,2,2) v(x)) s WHERE s.k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "function_derived_output"
+    },
+    {
+      "sql": "SELECT k FROM (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) s WHERE s.k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "derived_unread_output"
+    },
+    {
+      "sql": "SELECT * FROM demand_view WHERE k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "view_output"
+    },
+    {
+      "sql": "WITH q AS (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) SELECT * FROM q WHERE k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "inline_cte_output"
+    },
+    {
+      "sql": "WITH q AS NOT MATERIALIZED (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) SELECT * FROM q WHERE k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "not_materialized_output"
+    },
+    {
+      "sql": "WITH q AS MATERIALIZED (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) SELECT * FROM q WHERE k>0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "materialized_output"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x) LIMIT 2) s WHERE s.k>0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "limit_barrier"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,unnest(ARRAY[10/x]) AS z FROM (VALUES (0),(2)) v(x)) s WHERE s.k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "set_output"
+    },
+    {
+      "sql": "SELECT setval('demand_sequence',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_filter_reset"
+    },
+    {
+      "sql": "SELECT x FROM demand_rows WHERE nextval('demand_sequence')>0 LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_filter"
+    },
+    {
+      "sql": "SELECT nextval('demand_sequence') AS next_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_filter_effects"
+    },
+    {
+      "sql": "SELECT setval('demand_sequence',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_error_filter_reset"
+    },
+    {
+      "sql": "SELECT x FROM demand_rows WHERE CASE WHEN nextval('demand_sequence')>0 THEN 10/x>1 ELSE false END LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_error_filter"
+    },
+    {
+      "sql": "SELECT nextval('demand_sequence') AS next_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_error_filter_effects"
+    },
+    {
+      "sql": "SELECT setval('demand_sequence',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_projection_reset"
+    },
+    {
+      "sql": "SELECT nextval('demand_sequence') AS z FROM demand_rows LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_projection"
+    },
+    {
+      "sql": "SELECT nextval('demand_sequence') AS next_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_projection_effects"
+    },
+    {
+      "sql": "SELECT setval('demand_sequence',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_join_reset"
+    },
+    {
+      "sql": "SELECT a.x FROM demand_rows a CROSS JOIN (VALUES(1)) b(y) WHERE nextval('demand_sequence')>0 LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_join"
+    },
+    {
+      "sql": "SELECT nextval('demand_sequence') AS next_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_join_effects"
+    },
+    {
+      "sql": "SELECT setval('demand_sequence',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_exists_reset"
+    },
+    {
+      "sql": "SELECT EXISTS(SELECT 1 FROM demand_rows WHERE nextval('demand_sequence')>0) AS found",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "found"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_exists"
+    },
+    {
+      "sql": "SELECT nextval('demand_sequence') AS next_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_exists_effects"
+    },
+    {
+      "sql": "SELECT setval('demand_sequence',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_derived_reset"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,nextval('demand_sequence') AS z FROM (VALUES(0),(2)) v(x)) q WHERE k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_derived"
+    },
+    {
+      "sql": "SELECT nextval('demand_sequence') AS next_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_derived_effects"
+    },
+    {
+      "sql": "SELECT setval('demand_sequence',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_unread_reset"
+    },
+    {
+      "sql": "SELECT k FROM (SELECT x AS k,nextval('demand_sequence') AS z FROM (VALUES(0),(2)) v(x)) q WHERE k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_unread"
+    },
+    {
+      "sql": "SELECT nextval('demand_sequence') AS next_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_unread_effects"
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "cursor_begin"
+    },
+    {
+      "sql": "DECLARE demand_cursor NO SCROLL CURSOR FOR SELECT x FROM demand_rows WHERE 10/x>1",
+      "command_tags": [
+        "DECLARE CURSOR"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "cursor_declare"
+    },
+    {
+      "sql": "FETCH 1 FROM demand_cursor",
+      "command_tags": [
+        "FETCH 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "cursor_first"
+    },
+    {
+      "sql": "FETCH 1 FROM demand_cursor",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "cursor_next"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "cursor_rollback"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "42cb381927355af36e52041984a58693f12f4fbfb012776f08ff66c8524da448",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}
