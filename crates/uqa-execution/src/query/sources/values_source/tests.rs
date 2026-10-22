@@ -9,6 +9,73 @@ use crate::query::relational::values::test_support::Services;
 use uqa_sql::plan::{RelationalPlan, UnifiedPlan};
 
 #[test]
+fn values_sources_keep_each_outer_row_and_only_expose_their_own_columns() {
+    let oracle: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../../tests/parity/pg18/lateral_values_oracle.expected.json"
+    ))
+    .unwrap();
+    let reference = oracle["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["id"] == "lateral_rows")
+        .unwrap();
+    let UnifiedPlan::Query(plan) = UnifiedPlan::lower(
+        uqa_sql::compile(reference["sql"].as_str().unwrap())
+            .unwrap()
+            .remove(0),
+    ) else {
+        panic!("query")
+    };
+    let RelationalPlan::QueryBlock(block) = plan.root else {
+        panic!("query block")
+    };
+    let Some(SourcePlan::Join { right, .. }) = block.from else {
+        panic!("lateral source")
+    };
+    let mut actual = Vec::new();
+    for outer_value in [1, 2] {
+        let mut scope = crate::catalog::test_support::empty_scope();
+        scope.set_row_lock_outer_row(crate::OwnedPhysicalRow::new(
+            crate::RowSchema::with_qualified_types(
+                "t",
+                vec!["a".into()],
+                vec![Some(uqa_sql::ColumnType::Integer)],
+            ),
+            crate::PhysicalRow::from_values(vec![uqa_core::Value::Int(outer_value)]),
+        ));
+        let mut operator = build_values_source(
+            &Services,
+            &Services,
+            &right,
+            &[],
+            &scope,
+            || Arc::new(Services),
+            None,
+            None,
+            || panic!("no predicate"),
+        )
+        .unwrap();
+        assert_eq!(
+            operator.row_schema().qualified_type("v", "x"),
+            Some(&uqa_sql::ColumnType::Integer)
+        );
+        assert!(operator.row_schema().qualified_type("t", "a").is_none());
+        let (_, rows) = crate::physical::run_to_rows(operator.as_mut()).unwrap();
+        for row in rows {
+            let uqa_core::Value::Int(value) = row["x"] else {
+                panic!("integer VALUES output")
+            };
+            actual.push(vec![outer_value.to_string(), value.to_string()]);
+        }
+    }
+    assert_eq!(
+        serde_json::to_value(actual).unwrap(),
+        reference["results"][0]["rows"]
+    );
+}
+
+#[test]
 fn internal_values_capture_a_typed_outer_attribute_in_its_original_scope() {
     let relation = uqa_sql::ast::InternalRelationId::allocate();
     let source = SourcePlan::Values {

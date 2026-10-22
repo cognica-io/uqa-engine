@@ -10,6 +10,9 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_lateral/values.rs"]
+mod values;
+
 #[test]
 fn lateral_cross_join_with_generate_series() {
     let eng = Engine::new();

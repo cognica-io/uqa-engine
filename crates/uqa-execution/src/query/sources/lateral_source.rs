@@ -241,11 +241,13 @@ impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSour
                 )))
             }
             source => {
+                let mut scoped_ctes = self.ctes.clone();
+                scoped_ctes.set_row_lock_outer_row(left_row.clone());
                 let operator = build_join_operator_with_ctes(
                     &self.context,
                     source,
                     self.params,
-                    &mut self.ctes,
+                    &mut scoped_ctes,
                     None,
                     None,
                 )?;

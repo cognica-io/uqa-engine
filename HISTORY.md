@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Evaluate LATERAL VALUES against the current outer row, preserving common column types, correlated subqueries, SQL routines and durable views across storage providers.
+
 ## [0.6.1] - 2026-10-22
 
 ### Added

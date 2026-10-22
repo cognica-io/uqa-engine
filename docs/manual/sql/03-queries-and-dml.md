@@ -111,6 +111,15 @@ LATERAL generate_series(1, t.repeat_count) AS series(value)
 ORDER BY t.id, series.value;
 ```
 
+`LATERAL (VALUES ...)` evaluates every row expression with the current preceding row. Each output column uses the common type of its VALUES expressions, including mixtures of outer columns, constants and NULL. VALUES inside correlated scalar, EXISTS and IN subqueries uses the same enclosing-row scope.
+
+```sql execute
+SELECT t.a, v.x
+FROM (VALUES (1), (2)) AS t(a),
+LATERAL (VALUES (t.a), (t.a * 10)) AS v(x)
+ORDER BY t.a, v.x;
+```
+
 The right side is evaluated for each left row. A table function followed by `WITH ORDINALITY` appends a one-based `BIGINT` column after the function's ordinary output columns; its default name is `ordinality`, a positional column-alias list may rename it, and a LATERAL invocation restarts it at one for each left row.
 
 ```sql execute
