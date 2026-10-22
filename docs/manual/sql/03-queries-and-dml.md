@@ -120,7 +120,7 @@ LATERAL (VALUES (t.a), (t.a * 10)) AS v(x)
 ORDER BY t.a, v.x;
 ```
 
-A right input that references the current left row is evaluated for each such row. An independent table function or LATERAL source is evaluated once for the join, including when its expressions are volatile. RIGHT and FULL joins admit independent inputs and preserve each unmatched right row once; a right input that references the current left relation raises `42P10` because that correlation requires INNER or LEFT JOIN. References to an enclosing query remain available independently of the current join row.
+A right input that references the current left row is evaluated for each such row. An independent table function or LATERAL source is evaluated once for the join, including when its expressions are volatile. RIGHT and FULL joins admit independent inputs and preserve each unmatched right row once; a right input that references the current left relation raises `42P10` because that correlation requires INNER or LEFT JOIN. References to an enclosing query remain available independently of the current join row. Dependency analysis preserves quoted identifier case: a local `"A"` or `"N"` does not hide a preceding `a` relation or `n` column.
 
 A table function followed by `WITH ORDINALITY` appends a one-based `BIGINT` column after the function's ordinary output columns; its default name is `ordinality`, a positional column-alias list may rename it, and a correlated invocation restarts it at one for each left row.
 

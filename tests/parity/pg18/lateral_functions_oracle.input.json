@@ -279,6 +279,50 @@
     {
       "id": "empty_volatile_full_calls",
       "sql": "SELECT currval('lateral_function_calls')"
+    },
+    {
+      "id": "quoted_qualifier",
+      "sql": "SELECT a.n, r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (SELECT a.n AS x FROM (VALUES (99)) \"A\"(n)) r ORDER BY 1"
+    },
+    {
+      "id": "quoted_column",
+      "sql": "SELECT n,r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (SELECT n AS x FROM (VALUES (99)) b(\"N\")) r ORDER BY 1"
+    },
+    {
+      "id": "quoted_ancestor",
+      "sql": "SELECT \"A\".n,r.n,r.x FROM (VALUES (10),(20)) \"A\"(n) CROSS JOIN LATERAL (SELECT a.n,g.x FROM (VALUES (1),(3)) a(n) CROSS JOIN generate_series(a.n,a.n) g(x)) r ORDER BY 1,2"
+    },
+    {
+      "id": "quoted_cte",
+      "sql": "WITH \"T\" AS (SELECT 99 AS n) SELECT a.n,r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (WITH t AS (SELECT a.n AS n) SELECT n AS x FROM t) r ORDER BY 1"
+    },
+    {
+      "id": "quoted_scalar_qualifier",
+      "sql": "SELECT a.n,(SELECT a.n FROM (VALUES (99)) \"A\"(n)) AS x FROM (VALUES (1),(3)) a(n) ORDER BY 1"
+    },
+    {
+      "id": "quoted_scalar_column",
+      "sql": "SELECT n,(SELECT n FROM (VALUES (99)) b(\"N\")) AS x FROM (VALUES (1),(3)) a(n) ORDER BY 1"
+    },
+    {
+      "id": "quoted_exists_qualifier",
+      "sql": "SELECT a.n FROM (VALUES (1),(3)) a(n) WHERE EXISTS (SELECT 1 FROM (VALUES (3)) \"A\"(n) WHERE \"A\".n=a.n) ORDER BY 1"
+    },
+    {
+      "id": "quoted_exists_column",
+      "sql": "SELECT n FROM (VALUES (1),(3)) a(n) WHERE EXISTS (SELECT 1 FROM (VALUES (3)) b(\"N\") WHERE \"N\"=n) ORDER BY 1"
+    },
+    {
+      "id": "quoted_local_qualifier",
+      "sql": "SELECT a.n,r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (SELECT \"A\".n AS x FROM (VALUES (99)) \"A\"(n)) r ORDER BY 1"
+    },
+    {
+      "id": "quoted_local_column",
+      "sql": "SELECT n,r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (SELECT \"N\" AS x FROM (VALUES (99)) b(\"N\")) r ORDER BY 1"
+    },
+    {
+      "id": "quoted_cte_descriptor",
+      "sql": "WITH \"T\" AS (SELECT 99 AS n),t AS (SELECT 100 AS \"N\") SELECT n,r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (SELECT n AS x FROM t) r ORDER BY 1"
     }
   ]
 }

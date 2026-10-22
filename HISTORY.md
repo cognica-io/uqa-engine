@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Evaluate independent table-function and LATERAL inputs once per join, preserving unmatched RIGHT/FULL rows and volatile call counts. Empty INNER/LEFT/CROSS inputs do not start unnecessary right-side function calls. Reject forbidden RIGHT/FULL correlations during SQL analysis and retain enclosing-query values when a nested lateral input also reads the current row.
 
+- Preserve quoted identifier identity when detecting correlated LATERAL inputs, scalar subqueries and EXISTS predicates, including differently cased CTE names.
+
 ## [0.6.1] - 2026-10-22
 
 ### Added

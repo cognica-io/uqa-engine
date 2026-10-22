@@ -1,6 +1,6 @@
 # Implementation plans
 
-Current implementation follows the [open issue delivery groups](0024-open-issue-delivery.md): all 112 issues open after 0.6.1 are preserved in 37 ownership groups, with logical commits and one PR per coherent group. Draft progress is collected into ready-for-review CI batches. The earlier requested pause is over; historical delivery evidence below does not complete the remaining original requirements.
+Current implementation follows the [open issue delivery groups](0024-open-issue-delivery.md): all 112 issues open after 0.6.1 are preserved in 37 ownership groups, with logical commits and one PR per coherent group. The same source-correlation group now also tracks the reproduced quoted-identifier defect #1245. Draft progress is collected into ready-for-review CI batches. The earlier requested pause is over; historical delivery evidence below does not complete the remaining original requirements.
 
 The current [LATERAL group in PR #1244](https://github.com/cognica-io/uqa-engine/pull/1244) has corrected caller-row VALUES, independent function input multiplicity, RIGHT/FULL permissions and empty-probe demand. The 26- and 70-observation PostgreSQL references pass all four providers; 103 related Engine cases, 25 Execution join cases and seven SQL/schema cases pass locally. Original #1002/#1003/#1016 remain open for the remaining namespace and diagnostic-position requirements and final grouped platform qualification.
 

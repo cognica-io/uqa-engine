@@ -106,6 +106,18 @@ fn correlation_uses_scoped_relation_descriptors_without_hiding_outer_columns() {
             "WITH new_rows(local_id) AS (VALUES (1)) SELECT sum(local_id) FROM new_rows",
             false,
         ),
+        (
+            "WITH \"T\"(x) AS (VALUES (1)), t(y) AS (VALUES (2)) SELECT x FROM t",
+            true,
+        ),
+        (
+            "WITH \"T\"(x) AS (VALUES (1)), t(y) AS (VALUES (2)) SELECT y FROM t",
+            false,
+        ),
+        (
+            "WITH \"T\"(x) AS (VALUES (1)), t(y) AS (VALUES (2)) SELECT x FROM \"T\"",
+            false,
+        ),
     ] {
         let crate::plan::UnifiedPlan::Query(query) =
             crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
@@ -163,6 +175,8 @@ fn lateral_source_dependencies_distinguish_caller_from_local_and_enclosing_names
         ("LATERAL (VALUES(ancestor.n)) v(x)", false),
         ("LATERAL (SELECT t.a) v", true),
         ("LATERAL (SELECT t.a FROM (VALUES(2)) t(a)) v", false),
+        ("LATERAL (SELECT t.a FROM (VALUES(2)) \"T\"(a)) v", true),
+        ("LATERAL (SELECT a FROM (VALUES(2)) t(\"A\")) v", true),
         (
             "LATERAL (SELECT sum(t.a) FROM generate_series(t.a,t.a+1) t(a)) v",
             true,

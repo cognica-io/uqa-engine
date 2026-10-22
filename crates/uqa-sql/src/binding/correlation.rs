@@ -180,16 +180,7 @@ enum ColumnScope {
 fn correlation_column_scope(expression: &ScalarExpr, scope: &QueryScope) -> Option<ColumnScope> {
     match expression {
         ScalarExpr::Column(column) => {
-            if scope
-                .columns
-                .names
-                .iter()
-                .any(|local| local.eq_ignore_ascii_case(column))
-                || scope
-                    .qualifiers
-                    .iter()
-                    .any(|local| local.eq_ignore_ascii_case(column))
-            {
+            if scope.columns.names.contains(column) || scope.qualifiers.contains(column) {
                 Some(ColumnScope::Inner)
             } else if scope.columns.complete {
                 Some(ColumnScope::Outer)
@@ -198,11 +189,7 @@ fn correlation_column_scope(expression: &ScalarExpr, scope: &QueryScope) -> Opti
             }
         }
         ScalarExpr::QualifiedColumn { qualifier, .. } => {
-            if scope
-                .qualifiers
-                .iter()
-                .any(|local| local.eq_ignore_ascii_case(qualifier))
-            {
+            if scope.qualifiers.contains(qualifier) {
                 Some(ColumnScope::Inner)
             } else {
                 Some(ColumnScope::Outer)
@@ -621,10 +608,9 @@ fn relation_columns(
     name: &str,
     ctes: &BTreeMap<String, RelationColumns>,
 ) -> Result<RelationColumns, SQLError> {
-    if let Some(columns) = ctes
-        .iter()
-        .find(|(cte, _)| cte.eq_ignore_ascii_case(name))
-        .map(|(_, columns)| columns)
+    if let Some(columns) = crate::semantics::cte_reference_name(name)
+        .as_ref()
+        .and_then(|name| ctes.get(name))
     {
         return Ok(columns.clone());
     }
@@ -694,18 +680,14 @@ fn query_output_columns(plan: &QueryPlan) -> RelationColumns {
 fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -> bool {
     match expr {
         ScalarExpr::Column(column) => !resolves_unqualified(column, scopes),
-        ScalarExpr::QualifiedColumn { qualifier, .. } => !scopes.iter().rev().any(|scope| {
-            scope
-                .qualifiers
-                .iter()
-                .any(|local| local.eq_ignore_ascii_case(qualifier))
-        }),
-        ScalarExpr::QualifiedStar(qualifier) => !scopes.iter().rev().any(|scope| {
-            scope
-                .qualifiers
-                .iter()
-                .any(|local| local.eq_ignore_ascii_case(qualifier))
-        }),
+        ScalarExpr::QualifiedColumn { qualifier, .. } => !scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.qualifiers.contains(qualifier)),
+        ScalarExpr::QualifiedStar(qualifier) => !scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.qualifiers.contains(qualifier)),
         ScalarExpr::InternalColumn(column) => !scopes
             .iter()
             .rev()
@@ -795,16 +777,7 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
 
 fn resolves_unqualified(column: &str, scopes: &[QueryScope]) -> bool {
     for scope in scopes.iter().rev() {
-        if scope
-            .columns
-            .names
-            .iter()
-            .any(|local| local.eq_ignore_ascii_case(column))
-            || scope
-                .qualifiers
-                .iter()
-                .any(|local| local.eq_ignore_ascii_case(column))
-        {
+        if scope.columns.names.contains(column) || scope.qualifiers.contains(column) {
             return true;
         }
         if !scope.columns.complete {

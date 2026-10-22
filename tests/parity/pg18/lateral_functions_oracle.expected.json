@@ -1889,13 +1889,354 @@
       ],
       "notices": [],
       "id": "empty_volatile_full_calls"
+    },
+    {
+      "sql": "SELECT a.n, r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (SELECT a.n AS x FROM (VALUES (99)) \"A\"(n)) r ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "quoted_qualifier"
+    },
+    {
+      "sql": "SELECT n,r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (SELECT n AS x FROM (VALUES (99)) b(\"N\")) r ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "quoted_column"
+    },
+    {
+      "sql": "SELECT \"A\".n,r.n,r.x FROM (VALUES (10),(20)) \"A\"(n) CROSS JOIN LATERAL (SELECT a.n,g.x FROM (VALUES (1),(3)) a(n) CROSS JOIN generate_series(a.n,a.n) g(x)) r ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "n",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "10",
+              "1",
+              "1"
+            ],
+            [
+              "10",
+              "3",
+              "3"
+            ],
+            [
+              "20",
+              "1",
+              "1"
+            ],
+            [
+              "20",
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "quoted_ancestor"
+    },
+    {
+      "sql": "WITH \"T\" AS (SELECT 99 AS n) SELECT a.n,r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (WITH t AS (SELECT a.n AS n) SELECT n AS x FROM t) r ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "quoted_cte"
+    },
+    {
+      "sql": "SELECT a.n,(SELECT a.n FROM (VALUES (99)) \"A\"(n)) AS x FROM (VALUES (1),(3)) a(n) ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "quoted_scalar_qualifier"
+    },
+    {
+      "sql": "SELECT n,(SELECT n FROM (VALUES (99)) b(\"N\")) AS x FROM (VALUES (1),(3)) a(n) ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "quoted_scalar_column"
+    },
+    {
+      "sql": "SELECT a.n FROM (VALUES (1),(3)) a(n) WHERE EXISTS (SELECT 1 FROM (VALUES (3)) \"A\"(n) WHERE \"A\".n=a.n) ORDER BY 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "quoted_exists_qualifier"
+    },
+    {
+      "sql": "SELECT n FROM (VALUES (1),(3)) a(n) WHERE EXISTS (SELECT 1 FROM (VALUES (3)) b(\"N\") WHERE \"N\"=n) ORDER BY 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "quoted_exists_column"
+    },
+    {
+      "sql": "SELECT a.n,r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (SELECT \"A\".n AS x FROM (VALUES (99)) \"A\"(n)) r ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "99"
+            ],
+            [
+              "3",
+              "99"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "quoted_local_qualifier"
+    },
+    {
+      "sql": "SELECT n,r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (SELECT \"N\" AS x FROM (VALUES (99)) b(\"N\")) r ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "99"
+            ],
+            [
+              "3",
+              "99"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "quoted_local_column"
+    },
+    {
+      "sql": "WITH \"T\" AS (SELECT 99 AS n),t AS (SELECT 100 AS \"N\") SELECT n,r.x FROM (VALUES (1),(3)) a(n) CROSS JOIN LATERAL (SELECT n AS x FROM t) r ORDER BY 1",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "quoted_cte_descriptor"
     }
   ],
   "provenance": {
     "reference": "PostgreSQL 18.4 disposable Docker database",
     "capture_script": "tests/parity/pg18/capture_command_completion_oracle.py",
     "capture_script_sha256": "1a38f5e5ada449e35014fcda293ecb21e53baea43e49b4fa3418a9d0028e0cdb",
-    "input_sha256": "04b7ca2c30a4c7981133da1bbaba84d78b2cf91943254a794ec31d3955620386",
+    "input_sha256": "7a477608fc13052b13254e49bcc52aa4a8e1316de004dc0badccfd4a42caf0ef",
     "options": [
       "--rows",
       "--details",
