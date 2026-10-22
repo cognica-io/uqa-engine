@@ -2,6 +2,7 @@ name: Dependency checks
 
 on:
   pull_request:
+    types: [ready_for_review]
     paths:
       - ".github/actions/select-validation-inputs/**"
       - "scripts/performance_change_scope.py"
