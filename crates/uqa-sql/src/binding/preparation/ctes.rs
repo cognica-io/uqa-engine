@@ -20,7 +20,10 @@ impl Preparation<'_> {
         outer: Option<&RowSchema>,
     ) -> Result<Vec<(String, bool, Option<RowSchema>)>, SQLError> {
         let mut previous = Vec::new();
-        for cte in crate::semantics::ordered_cte_plans(ctes)? {
+        for (index, cte) in crate::semantics::ordered_cte_plans(ctes)?
+            .into_iter()
+            .enumerate()
+        {
             let recursive = cte_references_own_name(cte);
             let schema = if recursive {
                 let query = cte.body.query().ok_or_else(|| {
@@ -59,9 +62,14 @@ impl Preparation<'_> {
                 self.set_output(seed, step, *kind, *all)?.schema()
             } else {
                 let schema = match &cte.body {
-                    CtePlanBody::Query(query) => self.query(query, outer)?,
-                    CtePlanBody::Command(command) => self.command(command)?.unwrap_or_default(),
-                };
+                    CtePlanBody::Query(query) => self.query(query, outer),
+                    CtePlanBody::Command(command) => {
+                        self.command(command).map(Option::unwrap_or_default)
+                    }
+                }
+                .map_err(|error| {
+                    super::super::ctes::future_cte_reference_error(error, &ctes[index..])
+                })?;
                 previous.push((
                     cte.name.clone(),
                     self.scope.set_cte_returning(cte),

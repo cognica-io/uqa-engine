@@ -146,8 +146,7 @@ impl TraversalAnalysis<'_> {
                     let query = deferred.body.query().ok_or_else(|| {
                         SQLError::Internal("deferred CTE has no query body".into())
                     })?;
-                    let mut parent = ctes.clone();
-                    parent.remove_deferred(&deferred.name);
+                    let parent = ctes.definition_scope(name).expect("declared CTE scope");
                     return self.query(query, &parent, support);
                 }
                 Ok(BackwardScanSupport::Native)

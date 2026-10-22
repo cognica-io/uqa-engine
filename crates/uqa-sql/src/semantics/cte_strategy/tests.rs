@@ -12,6 +12,22 @@ fn names(ctes: &[&CtePlan]) -> Vec<String> {
     ctes.iter().map(|cte| cte.name.clone()).collect()
 }
 
+#[test]
+fn single_consumer_counts_follow_cte_definition_visibility() {
+    for (sql, single) in [
+        ("WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH q AS (SELECT id FROM q) SELECT * FROM q) s", true),
+        ("WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH r AS (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT * FROM r, q) s", true),
+        ("WITH q AS (SELECT 7 AS id) SELECT * FROM q a, q b", false),
+        ("WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH RECURSIVE q AS (SELECT 9 AS id) SELECT * FROM q) s", false),
+        ("WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH q AS (SELECT 9 AS id) SELECT * FROM q) s, q", true),
+    ] {
+        let UnifiedPlan::Query(plan) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0)) else {
+            panic!("query");
+        };
+        assert_eq!(crate::semantics::single_reference_plan_cte_names(&plan).contains("q"), single, "{sql}");
+    }
+}
+
 /// The items of a statement that run before and after its primary query.
 fn statement_order(sql: &str) -> (Vec<String>, Vec<String>) {
     match UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0)) {

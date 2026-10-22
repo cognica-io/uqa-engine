@@ -18,7 +18,7 @@ pub struct StatementCommands {
     /// Whether the statement's WITH modifies data, which makes its commands leave their AFTER events for the statement's end.
     modifies_with: AtomicBool,
     /// The WITH items that run once the primary query has finished, in the order they run.
-    postponed: parking_lot::Mutex<Vec<CtePlan>>,
+    postponed: parking_lot::Mutex<Vec<(CtePlan, bool)>>,
     /// The rows the statement's commands inserted, updated or deleted, which a statement whose WITH modifies data keeps.
     written: parking_lot::Mutex<BTreeSet<PhysicalDocumentIdentity>>,
     /// The rows that statements the statement started wrote: statements of its triggers and of the functions it calls, and their referential actions, which run under later command ids.
@@ -28,7 +28,7 @@ pub struct StatementCommands {
 
 impl StatementCommands {
     /// Note that the statement's WITH modifies data, and keep `postponed`, the items that run once the primary query has finished.
-    pub(crate) fn begin_data_modifying_with(&self, postponed: Vec<CtePlan>) {
+    pub(crate) fn begin_data_modifying_with(&self, postponed: Vec<(CtePlan, bool)>) {
         self.modifies_with.store(true, Ordering::Relaxed);
         *self.postponed.lock() = postponed;
     }
@@ -43,6 +43,13 @@ impl StatementCommands {
 
     /// The items that run once the primary query has finished, which the statement runs once.
     pub fn take_postponed(&self) -> Vec<CtePlan> {
+        self.take_scheduled_postponed()
+            .into_iter()
+            .map(|(plan, _)| plan)
+            .collect()
+    }
+
+    pub(crate) fn take_scheduled_postponed(&self) -> Vec<(CtePlan, bool)> {
         std::mem::take(&mut *self.postponed.lock())
     }
 

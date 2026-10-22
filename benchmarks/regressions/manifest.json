@@ -21333,6 +21333,87 @@
       "capability": "Projection and consumer demand",
       "workload": "The complete original output-demand report, additional scope/ordering boundaries and CTE dependency controls in 124 independent PostgreSQL observations across four providers.",
       "invariant": "Unobserved outputs, whole-row and selected routine demands, constant errors, SRF multiplicity, materialization, lexical scopes and data-modifying CTE values match the independent reference."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cte_analysis_distinguishes_enclosing_names_from_recursive_self_bindings",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "CTE definition scopes",
+      "workload": "Ordinary same-name CTEs, earlier definitions and actual recursive self/forward references.",
+      "invariant": "Analysis preserves definition visibility and does not classify ordinary references as recursive."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "invisible_cte_diagnostics_preserve_postgresql_detail_and_hint",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "CTE definition scopes",
+      "workload": "Undefined ordinary self and forward CTE references.",
+      "invariant": "SQLSTATE, primary text, DETAIL and HINT match the independent PostgreSQL fixture."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "single_consumer_counts_follow_cte_definition_visibility",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/cte_strategy/tests.rs",
+      "capability": "CTE definition scopes",
+      "workload": "Nested ordinary and recursive definitions shadow enclosing names alongside genuine repeated consumers.",
+      "invariant": "Only references to the same lexical binding determine materialization and output demand."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_definitions_keep_only_their_original_lexical_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/scope/retained_plans.rs",
+      "capability": "CTE definition scopes",
+      "workload": "Deferred inputs survive later and same-name declarations.",
+      "invariant": "Only directly referenced bindings are retained and immutable plans retain their original Arc identity."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "restored_definition_keeps_shared_inputs_and_invoking_scalar_arena",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/scope/retained_plans.rs",
+      "capability": "CTE definition scopes",
+      "workload": "A shadowed NOT MATERIALIZED definition is restored and scanned repeatedly.",
+      "invariant": "The original shared inputs remain available while the invoking scalar arena is preserved."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "cte_definition_scopes_match_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "CTE definition scopes",
+      "workload": "56 independent PostgreSQL observations on four providers and 11 observations after persistent reopen.",
+      "invariant": "Typed values, diagnostics, materialization, recursive references, prepared/stored definitions and routine privileges retain the definition namespace."
     }
   ]
 }

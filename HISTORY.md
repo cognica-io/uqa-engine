@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve each nonrecursive CTE's enclosing and preceding definitions across folding, materialization, prepared execution and stored-view reopening. Later same-name declarations no longer change its inputs or output types, and unavailable forward references retain PostgreSQL diagnostics.
+
 - Propagate unused-output demand through joined and lateral sources and folded CTEs, preserving join keys, outer-join rows, positional aliases and CTE dependency order.
 
 - Preserve PostgreSQL output demand through eligible UNION ALL members, including positional aliases, type-coercion barriers, ordering and unused aggregate values. Discarding an aggregate value keeps its group and empty-input row cardinality.

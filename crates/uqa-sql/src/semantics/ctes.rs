@@ -133,11 +133,22 @@ pub fn primary_command_cte_references(
     references
 }
 
+/// Only a recursive WITH item can reference its own binding. An ordinary definition can read a same-name enclosing CTE or catalog relation.
 pub fn cte_references_own_name(cte: &CtePlan) -> bool {
+    if !cte.recursive {
+        return false;
+    }
     let targets = BTreeSet::from([cte.name.clone()]);
     let mut references = BTreeSet::new();
     collect_target_cte_references_from_body(&cte.body, &targets, &BTreeSet::new(), &mut references);
     references.contains(&cte.name)
+}
+
+/// The already-visible CTE bindings read by a definition, respecting its nested WITH scopes.
+pub fn cte_external_references(body: &CtePlanBody, visible: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut references = BTreeSet::new();
+    collect_target_cte_references_from_body(body, visible, &BTreeSet::new(), &mut references);
+    references
 }
 
 pub fn ordered_plan_ctes(plan: &QueryPlan) -> Result<Vec<&CtePlan>, SQLError> {
@@ -191,7 +202,7 @@ pub fn order_cte_plans(plans: Vec<&CtePlan>) -> Result<Vec<&CtePlan>, SQLError> 
     Ok(ordered)
 }
 
-/// Return reachable CTEs with exactly one syntactic reference in the owning query tree. Counting references outside their lexical visibility can only make this set more conservative, never cause a multiply referenced CTE to be streamed as a single-consumer input.
+/// Return CTEs with exactly one syntactic reference to their own binding. Nested same-name definitions do not add consumers of the enclosing definition.
 pub fn single_reference_plan_cte_names(plan: &QueryPlan) -> BTreeSet<String> {
     let targets = plan
         .ctes
@@ -202,7 +213,16 @@ pub fn single_reference_plan_cte_names(plan: &QueryPlan) -> BTreeSet<String> {
         .iter()
         .map(|name| (name.clone(), 0usize))
         .collect::<BTreeMap<_, _>>();
-    count_plan_cte_references(plan, &targets, &mut counts);
+    let mut visible = if plan.ctes.iter().any(|cte| cte.recursive) {
+        targets.clone()
+    } else {
+        BTreeSet::new()
+    };
+    for cte in &plan.ctes {
+        count_cte_body_references(&cte.body, &visible, &mut counts);
+        visible.insert(cte.name.clone());
+    }
+    count_relational_cte_references(&plan.root, &targets, &mut counts);
     counts
         .into_iter()
         .filter_map(|(name, count)| (count == 1).then_some(name))
@@ -214,10 +234,26 @@ fn count_plan_cte_references(
     targets: &BTreeSet<String>,
     counts: &mut BTreeMap<String, usize>,
 ) {
-    for cte in &plan.ctes {
-        count_cte_body_references(&cte.body, targets, counts);
+    let visible = count_nested_cte_definitions(&plan.ctes, targets, counts);
+    count_relational_cte_references(&plan.root, &visible, counts);
+}
+
+fn count_nested_cte_definitions(
+    ctes: &[CtePlan],
+    targets: &BTreeSet<String>,
+    counts: &mut BTreeMap<String, usize>,
+) -> BTreeSet<String> {
+    let mut visible = targets.clone();
+    if ctes.iter().any(|cte| cte.recursive) {
+        for cte in ctes {
+            visible.remove(&cte.name);
+        }
     }
-    count_relational_cte_references(&plan.root, targets, counts);
+    for cte in ctes {
+        count_cte_body_references(&cte.body, &visible, counts);
+        visible.remove(&cte.name);
+    }
+    visible
 }
 
 fn count_cte_body_references(
@@ -228,14 +264,12 @@ fn count_cte_body_references(
     match body {
         CtePlanBody::Query(query) => count_plan_cte_references(query, targets, counts),
         CtePlanBody::Command(command) => {
-            for cte in command.ctes() {
-                count_cte_body_references(&cte.body, targets, counts);
-            }
+            let visible = count_nested_cte_definitions(command.ctes(), targets, counts);
             for query in command.query_inputs() {
-                count_plan_cte_references(query, targets, counts);
+                count_plan_cte_references(query, &visible, counts);
             }
             if let Some(source) = command.source_input() {
-                count_source_cte_references(source, targets, counts);
+                count_source_cte_references(source, &visible, counts);
             }
         }
     }

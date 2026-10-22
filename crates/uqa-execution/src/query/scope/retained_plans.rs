@@ -45,6 +45,68 @@ fn execution_scope_copies_do_not_duplicate_immutable_plan_payloads() {
 }
 
 #[test]
+fn deferred_definitions_keep_only_their_original_lexical_inputs() {
+    use std::sync::Arc;
+
+    let mut scope = CteScope::<()>::new();
+    let outer = query("WITH q AS (SELECT 7 AS id), unused AS (SELECT 11 AS id) SELECT * FROM q");
+    for cte in outer.ctes {
+        scope.insert_deferred(cte);
+    }
+    let original = Arc::clone(&scope.deferred_ctes["q"]);
+    let inner = query("WITH r AS (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT * FROM r, q");
+    for cte in inner.ctes {
+        scope.insert_deferred(cte);
+    }
+    let definition = scope.definition_scope("r").unwrap();
+    assert!(Arc::ptr_eq(&definition.deferred_ctes["q"], &original));
+    assert_eq!(definition.deferred_ctes.len(), 1);
+    assert!(!Arc::ptr_eq(&scope.deferred_ctes["q"], &original));
+    assert!(scope
+        .definition_scope("q")
+        .unwrap()
+        .deferred_ctes
+        .is_empty());
+
+    let parent = Arc::clone(&scope.deferred_ctes["q"]);
+    let mut same_name = query("WITH q AS (SELECT id FROM q) SELECT * FROM q");
+    scope.insert_deferred(same_name.ctes.remove(0));
+    let definition = scope.definition_scope("q").unwrap();
+    assert!(Arc::ptr_eq(&definition.deferred_ctes["q"], &parent));
+    assert!(!uqa_sql::semantics::cte_references_own_name(
+        scope.deferred_reference("q").unwrap()
+    ));
+}
+
+#[test]
+fn restored_definition_keeps_shared_inputs_and_invoking_scalar_arena() {
+    use super::bindings::{restore_cte_names, save_cte_names};
+    use std::{collections::BTreeSet, sync::Arc};
+
+    let mut scope = CteScope::<()>::new();
+    let definition = query(
+        "WITH q AS (SELECT 7 AS id), r AS NOT MATERIALIZED (SELECT id FROM q) SELECT * FROM r",
+    );
+    for cte in definition.ctes {
+        scope.insert_deferred(cte);
+    }
+    let original = Arc::clone(&scope.deferred_ctes["q"]);
+    let saved = save_cte_names(&scope, &BTreeSet::from(["r".into()]));
+    let mut replacement = query("WITH r AS (SELECT 9 AS id) SELECT * FROM r");
+    scope.insert_deferred(replacement.ctes.remove(0));
+    restore_cte_names(&mut scope, saved);
+    scope.scalar_subqueries = vec![query("SELECT 11")].into();
+    for _ in 0..3 {
+        let (_, input) = scope.take_deferred_input("r").unwrap();
+        assert!(Arc::ptr_eq(&input.deferred_ctes["q"], &original));
+        assert!(Arc::ptr_eq(
+            &input.scalar_subqueries,
+            &scope.scalar_subqueries
+        ));
+    }
+}
+
+#[test]
 fn not_materialized_definition_survives_repeated_scans_and_shadow_restoration() {
     use super::bindings::{restore_cte_names, save_and_remove_cte_names};
     use std::collections::BTreeSet;

@@ -58,6 +58,8 @@ impl<S: Clone> CteScope<S> {
     pub fn inherit_cte_bindings(&mut self, parent: &Self) {
         self.rows.clone_from(&parent.rows);
         self.deferred_ctes.clone_from(&parent.deferred_ctes);
+        self.definition_scopes.clone_from(&parent.definition_scopes);
+        self.folded_ctes.clone_from(&parent.folded_ctes);
         self.non_returning_ctes
             .clone_from(&parent.non_returning_ctes);
         self.visible_cte_names.clone_from(&parent.visible_cte_names);
@@ -108,22 +110,20 @@ impl<S: Clone> CteScope<S> {
 
     pub fn insert_shared(&mut self, name: String, rows: crate::SharedSpill) {
         self.deferred_ctes.remove(&name);
+        self.definition_scopes.remove(&name);
+        self.folded_ctes.remove(&name);
         self.non_returning_ctes.remove(&name);
         self.rows.insert(name, rows);
     }
 
     pub fn insert_deferred(&mut self, plan: CtePlan) {
-        self.rows.remove(&plan.name);
-        if plan.body.returns_rows() {
-            self.non_returning_ctes.remove(&plan.name);
-        } else {
-            self.non_returning_ctes.insert(plan.name.clone());
-        }
-        self.deferred_ctes.insert(plan.name.clone(), Arc::new(plan));
+        self.insert_preparation_cte(plan, true);
     }
 
     pub fn remove_deferred(&mut self, name: &str) -> Option<CtePlan> {
         self.non_returning_ctes.remove(name);
+        self.definition_scopes.remove(name);
+        self.folded_ctes.remove(name);
         self.deferred_ctes.remove(name).map(Arc::unwrap_or_clone)
     }
 
@@ -136,6 +136,8 @@ impl<S: Clone> CteScope<S> {
         let plan = if persistent {
             self.deferred_ctes.get(&name).cloned()
         } else {
+            self.definition_scopes.remove(&name);
+            self.folded_ctes.remove(&name);
             self.deferred_ctes.remove(&name)
         };
         plan.map(Arc::unwrap_or_clone)

@@ -46,7 +46,7 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     let mut scope = ctes.clone();
-    for cte in &plan.ctes {
+    for cte in uqa_sql::semantics::ordered_plan_ctes(plan)? {
         scope.insert_deferred(cte.clone());
     }
     let mut lookup = scope.enter_relation_lookup_mode(plan.relations_bound)?;
@@ -55,7 +55,10 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
     for scheduled in crate::query::cte::strategy::schedule_plan_ctes(context.volatility, plan)? {
         if !scheduled.deferred {
             if let Some(query) = scheduled.plan.body.query() {
-                initialize(context, permissions, query, params, scope, outer)?;
+                let definition = scope
+                    .definition_scope(&scheduled.plan.name)
+                    .expect("declared CTE scope");
+                initialize(context, permissions, query, params, &definition, outer)?;
             }
         }
     }
@@ -208,7 +211,7 @@ pub(crate) fn source_calls<S: Clone + Send + Sync + 'static>(
             } else {
                 catalog.view_resolved(&resolution, name)?.cloned()
             };
-            let mut scope = ctes.clone();
+            let mut scope = ctes.definition_scope(name).unwrap_or_else(|| ctes.clone());
             if let Some(view) = view {
                 let subject = if view.security_invoker() {
                     scope.privilege_subject()?.clone()

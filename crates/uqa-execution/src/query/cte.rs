@@ -24,7 +24,32 @@ mod statement;
 pub(crate) mod strategy;
 pub use context::CteExecutionContext;
 use recursive::materialize_recursive_cte;
+pub(crate) use statement::install_statement_ctes;
 pub use statement::{finish_statement_ctes, materialize_command_ctes, materialize_statement_ctes};
+
+/// Bind folded definitions only after their dependencies are available, retaining the lexical input of each definition before later names replace it.
+pub(crate) fn install_scheduled_ctes<'a, S: Clone>(
+    context: CteExecutionContext<'_, S>,
+    plans: impl IntoIterator<Item = uqa_sql::semantics::cte_strategy::ScheduledCte<'a>>,
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+    output_filters: &BTreeMap<String, (String, ScalarExpr)>,
+) -> Result<(), SQLError> {
+    for scheduled in plans {
+        if scheduled.deferred {
+            ctes.insert_deferred(scheduled.plan.clone());
+        } else {
+            materialize_plan_ctes_with_filters(
+                context,
+                std::iter::once(scheduled.plan),
+                params,
+                ctes,
+                output_filters,
+            )?;
+        }
+    }
+    Ok(())
+}
 
 pub fn materialize_plan_ctes<S: Clone>(
     context: CteExecutionContext<'_, S>,

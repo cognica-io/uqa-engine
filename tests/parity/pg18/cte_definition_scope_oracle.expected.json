@@ -1,0 +1,1172 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id) SELECT s.id FROM (WITH q AS (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "same_name_default_default"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH r AS (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT r.id AS old_id,q.id AS new_id FROM r,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "old_id",
+            "new_id"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "earlier_binding_default_default"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id) SELECT s.id FROM (WITH q AS MATERIALIZED (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "same_name_default_materialized"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH r AS MATERIALIZED (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT r.id AS old_id,q.id AS new_id FROM r,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "old_id",
+            "new_id"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "earlier_binding_default_materialized"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id) SELECT s.id FROM (WITH q AS NOT MATERIALIZED (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "same_name_default_not_materialized"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH r AS NOT MATERIALIZED (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT r.id AS old_id,q.id AS new_id FROM r,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "old_id",
+            "new_id"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "earlier_binding_default_not_materialized"
+    },
+    {
+      "sql": "WITH q AS MATERIALIZED (SELECT 7 AS id) SELECT s.id FROM (WITH q AS (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "same_name_materialized_default"
+    },
+    {
+      "sql": "WITH q AS MATERIALIZED (SELECT 7 AS id) SELECT * FROM (WITH r AS (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT r.id AS old_id,q.id AS new_id FROM r,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "old_id",
+            "new_id"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "earlier_binding_materialized_default"
+    },
+    {
+      "sql": "WITH q AS MATERIALIZED (SELECT 7 AS id) SELECT s.id FROM (WITH q AS MATERIALIZED (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "same_name_materialized_materialized"
+    },
+    {
+      "sql": "WITH q AS MATERIALIZED (SELECT 7 AS id) SELECT * FROM (WITH r AS MATERIALIZED (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT r.id AS old_id,q.id AS new_id FROM r,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "old_id",
+            "new_id"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "earlier_binding_materialized_materialized"
+    },
+    {
+      "sql": "WITH q AS MATERIALIZED (SELECT 7 AS id) SELECT s.id FROM (WITH q AS NOT MATERIALIZED (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "same_name_materialized_not_materialized"
+    },
+    {
+      "sql": "WITH q AS MATERIALIZED (SELECT 7 AS id) SELECT * FROM (WITH r AS NOT MATERIALIZED (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT r.id AS old_id,q.id AS new_id FROM r,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "old_id",
+            "new_id"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "earlier_binding_materialized_not_materialized"
+    },
+    {
+      "sql": "WITH q AS NOT MATERIALIZED (SELECT 7 AS id) SELECT s.id FROM (WITH q AS (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "same_name_not_materialized_default"
+    },
+    {
+      "sql": "WITH q AS NOT MATERIALIZED (SELECT 7 AS id) SELECT * FROM (WITH r AS (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT r.id AS old_id,q.id AS new_id FROM r,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "old_id",
+            "new_id"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "earlier_binding_not_materialized_default"
+    },
+    {
+      "sql": "WITH q AS NOT MATERIALIZED (SELECT 7 AS id) SELECT s.id FROM (WITH q AS MATERIALIZED (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "same_name_not_materialized_materialized"
+    },
+    {
+      "sql": "WITH q AS NOT MATERIALIZED (SELECT 7 AS id) SELECT * FROM (WITH r AS MATERIALIZED (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT r.id AS old_id,q.id AS new_id FROM r,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "old_id",
+            "new_id"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "earlier_binding_not_materialized_materialized"
+    },
+    {
+      "sql": "WITH q AS NOT MATERIALIZED (SELECT 7 AS id) SELECT s.id FROM (WITH q AS NOT MATERIALIZED (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "same_name_not_materialized_not_materialized"
+    },
+    {
+      "sql": "WITH q AS NOT MATERIALIZED (SELECT 7 AS id) SELECT * FROM (WITH r AS NOT MATERIALIZED (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT r.id AS old_id,q.id AS new_id FROM r,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "old_id",
+            "new_id"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "earlier_binding_not_materialized_not_materialized"
+    },
+    {
+      "sql": "WITH q AS (SELECT 'outer'::text AS id) SELECT * FROM (WITH r AS (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT r.id AS old_id,q.id AS new_id FROM r,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "old_id",
+            "new_id"
+          ],
+          "type_oids": [
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "outer",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "different_types"
+    },
+    {
+      "sql": "WITH q(x) AS (SELECT 7) SELECT * FROM (WITH q(y) AS (SELECT x FROM q) SELECT z.n FROM q AS z(n)) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "column_aliases"
+    },
+    {
+      "sql": "WITH \"Q\" AS (SELECT 7 AS \"Id\") SELECT * FROM (WITH \"Q\" AS (SELECT \"Id\" FROM \"Q\") SELECT * FROM \"Q\") s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "Id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "quoted_names"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH r AS (SELECT id FROM q), q AS (SELECT 9 AS id), t AS (SELECT r.id FROM r) SELECT * FROM (WITH q AS (SELECT 11 AS id) SELECT * FROM t) z) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "definition_chain"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH r AS NOT MATERIALIZED (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT a.id AS a,b.id AS b,q.id AS c FROM r a,r b,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "repeated_not_materialized"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH RECURSIVE q(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM q WHERE id<3) SELECT * FROM q) s ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "recursive_self"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH RECURSIVE r AS (SELECT id FROM q),q AS (SELECT 9 AS id) SELECT * FROM r) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "recursive_forward"
+    },
+    {
+      "sql": "WITH q AS (SELECT id FROM q) SELECT * FROM q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"q\" does not exist",
+        "detail": "There is a WITH item named \"q\", but it cannot be referenced from this part of the query.",
+        "hint": "Use WITH RECURSIVE, or re-order the WITH items to remove forward references."
+      },
+      "results": [],
+      "id": "undefined_self"
+    },
+    {
+      "sql": "WITH r AS (SELECT id FROM q),q AS (SELECT 9 AS id) SELECT * FROM r",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"q\" does not exist",
+        "detail": "There is a WITH item named \"q\", but it cannot be referenced from this part of the query.",
+        "hint": "Use WITH RECURSIVE, or re-order the WITH items to remove forward references."
+      },
+      "results": [],
+      "id": "undefined_forward"
+    },
+    {
+      "sql": "WITH q AS (SELECT 1/0 AS id) SELECT * FROM (WITH q AS (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "required_error"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id) SELECT * FROM q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "scope_after_error"
+    },
+    {
+      "sql": "CREATE SCHEMA cte_lexical",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "schema"
+    },
+    {
+      "sql": "CREATE SEQUENCE cte_lexical.counter",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "sequence"
+    },
+    {
+      "sql": "WITH q AS (SELECT nextval('cte_lexical.counter') AS id) SELECT * FROM (WITH r AS (SELECT id FROM q),q AS (SELECT 9 AS id) SELECT a.id AS a,b.id AS b,q.id AS c FROM r a,r b,q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            20,
+            20,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_materialized"
+    },
+    {
+      "sql": "SELECT last_value FROM cte_lexical.counter",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "volatile_count"
+    },
+    {
+      "sql": "CREATE TABLE cte_lexical.q(id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "table"
+    },
+    {
+      "sql": "INSERT INTO cte_lexical.q VALUES (7)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "insert"
+    },
+    {
+      "sql": "WITH q AS (SELECT id FROM cte_lexical.q) SELECT * FROM (WITH q AS (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "catalog_same_name"
+    },
+    {
+      "sql": "CREATE VIEW cte_lexical.saved AS WITH q AS (SELECT 7 AS id) SELECT s.id FROM (WITH q AS (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "view"
+    },
+    {
+      "sql": "SELECT * FROM cte_lexical.saved",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "view_read"
+    },
+    {
+      "sql": "CREATE FUNCTION cte_lexical.saved_value() RETURNS integer LANGUAGE SQL AS 'WITH q AS (SELECT 7 AS id) SELECT s.id FROM (WITH q AS (SELECT id FROM q) SELECT * FROM q) s'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "routine"
+    },
+    {
+      "sql": "SELECT cte_lexical.saved_value() AS id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "routine_read"
+    },
+    {
+      "sql": "PREPARE cte_lexical_prepared(integer) AS WITH q AS (SELECT $1::integer AS id) SELECT s.id FROM (WITH q AS (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "prepare"
+    },
+    {
+      "sql": "EXECUTE cte_lexical_prepared(7)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "execute_first"
+    },
+    {
+      "sql": "EXECUTE cte_lexical_prepared(11)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "11"
+            ]
+          ]
+        }
+      ],
+      "id": "execute_second"
+    },
+    {
+      "sql": "DEALLOCATE cte_lexical_prepared",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "deallocate"
+    },
+    {
+      "sql": "WITH q AS (SELECT 7 AS id,1/0 AS z) SELECT s.id FROM (WITH q AS (SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "unused_enclosing_output"
+    },
+    {
+      "sql": "CREATE ROLE cte_lexical_reader",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "role"
+    },
+    {
+      "sql": "REVOKE EXECUTE ON FUNCTION pg_catalog.length(text) FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "restrict_builtin"
+    },
+    {
+      "sql": "SET ROLE cte_lexical_reader",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "set_role"
+    },
+    {
+      "sql": "WITH q AS (SELECT -7 AS id) SELECT * FROM (WITH q AS (SELECT abs(id) AS id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "allowed_builtin_scope"
+    },
+    {
+      "sql": "WITH q AS (SELECT 'outer'::text AS id) SELECT * FROM (WITH q AS (SELECT length(id) AS id FROM q) SELECT * FROM q) s",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function length",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "denied_builtin_scope"
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "reset_role"
+    },
+    {
+      "sql": "GRANT EXECUTE ON FUNCTION pg_catalog.length(text) TO PUBLIC",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "restore_builtin"
+    },
+    {
+      "sql": "DROP ROLE cte_lexical_reader",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "drop_role"
+    },
+    {
+      "sql": "WITH \"Q\" AS (SELECT id FROM \"Q\") SELECT * FROM \"Q\"",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"Q\" does not exist",
+        "detail": "There is a WITH item named \"Q\", but it cannot be referenced from this part of the query.",
+        "hint": "Use WITH RECURSIVE, or re-order the WITH items to remove forward references."
+      },
+      "results": [],
+      "id": "undefined_quoted_self"
+    },
+    {
+      "sql": "WITH r AS (SELECT id FROM \"Q\"), \"Q\" AS (SELECT 9 AS id) SELECT * FROM r",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"Q\" does not exist",
+        "detail": "There is a WITH item named \"Q\", but it cannot be referenced from this part of the query.",
+        "hint": "Use WITH RECURSIVE, or re-order the WITH items to remove forward references."
+      },
+      "results": [],
+      "id": "undefined_quoted_forward"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "f9d80692e02ee46eda35c8bb517adf0b0b5d5dcdf85e8369e8d026fcfddd2db2",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}

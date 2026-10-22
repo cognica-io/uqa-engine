@@ -120,7 +120,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 ));
             }
 
-            if let Some(mut plan) = ctes.deferred_for_scan(name) {
+            if let Some((mut plan, mut definition_scope)) = ctes.take_deferred_input(name) {
                 if let (Some(query), Some(prepared)) =
                     (plan.body.query_mut(), executable_query.as_deref())
                 {
@@ -136,12 +136,12 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         &aliases,
                         projection,
                         params,
-                        ctes,
-                        ctes.row_lock_outer_row().map(|row| &row.schema),
+                        &definition_scope,
+                        definition_scope.row_lock_outer_row().map(|row| &row.schema),
                     )?;
                 }
                 let streamed = {
-                    let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
+                    let mut scoped_ctes = definition_scope.enter_lock_identity_emission(false);
                     match plan.body.query() {
                         Some(query)
                             if scoped_ctes.streams_command_progress()
@@ -181,7 +181,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     && !plan.body.modifies_data()
                 {
                     let output = {
-                        let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
+                        let mut scoped_ctes = definition_scope.enter_lock_identity_emission(false);
                         context.ctes.queries.execute_query(
                             plan.body.query().ok_or_else(|| {
                                 SQLError::Internal(
@@ -202,13 +202,17 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         context.ctes,
                         std::slice::from_ref(&plan),
                         params,
-                        ctes,
+                        &mut definition_scope,
                     )?;
-                    ctes.materialized_for_scan(name).ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "deferred CTE `{name}` did not produce a materialized input"
-                        ))
-                    })?
+                    let rows = definition_scope
+                        .materialized_for_scan(name)
+                        .ok_or_else(|| {
+                            SQLError::Internal(format!(
+                                "deferred CTE `{name}` did not produce a materialized input"
+                            ))
+                        })?;
+                    ctes.insert_shared(plan.name.clone(), rows.clone());
+                    rows
                 };
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(crate::SharedSpillScan::new(materialized));

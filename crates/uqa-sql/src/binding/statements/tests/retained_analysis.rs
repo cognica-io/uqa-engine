@@ -9,6 +9,52 @@
 use super::*;
 
 #[test]
+fn cte_analysis_distinguishes_enclosing_names_from_recursive_self_bindings() {
+    for sql in [
+        "WITH q AS (SELECT 7 AS id) SELECT s.id FROM (WITH q AS (SELECT id FROM q) SELECT * FROM q) s",
+        "WITH q AS (SELECT 7 AS id) SELECT * FROM (WITH r AS (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT r.id, q.id FROM r, q) s",
+        "WITH items AS (SELECT id FROM items) SELECT * FROM items",
+        "WITH RECURSIVE q(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM q WHERE id<3) SELECT * FROM q",
+        "WITH RECURSIVE r AS (SELECT id FROM q), q AS (SELECT 7 AS id) SELECT * FROM r",
+    ] {
+        analyze(&Scopes::default(), sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+}
+
+#[test]
+fn invisible_cte_diagnostics_preserve_postgresql_detail_and_hint() {
+    for (sql, name) in [
+        ("WITH q AS (SELECT id FROM q) SELECT * FROM q", "q"),
+        (
+            "WITH r AS (SELECT id FROM q), q AS (SELECT 9 AS id) SELECT * FROM r",
+            "q",
+        ),
+        (
+            "WITH \"Q\" AS (SELECT id FROM \"Q\") SELECT * FROM \"Q\"",
+            "Q",
+        ),
+        (
+            "WITH r AS (SELECT id FROM \"Q\"), \"Q\" AS (SELECT 9 AS id) SELECT * FROM r",
+            "Q",
+        ),
+    ] {
+        let error = analyze(&Scopes::default(), sql).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42P01"), "{sql}");
+        assert_eq!(
+            error.to_string(),
+            format!("relation \"{name}\" does not exist"),
+            "{sql}"
+        );
+        assert_eq!(error.detail(), Some(format!("There is a WITH item named \"{name}\", but it cannot be referenced from this part of the query.").as_str()), "{sql}");
+        assert_eq!(
+            error.hint(),
+            Some("Use WITH RECURSIVE, or re-order the WITH items to remove forward references."),
+            "{sql}"
+        );
+    }
+}
+
+#[test]
 fn nested_output_descriptors_reuse_analysis_and_do_not_enter_stored_syntax() {
     for sql in [
         "SELECT count(*) FROM (SELECT id AS x FROM items WHERE true UNION ALL SELECT 2) q",

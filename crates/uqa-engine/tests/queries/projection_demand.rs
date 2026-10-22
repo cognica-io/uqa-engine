@@ -96,3 +96,41 @@ fn original_output_demand_matches_postgresql(#[case] provider: usize) {
         include_str!("../../../../tests/parity/pg18/projection_output_oracle.expected.json"),
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn cte_definition_scopes_match_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cte-definition-scopes.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/cte_definition_scope_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    restored["cases"].as_array_mut().unwrap().retain(|case| {
+        matches!(
+            case["id"].as_str().unwrap(),
+            "view_read"
+                | "routine_read"
+                | "catalog_same_name"
+                | "different_types"
+                | "column_aliases"
+                | "quoted_names"
+                | "definition_chain"
+                | "repeated_not_materialized"
+                | "recursive_self"
+                | "recursive_forward"
+                | "unused_enclosing_output"
+        )
+    });
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 11);
+    crate::pg18_oracle::verify(&engine, &restored.to_string());
+}
