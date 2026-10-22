@@ -1,6 +1,6 @@
 # Implementation plans
 
-Current implementation follows the [open issue delivery groups](0024-open-issue-delivery.md): all 112 issues open after 0.6.1 are preserved in 34 ownership groups, with logical commits and one PR per coherent group. Draft progress is collected into ready-for-review CI batches. The earlier requested pause is over; historical delivery evidence below does not complete the remaining original requirements.
+Current implementation follows the [open issue delivery groups](0024-open-issue-delivery.md): all 112 issues open after 0.6.1 are preserved in 37 ownership groups, with logical commits and one PR per coherent group. Draft progress is collected into ready-for-review CI batches. The earlier requested pause is over; historical delivery evidence below does not complete the remaining original requirements.
 
 The [open performance ledger](open-performance-corrections.md) preserves all six original issues and their source-scoped evidence. The [SQLite page-cache correction](sqlite-page-cache.md) is merged in [PR #1144](https://github.com/cognica-io/uqa-engine/pull/1144), closing #348 after local and actual Linux/macOS qualification. Regex #1063 passes its final controlled comparison; current platform and remaining COPY, type, analysis and historical-noise obligations are recorded in the ledger.
 
