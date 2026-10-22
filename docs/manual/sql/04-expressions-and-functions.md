@@ -571,6 +571,8 @@ SELECT lastval() AS last_allocated;
 
 Aggregates support `DISTINCT`, aggregate-local `ORDER BY`, and `FILTER` where the function shape permits it; on an ordinary function each is `42809` (`FILTER specified, but abs is not an aggregate function`). `min` and `max` compare arrays and record-like map values lexicographically in addition to their scalar inputs.
 
+The selected routine determines whether a call is an aggregate. `pg_catalog.count(*)` selects the system aggregate even when the search path contains a user scalar named `count`. The bare star is syntax for a zero-argument aggregate call; `count(q.*)` instead observes the whole row. A selected scalar invoked with `*` reports `42809`, while a missing zero-argument signature reports `42883`. Qualified built-ins retain the same grouping, filtering, ordering, window and bounded-state behavior as unqualified aggregate calls.
+
 `mode() WITHIN GROUP (ORDER BY value [ASC | DESC])` returns the most frequent non-NULL value with the input's type, or NULL for empty or all-NULL input. SQL-equal values count together, including signed floating zero, equal intervals and equivalent JSONB representations. When frequencies tie, the first value in the requested ordering wins. Memory and spilled aggregate execution use the same equality and tie rules.
 
 ```sql

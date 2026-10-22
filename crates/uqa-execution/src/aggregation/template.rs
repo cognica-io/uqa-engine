@@ -134,6 +134,7 @@ pub(super) fn enum_extrema_state(
     name: &str,
     input_type: Option<&ColumnType>,
 ) -> Option<Arc<EnumComparisonState>> {
+    let name = uqa_sql::semantics::builtin_aggregate_dispatch_name(name);
     if let Some(ColumnType::Domain { base, .. }) = input_type {
         return enum_extrema_state(name, Some(base));
     }

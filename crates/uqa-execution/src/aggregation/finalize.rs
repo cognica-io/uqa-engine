@@ -81,7 +81,7 @@ pub fn aggregate_value_with_args(
         })?;
         return aggregate_value_with_args(name, &ordered, args, enums);
     }
-    let lname = name.to_ascii_lowercase();
+    let lname = uqa_sql::semantics::builtin_aggregate_dispatch_name(name).to_ascii_lowercase();
 
     let value = match lname.as_str() {
         "count" => Value::Int(

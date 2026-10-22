@@ -6,7 +6,7 @@
 
 //! Recursive query/source plan traversal and compute classification.
 
-use uqa_sql::SQLError;
+use uqa_sql::{SQLError, ScalarExpr};
 
 use super::{
     choose_access_path, optimize_command, optimize_scalar_slot, prioritize_access_predicates,
@@ -168,8 +168,8 @@ pub(super) fn optimize_query_block(
     let live_subqueries = super::subqueries::live_slots(block.expressions())?;
     super::subqueries::optimize_live(&mut block.subqueries, &live_subqueries, config, aggregates)?;
 
-    let is_aggregate = |name: &str| {
-        crate::unified_plan::is_builtin_aggregate(name) || aggregates.is_registered_aggregate(name)
+    let contains_aggregate = |expression: &ScalarExpr| {
+        uqa_sql::semantics::aggregates::contains_aggregate(aggregates, expression)
     };
     let has_aggregate = !block.group_by.is_empty()
         || !block.grouping_sets.is_empty()
@@ -177,12 +177,12 @@ pub(super) fn optimize_query_block(
         || block
             .projections
             .iter()
-            .any(|projection| projection.expr.contains_aggregate(&is_aggregate))
+            .any(|projection| contains_aggregate(&projection.expr))
         || block
             .windows
             .iter()
             .flat_map(|window| window.spec.expressions())
-            .any(|expression| expression.contains_aggregate(&is_aggregate));
+            .any(contains_aggregate);
     let has_window = block
         .projections
         .iter()

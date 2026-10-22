@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve selected aggregate identities through SQL lowering, optimization and execution, including `pg_catalog` qualification and same-name user scalar functions. Resolve a bare function `*` as aggregate syntax with no value arguments, retaining whole-row arguments and PostgreSQL diagnostics for scalar misuse.
+
+- Distinguish row-count demand from whole-row values when pruning unused direct derived-table and folded-CTE outputs, retaining aggregate filters, ordering and relation-name column shadowing.
+
 - Evaluate LATERAL VALUES against the current outer row, preserving common column types, correlated subqueries, SQL routines and durable views across storage providers.
 
 - Evaluate independent table-function and LATERAL inputs once per join, preserving unmatched RIGHT/FULL rows and volatile call counts. Empty INNER/LEFT/CROSS inputs do not start unnecessary right-side function calls. Reject forbidden RIGHT/FULL correlations during SQL analysis and retain enclosing-query values when a nested lateral input also reads the current row.

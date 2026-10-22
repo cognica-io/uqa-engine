@@ -19,6 +19,7 @@ mod defaults;
 mod dependencies;
 mod domain_collations;
 mod field_collations;
+mod function_star;
 mod input_collations;
 mod json_operators;
 mod lateral;

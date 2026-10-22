@@ -23,7 +23,7 @@ pub struct ScalarCallArgument<'a> {
     pub explicit_variadic: bool,
 }
 
-/// Decode and validate all compiler-owned call-argument markers. `PostgreSQL` permits one explicit `VARIADIC` argument and requires it to be the final argument.
+/// Decode and validate all compiler-owned call-argument markers. A sole bare star is a call modifier with no value arguments; a qualified star retains its whole-row argument. `PostgreSQL` permits one explicit `VARIADIC` argument and requires it to be the final argument.
 #[doc(hidden)]
 pub fn scalar_call_arguments(
     arguments: &[ScalarExpr],
@@ -43,6 +43,10 @@ pub fn scalar_call_arguments_with_control<'a>(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<ScalarCallArgument<'a>>>, SQLError> {
     let mut decoded = ProductionVec::new(*control);
+    if matches!(arguments, [ScalarExpr::Star]) {
+        control.check()?;
+        return decoded.finish().map_err(Into::into);
+    }
     decoded.reserve(arguments.len())?;
     for argument in arguments {
         control.check()?;
@@ -241,6 +245,9 @@ fn malformed_call_argument(message: &str) -> SQLError {
 pub fn analyze_expression_call_arguments(
     arguments: &[crate::plan::ExpressionPlan],
 ) -> Result<(Vec<ScalarCallArgument<'_>>, bool), SQLError> {
+    if matches!(arguments, [argument] if matches!(argument.scalar, ScalarExpr::Star)) {
+        return Ok((Vec::new(), false));
+    }
     let decoded = arguments
         .iter()
         .map(|argument| scalar_call_argument(&argument.scalar))

@@ -268,9 +268,5 @@ impl Lowering<'_> {
     }
 }
 
-pub(crate) fn is_builtin_aggregate(name: &str) -> bool {
-    crate::ast::is_builtin_aggregate_function(name)
-}
-
 #[cfg(test)]
 mod tests;

@@ -123,6 +123,8 @@ impl SelectedFunctionArguments {
     pub(super) fn validate_modifiers(
         &self,
         name: &str,
+        binding: Option<&FunctionBinding>,
+        args: &[crate::ScalarExpr],
         modifiers: super::super::ordered_calls::Modifiers,
         arguments: &ObservedFunctionArguments,
     ) -> Result<(), SQLError> {
@@ -138,7 +140,24 @@ impl SelectedFunctionArguments {
                 &arguments.names,
                 &arguments.types(),
             )
-        })
+        })?;
+        super::super::ordered_calls::validate_builtin_aggregate_arguments(
+            name,
+            self.overload
+                .as_ref()
+                .map(|selected| &selected.binding)
+                .or(binding),
+            args,
+            || {
+                crate::type_resolution::function_resolution_error(
+                    "42883",
+                    name,
+                    &arguments.names,
+                    &arguments.types(),
+                    "does not exist",
+                )
+            },
+        )
     }
 }
 

@@ -61,6 +61,33 @@ fn argument_scratch_failure_and_both_cancellation_tokens_release_memory() {
 }
 
 #[test]
+fn bare_star_has_no_argument_allocation_but_still_observes_cancellation() {
+    let budget = MemoryBudget::new(0);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let bare_star = [ScalarExpr::Star];
+    let decoded = scalar_call_arguments_with_control(&bare_star, &control).unwrap();
+    assert!(decoded.is_empty());
+    assert_eq!(decoded.reserved_bytes(), 0);
+    drop(decoded);
+    let whole_row = [ScalarExpr::QualifiedStar("q".into())];
+    assert_eq!(
+        scalar_call_arguments_with_control(&whole_row, &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("53200")
+    );
+    token.cancel();
+    assert_eq!(
+        scalar_call_arguments_with_control(&[ScalarExpr::Star], &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn variadic_validation_keeps_duplicate_error_before_final_position_error() {
     let expression = ScalarExpr::Literal(Value::Null);
     let variadic = ScalarCallArgument {

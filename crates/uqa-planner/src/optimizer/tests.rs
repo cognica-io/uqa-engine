@@ -10,6 +10,7 @@ use uqa_sql::compile;
 
 use super::*;
 
+mod aggregate_identity;
 mod retained_rows;
 
 fn optimized(sql: &str) -> UnifiedPlan {

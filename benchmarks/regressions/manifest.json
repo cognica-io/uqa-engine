@@ -21113,6 +21113,113 @@
       "capability": "Independent FROM input dependencies",
       "workload": "Overloaded user table functions with partial positional aliases and independent versus caller-dependent projected columns.",
       "invariant": "Correlation reads the selected routine identity and complete declared output without parsing or executing the routine body."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bare_star_has_no_argument_allocation_but_still_observes_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/ir/call_arguments/production_tests.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Bare function star under a zero-byte allowance, whole-row argument allocation rejection and cancellation.",
+      "invariant": "The star modifier carries no value argument or scratch allocation; whole-row values remain admitted and cancellation is observed."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bare_star_resolves_the_zero_argument_user_overload_without_reading_its_body",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/routines/inlining/tests.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Qualified and unqualified user count overloads with distinct zero- and one-argument signatures.",
+      "invariant": "Bare star selects the zero-argument catalog identity without evaluating the routine body."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "function_star_identity_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Twenty-eight independent PostgreSQL observations and twenty-four retained observations after persistent reopen.",
+      "invariant": "Selected user and builtin identities, rows, declared result types and exact diagnostics preserve the distinction between COUNT(*), whole-row values and invalid scalar-star syntax."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "count_rows_and_whole_row_references_have_different_output_demand",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_projection.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Derived projections under row counts, qualified counts, whole-row counts, FILTER and relation-name column shadowing.",
+      "invariant": "A selected row count does not observe discarded output values; whole-row, filter and explicitly selected columns retain their value demand."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_row_count_keeps_filters_and_column_shadowing",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/cte_projection.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Folded CTE outputs under row counts, filters and positional aliases that shadow the CTE relation name.",
+      "invariant": "CTE demand is established before constant folding while preserving aliases, filter inputs and whole-row observations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "qualified_aggregates_keep_aggregate_compute_during_lowering",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plan/tests.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Qualified count and sum calls during SQL plan lowering.",
+      "invariant": "System-qualified aggregates retain aggregate computation before optimization."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "recomputed_aggregate_kind_preserves_qualified_builtin_and_selected_scalar",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/tests/aggregate_identity.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Qualified builtin aggregates and a selected same-name user scalar after optimization.",
+      "invariant": "Compute classification preserves the selected routine kind without resolving a different overload."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "qualified_streaming_aggregates_keep_the_same_bounded_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/aggregation/tests.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "4097 input values through system-qualified count, sum and extrema.",
+      "invariant": "Qualified builtin kernels retain no per-input rows or spill records and return the same aggregate values."
     }
   ]
 }

@@ -26,6 +26,8 @@ mod operator_tree_full_surface;
 mod operator_tree_pipeline;
 #[path = "optimizer_passes.rs"]
 mod optimizer_passes;
+#[path = "queries/projection_demand.rs"]
+mod projection_demand;
 #[path = "queries/retrieval_mutations.rs"]
 mod retrieval_mutations;
 #[path = "queries/row_metadata_filters.rs"]

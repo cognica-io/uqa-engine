@@ -405,11 +405,7 @@ impl Preparation<'_> {
             binding,
             order_by.len(),
         );
-        let ordered = if within_group {
-            order_by.as_slice()
-        } else {
-            &[]
-        };
+        let ordered: &[crate::ScalarOrder] = if within_group { order_by } else { &[] };
         let mut arguments =
             self.observe_function_arguments(name, args, ordered, input, subqueries)?;
         let additional = self.function_modifier_collations(
@@ -430,8 +426,10 @@ impl Preparation<'_> {
         };
         selected.validate_modifiers(
             name,
+            binding,
+            args,
             super::super::ordered_calls::Modifiers {
-                direct: args.len(),
+                direct: super::super::ordered_calls::DirectArguments::from(args.as_slice()),
                 ordered: order_by.len(),
                 within_group,
                 distinct: *distinct,

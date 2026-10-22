@@ -7,7 +7,7 @@
 //! SELECT, source, projection, order, CTE, and mutation-child lowering.
 
 use super::rewrite::rewrite_query_scalars;
-use super::scalar::{is_builtin_aggregate, lower_scalar_expression};
+use super::scalar::lower_scalar_expression;
 use super::{
     AccessPathPlan, AggregateClassifier, AssignmentPlan, ComputePlan, CteCyclePlan, CtePlan,
     CteSearchPlan, Expr, ExpressionPlan, FromClause, JoinExecutionStrategy, MergeWhenPlan,
@@ -291,18 +291,19 @@ impl QueryBlockPlan {
                 ),
             })
             .collect();
-        let is_aggregate =
-            |name: &str| is_builtin_aggregate(name) || aggregates.is_registered_aggregate(name);
+        let contains_aggregate = |expression: &ScalarExpr| {
+            crate::semantics::aggregates::contains_aggregate(aggregates, expression)
+        };
         let has_aggregate = !statement.group_by.is_empty()
             || !statement.grouping_sets.is_empty()
             || statement.having.is_some()
             || projections
                 .iter()
-                .any(|projection| projection.expr.contains_aggregate(&is_aggregate))
+                .any(|projection| contains_aggregate(&projection.expr))
             || windows
                 .iter()
                 .flat_map(|window| window.spec.expressions())
-                .any(|expression| expression.contains_aggregate(&is_aggregate));
+                .any(contains_aggregate);
         let has_window = projections
             .iter()
             .any(|projection| projection.expr.contains_window());

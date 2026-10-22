@@ -16,6 +16,23 @@ fn one(sql: &str) -> UnifiedPlan {
 }
 
 #[test]
+fn qualified_aggregates_keep_aggregate_compute_during_lowering() {
+    for sql in [
+        "SELECT pg_catalog.count(*) FROM t",
+        "SELECT pg_catalog.sum(n) FROM t",
+        "SELECT coalesce(pg_catalog.count(*), 0) FROM t",
+    ] {
+        let UnifiedPlan::Query(query) = one(sql) else {
+            panic!("expected query: {sql}");
+        };
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("expected block: {sql}");
+        };
+        assert!(matches!(block.compute, ComputePlan::Aggregate), "{sql}");
+    }
+}
+
+#[test]
 fn alter_routine_lowers_as_an_exact_identity_command() {
     let plan = one("ALTER FUNCTION app.f(integer, text) IMMUTABLE STRICT");
     assert_eq!(plan.name(), "AlterRoutine");

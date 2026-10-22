@@ -589,6 +589,7 @@ pub(super) fn supports_optimistic_grouping(
 }
 
 fn is_mergeable_builtin(name: &str) -> bool {
+    let name = uqa_sql::semantics::builtin_aggregate_dispatch_name(name);
     matches!(
         name.to_ascii_lowercase().as_str(),
         "count"

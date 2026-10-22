@@ -73,6 +73,28 @@ fn streaming_aggregate_does_not_retain_or_spill_inputs() {
 }
 
 #[test]
+fn qualified_streaming_aggregates_keep_the_same_bounded_state() {
+    for (name, expected) in [
+        ("pg_catalog.count", Value::Int(4097)),
+        ("pg_catalog.sum", Value::Int(4096 * 4097 / 2)),
+        ("PG_CATALOG.MIN", Value::Int(0)),
+        ("pg_catalog.max", Value::Int(4096)),
+    ] {
+        let mut accumulator = AggregateAccumulator::builtin(name);
+        for value in 0..4097 {
+            accumulator.observe(&Value::Int(value)).unwrap();
+        }
+        assert!(accumulator.values.rows.is_empty(), "{name}");
+        assert!(accumulator.values.runs.is_empty(), "{name}");
+        assert_eq!(
+            aggregate_value(name, &accumulator, None).unwrap(),
+            expected,
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn collection_aggregate_still_retains_inputs() {
     let mut accumulator = AggregateAccumulator::builtin("array_agg");
     accumulator.observe(&Value::Int(7)).unwrap();
