@@ -215,7 +215,7 @@ pub(super) fn validate_view_expression(
                 if target && (source || scope.include_excluded) {
                     error = Some(ambiguous_column(column));
                 } else if !target && !source {
-                    error = Some(SQLError::UnknownColumn(column.clone()));
+                    error = Some(SQLError::UnknownColumn(column.to_string()));
                 }
             }
             ScalarExpr::QualifiedColumn { qualifier, column }
@@ -259,18 +259,19 @@ fn validate_public_view_expression(
         }
         match node {
             ScalarExpr::Column(column) => {
-                let target = public_columns.contains(column);
+                let target = public_columns.contains(column.as_str());
                 let source = scope
                     .source
                     .is_some_and(|source| source.has_unqualified_column(column));
                 if target && (source || scope.include_excluded) {
                     error = Some(ambiguous_column(column));
                 } else if !target && !source {
-                    error = Some(SQLError::UnknownColumn(column.clone()));
+                    error = Some(SQLError::UnknownColumn(column.to_string()));
                 }
             }
             ScalarExpr::QualifiedColumn { qualifier, column }
-                if scope.target_qualifier(qualifier) && !public_columns.contains(column) =>
+                if scope.target_qualifier(qualifier)
+                    && !public_columns.contains(column.as_str()) =>
             {
                 error = Some(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
             }

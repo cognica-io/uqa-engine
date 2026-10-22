@@ -30,7 +30,7 @@ impl IndexKey {
     #[must_use]
     pub fn from_expression(expression: Expr) -> Self {
         match expression {
-            Expr::Column(column) => Self::Column(column),
+            Expr::Column(column) => Self::Column(column.to_string()),
             other => Self::Expression(Box::new(other)),
         }
     }
@@ -46,7 +46,7 @@ impl IndexKey {
     #[must_use]
     pub fn expression(&self) -> Cow<'_, Expr> {
         match self {
-            Self::Column(column) => Cow::Owned(Expr::Column(column.clone())),
+            Self::Column(column) => Cow::Owned(Expr::Column(column.clone().into())),
             Self::Expression(expression) => Cow::Borrowed(expression),
         }
     }

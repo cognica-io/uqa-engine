@@ -627,7 +627,7 @@ fn analyze_query_block(
         .filter(|_| ctes.include_authorization_only_columns)
     {
         let expression = column.qualifier().map_or_else(
-            || ScalarExpr::Column(column.column().to_string()),
+            || ScalarExpr::Column(column.column().to_string().into()),
             |qualifier| ScalarExpr::qualified_column(qualifier, column.column()),
         );
         collect_expression_columns(&expression, &scopes, false, required);

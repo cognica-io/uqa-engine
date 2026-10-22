@@ -147,7 +147,7 @@ fn rewrite_correlated_scalar(
             return;
         }
         let replacement = match node {
-            ScalarExpr::Column(column) if !shadowed_columns.contains(column) => {
+            ScalarExpr::Column(column) if !shadowed_columns.contains(column.as_str()) => {
                 layer_column(context.layer, column)
                     .map(|mapping| {
                         embed_layer_expression(

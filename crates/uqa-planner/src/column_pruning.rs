@@ -530,7 +530,7 @@ fn collect_expr_prune_columns(
                         *valid = false;
                         return;
                     };
-                    source.insert(column.clone());
+                    source.insert(column.to_string());
                     if doc_id {
                         source.metadata_mut().request_doc_id();
                     } else {
@@ -555,7 +555,7 @@ fn collect_expr_prune_columns(
                     continue;
                 }
                 if let Some(columns) = prune.get_mut(qualifier) {
-                    columns.insert(column.clone());
+                    columns.insert(column.to_string());
                 }
             }
         }
@@ -573,7 +573,7 @@ fn collect_expr_prune_columns(
                         *valid = false;
                         return;
                     };
-                    source.insert(column.clone());
+                    source.insert(column.to_string());
                     if doc_id {
                         source.metadata_mut().request_doc_id();
                     } else {
@@ -598,7 +598,7 @@ fn collect_expr_prune_columns(
                 return;
             }
             if let Some(columns) = prune.get_mut(qualifier) {
-                columns.insert(column.clone());
+                columns.insert(column.to_string());
             } else {
                 *valid = false;
             }

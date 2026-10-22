@@ -32,12 +32,13 @@ fn rewrite_layer_source_scalar(
     crate::plan::rewrite_scalar_expression(expression, &mut |node| {
         let replacement = match node {
             ScalarExpr::Column(column)
-                if !shadowed_columns.contains(column)
+                if !shadowed_columns.contains(column.as_str())
                     && layer.source_schema.has_unqualified_column(column) =>
             {
                 Some(ScalarExpr::QualifiedColumn {
                     qualifier: target_qualifier.to_string(),
-                    column: layer.physical_source_column(column).to_string(),
+                    column: crate::ast::ReferenceName::from(layer.physical_source_column(column))
+                        .with_position(column.position()),
                 })
             }
             ScalarExpr::QualifiedColumn { qualifier, column }
@@ -50,7 +51,8 @@ fn rewrite_layer_source_scalar(
             {
                 Some(ScalarExpr::QualifiedColumn {
                     qualifier: target_qualifier.to_string(),
-                    column: layer.physical_source_column(column).to_string(),
+                    column: crate::ast::ReferenceName::from(layer.physical_source_column(column))
+                        .with_position(column.position()),
                 })
             }
             _ => None,
@@ -144,16 +146,12 @@ fn rename_source_plan_qualifier(source: &mut SourcePlan, qualifier: &str, replac
 }
 
 fn rename_qualified_scalar(expression: &mut ScalarExpr, qualifier: &str, replacement: &str) {
-    crate::plan::rewrite_scalar_expression(expression, &mut |node| match node {
-        ScalarExpr::QualifiedColumn {
-            qualifier: current, ..
+    crate::plan::rewrite_scalar_expression(expression, &mut |node| {
+        if let Some(current) = node.reference_qualifier_mut() {
+            if current == qualifier {
+                replacement.clone_into(current);
+            }
         }
-        | ScalarExpr::QualifiedStar(current)
-            if current == qualifier =>
-        {
-            *current = replacement.to_string();
-        }
-        _ => {}
     });
 }
 
@@ -426,11 +424,10 @@ fn fresh_query_qualifier(query: &QueryPlan) -> String {
     let mut qualifiers = BTreeSet::new();
     collect_query_source_qualifiers(query, &mut qualifiers);
     let mut query = query.clone();
-    query.rewrite_scalar_expressions(&mut |expression| match expression {
-        ScalarExpr::QualifiedColumn { qualifier, .. } | ScalarExpr::QualifiedStar(qualifier) => {
-            qualifiers.insert(qualifier.clone());
+    query.rewrite_scalar_expressions(&mut |expression| {
+        if let Some(qualifier) = expression.reference_qualifier() {
+            qualifiers.insert(qualifier.to_owned());
         }
-        _ => {}
     });
     (0..=qualifiers.len())
         .map(|index| format!("__uqa_view_subquery_local_{index}"))

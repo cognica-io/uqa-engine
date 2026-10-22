@@ -65,6 +65,16 @@ pub enum SQLError {
     /// Routine traceback, independent of the primary diagnostic and its typed cause.
     #[error("{source}")]
     Context { source: Box<Self>, context: String },
+    /// Source position independent of the primary diagnostic and its typed cause.
+    #[error("{source}")]
+    Position { source: Box<Self>, position: u32 },
+    /// A routine-body cursor that cannot be transposed into the submitted SQL.
+    #[error("{source}")]
+    InternalPosition {
+        source: Box<Self>,
+        position: u32,
+        query: String,
+    },
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -74,7 +84,9 @@ impl SQLError {
     pub const fn code(&self) -> Option<&'static str> {
         match self {
             Self::NotificationRequiresSubscription => Some("NOTIFICATION_REQUIRES_SUBSCRIPTION"),
-            Self::Context { source, .. } => source.code(),
+            Self::Context { source, .. }
+            | Self::Position { source, .. }
+            | Self::InternalPosition { source, .. } => source.code(),
             _ => None,
         }
     }
@@ -82,6 +94,19 @@ impl SQLError {
     /// Append an enclosing routine frame after the innermost error context.
     pub fn with_context(self, frame: impl AsRef<str>) -> Self {
         match self {
+            Self::InternalPosition {
+                source,
+                position,
+                query,
+            } => Self::InternalPosition {
+                source: Box::new(source.with_context(frame)),
+                position,
+                query,
+            },
+            Self::Position { source, position } => Self::Position {
+                source: Box::new(source.with_context(frame)),
+                position,
+            },
             Self::Context {
                 source,
                 mut context,
@@ -101,6 +126,9 @@ impl SQLError {
     pub fn context(&self) -> Option<&str> {
         match self {
             Self::Context { context, .. } => Some(context),
+            Self::Position { source, .. } | Self::InternalPosition { source, .. } => {
+                source.context()
+            }
             _ => None,
         }
     }
@@ -108,7 +136,76 @@ impl SQLError {
     /// The typed primary error, unaffected by an attached routine traceback.
     pub fn primary(&self) -> &Self {
         match self {
-            Self::Context { source, .. } => source.primary(),
+            Self::Context { source, .. }
+            | Self::Position { source, .. }
+            | Self::InternalPosition { source, .. } => source.primary(),
+            _ => self,
+        }
+    }
+
+    /// Preserve the innermost reference's source position without changing its typed diagnostic.
+    pub fn at_position(self, position: Option<u32>) -> Self {
+        match position.filter(|position| *position != 0) {
+            Some(position) if self.position().is_none() && self.internal_position().is_none() => {
+                Self::Position {
+                    source: Box::new(self),
+                    position,
+                }
+            }
+            _ => self,
+        }
+    }
+
+    /// Position within `internal_query`, separate from the submitted SQL cursor.
+    pub fn internal_position(&self) -> Option<u32> {
+        match self {
+            Self::InternalPosition { position, .. } => Some(*position),
+            Self::Context { source, .. } | Self::Position { source, .. } => {
+                source.internal_position()
+            }
+            _ => None,
+        }
+    }
+
+    /// Routine source for an internal diagnostic cursor.
+    pub fn internal_query(&self) -> Option<&str> {
+        match self {
+            Self::InternalPosition { query, .. } => Some(query),
+            Self::Context { source, .. } | Self::Position { source, .. } => source.internal_query(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn in_routine_source(
+        self,
+        body: &str,
+        origin: Option<&crate::ast::RoutineBodyOrigin>,
+    ) -> Self {
+        let Some(position) = self.position() else {
+            return self;
+        };
+        let source = self.without_position();
+        match origin.and_then(|origin| origin.position(position)) {
+            Some(position) => source.at_position(Some(position)),
+            None => Self::InternalPosition {
+                source: Box::new(source),
+                position,
+                query: body.to_owned(),
+            },
+        }
+    }
+
+    fn without_position(self) -> Self {
+        match self {
+            Self::Position { source, .. } => source.without_position(),
+            Self::Context { source, context } => Self::Context {
+                source: Box::new(source.without_position()),
+                context,
+            },
+            Self::ParseDiagnostic(mut diagnostic) => {
+                diagnostic.cursor_position = 0;
+                Self::ParseDiagnostic(diagnostic)
+            }
             _ => self,
         }
     }
@@ -163,7 +260,9 @@ impl SQLError {
     /// errors that do not carry a defined `SQLSTATE`.
     pub fn sqlstate(&self) -> Option<&str> {
         match self {
-            SQLError::Context { source, .. } => source.sqlstate(),
+            SQLError::Context { source, .. }
+            | SQLError::Position { source, .. }
+            | SQLError::InternalPosition { source, .. } => source.sqlstate(),
             SQLError::Cancelled(cancelled) => Some(cancelled.sqlstate()),
             SQLError::Parse(_) => Some("42601"), // syntax_error
             SQLError::ParseDiagnostic(diagnostic) => Some(&diagnostic.sqlstate),
@@ -186,7 +285,9 @@ impl SQLError {
     /// `PostgreSQL` DETAIL field, reported separately from the primary message.
     pub fn detail(&self) -> Option<&str> {
         match self {
-            SQLError::Context { source, .. } => source.detail(),
+            SQLError::Context { source, .. }
+            | SQLError::Position { source, .. }
+            | SQLError::InternalPosition { source, .. } => source.detail(),
             SQLError::Diagnostic { detail, .. } => detail.as_deref(),
             SQLError::ParseDiagnostic(diagnostic) => diagnostic.detail.as_deref(),
             _ => None,
@@ -196,17 +297,20 @@ impl SQLError {
     /// `PostgreSQL` HINT field, reported separately from the primary message.
     pub fn hint(&self) -> Option<&str> {
         match self {
-            SQLError::Context { source, .. } => source.hint(),
+            SQLError::Context { source, .. }
+            | SQLError::Position { source, .. }
+            | SQLError::InternalPosition { source, .. } => source.hint(),
             SQLError::Diagnostic { hint, .. } => hint.as_deref(),
             SQLError::ParseDiagnostic(diagnostic) => diagnostic.hint.as_deref(),
             _ => None,
         }
     }
 
-    /// One-based character position in the submitted SQL, only when supplied by the parser.
+    /// One-based character position in the original submitted SQL.
     pub fn position(&self) -> Option<u32> {
         match self {
             Self::Context { source, .. } => source.position(),
+            Self::Position { position, .. } => Some(*position),
             Self::ParseDiagnostic(diagnostic) => u32::try_from(diagnostic.cursor_position)
                 .ok()
                 .filter(|position| *position != 0),
@@ -251,6 +355,38 @@ impl From<uqa_core::ValueRetentionError> for SQLError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn source_positions_preserve_typed_errors_and_nested_context() {
+        let error = super::SQLError::Diagnostic {
+            sqlstate: "42P10".into(),
+            message: "invalid reference".into(),
+            detail: Some("invalid join type".into()),
+            hint: Some("hint".into()),
+        }
+        .with_context("inner")
+        .at_position(Some(17))
+        .with_context("outer")
+        .at_position(Some(29));
+        assert_eq!(error.position(), Some(17));
+        assert_eq!(error.context(), Some("inner\nouter"));
+        assert_eq!(error.sqlstate(), Some("42P10"));
+        assert_eq!(error.to_string(), "invalid reference");
+        assert_eq!(error.detail(), Some("invalid join type"));
+        assert_eq!(error.hint(), Some("hint"));
+        assert!(matches!(
+            error.primary(),
+            super::SQLError::Diagnostic { .. }
+        ));
+        let cancelled =
+            super::SQLError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST).at_position(Some(3));
+        assert!(matches!(cancelled.primary(), super::SQLError::Cancelled(_)));
+        let subscription = super::SQLError::NotificationRequiresSubscription.at_position(Some(2));
+        assert_eq!(
+            subscription.code(),
+            Some("NOTIFICATION_REQUIRES_SUBSCRIPTION")
+        );
+    }
+
     use super::SQLError;
 
     #[test]

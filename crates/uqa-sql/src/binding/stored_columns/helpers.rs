@@ -107,7 +107,7 @@ pub(super) fn opaque_scope(columns: &[String], qualifier: Option<&str>) -> Colum
             name: name.clone(),
             current_name: name.clone(),
             reference: qualifier.map_or_else(
-                || Expr::Column(name.clone()),
+                || Expr::Column(name.clone().into()),
                 |qualifier| Expr::qualified_column(qualifier, name),
             ),
             dependencies: BTreeSet::new(),
@@ -161,7 +161,9 @@ pub(super) fn projection_output_names(projections: &[crate::ast::Projection]) ->
                 .alias
                 .clone()
                 .unwrap_or_else(|| match &projection.expr {
-                    Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => name.clone(),
+                    Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => {
+                        name.to_string()
+                    }
                     Expr::Func {
                         name,
                         binding,

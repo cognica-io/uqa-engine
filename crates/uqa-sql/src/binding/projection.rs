@@ -238,6 +238,14 @@ pub(super) fn projection_star_columns(
     expression: &ScalarExpr,
     schema: &RowSchema,
 ) -> Result<Option<Vec<ProjectionStarColumn>>, SQLError> {
+    projection_star_columns_inner(expression, schema)
+        .map_err(|error| error.at_position(expression.reference_position()))
+}
+
+fn projection_star_columns_inner(
+    expression: &ScalarExpr,
+    schema: &RowSchema,
+) -> Result<Option<Vec<ProjectionStarColumn>>, SQLError> {
     match expression {
         ScalarExpr::Star => Ok(Some(
             schema
@@ -270,7 +278,7 @@ pub(super) fn projection_star_columns(
                 if let Some(error) = schema.unavailable_qualifier_error(qualifier) {
                     return Err(error);
                 }
-                return Err(SQLError::UnknownTable(qualifier.clone()));
+                return Err(SQLError::UnknownTable(qualifier.to_string()));
             }
             Ok(Some(columns))
         }

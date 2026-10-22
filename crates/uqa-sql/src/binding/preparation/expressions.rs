@@ -157,9 +157,7 @@ impl Preparation<'_> {
             return Ok(value);
         }
         if self.schema_expression.is_some() {
-            if let ScalarExpr::QualifiedColumn { qualifier, .. }
-            | ScalarExpr::QualifiedStar(qualifier) = expression
-            {
+            if let Some(qualifier) = expression.reference_qualifier() {
                 if !input.has_qualifier(qualifier) {
                     return Err(error(
                         "42P01",

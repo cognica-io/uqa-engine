@@ -143,7 +143,7 @@ fn project(body: Box<QueryPlan>, width: usize) -> QueryPlan {
             projections: columns
                 .iter()
                 .map(|name| ProjectionPlan {
-                    expr: ScalarExpr::Column(name.clone()),
+                    expr: ScalarExpr::Column(name.clone().into()),
                     alias: Some(name.clone()),
                 })
                 .collect(),

@@ -49,7 +49,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             // suffix of a qualified `table.col` key, so the same row
             // shape works for single-table SELECTs and JOIN tuples.
             if ctx.row_lookup()?.column_is_ambiguous(name) {
-                return Err(SQLError::AmbiguousColumn(name.clone()));
+                return Err(SQLError::AmbiguousColumn(name.to_string()));
             }
             Ok(ctx
                 .row_lookup()?

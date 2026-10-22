@@ -131,8 +131,8 @@ fn bind_whole_row_fields(expression: &mut Expr, schema: &RowSchema) -> Result<()
         {
             if schema.has_qualifier(qualifier) {
                 *node = Expr::QualifiedColumn {
-                    qualifier: qualifier.clone(),
-                    column: column.clone(),
+                    qualifier: qualifier.to_string(),
+                    column: column.clone().into(),
                 };
             }
         }

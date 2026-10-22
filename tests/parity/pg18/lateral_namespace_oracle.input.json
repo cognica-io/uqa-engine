@@ -221,6 +221,10 @@
       "sql": "SELECT pg_get_viewdef('nested_lateral_view'::regclass,false)"
     },
     {
+      "id": "nested_view_definition_pretty",
+      "sql": "SELECT pg_get_viewdef('nested_lateral_view'::regclass,true)"
+    },
+    {
       "id": "nonlateral_duplicate_relation_columns",
       "sql": "SELECT * FROM (VALUES(1)) v(x), ((VALUES(2)) v(x) CROSS JOIN (SELECT x AS z) r) AS j"
     },

@@ -414,7 +414,7 @@ pub(super) fn eval_operand_borrowed<'a>(
         },
         Expr::Column(name) => {
             if ctx.row_lookup()?.column_is_ambiguous(name) {
-                return Err(SQLError::AmbiguousColumn(name.clone()));
+                return Err(SQLError::AmbiguousColumn(name.to_string()));
             }
             Ok(Some(match ctx.row_lookup()?.column(name) {
                 Some(value) => EvalOperand::Borrowed(value),

@@ -41,8 +41,8 @@ pub fn projection_label_at(proj: &ProjectionPlan) -> String {
         expression = expr;
     }
     match expression {
-        ScalarExpr::Column(c) => c.clone(),
-        ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
+        ScalarExpr::Column(c) => c.to_string(),
+        ScalarExpr::QualifiedColumn { column, .. } => column.to_string(),
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),
         ScalarExpr::Func {
             name,
@@ -181,7 +181,7 @@ pub fn expand_from_star_columns(
                     .map(|(column, _, _, _)| column)
                     .collect::<Vec<_>>();
                 if qualified_columns.is_empty() {
-                    return Err(SQLError::UnknownTable(qualifier.clone()));
+                    return Err(SQLError::UnknownTable(qualifier.to_string()));
                 }
                 output.extend(qualified_columns);
             }
@@ -200,7 +200,7 @@ pub fn bound_projection_expression(schema: &RowSchema, position: usize) -> Scala
             return ScalarExpr::qualified_column(qualifier, identity.column());
         }
     } else if schema.unqualified_position(identity.column()) == Some(position) {
-        return ScalarExpr::Column(identity.column().to_string());
+        return ScalarExpr::Column(identity.column().to_string().into());
     }
     ScalarExpr::Position(position)
 }
@@ -240,7 +240,7 @@ pub fn expand_bound_projection_stars_in_scope(
                     if let Some(error) = schema.unavailable_qualifier_error(qualifier) {
                         return Err(error);
                     }
-                    return Err(SQLError::UnknownTable(qualifier.clone()));
+                    return Err(SQLError::UnknownTable(qualifier.to_string()));
                 }
                 for (column, logical, _, _) in layout {
                     if logical.is_some_and(|position| {

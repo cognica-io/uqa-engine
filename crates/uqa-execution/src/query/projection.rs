@@ -77,7 +77,7 @@ pub fn physical_projections(projections: &[ProjectionPlan]) -> Vec<PhysicalProje
 
 pub fn projection_target_expression(target: &ProjectionTarget) -> ScalarExpr {
     match target {
-        ProjectionTarget::Column(column) => ScalarExpr::Column(column.clone()),
+        ProjectionTarget::Column(column) => ScalarExpr::Column(column.clone().into()),
         ProjectionTarget::Internal(column) => ScalarExpr::InternalColumn(*column),
     }
 }

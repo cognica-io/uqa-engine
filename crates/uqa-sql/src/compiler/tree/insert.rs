@@ -147,7 +147,7 @@ pub(in crate::compiler) fn compile_on_conflict(
                 conflict_columns.push(index.name.clone());
             } else if let Some(expression) = &index.expr {
                 match compile_expr(expression)? {
-                    Expr::Column(column) => conflict_columns.push(column),
+                    Expr::Column(column) => conflict_columns.push(column.to_string()),
                     expression => expressions.push(expression),
                 }
             }

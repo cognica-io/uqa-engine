@@ -546,7 +546,7 @@ fn collect_resolved_aliases(
     };
     match expression {
         ScalarExpr::Column(column) => {
-            let Some(Some((alias, _))) = column_owners.get(column) else {
+            let Some(Some((alias, _))) = column_owners.get(column.as_str()) else {
                 return false;
             };
             output.insert(alias.clone());
@@ -643,8 +643,8 @@ fn resolve_join_column(
     match expression {
         ScalarExpr::QualifiedColumn {
             qualifier, column, ..
-        } if aliases.contains(qualifier) => Some((qualifier.clone(), column.clone())),
-        ScalarExpr::Column(column) => column_owners.get(column)?.clone(),
+        } if aliases.contains(qualifier) => Some((qualifier.clone(), column.to_string())),
+        ScalarExpr::Column(column) => column_owners.get(column.as_str())?.clone(),
         _ => None,
     }
 }
@@ -832,10 +832,10 @@ fn source_qualifiers(source: &SourcePlan) -> BTreeSet<String> {
 }
 
 fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<String>) {
+    if let Some(qualifier) = expression.reference_qualifier() {
+        output.insert(qualifier.to_owned());
+    }
     match expression {
-        ScalarExpr::QualifiedColumn { qualifier, .. } | ScalarExpr::QualifiedStar(qualifier) => {
-            output.insert(qualifier.clone());
-        }
         ScalarExpr::Func {
             args,
             order_by,
@@ -918,7 +918,9 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
             }
         }
         ScalarExpr::InSubquery { expr, .. } => collect_scalar_qualifiers(expr, output),
-        ScalarExpr::Default
+        ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::QualifiedStar(_)
+        | ScalarExpr::Default
         | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)

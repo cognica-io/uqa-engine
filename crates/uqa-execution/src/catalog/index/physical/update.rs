@@ -33,7 +33,9 @@ impl PhysicalIndexDefinitions {
         let expression_changed = |expression: &Expr| {
             expression.any_node(&|node| match node {
                 Expr::Column(column) | Expr::QualifiedColumn { column, .. } => {
-                    if !previous.contains_key(column) && !document.contains_key(column) {
+                    if !previous.contains_key(column.as_str())
+                        && !document.contains_key(column.as_str())
+                    {
                         row_changed()
                     } else {
                         changed(column)

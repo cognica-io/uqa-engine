@@ -48,6 +48,15 @@ pub fn validate_sql_function_body(
     body: &CompiledFunctionBody,
     check_result: bool,
 ) -> Result<(), SQLError> {
+    validate_body(context, def, body, check_result).map_err(|error| def.source_body_error(error))
+}
+
+fn validate_body(
+    context: &SQLBodyValidationContext<'_>,
+    def: &CreateFunction,
+    body: &CompiledFunctionBody,
+    check_result: bool,
+) -> Result<(), SQLError> {
     let CompiledFunctionBody::SQL(plans) = body else {
         return Ok(());
     };

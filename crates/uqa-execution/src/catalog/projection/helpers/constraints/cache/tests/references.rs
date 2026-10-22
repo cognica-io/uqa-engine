@@ -27,7 +27,7 @@ fn catalog_fixture(case: &serde_json::Value) -> (CatalogReadView, RelationIdenti
     for check in &mut table.checks {
         uqa_sql::catalog::stored_ast::visit_stored_expression(&mut check.expr, &mut |node| {
             if matches!(node, Expr::Column(name) if name == &table.name) {
-                *node = Expr::QualifiedStar(table.name.clone());
+                *node = Expr::QualifiedStar(table.name.clone().into());
             }
             Ok(())
         })

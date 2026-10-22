@@ -27,6 +27,7 @@ fn view_source_lists_preserve_postgresql_comma_and_join_syntax() {
     };
     for (input, output, pretty) in [
         ("create_nested_view", "nested_view_definition", false),
+        ("create_nested_view", "nested_view_definition_pretty", true),
         ("create_comma_view", "comma_view_definition", false),
         ("create_comma_view", "comma_view_definition_pretty", true),
         ("create_cross_view", "cross_view_definition", false),

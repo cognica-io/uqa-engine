@@ -14,11 +14,26 @@ use crate::ast::RuleEvent;
 use crate::routines::RoutineResolution;
 use crate::{FunctionTypeResolver, RowSchema, ScalarFrameBound};
 
+pub(super) fn validate_expression(
+    rule_event: Option<RuleEvent>,
+    routines: &dyn RoutineResolution,
+    expression: &ScalarExpr,
+    schema: &RowSchema,
+    fallback: Option<&RowSchema>,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<(), SQLError> {
+    validate_expression_inner(
+        rule_event, routines, expression, schema, fallback, params, resolver,
+    )
+    .map_err(|error| error.at_position(expression.reference_position()))
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "preserves SELECT schema and row identity"
 )]
-pub(super) fn validate_expression(
+fn validate_expression_inner(
     rule_event: Option<RuleEvent>,
     routines: &dyn RoutineResolution,
     expression: &ScalarExpr,
@@ -86,7 +101,7 @@ pub(super) fn validate_expression(
                         return Err(error);
                     }
                 }
-                Err(SQLError::UnknownTable(qualifier.clone()))
+                Err(SQLError::UnknownTable(qualifier.to_string()))
             }
         }
         ScalarExpr::Func {

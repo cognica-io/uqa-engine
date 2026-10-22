@@ -184,7 +184,9 @@ enum ColumnScope {
 fn correlation_column_scope(expression: &ScalarExpr, scope: &QueryScope) -> Option<ColumnScope> {
     match expression {
         ScalarExpr::Column(column) => {
-            if scope.columns.names.contains(column) || scope.qualifiers.contains_key(column) {
+            if scope.columns.names.contains(column.as_str())
+                || scope.qualifiers.contains_key(column.as_str())
+            {
                 Some(ColumnScope::Inner)
             } else if scope.columns.complete {
                 Some(ColumnScope::Outer)
@@ -405,7 +407,7 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
         ScalarExpr::QualifiedStar(qualifier) => !scopes
             .iter()
             .rev()
-            .any(|scope| scope.qualifiers.contains_key(qualifier)),
+            .any(|scope| scope.qualifiers.contains_key(qualifier.as_str())),
         ScalarExpr::InternalColumn(column) => !scopes
             .iter()
             .rev()

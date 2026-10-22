@@ -191,6 +191,8 @@ pub struct ErrorOrNotice {
     pub detail: Option<String>,
     pub hint: Option<String>,
     pub position: Option<i32>,
+    pub internal_position: Option<i32>,
+    pub internal_query: Option<String>,
     pub where_: Option<String>,
     pub schema: Option<String>,
     pub table: Option<String>,
@@ -211,6 +213,8 @@ impl ErrorOrNotice {
             detail: None,
             hint: None,
             position: None,
+            internal_position: None,
+            internal_query: None,
             where_: None,
             schema: None,
             table: None,
@@ -455,6 +459,18 @@ fn encode_error_or_notice(tag: u8, message: &ErrorOrNotice) -> Result<Vec<u8>, P
     write_optional_field(&mut body, b'D', message.detail.as_deref(), "error detail")?;
     write_optional_field(&mut body, b'H', message.hint.as_deref(), "error hint")?;
     write_optional_i32_field(&mut body, b'P', message.position, "error position")?;
+    write_optional_i32_field(
+        &mut body,
+        b'p',
+        message.internal_position,
+        "internal error position",
+    )?;
+    write_optional_field(
+        &mut body,
+        b'q',
+        message.internal_query.as_deref(),
+        "internal query",
+    )?;
     write_optional_field(&mut body, b'W', message.where_.as_deref(), "error context")?;
     write_optional_field(&mut body, b's', message.schema.as_deref(), "error schema")?;
     write_optional_field(&mut body, b't', message.table.as_deref(), "error table")?;

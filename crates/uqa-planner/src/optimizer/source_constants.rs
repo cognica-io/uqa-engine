@@ -75,7 +75,7 @@ pub(super) fn propagate_source_constants(
             if let ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. } =
                 &projection.expr
             {
-                projection.alias = Some(column.clone());
+                projection.alias = Some(column.to_string());
             }
         }
         rewrite(&mut projection.expr, &mut replace);

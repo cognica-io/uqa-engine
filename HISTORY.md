@@ -18,11 +18,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Retain builtin and selected user table-function output columns, WITH ORDINALITY, wildcard-derived fields, CTE and USING namespaces, stored view columns and positional alias tails during correlation analysis, so independent derived inputs do not repeat unmatched rows or volatile calls.
 
+- Preserve PostgreSQL LATERAL reference error positions through SQL lowering, plan copies and stored-definition binding, including Unicode and multiple-statement requests. SQL function source errors retain creation-statement positions or the separate internal-query cursor when PostgreSQL cannot transpose them.
+
 ### Changed
 
 - Custom Rust correlation and subquery adapters now supply the invoking routine catalog so declared TABLE and composite results preserve the selected function identity and full output schema.
 
 - Rust constructors for `FromClause::Values`, `FromClause::Subquery`, `SourcePlan::Values` and `SourcePlan::Subquery` now supply a `lateral` flag belonging to that range item. Existing serialized nodes without the field still decode; legacy right-side permission on `Join::lateral` remains supported. `FromClause::Join` and `SourcePlan::Join` also supply `comma` to distinguish source lists from explicit joins.
+
+- Rust column and qualified-wildcard AST/IR names use `ReferenceName`, retaining transient source positions while keeping name equality, hashing and serialized strings unchanged. Custom routine constructors supply `body_origin: None`; protocol diagnostic constructors also expose internal query and position fields.
 
 ## [0.6.1] - 2026-10-22
 

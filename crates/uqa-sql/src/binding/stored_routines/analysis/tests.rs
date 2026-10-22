@@ -147,7 +147,10 @@ fn stored_statement_errors_release_the_scope_without_evaluating_constants() {
     let result = scopes
         .context()
         .bind_statement(&plan("SELECT missing, 1 / 0"));
-    assert!(matches!(result,Err(SQLError::UnknownColumn(name)) if name=="missing"));
+    let Err(error) = result else {
+        panic!("missing column must reject the stored statement");
+    };
+    assert!(matches!(error.primary(), SQLError::UnknownColumn(name) if name == "missing"));
     assert_eq!(
         *scopes.events.lock().unwrap(),
         ["scope:1", "binding", "release"]

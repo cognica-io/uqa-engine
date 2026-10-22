@@ -105,7 +105,7 @@ fn output_expressions<S: Clone>(
                 }
             }
             ScalarExpr::Position(position) => {
-                *expression = ScalarExpr::Column(schema.columns()[*position].clone());
+                *expression = ScalarExpr::Column(schema.columns()[*position].clone().into());
             }
             _ => {}
         }

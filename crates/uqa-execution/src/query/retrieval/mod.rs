@@ -121,7 +121,7 @@ pub fn run_bayesian_match_with_prior(
         context,
         table,
         &[
-            ScalarExpr::Column(field),
+            ScalarExpr::Column(field.into()),
             ScalarExpr::Literal(Value::Str(query)),
         ],
         params,

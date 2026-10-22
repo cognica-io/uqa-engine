@@ -42,6 +42,7 @@ mod returning;
 mod routines;
 mod schema_moves;
 mod sequences;
+mod source_positions;
 mod tree;
 mod type_lifecycle;
 mod types;

@@ -400,7 +400,7 @@ fn projection_output_columns(
                 }
             }
             Expr::Column(column) | Expr::QualifiedColumn { column, .. } => {
-                columns.push(column.clone());
+                columns.push(column.to_string());
             }
             Expr::Func {
                 name,

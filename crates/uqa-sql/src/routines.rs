@@ -99,7 +99,7 @@ pub fn analyzable_routine_body(
 ) -> Result<Option<Arc<CompiledFunctionBody>>, SQLError> {
     match resolution.routine_analysis_body(function) {
         Ok(body) => Ok(Some(body)),
-        Err(SQLError::Internal(message)) => Err(SQLError::Internal(message)),
+        Err(error) if matches!(error.primary(), SQLError::Internal(_)) => Err(error),
         Err(_) => Ok(None),
     }
 }
