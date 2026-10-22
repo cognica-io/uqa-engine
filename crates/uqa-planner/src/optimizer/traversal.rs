@@ -27,6 +27,7 @@ pub(super) fn optimize_unified_plan(
             }
         }
     });
+    super::source_demand::prune(plan, config, aggregates)?;
     match plan {
         UnifiedPlan::Query(query) => optimize_query(query, config, aggregates)?,
         UnifiedPlan::Command(command) => optimize_command(command, config, aggregates)?,
@@ -52,13 +53,15 @@ pub(super) fn optimize_query(
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
     super::subqueries::prune_query(query);
-    if let Some(routines) = &config.routine_inlining {
-        super::cte_projection::prune(
-            query,
-            aggregates,
-            routines.volatility,
-            Some(routines.routines),
-        )?;
+    if query.analyzed_output.is_none() {
+        if let Some(routines) = &config.routine_inlining {
+            super::cte_projection::prune(
+                query,
+                aggregates,
+                routines.volatility,
+                Some(routines.routines),
+            )?;
+        }
     }
     let reachable = uqa_sql::semantics::reachable_plan_cte_names(query);
     for cte in query
@@ -69,7 +72,9 @@ pub(super) fn optimize_query(
         optimize_cte(&mut cte.body, config, aggregates)?;
     }
     match &mut query.root {
-        RelationalPlan::QueryBlock(block) => optimize_query_block(block, config, aggregates)?,
+        RelationalPlan::QueryBlock(block) => {
+            optimize_query_block(block, config, aggregates, query.analyzed_output.is_none())?;
+        }
         RelationalPlan::SetOp {
             left,
             right,
@@ -116,19 +121,22 @@ pub(super) fn optimize_query_block(
     block: &mut QueryBlockPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
+    infer_output_demand: bool,
 ) -> Result<(), SQLError> {
-    super::derived_projection::prune(
-        block,
-        aggregates,
-        config
-            .routine_inlining
-            .as_ref()
-            .map(|context| context.routines),
-        config
-            .routine_inlining
-            .as_ref()
-            .map(|context| context.volatility),
-    );
+    if infer_output_demand {
+        super::derived_projection::prune(
+            block,
+            aggregates,
+            config
+                .routine_inlining
+                .as_ref()
+                .map(|context| context.routines),
+            config
+                .routine_inlining
+                .as_ref()
+                .map(|context| context.volatility),
+        );
+    }
     if let Some(source) = &mut block.from {
         optimize_source(source, config, aggregates)?;
     }

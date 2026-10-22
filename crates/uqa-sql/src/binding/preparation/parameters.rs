@@ -176,8 +176,31 @@ pub(super) struct InputConstants(
     /// Each analyzed call's input collation, recorded on the binding the call keeps.
     BTreeMap<NonNull<ScalarExpr>, Option<crate::catalog::collations::CollationSelection>>,
     BTreeMap<NonNull<Option<crate::ast::FunctionBinding>>, crate::ast::FunctionBinding>,
-    BTreeMap<NonNull<crate::plan::QueryPlan>, crate::RowSchema>,
+    QuerySchemas,
 );
+
+#[derive(Default)]
+struct QuerySchemas {
+    outputs: BTreeMap<NonNull<crate::plan::QueryPlan>, crate::RowSchema>,
+    sources: BTreeMap<NonNull<crate::plan::SourcePlan>, crate::RowSchema>,
+}
+
+impl QuerySchemas {
+    fn take_source(
+        &mut self,
+        source: &crate::plan::SourcePlan,
+    ) -> Option<crate::plan::AnalyzedSource> {
+        let schema = self.sources.remove(&NonNull::from(source))?;
+        let children = match source {
+            crate::plan::SourcePlan::Join { left, right, .. } => Some(Box::new((
+                self.take_source(left)?,
+                self.take_source(right)?,
+            ))),
+            _ => None,
+        };
+        Some(crate::plan::AnalyzedSource { schema, children })
+    }
+}
 
 impl InputConstants {
     /// Ordinary messages must repeat session/catalog-dependent input functions.
@@ -302,14 +325,25 @@ impl InputConstants {
             && self.5.is_empty()
             && self.6.is_empty()
             && self.7.is_empty()
-            && self.8.is_empty()
+            && self.8.outputs.is_empty()
+            && self.8.sources.is_empty()
     }
 
     fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
-        query.analyzed_output = self.8.remove(&NonNull::from(&*query));
+        query.analyzed_output = self.8.outputs.remove(&NonNull::from(&*query));
+        query.analyzed_source = match &query.root {
+            crate::plan::RelationalPlan::QueryBlock(block) => block
+                .from
+                .as_ref()
+                .and_then(|source| self.8.take_source(source))
+                .map(std::sync::Arc::new),
+            _ => None,
+        };
     }
 
     fn apply_source(&mut self, source: &mut crate::plan::SourcePlan) {
+        // Command inputs have no enclosing QueryPlan; their validated descriptors are not needed by query-output pruning.
+        self.8.sources.remove(&NonNull::from(&*source));
         let mut apply = |binding: &mut Option<crate::ast::FunctionBinding>| {
             if let Some(selected) = self.7.remove(&NonNull::from(&*binding)) {
                 *binding = Some(selected);
@@ -339,11 +373,28 @@ impl InputConstants {
 }
 
 impl<'a> ParameterTypes<'a> {
+    pub(super) fn retain_source_schema(
+        &mut self,
+        source: &crate::plan::SourcePlan,
+        schema: &crate::RowSchema,
+    ) {
+        if let Some(constants) = &mut self.input_constants {
+            constants
+                .8
+                .sources
+                .insert(NonNull::from(source), schema.clone());
+        }
+    }
+
     pub(super) fn query_output_schema(
         &self,
         query: &crate::plan::QueryPlan,
     ) -> Option<&crate::RowSchema> {
-        self.input_constants.as_ref()?.8.get(&NonNull::from(query))
+        self.input_constants
+            .as_ref()?
+            .8
+            .outputs
+            .get(&NonNull::from(query))
     }
 
     pub(super) fn retain_set_operand_coercions(
@@ -358,7 +409,7 @@ impl<'a> ParameterTypes<'a> {
         let Some(schema) = self
             .input_constants
             .as_mut()
-            .and_then(|constants| constants.8.get_mut(&NonNull::from(query)))
+            .and_then(|constants| constants.8.outputs.get_mut(&NonNull::from(query)))
         else {
             return;
         };
@@ -404,7 +455,10 @@ impl<'a> ParameterTypes<'a> {
         output: &super::QueryOutput,
     ) {
         if let Some(constants) = &mut self.input_constants {
-            constants.8.insert(NonNull::from(query), output.schema());
+            constants
+                .8
+                .outputs
+                .insert(NonNull::from(query), output.schema());
         }
     }
 

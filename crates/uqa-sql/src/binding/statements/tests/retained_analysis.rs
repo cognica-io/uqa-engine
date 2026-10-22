@@ -63,6 +63,47 @@ fn nested_output_descriptors_reuse_analysis_and_do_not_enter_stored_syntax() {
 }
 
 #[test]
+fn analyzed_join_sources_share_input_layouts_without_persisting_namespaces() {
+    for sql in [
+        "SELECT joined.a FROM ((SELECT id,1/0 AS z FROM items) q JOIN (VALUES(1)) r(id) USING(id)) joined(a,b)",
+        "SELECT count(q.id) FROM (VALUES(1)) r(n) CROSS JOIN LATERAL (SELECT r.n AS id,1/0 AS z) q",
+    ] {
+        let scopes = Scopes::default();
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        analyze_executable_plan(
+            &StatementAnalysisContext {
+                scopes: &scopes,
+                routines: &NoRoutines,
+                aliases: &NoRoutines,
+            },
+            &mut plan,
+            &[],
+        )
+        .unwrap();
+        let UnifiedPlan::Query(query) = &plan else {
+            panic!("query");
+        };
+        let source = query.analyzed_source.as_ref().expect("analyzed source");
+        let children = source.children.as_ref().expect("join inputs");
+        assert!(!children.0.schema.is_empty());
+        assert!(!children.1.schema.is_empty());
+        let UnifiedPlan::Query(cloned) = plan.clone() else {
+            panic!("cloned query");
+        };
+        assert!(std::sync::Arc::ptr_eq(
+            source,
+            cloned.analyzed_source.as_ref().unwrap()
+        ));
+        let mut roots = 0;
+        let mut plan = plan.clone();
+        plan.visit_query_roots_mut(&mut |_| roots += 1);
+        assert_eq!(roots, 1);
+        let mut restored: UnifiedPlan = serde_json::from_slice(&serde_json::to_vec(&plan).unwrap()).unwrap();
+        restored.visit_queries_mut(&mut |query| assert!(query.analyzed_source.is_none()));
+    }
+}
+
+#[test]
 fn executable_analysis_derives_each_query_result_once() {
     for sql in [
         "SELECT id FROM items",

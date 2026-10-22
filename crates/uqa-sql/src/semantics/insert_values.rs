@@ -84,6 +84,7 @@ pub fn single_row_values_query(
     }
     let source = QueryPlan {
         analyzed_output: None,
+        analyzed_source: None,
         relations_bound: insert.relations_bound,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {

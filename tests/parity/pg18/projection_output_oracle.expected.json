@@ -1,0 +1,2231 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_begin"
+    },
+    {
+      "sql": "CREATE SCHEMA unused_output_probe",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_schema"
+    },
+    {
+      "sql": "SET search_path=unused_output_probe,pg_catalog",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_path"
+    },
+    {
+      "sql": "CREATE VIEW v AS SELECT 1/0 AS z FROM (VALUES(1)) i(n) WHERE false",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_view"
+    },
+    {
+      "sql": "CREATE SEQUENCE effects",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_sequence"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_derived_count_savepoint"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z FROM (VALUES(1)) i(n) WHERE false) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "original_derived_count"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_derived_count_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_derived_escape_savepoint"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 'a' SIMILAR TO 'a' ESCAPE '##' AS z FROM (VALUES(1)) i(n) WHERE false) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "original_derived_escape"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_derived_escape_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_derived_dynamic_escape_savepoint"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT n SIMILAR TO 'a' ESCAPE '##' AS z FROM (VALUES('a'),('b')) i(n) WHERE false) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "original_derived_dynamic_escape"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_derived_dynamic_escape_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_derived_constant_savepoint"
+    },
+    {
+      "sql": "SELECT 1 FROM (SELECT 1/0 AS z FROM (VALUES(1)) i(n)) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "original_derived_constant"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_derived_constant_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_derived_selected_savepoint"
+    },
+    {
+      "sql": "SELECT z FROM (SELECT 1/0 AS z FROM (VALUES(1)) i(n) WHERE false) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "original_derived_selected"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_derived_selected_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_view_count_savepoint"
+    },
+    {
+      "sql": "SELECT count(*) FROM v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "original_view_count"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_view_count_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_folded_cte_count_savepoint"
+    },
+    {
+      "sql": "WITH q AS (SELECT 1/0 AS z FROM (VALUES(1)) i(n) WHERE false) SELECT count(*) FROM q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "original_folded_cte_count"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_folded_cte_count_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_materialized_cte_count_savepoint"
+    },
+    {
+      "sql": "WITH q AS MATERIALIZED (SELECT 1/0 AS z FROM (VALUES(1)) i(n) WHERE false) SELECT count(*) FROM q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "original_materialized_cte_count"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_materialized_cte_count_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_distinct_savepoint"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT DISTINCT 1/0 AS z FROM (VALUES(1)) i(n) WHERE false) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "original_distinct"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_distinct_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_order_by_savepoint"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z FROM (VALUES(1)) i(n) WHERE false ORDER BY z) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "original_order_by"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_order_by_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_union_all_savepoint"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z FROM (VALUES(1)) i(n) WHERE false UNION ALL SELECT 1) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "original_union_all"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_union_all_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_union_distinct_savepoint"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z FROM (VALUES(1)) i(n) WHERE false UNION SELECT 1) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "original_union_distinct"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_union_distinct_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_join_count_savepoint"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z FROM (VALUES(1)) i(n)) q CROSS JOIN (VALUES(2)) other(n)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "original_join_count"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_join_count_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_set_output_savepoint"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT generate_series(1,3) AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "original_set_output"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_set_output_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_volatile_savepoint"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT nextval('effects') AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "original_volatile"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_volatile_rollback"
+    },
+    {
+      "sql": "SAVEPOINT p",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_volatile_state_savepoint"
+    },
+    {
+      "sql": "SELECT is_called FROM effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "is_called"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "original_volatile_state"
+    },
+    {
+      "sql": "ROLLBACK TO p",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_volatile_state_rollback"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "original_rollback"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_count_star"
+    },
+    {
+      "sql": "SELECT count(1) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_count_constant"
+    },
+    {
+      "sql": "SELECT count(NULL) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_count_null"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE false) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_count_filter_constant"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE id=1) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_count_filter_unused"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE z=1) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_count_filter_used"
+    },
+    {
+      "sql": "SELECT count(1 ORDER BY z) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_count_order_used"
+    },
+    {
+      "sql": "SELECT count(1 ORDER BY id) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_count_order_id"
+    },
+    {
+      "sql": "SELECT count(q.*) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_count_qualified_star"
+    },
+    {
+      "sql": "SELECT count(q) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_count_whole_row"
+    },
+    {
+      "sql": "SELECT count(z) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_count_output"
+    },
+    {
+      "sql": "SELECT sum(1) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sum"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_sum_constant"
+    },
+    {
+      "sql": "SELECT sum(id) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sum"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_sum_unused"
+    },
+    {
+      "sql": "SELECT array_agg(1) FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_agg"
+          ],
+          "type_oids": [
+            1007
+          ],
+          "rows": [
+            [
+              "{1}"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_array_agg_constant"
+    },
+    {
+      "sql": "SELECT q.* FROM (SELECT 1 AS id, 1/0 AS z) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_projection_star"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id, 1/0 AS z) q JOIN (VALUES(1)) r(id) ON q.id=r.id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_join_on_id"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id, 1/0 AS z) q JOIN (VALUES(1)) r(id) ON q.z=r.id",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_join_on_output"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id, 1/0 AS z) q JOIN (VALUES(1)) r(id) USING(id)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_join_using_id"
+    },
+    {
+      "sql": "SELECT count(*) FROM ((SELECT 1 AS id, 1/0 AS z) q JOIN (VALUES(1)) r(i) ON q.id=r.i) joined",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_join_alias"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id, 1/0 AS z) q NATURAL JOIN (VALUES(1)) r(id)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_natural_join_id"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id, 1/0 AS z) q NATURAL JOIN (VALUES(1,1)) r(id,z)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_natural_join_output"
+    },
+    {
+      "sql": "SELECT count(a) FROM (SELECT 1 AS id,1/0 AS z) q(a,b)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_renamed_output"
+    },
+    {
+      "sql": "SELECT count(b) FROM (SELECT 1 AS id,1/0 AS z) q(a,b)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_renamed_used"
+    },
+    {
+      "sql": "SELECT count(q.id) FROM (VALUES(1)) r(n) CROSS JOIN LATERAL (SELECT r.n AS id,1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_lateral_unused"
+    },
+    {
+      "sql": "SELECT count(*) FROM (VALUES(1)) r(n) CROSS JOIN LATERAL (SELECT r.n AS id,1/0 AS z) q WHERE q.z=r.n",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_lateral_used"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z UNION ALL SELECT 2) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_union_all_count"
+    },
+    {
+      "sql": "SELECT sum(id) FROM (SELECT 1 AS id,1/0 AS z UNION ALL SELECT 2,3) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_union_all_positions"
+    },
+    {
+      "sql": "SELECT sum(a) FROM (SELECT 1 AS id,1/0 AS z UNION ALL SELECT 2,3) q(a,b)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_union_all_aliases"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z UNION SELECT 2) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_union_distinct_values"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z INTERSECT ALL SELECT 2) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_intersect_all_values"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z EXCEPT ALL SELECT 2) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_except_all_values"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1 AS z UNION ALL SELECT 'bad') q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_union_common_type"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1 AS z UNION ALL SELECT true) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "UNION types integer and boolean cannot be matched",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_union_mismatched_type"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z UNION ALL SELECT 2 ORDER BY z) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_union_order_uses_output"
+    },
+    {
+      "sql": "WITH q AS (SELECT 1 AS id,1/0 AS z) SELECT count(*) FROM q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_folded_cte_count"
+    },
+    {
+      "sql": "WITH q AS (SELECT 1 AS id,1/0 AS z) SELECT count(*) FILTER (WHERE z=1) FROM q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_folded_cte_filter_used"
+    },
+    {
+      "sql": "WITH q AS MATERIALIZED (SELECT 1 AS id,1/0 AS z) SELECT count(*) FROM q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_materialized_cte_count"
+    },
+    {
+      "sql": "WITH q AS NOT MATERIALIZED (SELECT 1 AS id,1/0 AS z) SELECT count(*) FROM q a CROSS JOIN q b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_folded_cte_two_references"
+    },
+    {
+      "sql": "WITH q AS (SELECT 1 AS id,1/0 AS z) SELECT count(*) FROM q a CROSS JOIN q b",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "boundary_materialized_two_references"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT generate_series(1,3) AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_selected_set_cardinality"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT generate_series(1,3) AS id,1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_discarded_error_beside_set"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT sum(n) AS z FROM (VALUES(1)) r(n) WHERE false) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_aggregate_empty_cardinality"
+    },
+    {
+      "sql": "CREATE TEMP SEQUENCE unused_output_boundary_effects",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "boundary_sequence"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT nextval('unused_output_boundary_effects') AS z FROM (VALUES(1),(2)) r(n)) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_volatile_count"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM unused_output_boundary_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "2",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_volatile_effects"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT nextval('unused_output_boundary_effects') AS z FROM (VALUES(1),(2)) r(n) WHERE false) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_volatile_false"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM unused_output_boundary_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "2",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "boundary_volatile_false_effects"
+    },
+    {
+      "sql": "SELECT 1 AS z FROM (SELECT 1/0 AS z) q CROSS JOIN (VALUES(2)) r(n) ORDER BY z",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "order_alias_constant"
+    },
+    {
+      "sql": "SELECT q.id AS z FROM (SELECT 1 AS id,1/0 AS z) q CROSS JOIN (VALUES(2)) r(n) ORDER BY z",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "order_alias_column"
+    },
+    {
+      "sql": "SELECT 1 AS z FROM (SELECT 1/0 AS z) q CROSS JOIN (VALUES(2)) r(n) ORDER BY q.z",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "order_qualified"
+    },
+    {
+      "sql": "SELECT q.id FROM (SELECT 1 AS id,1/0 AS z) q CROSS JOIN (VALUES(2)) r(n) ORDER BY 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "order_position"
+    },
+    {
+      "sql": "SELECT q FROM (SELECT 1/0 AS z) q CROSS JOIN (VALUES(7)) r(q)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "q"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "shadow_row_alias"
+    },
+    {
+      "sql": "SELECT r.x FROM (SELECT 1/0 AS z) q CROSS JOIN LATERAL (SELECT q AS x FROM (VALUES(7)) t(q)) r",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "shadow_lateral_alias"
+    },
+    {
+      "sql": "SELECT r.x FROM (SELECT 7 AS id,1/0 AS z) q CROSS JOIN LATERAL (SELECT q.x FROM (SELECT q.id AS x) q) r",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_alias_scope"
+    },
+    {
+      "sql": "SELECT q.a FROM (SELECT 1 AS v,1/0 AS v) q(a,b) CROSS JOIN (VALUES(2)) r(n)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "duplicate_labels"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1::int AS id,1/0 AS z) q FULL JOIN (VALUES(2::bigint)) r(id) USING(id)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "using_full_coercion"
+    },
+    {
+      "sql": "SELECT j.id FROM ((SELECT 1 AS id,1/0 AS z) q FULL JOIN (VALUES(2)) r(id) USING(id)) j CROSS JOIN (VALUES(3)) s(n) ORDER BY j.id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_using"
+    },
+    {
+      "sql": "WITH q AS(SELECT 1 AS id,1/0 AS z), r AS(SELECT * FROM q) SELECT count(r.id) FROM r JOIN (VALUES(1)) s(id) USING(id)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "cte_chain"
+    },
+    {
+      "sql": "WITH RECURSIVE r AS(SELECT * FROM q), q AS(SELECT 1 AS id,1/0 AS z) SELECT count(r.id) FROM r JOIN (VALUES(1)) s(id) USING(id)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "cte_forward"
+    },
+    {
+      "sql": "WITH q AS(SELECT 7 AS id,1/0 AS z) SELECT s.id FROM (WITH q AS(SELECT id FROM q) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "cte_self_name_reads_outer"
+    },
+    {
+      "sql": "WITH q AS(SELECT 7 AS id,1/0 AS z) SELECT s.id FROM (WITH r AS(SELECT id FROM q), q AS(SELECT 9 AS id) SELECT * FROM r) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "cte_later_name_reads_outer"
+    },
+    {
+      "sql": "WITH q AS(SELECT 7 AS id,1/0 AS z) SELECT s.id FROM (WITH q AS(SELECT 9 AS id) SELECT * FROM q) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "cte_local_shadow"
+    },
+    {
+      "sql": "WITH q AS NOT MATERIALIZED(SELECT 7 AS a,9 AS b,1/0 AS z) SELECT x.a,y.b FROM q x CROSS JOIN q y",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "cte_shared_positions"
+    },
+    {
+      "sql": "CREATE TABLE demand_cte_data(v integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "cte_data_table"
+    },
+    {
+      "sql": "WITH q AS NOT MATERIALIZED(SELECT 7 AS a,9 AS b), changed AS(INSERT INTO demand_cte_data SELECT b FROM q RETURNING v) SELECT q.a FROM q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "cte_data_value"
+    },
+    {
+      "sql": "SELECT v FROM demand_cte_data",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ],
+      "id": "cte_data_read"
+    },
+    {
+      "sql": "DROP TABLE demand_cte_data",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "cte_data_drop"
+    },
+    {
+      "sql": "SELECT DISTINCT ON(z) 1 AS z FROM (SELECT 1/0 AS z) q CROSS JOIN (VALUES(2)) r(n)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_alias"
+    },
+    {
+      "sql": "SELECT DISTINCT ON(q.z) 1 AS z FROM (SELECT 1/0 AS z) q CROSS JOIN (VALUES(2)) r(n)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "distinct_qualified"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "424da2ffb707daaaa61384c58ce6b6878509e3ae3bb782f254dc80ecbfd887d9",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}

@@ -31,11 +31,13 @@ impl Preparation<'_> {
         scope: SourceScope<'_>,
     ) -> Result<RowSchema, SQLError> {
         let schema = self.source_in_scope_inner(source, subqueries, scope)?;
-        Ok(if scope.retain_names {
+        let schema = if scope.retain_names {
             SourceScope::describe_output(source, schema)
         } else {
             schema
-        })
+        };
+        self.parameters.retain_source_schema(source, &schema);
+        Ok(schema)
     }
 
     fn source_in_scope_inner(

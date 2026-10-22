@@ -108,6 +108,36 @@ pub fn prune_outputs(
     routines: Option<&dyn uqa_sql::routines::RoutineResolution>,
     volatility: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
 ) {
+    let names = schema
+        .or(query.analyzed_output.as_ref())
+        .map(|schema| schema.columns().to_vec())
+        .or_else(|| uqa_sql::semantics::query_plan_output_columns(query));
+    let Some(names) = names else {
+        return;
+    };
+    let demanded = names
+        .iter()
+        .enumerate()
+        .map(|(position, name)| required(aliases.get(position).unwrap_or(name)))
+        .collect::<Vec<_>>();
+    prune_positions(
+        query,
+        &|position| demanded.get(position).copied().unwrap_or(true),
+        schema,
+        aggregates,
+        routines,
+        volatility,
+    );
+}
+
+pub(super) fn prune_positions(
+    query: &mut QueryPlan,
+    required: &dyn Fn(usize) -> bool,
+    schema: Option<&RowSchema>,
+    aggregates: &dyn AggregateClassifier,
+    routines: Option<&dyn uqa_sql::routines::RoutineResolution>,
+    volatility: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
+) {
     if query.analyzed_output.is_none() {
         if let Some(schema) = schema {
             query.analyzed_output = Some(schema.clone());
@@ -117,37 +147,22 @@ pub fn prune_outputs(
         }
     }
     if matches!(query.root, RelationalPlan::SetOp { .. }) {
-        super::union_projection::prune(query, aliases, required, aggregates, routines, volatility);
+        super::union_projection::prune(query, required, aggregates, routines, volatility);
         return;
     }
     let schema = schema.or(query.analyzed_output.as_ref());
     let RelationalPlan::QueryBlock(inner) = &mut query.root else {
         return;
     };
-    if inner.distinct
-        || !inner.distinct_on.is_empty()
-        || !inner.windows.is_empty()
-        || inner
-            .projections
-            .iter()
-            .any(|p| matches!(p.expr, ScalarExpr::Star | ScalarExpr::QualifiedStar(_)))
-    {
+    if inner.distinct || !inner.distinct_on.is_empty() || !inner.windows.is_empty() {
         return;
     }
-    let names = inner
-        .projections
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            aliases
-                .get(i)
-                .cloned()
-                .unwrap_or_else(|| uqa_sql::semantics::projection_label_at(p))
-        })
-        .collect::<Vec<_>>();
+    if !expand_local_stars(inner, query.analyzed_source.as_deref(), schema) {
+        return;
+    }
     let mut replacements = Vec::new();
     for (index, projection) in inner.projections.iter().enumerate() {
-        if required(&names[index])
+        if required(index)
             || needed_by_ordering(inner, index)
             || !removable(&projection.expr, aggregates)
         {
@@ -200,6 +215,47 @@ pub fn prune_outputs(
         }
         projection.expr = expression;
     }
+}
+
+fn expand_local_stars(
+    inner: &mut QueryBlockPlan,
+    source: Option<&uqa_sql::plan::AnalyzedSource>,
+    schema: Option<&RowSchema>,
+) -> bool {
+    if inner
+        .projections
+        .iter()
+        .any(|p| matches!(p.expr, ScalarExpr::Star | ScalarExpr::QualifiedStar(_)))
+    {
+        let Some(source) = source else {
+            return false;
+        };
+        if schema.is_some_and(|schema| schema.columns_are_open(None))
+            || inner
+                .projections
+                .iter()
+                .any(|projection| match &projection.expr {
+                    ScalarExpr::Star => source.schema.columns_are_open(None),
+                    ScalarExpr::QualifiedStar(qualifier) => {
+                        source.schema.columns_are_open(Some(qualifier))
+                    }
+                    _ => false,
+                })
+        {
+            return false;
+        }
+        let Ok(expanded) =
+            uqa_sql::semantics::expand_bound_projection_stars(&inner.projections, &source.schema)
+        else {
+            // A qualified enclosing star needs its enclosing layout; a local descriptor alone cannot authorize that expansion.
+            return false;
+        };
+        if schema.is_none_or(|schema| schema.len() != expanded.len()) {
+            return false;
+        }
+        inner.projections = expanded;
+    }
+    true
 }
 
 fn needed_by_ordering(block: &QueryBlockPlan, index: usize) -> bool {
@@ -263,6 +319,43 @@ mod tests {
         fn is_registered_aggregate(&self, _: &str) -> bool {
             false
         }
+    }
+
+    #[test]
+    fn positional_demand_distinguishes_duplicate_output_names() {
+        let crate::UnifiedPlan::Query(mut query) = crate::UnifiedPlan::lower(
+            uqa_sql::compile("SELECT 1/0 AS v,2 AS v")
+                .unwrap()
+                .remove(0),
+        ) else {
+            panic!("query");
+        };
+        query.analyzed_output = Some(RowSchema::with_types(
+            vec!["v".into(), "v".into()],
+            vec![Some(uqa_sql::ColumnType::Integer); 2],
+        ));
+        prune_positions(
+            &mut query,
+            &|position| position == 1,
+            None,
+            &NoAggregates,
+            None,
+            None,
+        );
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("block");
+        };
+        assert!(matches!(
+            block.projections[0].expr,
+            ScalarExpr::TypedLiteral {
+                value: Value::Null,
+                ..
+            }
+        ));
+        assert!(matches!(
+            block.projections[1].expr,
+            ScalarExpr::Literal(Value::Int(2))
+        ));
     }
 
     #[test]

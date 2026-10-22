@@ -65,3 +65,34 @@ fn union_output_demand_matches_postgresql(#[case] provider: usize) {
         include_str!("../../../../tests/parity/pg18/union_output_demand_oracle.expected.json"),
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn join_output_demand_matches_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("join-demand.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/join_output_demand_oracle.expected.json"),
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn original_output_demand_matches_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(
+        provider,
+        &directory.path().join("original-output-demand.db"),
+    );
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/projection_output_oracle.expected.json"),
+    );
+}

@@ -237,6 +237,7 @@ fn command_statement_query(
         .collect();
     let mut query = QueryPlan {
         analyzed_output: None,
+        analyzed_source: None,
         relations_bound: true,
         ctes: inputs.ctes,
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {

@@ -206,6 +206,9 @@ impl Preparation<'_> {
             .transpose()?
             .unwrap_or_default();
         let source = analysis::with_query_source_columns(&source, block);
+        if let Some(from) = &block.from {
+            self.parameters.retain_source_schema(from, &source);
+        }
         self.block_with_source(block, &source, outer, preserve_unknown)
     }
 

@@ -16,8 +16,7 @@ use uqa_sql::{
 
 pub(super) fn prune(
     query: &mut QueryPlan,
-    aliases: &[String],
-    required: &dyn Fn(&str) -> bool,
+    required: &dyn Fn(usize) -> bool,
     aggregates: &dyn AggregateClassifier,
     routines: Option<&dyn RoutineResolution>,
     volatility: Option<&dyn VolatilityCatalog>,
@@ -28,13 +27,7 @@ pub(super) fn prune(
     if !simple_union(query, output.column_types()) {
         return;
     }
-    let names = output
-        .columns()
-        .iter()
-        .enumerate()
-        .map(|(index, name)| aliases.get(index).unwrap_or(name).clone())
-        .collect::<Vec<_>>();
-    prune_members(query, &names, required, aggregates, routines, volatility);
+    prune_members(query, required, aggregates, routines, volatility);
 }
 
 fn simple_union(query: &QueryPlan, types: &[Option<ColumnType>]) -> bool {
@@ -76,8 +69,7 @@ fn same_types(schema: &RowSchema, types: &[Option<ColumnType>]) -> bool {
 
 fn prune_members(
     query: &mut QueryPlan,
-    names: &[String],
-    required: &dyn Fn(&str) -> bool,
+    required: &dyn Fn(usize) -> bool,
     aggregates: &dyn AggregateClassifier,
     routines: Option<&dyn RoutineResolution>,
     volatility: Option<&dyn VolatilityCatalog>,
@@ -85,12 +77,12 @@ fn prune_members(
     let pulled_up = pulled_up_member(query, routines, volatility);
     match &mut query.root {
         RelationalPlan::SetOp { left, right, .. } => {
-            prune_members(left, names, required, aggregates, routines, volatility);
-            prune_members(right, names, required, aggregates, routines, volatility);
+            prune_members(left, required, aggregates, routines, volatility);
+            prune_members(right, required, aggregates, routines, volatility);
         }
         RelationalPlan::QueryBlock(_) if pulled_up == Some(false) => {
-            super::derived_projection::prune_outputs(
-                query, names, required, None, aggregates, routines, volatility,
+            super::derived_projection::prune_positions(
+                query, required, None, aggregates, routines, volatility,
             );
         }
         _ => {}
@@ -216,6 +208,20 @@ mod tests {
                 vec![Some(ColumnType::BigInteger)],
             ));
         });
+        let crate::UnifiedPlan::Query(query) = &mut plan else {
+            panic!("query");
+        };
+        query.analyzed_output = Some(RowSchema::with_types(
+            vec!["count".into()],
+            vec![Some(ColumnType::BigInteger)],
+        ));
+        query.analyzed_source = Some(std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
+            schema: RowSchema::with_relation_qualifier(
+                &RowSchema::with_types(vec!["z".into()], vec![Some(ColumnType::BigInteger)]),
+                "q",
+            ),
+            children: None,
+        }));
         let crate::UnifiedPlan::Query(query) = super::super::optimize(
             plan,
             &super::super::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
@@ -275,7 +281,7 @@ mod tests {
             };
             let schema = RowSchema::with_types(vec!["z".into()], vec![Some(ColumnType::Integer)]);
             query.visit_queries_mut(&mut |query| query.analyzed_output = Some(schema.clone()));
-            prune(&mut query, &[], &|_| false, &NoAggregates, None, None);
+            prune(&mut query, &|_| false, &NoAggregates, None, None);
             let RelationalPlan::SetOp { left, .. } = &query.root else {
                 panic!("union");
             };

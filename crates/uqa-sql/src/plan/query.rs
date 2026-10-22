@@ -97,6 +97,7 @@ impl QueryPlan {
         let root = lower_relational_root(statement, aggregates);
         let mut plan = Self {
             analyzed_output: None,
+            analyzed_source: None,
             relations_bound: false,
             ctes,
             root,
@@ -270,6 +271,7 @@ pub(super) fn lower_relational_root(
     } else {
         QueryPlan {
             analyzed_output: None,
+            analyzed_source: None,
             relations_bound: false,
             ctes: Vec::new(),
             root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan::lower_with(
@@ -387,6 +389,18 @@ impl QueryBlockPlan {
         if let Some(source) = &self.from {
             source.push_expressions(&mut expressions);
         }
+        self.push_query_expressions(&mut expressions);
+        expressions
+    }
+
+    /// Expressions at this query level, excluding FROM-item inputs and join conditions, which have their own namespaces.
+    pub fn query_expressions(&self) -> Vec<&ScalarExpr> {
+        let mut expressions = Vec::new();
+        self.push_query_expressions(&mut expressions);
+        expressions
+    }
+
+    fn push_query_expressions<'a>(&'a self, expressions: &mut Vec<&'a ScalarExpr>) {
         // Scan projections initialize before scan qualifications; aggregate and window outputs initialize after their input scan.
         if matches!(self.compute, ComputePlan::Project) {
             expressions.extend(self.projections.iter().map(|projection| &projection.expr));
@@ -417,7 +431,6 @@ impl QueryBlockPlan {
                 .iter()
                 .flat_map(|window| window.spec.expressions()),
         );
-        expressions
     }
 }
 

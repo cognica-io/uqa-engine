@@ -21275,6 +21275,64 @@
       "capability": "Projection and consumer demand",
       "workload": "Fifty-six independent PostgreSQL observations across four storage providers.",
       "invariant": "Typed results, errors, aggregate cardinality, ordering, type coercion, SRF multiplicity and sequence effects match the independent PostgreSQL reference."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzed_join_sources_share_input_layouts_without_persisting_namespaces",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Analyzed USING aliases and LATERAL input trees, plan cloning and syntax serialization.",
+      "invariant": "Clones share the analyzed input layout; query-root traversal visits its root once and stored syntax excludes transient namespaces."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "positional_demand_distinguishes_duplicate_output_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_projection.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Two same-named outputs with demand for only the second physical position.",
+      "invariant": "Duplicate labels cannot keep an unobserved failing output or remove a consumed value."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "join_output_demand_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Thirty independent PostgreSQL observations across four storage providers.",
+      "invariant": "Join keys, whole rows, output aliases, outer joins, LATERAL producer demand and folded CTE outputs preserve typed values and diagnostics."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "original_output_demand_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "The complete original output-demand report, additional scope/ordering boundaries and CTE dependency controls in 124 independent PostgreSQL observations across four providers.",
+      "invariant": "Unobserved outputs, whole-row and selected routine demands, constant errors, SRF multiplicity, materialization, lexical scopes and data-modifying CTE values match the independent reference."
     }
   ]
 }

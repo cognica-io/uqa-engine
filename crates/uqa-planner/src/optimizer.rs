@@ -33,6 +33,7 @@ mod join_reorder;
 mod output_demand;
 mod scalar;
 mod source_constants;
+mod source_demand;
 mod subqueries;
 mod traversal;
 mod union_projection;

@@ -158,6 +158,7 @@ fn scalar_query(
     }
     let mut query = uqa_sql::plan::QueryPlan {
         analyzed_output: None,
+        analyzed_source: None,
         relations_bound: false,
         ctes: Vec::new(),
         root: uqa_sql::plan::RelationalPlan::QueryBlock(Box::new(uqa_sql::plan::QueryBlockPlan {

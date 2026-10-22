@@ -1,0 +1,124 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "count_whole_row",
+      "sql": "SELECT count(q) FROM (SELECT 1 AS id, 1/0 AS z) q"
+    },
+    {
+      "id": "join_on_id",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id, 1/0 AS z) q JOIN (VALUES(1)) r(id) ON q.id=r.id"
+    },
+    {
+      "id": "join_on_output",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id, 1/0 AS z) q JOIN (VALUES(1)) r(id) ON q.z=r.id"
+    },
+    {
+      "id": "join_using_id",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id, 1/0 AS z) q JOIN (VALUES(1)) r(id) USING(id)"
+    },
+    {
+      "id": "join_alias",
+      "sql": "SELECT count(*) FROM ((SELECT 1 AS id, 1/0 AS z) q JOIN (VALUES(1)) r(i) ON q.id=r.i) joined"
+    },
+    {
+      "id": "natural_join_id",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id, 1/0 AS z) q NATURAL JOIN (VALUES(1)) r(id)"
+    },
+    {
+      "id": "natural_join_output",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id, 1/0 AS z) q NATURAL JOIN (VALUES(1,1)) r(id,z)"
+    },
+    {
+      "id": "lateral_unused",
+      "sql": "SELECT count(q.id) FROM (VALUES(1)) r(n) CROSS JOIN LATERAL (SELECT r.n AS id,1/0 AS z) q"
+    },
+    {
+      "id": "lateral_used",
+      "sql": "SELECT count(*) FROM (VALUES(1)) r(n) CROSS JOIN LATERAL (SELECT r.n AS id,1/0 AS z) q WHERE q.z=r.n"
+    },
+    {
+      "id": "join_count",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z FROM (VALUES(1)) i(n)) q CROSS JOIN (VALUES(2)) other(n)"
+    },
+    {
+      "id": "join_sum",
+      "sql": "SELECT sum(q.id) FROM (SELECT 1 AS id,1/0 AS z) q CROSS JOIN (VALUES(2),(3)) r(n)"
+    },
+    {
+      "id": "join_whole",
+      "sql": "SELECT count(q.*) FROM (SELECT 1 AS id,1/0 AS z) q CROSS JOIN (VALUES(2)) r(n)"
+    },
+    {
+      "id": "left_unused",
+      "sql": "SELECT count(*) FROM (VALUES(2)) r(id) LEFT JOIN (SELECT 1 AS id,1/0 AS z) q ON r.id=q.id"
+    },
+    {
+      "id": "right_unused",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id,1/0 AS z) q RIGHT JOIN (VALUES(2)) r(id) ON r.id=q.id"
+    },
+    {
+      "id": "full_unused",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id,1/0 AS z) q FULL JOIN (VALUES(2)) r(id) ON r.id=q.id"
+    },
+    {
+      "id": "left_read",
+      "sql": "SELECT q.id FROM (VALUES(2)) r(id) LEFT JOIN (SELECT 1 AS id,1/0 AS z) q ON r.id=q.id"
+    },
+    {
+      "id": "join_alias_read",
+      "sql": "SELECT joined.id FROM ((SELECT 1 AS id,1/0 AS z) q CROSS JOIN (VALUES(2)) r(n)) joined"
+    },
+    {
+      "id": "join_column_alias",
+      "sql": "SELECT joined.a FROM ((SELECT 1 AS id,1/0 AS z) q CROSS JOIN (VALUES(2)) r(n)) joined(a,b,c)"
+    },
+    {
+      "id": "join_column_alias_used",
+      "sql": "SELECT joined.b FROM ((SELECT 1 AS id,1/0 AS z) q CROSS JOIN (VALUES(2)) r(n)) joined(a,b,c)"
+    },
+    {
+      "id": "join_alias_whole",
+      "sql": "SELECT count(joined) FROM ((SELECT 1 AS id,1/0 AS z) q CROSS JOIN (VALUES(2)) r(n)) joined"
+    },
+    {
+      "id": "lateral_preceding_required",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id,1/0 AS z) q CROSS JOIN LATERAL (SELECT q.z OFFSET 0) r"
+    },
+    {
+      "id": "lateral_preceding_unused",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id,1/0 AS z) q CROSS JOIN LATERAL (SELECT q.id OFFSET 0) r"
+    },
+    {
+      "id": "lateral_preceding_folded",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id,1/0 AS z) q CROSS JOIN LATERAL (SELECT q.z) r"
+    },
+    {
+      "id": "lateral_function",
+      "sql": "SELECT count(*) FROM (SELECT 2 AS n,1/0 AS z) q CROSS JOIN generate_series(1,q.n) r(n)"
+    },
+    {
+      "id": "lateral_function_used",
+      "sql": "SELECT count(*) FROM (SELECT 2 AS n,1/0 AS z) q CROSS JOIN generate_series(1,q.z) r(n)"
+    },
+    {
+      "id": "cte_join",
+      "sql": "WITH q AS(SELECT 1 AS id,1/0 AS z) SELECT count(*) FROM q JOIN (VALUES(1)) r(id) USING(id)"
+    },
+    {
+      "id": "cte_union",
+      "sql": "WITH q AS(SELECT 1/0 AS z WHERE true UNION ALL SELECT 2) SELECT count(*) FROM q"
+    },
+    {
+      "id": "unused_nested",
+      "sql": "SELECT count(*) FROM (SELECT 1/0 AS z FROM (VALUES(1)) i(n)) q CROSS JOIN (SELECT 1/0 AS z) r"
+    },
+    {
+      "id": "derived_join_projection",
+      "sql": "SELECT count(*) FROM (SELECT q.id,1/0 AS z FROM (VALUES(1)) q(id) JOIN (VALUES(1)) r(id) USING(id)) s"
+    }
+  ]
+}
