@@ -2,7 +2,7 @@
 
 ## Original scope
 
-This is the next independent group in the [112-issue delivery ledger](0024-open-issue-delivery.md), covering [#990](https://github.com/cognica-io/uqa-engine/issues/990), [#1015](https://github.com/cognica-io/uqa-engine/issues/1015) and [#1019](https://github.com/cognica-io/uqa-engine/issues/1019). Preserve every original report and later reference boundary in those issues. The preceding LATERAL group remains in PR #1244; its corrections and qualification do not complete this group.
+This [draft PR #1247](https://github.com/cognica-io/uqa-engine/pull/1247) is the next independent group in the [112-issue delivery ledger](0024-open-issue-delivery.md), covering [#990](https://github.com/cognica-io/uqa-engine/issues/990), [#1015](https://github.com/cognica-io/uqa-engine/issues/1015) and [#1019](https://github.com/cognica-io/uqa-engine/issues/1019). Preserve every original report and later reference boundary in those issues. The preceding LATERAL group remains in PR #1244; its corrections and qualification do not complete this group.
 
 - [ ] #990: omit unobserved derived/view/folded-CTE outputs before constant simplification while preserving required values, positional types, privileges, set multiplicity, DISTINCT, ordering, volatile effects and set-producing expressions. Cover all six original remaining failures, aggregate FILTER/ORDER BY, whole-row references, joined/lateral inputs, selected routine identity, CTE materialization and UNION ALL pull-up barriers. The opposite whole-row defect must also be fixed; merely discarding more expressions is insufficient.
 - [ ] #1015: apply eligible outer predicates before evaluating derived-table outputs they discard, including views and folded CTEs. Preserve volatile, set-returning, LIMIT/OFFSET, materialization and other non-inlinable boundaries as PostgreSQL evaluates them.
@@ -23,6 +23,10 @@ The 2026-10-23 main `9eb335c2399323710c9e6d62ed0e2310c3db9ca8` has identical cra
 The fresh matrix is independently captured from a disposable Docker PostgreSQL 18.4 database in `tests/parity/pg18/projection_consumer_oracle.input.json` and its expected file. It includes 52 observations counting the server-version control. Its successful controls are significant: the simple table LIMIT filter, direct projection LIMIT, current view rewrite, materialized/limited derived barriers, LIMIT 0 and several simple-table volatile cases already agree. Joins and EXISTS still advance a sequence beyond the consumer's first result; a filtered derived output can return sequence value 2 where PostgreSQL returns 1. A deferred-error buffer alone cannot correct that observation.
 
 Raw baseline reports and diagnostic captures remain outside the repository. The original #990 independent matrices will be incorporated with complete typed/error expectations as the owner tests are implemented; none of their boundaries is waived by the smaller fresh matrix.
+
+## Current implementation checkpoint
+
+The first Planner correction shares input-value traversal between direct derived sources and folded CTEs. Selected COUNT(*) consumes rows without demanding every output; FILTER/ORDER BY remain visible, and whole-row references retain all fields unless a real column shadows the relation name. All 195 Planner unit tests, strict Planner Clippy, formatting and ownership/dependency/file-length checks pass, including the new owner controls. Whole-row shadowing is checked on demand without copying a full output-name list. Joined/set-member propagation, predicate placement, consumer backpressure and final typed/provider acceptance remain required.
 
 ## Owning interfaces
 

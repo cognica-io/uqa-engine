@@ -30,6 +30,7 @@ mod derived_projection;
 mod function_source;
 mod implicit_fusion;
 mod join_reorder;
+mod output_demand;
 mod scalar;
 mod source_constants;
 mod subqueries;
