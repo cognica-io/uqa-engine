@@ -1,0 +1,181 @@
+# Open issue delivery groups
+
+## Scope and completion
+
+This ledger starts from all 112 issues open on 2026-10-22 after release 0.6.1, at main `79936592076a3d54315bc08bb5c1ab260da3d73d`. Every original issue appears once below. The linked issue retains its full report and acceptance requirements; grouping does not narrow that scope or establish that an old report still reproduces. Reproduce each outstanding case on current main and inspect its complete acceptance list before changing code or closing it.
+
+Use one PR per coherent behavior group and logical commits for the individual corrections. Large independent features such as row-level security and event triggers remain their own substantial groups. Review and qualify a completed group before starting another delivery PR; continue independent investigation while its final checks run. Keep actual completion evidence, the group PR and the issue state synchronized. Resolve already-fixed reports only after verifying all remaining acceptance conditions, and use closing references for issues fully resolved by the group.
+
+A group is complete only after implementation, affected PostgreSQL 18 or independent reference observations, focused owner and provider/binding tests, review, required actual Linux/macOS performance results, merge and issue closure. Feature additions retain the mathematical proof requirement in AI_POLICY.md. Preserve historical measurement failures and use the controlled host with its independently established noise bound for latency claims. The existing open performance ledger and original extension task records remain authoritative for their full unfinished requirements.
+
+## Delivery order and current work
+
+- [ ] Finish the CI batching change and this complete issue inventory in the preparation PR; preserve validation coverage and prove that ordinary draft pushes do not start PR jobs.
+- [ ] Reproduce and correct relational inputs, consumer demand and function-source row descriptors first because these affect returned or modified rows.
+- [ ] Finish namespace, comparison, collation and constraint groups in dependency order; implement prerequisite catalog identities in their owning groups before consuming them.
+- [ ] Complete the remaining built-in, DDL, transaction, binding, graph and documentation groups below, retaining their original acceptance conditions.
+- [ ] Complete bounded COPY and the original execution-latency/historical-noise obligations; use existing source-scoped evidence as a baseline, not as proof of unfinished work.
+
+No original issue is marked complete by this inventory. All 112 require current-state review; the first active delivery is CI batching and inventory maintenance.
+
+## Validation batches
+
+Keep group PRs draft while committing and pushing implementation progress. Run focused local checks as fixes are completed. Mark the finished batch ready once to trigger affected PR checks, including Linux/macOS deterministic performance and selected FDW/binding checks. If a product correction follows, return to draft, accumulate the correction batch and mark ready again. Never treat a skipped check or an older different product input as passing evidence. Main retains its configured integration and performance checks. There is no manual workflow dispatch, cancellation or rerun in this process.
+
+## Group inventory
+
+| Group | Owning boundaries | Original issues | Delivery state |
+| --- | --- | --- | --- |
+| Relational inputs and consumer demand | uqa-sql, uqa-planner, uqa-execution | [#990](https://github.com/cognica-io/uqa-engine/issues/990), [#1002](https://github.com/cognica-io/uqa-engine/issues/1002), [#1003](https://github.com/cognica-io/uqa-engine/issues/1003), [#1015](https://github.com/cognica-io/uqa-engine/issues/1015), [#1016](https://github.com/cognica-io/uqa-engine/issues/1016), [#1019](https://github.com/cognica-io/uqa-engine/issues/1019), [#1104](https://github.com/cognica-io/uqa-engine/issues/1104), [#1146](https://github.com/cognica-io/uqa-engine/issues/1146) | Pending current-main review |
+| Function-source row descriptors | uqa-sql, uqa-execution | [#1007](https://github.com/cognica-io/uqa-engine/issues/1007), [#1021](https://github.com/cognica-io/uqa-engine/issues/1021), [#1026](https://github.com/cognica-io/uqa-engine/issues/1026), [#1027](https://github.com/cognica-io/uqa-engine/issues/1027), [#1035](https://github.com/cognica-io/uqa-engine/issues/1035), [#1071](https://github.com/cognica-io/uqa-engine/issues/1071) | Pending current-main review |
+| Subqueries and quantified comparisons | uqa-sql, uqa-planner, uqa-execution | [#996](https://github.com/cognica-io/uqa-engine/issues/996), [#997](https://github.com/cognica-io/uqa-engine/issues/997), [#1004](https://github.com/cognica-io/uqa-engine/issues/1004), [#1013](https://github.com/cognica-io/uqa-engine/issues/1013), [#1032](https://github.com/cognica-io/uqa-engine/issues/1032) | Pending current-main review |
+| Namespace and routine name resolution | uqa-sql, uqa-execution; Engine session adapters; uqa-graph | [#127](https://github.com/cognica-io/uqa-engine/issues/127), [#128](https://github.com/cognica-io/uqa-engine/issues/128), [#333](https://github.com/cognica-io/uqa-engine/issues/333), [#334](https://github.com/cognica-io/uqa-engine/issues/334), [#1018](https://github.com/cognica-io/uqa-engine/issues/1018) | Pending current-main review |
+| Expression collation propagation | uqa-sql, uqa-execution | [#1031](https://github.com/cognica-io/uqa-engine/issues/1031), [#1055](https://github.com/cognica-io/uqa-engine/issues/1055), [#1056](https://github.com/cognica-io/uqa-engine/issues/1056), [#1057](https://github.com/cognica-io/uqa-engine/issues/1057), [#1058](https://github.com/cognica-io/uqa-engine/issues/1058), [#1059](https://github.com/cognica-io/uqa-engine/issues/1059) | Pending current-main review |
+| Collation definitions and Unicode ordering | uqa-core, uqa-sql, uqa-execution | [#1006](https://github.com/cognica-io/uqa-engine/issues/1006), [#1034](https://github.com/cognica-io/uqa-engine/issues/1034), [#1036](https://github.com/cognica-io/uqa-engine/issues/1036) | Pending current-main review |
+| DDL collation dependency rebinding | uqa-sql, uqa-execution, uqa-storage | [#294](https://github.com/cognica-io/uqa-engine/issues/294), [#313](https://github.com/cognica-io/uqa-engine/issues/313), [#1052](https://github.com/cognica-io/uqa-engine/issues/1052), [#1054](https://github.com/cognica-io/uqa-engine/issues/1054) | Pending current-main review |
+| Conflict arbiter inference | uqa-sql, uqa-execution | [#988](https://github.com/cognica-io/uqa-engine/issues/988), [#1060](https://github.com/cognica-io/uqa-engine/issues/1060) | Pending current-main review |
+| Partitioned constraints and index attachment | uqa-sql, uqa-execution, uqa-storage | [#295](https://github.com/cognica-io/uqa-engine/issues/295), [#296](https://github.com/cognica-io/uqa-engine/issues/296), [#298](https://github.com/cognica-io/uqa-engine/issues/298), [#302](https://github.com/cognica-io/uqa-engine/issues/302), [#311](https://github.com/cognica-io/uqa-engine/issues/311) | Pending current-main review |
+| Deferred and exclusion constraints | uqa-sql, uqa-execution, uqa-storage and providers | [#293](https://github.com/cognica-io/uqa-engine/issues/293), [#304](https://github.com/cognica-io/uqa-engine/issues/304), [#305](https://github.com/cognica-io/uqa-engine/issues/305) | Pending current-main review |
+| Table declarations and active dependencies | uqa-sql, uqa-execution | [#287](https://github.com/cognica-io/uqa-engine/issues/287), [#288](https://github.com/cognica-io/uqa-engine/issues/288), [#1051](https://github.com/cognica-io/uqa-engine/issues/1051) | Pending current-main review |
+| DML rules and trigger namespaces | uqa-sql, uqa-execution; Engine transaction adapters | [#290](https://github.com/cognica-io/uqa-engine/issues/290), [#291](https://github.com/cognica-io/uqa-engine/issues/291), [#312](https://github.com/cognica-io/uqa-engine/issues/312), [#1023](https://github.com/cognica-io/uqa-engine/issues/1023), [#1024](https://github.com/cognica-io/uqa-engine/issues/1024), [#1025](https://github.com/cognica-io/uqa-engine/issues/1025) | Pending current-main review |
+| Event triggers | uqa-sql, uqa-execution; Engine catalog adapters | [#327](https://github.com/cognica-io/uqa-engine/issues/327) | Pending current-main review |
+| Row-level security | uqa-sql, uqa-planner, uqa-execution | [#308](https://github.com/cognica-io/uqa-engine/issues/308) | Pending current-main review |
+| Routine blocks and diagnostics | uqa-sql, uqa-execution | [#320](https://github.com/cognica-io/uqa-engine/issues/320), [#323](https://github.com/cognica-io/uqa-engine/issues/323), [#335](https://github.com/cognica-io/uqa-engine/issues/335) | Pending current-main review |
+| Session parameters and value formatting | uqa-core, uqa-sql, uqa-execution; binding codecs | [#317](https://github.com/cognica-io/uqa-engine/issues/317), [#318](https://github.com/cognica-io/uqa-engine/issues/318), [#319](https://github.com/cognica-io/uqa-engine/issues/319) | Pending current-main review |
+| Datetime input grammars | uqa-core, uqa-sql | [#289](https://github.com/cognica-io/uqa-engine/issues/289), [#1043](https://github.com/cognica-io/uqa-engine/issues/1043) | Pending current-main review |
+| Temporal bins and series | uqa-core, uqa-sql, uqa-execution | [#1030](https://github.com/cognica-io/uqa-engine/issues/1030), [#1041](https://github.com/cognica-io/uqa-engine/issues/1041) | Pending current-main review |
+| Numeric and digest functions | uqa-core, uqa-sql | [#1038](https://github.com/cognica-io/uqa-engine/issues/1038), [#1039](https://github.com/cognica-io/uqa-engine/issues/1039), [#1040](https://github.com/cognica-io/uqa-engine/issues/1040) | Pending current-main review |
+| Unicode, bit strings and text result limits | uqa-core, uqa-sql | [#985](https://github.com/cognica-io/uqa-engine/issues/985), [#989](https://github.com/cognica-io/uqa-engine/issues/989), [#1062](https://github.com/cognica-io/uqa-engine/issues/1062) | Pending current-main review |
+| JSON records and set-returning values | uqa-core, uqa-sql, uqa-execution | [#1017](https://github.com/cognica-io/uqa-engine/issues/1017), [#1028](https://github.com/cognica-io/uqa-engine/issues/1028), [#1037](https://github.com/cognica-io/uqa-engine/issues/1037), [#1042](https://github.com/cognica-io/uqa-engine/issues/1042) | Pending current-main review |
+| Catalog identities and introspection | uqa-sql, uqa-execution; Engine catalog adapters | [#225](https://github.com/cognica-io/uqa-engine/issues/225), [#286](https://github.com/cognica-io/uqa-engine/issues/286), [#325](https://github.com/cognica-io/uqa-engine/issues/325), [#1033](https://github.com/cognica-io/uqa-engine/issues/1033), [#1049](https://github.com/cognica-io/uqa-engine/issues/1049) | Pending current-main review |
+| Operators, casts and object comments | uqa-sql, uqa-execution, uqa-storage | [#1008](https://github.com/cognica-io/uqa-engine/issues/1008), [#1009](https://github.com/cognica-io/uqa-engine/issues/1009), [#1045](https://github.com/cognica-io/uqa-engine/issues/1045), [#1048](https://github.com/cognica-io/uqa-engine/issues/1048), [#1115](https://github.com/cognica-io/uqa-engine/issues/1115) | Pending current-main review |
+| Analysis errors and stored SQL output | uqa-sql, uqa-execution | [#285](https://github.com/cognica-io/uqa-engine/issues/285), [#306](https://github.com/cognica-io/uqa-engine/issues/306), [#310](https://github.com/cognica-io/uqa-engine/issues/310), [#984](https://github.com/cognica-io/uqa-engine/issues/984), [#1014](https://github.com/cognica-io/uqa-engine/issues/1014), [#1020](https://github.com/cognica-io/uqa-engine/issues/1020) | Pending current-main review |
+| Physical row identity and ordering | uqa-storage and providers; uqa-execution | [#292](https://github.com/cognica-io/uqa-engine/issues/292), [#300](https://github.com/cognica-io/uqa-engine/issues/300) | Pending current-main review |
+| Access methods and tablespaces | uqa-storage and providers; uqa-sql, uqa-execution | [#301](https://github.com/cognica-io/uqa-engine/issues/301), [#322](https://github.com/cognica-io/uqa-engine/issues/322) | Pending current-main review |
+| Lock introspection | uqa-storage; uqa-execution; Engine session adapters | [#283](https://github.com/cognica-io/uqa-engine/issues/283) | Pending current-main review |
+| Plans, statistics and index rebuilding | uqa-planner, uqa-sql, uqa-execution, uqa-storage | [#282](https://github.com/cognica-io/uqa-engine/issues/282), [#1029](https://github.com/cognica-io/uqa-engine/issues/1029), [#1053](https://github.com/cognica-io/uqa-engine/issues/1053) | Pending current-main review |
+| Foreign-table writes | uqa-fdw, uqa-execution; Engine catalog adapters | [#314](https://github.com/cognica-io/uqa-engine/issues/314) | Pending current-main review |
+| Bounded COPY output | uqa-execution; Engine and binding result adapters | [#714](https://github.com/cognica-io/uqa-engine/issues/714) | Pending current-main review |
+| Execution latency and controlled qualification | uqa-sql, uqa-planner, uqa-execution; benchmark controller | [#653](https://github.com/cognica-io/uqa-engine/issues/653), [#1108](https://github.com/cognica-io/uqa-engine/issues/1108), [#1117](https://github.com/cognica-io/uqa-engine/issues/1117) | Pending current-main review |
+| Installed binding usability | uqa-node, uqa-client; package verification | [#711](https://github.com/cognica-io/uqa-engine/issues/711), [#713](https://github.com/cognica-io/uqa-engine/issues/713) | Pending current-main review |
+| Cypher expression compatibility | uqa-graph; SQL regular-expression interface | [#1046](https://github.com/cognica-io/uqa-engine/issues/1046), [#1047](https://github.com/cognica-io/uqa-engine/issues/1047) | Pending current-main review |
+| Verified community usage documentation | manual, examples | [#41](https://github.com/cognica-io/uqa-engine/issues/41) | Pending current-main review |
+
+## Original issue titles
+
+These titles preserve the initial inventory for reconciliation; the linked issue descriptions and later verified progress determine closure. Newly discovered defects must be recorded and fixed with the relevant group, without removing any original requirement.
+
+| Issue | Original task | Current state |
+| --- | --- | --- |
+| [#41](https://github.com/cognica-io/uqa-engine/issues/41) | Usage example: resuming past coding-agent work with CAIRN, built on UQA | Open; unverified on current main |
+| [#127](https://github.com/cognica-io/uqa-engine/issues/127) | Include AGE label relations in regclass catalog resolution | Open; unverified on current main |
+| [#128](https://github.com/cognica-io/uqa-engine/issues/128) | Return SQL NULL from current_schema for an empty effective search path | Open; unverified on current main |
+| [#225](https://github.com/cognica-io/uqa-engine/issues/225) | Implement PostgreSQL access-method catalogs and index method identities | Open; unverified on current main |
+| [#282](https://github.com/cognica-io/uqa-engine/issues/282) | EXPLAIN prints no scan nodes, so an index-only read is not visible in a plan | Open; unverified on current main |
+| [#283](https://github.com/cognica-io/uqa-engine/issues/283) | Implement pg_locks and pg_blocking_pids() | Open; unverified on current main |
+| [#285](https://github.com/cognica-io/uqa-engine/issues/285) | Name relations in diagnostics as PostgreSQL does instead of schema-qualified | Open; unverified on current main |
+| [#286](https://github.com/cognica-io/uqa-engine/issues/286) | Implement the pg_sequence catalog | Open; unverified on current main |
+| [#287](https://github.com/cognica-io/uqa-engine/issues/287) | Support CREATE TABLE ... (LIKE source ...) | Open; unverified on current main |
+| [#288](https://github.com/cognica-io/uqa-engine/issues/288) | Reject ALTER TABLE on a table the running statement is writing (55006) | Open; unverified on current main |
+| [#289](https://github.com/cognica-io/uqa-engine/issues/289) | Read every datetime input form of PostgreSQL's DecodeDateTime | Open; unverified on current main |
+| [#290](https://github.com/cognica-io/uqa-engine/issues/290) | Stream data-modifying WITH queries to their reader as PostgreSQL does | Open; unverified on current main |
+| [#291](https://github.com/cognica-io/uqa-engine/issues/291) | Reject WITH on statements that rules rewrite into several queries | Open; unverified on current main |
+| [#292](https://github.com/cognica-io/uqa-engine/issues/292) | Visit rows in storage order instead of document identity order | Open; unverified on current main |
+| [#293](https://github.com/cognica-io/uqa-engine/issues/293) | Support DEFERRABLE UNIQUE and PRIMARY KEY constraints | Open; unverified on current main |
+| [#294](https://github.com/cognica-io/uqa-engine/issues/294) | Honor COLLATE and operator classes of CREATE INDEX key columns | Open; unverified on current main |
+| [#295](https://github.com/cognica-io/uqa-engine/issues/295) | Report a partition's copied constraints in pg_constraint as PostgreSQL does | Open; unverified on current main |
+| [#296](https://github.com/cognica-io/uqa-engine/issues/296) | Attach a partition's matching unique index to a partitioned table's new primary key | Open; unverified on current main |
+| [#298](https://github.com/cognica-io/uqa-engine/issues/298) | Support ADD CONSTRAINT ... USING INDEX | Open; unverified on current main |
+| [#300](https://github.com/cognica-io/uqa-engine/issues/300) | Implement the system columns ctid, xmax, cmin and cmax | Open; unverified on current main |
+| [#301](https://github.com/cognica-io/uqa-engine/issues/301) | Support CREATE INDEX USING hash, gist, spgist and brin, and report unknown access methods as 42704 | Open; unverified on current main |
+| [#302](https://github.com/cognica-io/uqa-engine/issues/302) | Report the repeated key PostgreSQL's unique index build reports | Open; unverified on current main |
+| [#304](https://github.com/cognica-io/uqa-engine/issues/304) | Support EXCLUDE constraints | Open; unverified on current main |
+| [#305](https://github.com/cognica-io/uqa-engine/issues/305) | Require btree_gist operator classes for WITHOUT OVERLAPS keys over scalar columns | Open; unverified on current main |
+| [#306](https://github.com/cognica-io/uqa-engine/issues/306) | Send error fields, CONTEXT and GET STACKED DIAGNOSTICS as PostgreSQL does | Open; unverified on current main |
+| [#308](https://github.com/cognica-io/uqa-engine/issues/308) | Implement row level security | Open; unverified on current main |
+| [#310](https://github.com/cognica-io/uqa-engine/issues/310) | Keep the parentheses pg_get_viewdef's pretty mode keeps | Open; unverified on current main |
+| [#311](https://github.com/cognica-io/uqa-engine/issues/311) | Report WITHOUT OVERLAPS and unique index violations of existing rows as PostgreSQL does | Open; unverified on current main |
+| [#312](https://github.com/cognica-io/uqa-engine/issues/312) | Report BEFORE triggers that move a row out of its partition as PostgreSQL does | Open; unverified on current main |
+| [#313](https://github.com/cognica-io/uqa-engine/issues/313) | Support partition keys with a non-default collation | Open; unverified on current main |
+| [#314](https://github.com/cognica-io/uqa-engine/issues/314) | Pass INSERT on a foreign table to its wrapper | Open; unverified on current main |
+| [#317](https://github.com/cognica-io/uqa-engine/issues/317) | Validate DateStyle and TimeZone, format values with them, and define IntervalStyle | Open; unverified on current main |
+| [#318](https://github.com/cognica-io/uqa-engine/issues/318) | Validate and canonicalize client_encoding and encode output in it | Open; unverified on current main |
+| [#319](https://github.com/cognica-io/uqa-engine/issues/319) | Define the PostgreSQL parameters the engine lacks, GRANT SET ON PARAMETER and UPDATE pg_settings | Open; unverified on current main |
+| [#320](https://github.com/cognica-io/uqa-engine/issues/320) | Define plpgsql.print_strict_params, plpgsql.extra_warnings and plpgsql.extra_errors with their effects | Open; unverified on current main |
+| [#322](https://github.com/cognica-io/uqa-engine/issues/322) | Implement pg_tablespace, pg_am, TABLESPACE and USING heap | Open; unverified on current main |
+| [#323](https://github.com/cognica-io/uqa-engine/issues/323) | Support RAISE ... USING options | Open; unverified on current main |
+| [#325](https://github.com/cognica-io/uqa-engine/issues/325) | Allocate catalog OIDs in creation order | Open; unverified on current main |
+| [#327](https://github.com/cognica-io/uqa-engine/issues/327) | Implement event triggers | Open; unverified on current main |
+| [#333](https://github.com/cognica-io/uqa-engine/issues/333) | Report missing and invisible FROM-clause entries as PostgreSQL does | Open; unverified on current main |
+| [#334](https://github.com/cognica-io/uqa-engine/issues/334) | Resolve fields of composite parameters in SQL routine bodies | Open; unverified on current main |
+| [#335](https://github.com/cognica-io/uqa-engine/issues/335) | Scope PL/pgSQL declarations to their block and qualify variables by block labels | Open; unverified on current main |
+| [#653](https://github.com/cognica-io/uqa-engine/issues/653) | Investigate inconclusive analytical qualification on the controlled runner | Open; unverified on current main |
+| [#711](https://github.com/cognica-io/uqa-engine/issues/711) | Reject mistaken persistent-path arguments to the in-memory Node.js constructor | Open; unverified on current main |
+| [#713](https://github.com/cognica-io/uqa-engine/issues/713) | Verify published HTTP-only bindings in Next.js and hosted Linux builds | Open; unverified on current main |
+| [#714](https://github.com/cognica-io/uqa-engine/issues/714) | Bound memory in COPY output before exposing large standard exports | Open; unverified on current main |
+| [#984](https://github.com/cognica-io/uqa-engine/issues/984) | Print SQL-standard syntax for POSITION, OVERLAY, TRIM and SUBSTRING in stored definitions | Open; unverified on current main |
+| [#985](https://github.com/cognica-io/uqa-engine/issues/985) | Implement PostgreSQL Unicode normalization and Unicode information functions | Open; unverified on current main |
+| [#988](https://github.com/cognica-io/uqa-engine/issues/988) | Infer ON CONFLICT arbiters for expression indexes over concatenation, replace and pattern calls | Open; unverified on current main |
+| [#989](https://github.com/cognica-io/uqa-engine/issues/989) | Implement substring for bit and bit varying | Open; unverified on current main |
+| [#990](https://github.com/cognica-io/uqa-engine/issues/990) | Skip unreferenced subquery outputs before constant folding | Open; unverified on current main |
+| [#996](https://github.com/cognica-io/uqa-engine/issues/996) | Support PostgreSQL ARRAY(subquery) constructors | Open; unverified on current main |
+| [#997](https://github.com/cognica-io/uqa-engine/issues/997) | Support PostgreSQL quantified subquery comparisons with any operator and row operands | Open; unverified on current main |
+| [#1002](https://github.com/cognica-io/uqa-engine/issues/1002) | Evaluate VALUES rows that reference outer columns in LATERAL items and correlated subqueries | Open; unverified on current main |
+| [#1003](https://github.com/cognica-io/uqa-engine/issues/1003) | Preserve unmatched right rows once when RIGHT or FULL JOIN reads a table function | Open; unverified on current main |
+| [#1004](https://github.com/cognica-io/uqa-engine/issues/1004) | Evaluate restriction conjuncts in PostgreSQL's cost order | Open; unverified on current main |
+| [#1006](https://github.com/cognica-io/uqa-engine/issues/1006) | Support CREATE, ALTER and DROP COLLATION, including nondeterministic collations | Open; unverified on current main |
+| [#1007](https://github.com/cognica-io/uqa-engine/issues/1007) | Accept scalar functions as FROM items | Open; unverified on current main |
+| [#1008](https://github.com/cognica-io/uqa-engine/issues/1008) | Support COMMENT ON for every object kind and expose built-in descriptions | Open; unverified on current main |
+| [#1009](https://github.com/cognica-io/uqa-engine/issues/1009) | Resolve built-in routines in DROP and ALTER FUNCTION | Open; unverified on current main |
+| [#1013](https://github.com/cognica-io/uqa-engine/issues/1013) | Compare jsonb values from set-returning jsonb functions canonically | Open; unverified on current main |
+| [#1014](https://github.com/cognica-io/uqa-engine/issues/1014) | Report 42803 for aggregates and window functions in forbidden contexts | Open; unverified on current main |
+| [#1015](https://github.com/cognica-io/uqa-engine/issues/1015) | Apply outer predicates before evaluating derived-table outputs they discard | Open; unverified on current main |
+| [#1016](https://github.com/cognica-io/uqa-engine/issues/1016) | Resolve LATERAL references from operands of an explicit join after a comma | Open; unverified on current main |
+| [#1017](https://github.com/cognica-io/uqa-engine/issues/1017) | Implement the json and jsonb record functions | Open; unverified on current main |
+| [#1018](https://github.com/cognica-io/uqa-engine/issues/1018) | Create routines in the session's temporary schema | Open; unverified on current main |
+| [#1019](https://github.com/cognica-io/uqa-engine/issues/1019) | Return rows before a failing row when a query stops early | Open; unverified on current main |
+| [#1020](https://github.com/cognica-io/uqa-engine/issues/1020) | Report statement positions for analysis errors | Open; unverified on current main |
+| [#1021](https://github.com/cognica-io/uqa-engine/issues/1021) | Type whole-row references to scalar function sources as their scalar value | Open; unverified on current main |
+| [#1023](https://github.com/cognica-io/uqa-engine/issues/1023) | Run INSERT rule actions once for a single-row VALUES list that a set-returning function expands | Open; unverified on current main |
+| [#1024](https://github.com/cognica-io/uqa-engine/issues/1024) | Analyze trigger WHEN conditions in PostgreSQL's OLD and NEW namespace | Open; unverified on current main |
+| [#1025](https://github.com/cognica-io/uqa-engine/issues/1025) | Report PostgreSQL's diagnostics for rule WHERE conditions and resolve OLD and NEW system columns in rules | Open; unverified on current main |
+| [#1026](https://github.com/cognica-io/uqa-engine/issues/1026) | Expand function results of domains over composite types into columns in FROM | Open; unverified on current main |
+| [#1027](https://github.com/cognica-io/uqa-engine/issues/1027) | Expand unnest of composite and record arrays into columns in FROM | Open; unverified on current main |
+| [#1028](https://github.com/cognica-io/uqa-engine/issues/1028) | Report PostgreSQL's errors for invalid and wrongly shaped json and jsonb function arguments | Open; unverified on current main |
+| [#1029](https://github.com/cognica-io/uqa-engine/issues/1029) | Implement CREATE, ALTER and DROP STATISTICS and the extended statistics catalogs | Open; unverified on current main |
+| [#1030](https://github.com/cognica-io/uqa-engine/issues/1030) | Implement the numeric, timestamp and timestamptz forms of generate_series | Open; unverified on current main |
+| [#1031](https://github.com/cognica-io/uqa-engine/issues/1031) | Apply the call's input collation inside SQL and PL/pgSQL routine bodies | Open; unverified on current main |
+| [#1032](https://github.com/cognica-io/uqa-engine/issues/1032) | Evaluate pattern and other boolean operators with ANY and ALL over arrays | Open; unverified on current main |
+| [#1033](https://github.com/cognica-io/uqa-engine/issues/1033) | Give common built-in functions their PostgreSQL catalog identities for persistent CHECK constraints | Open; unverified on current main |
+| [#1034](https://github.com/cognica-io/uqa-engine/issues/1034) | Reproduce ICU dictionary word breaks in initcap under ICU collations | Open; unverified on current main |
+| [#1035](https://github.com/cognica-io/uqa-engine/issues/1035) | Expand (expr).* into the fields of a composite value | Open; unverified on current main |
+| [#1036](https://github.com/cognica-io/uqa-engine/issues/1036) | Order text under the unicode collation by the ICU root collation | Open; unverified on current main |
+| [#1037](https://github.com/cognica-io/uqa-engine/issues/1037) | Return PostgreSQL json and jsonb members from the JSON set-returning functions | Open; unverified on current main |
+| [#1038](https://github.com/cognica-io/uqa-engine/issues/1038) | Evaluate div, gcd and lcm with PostgreSQL's numeric and integer semantics | Open; unverified on current main |
+| [#1039](https://github.com/cognica-io/uqa-engine/issues/1039) | Implement the sha224, sha256, sha384 and sha512 functions | Open; unverified on current main |
+| [#1040](https://github.com/cognica-io/uqa-engine/issues/1040) | Implement the scale, min_scale and trim_scale functions | Open; unverified on current main |
+| [#1041](https://github.com/cognica-io/uqa-engine/issues/1041) | Implement date_bin for timestamp and timestamp with time zone | Open; unverified on current main |
+| [#1042](https://github.com/cognica-io/uqa-engine/issues/1042) | Implement jsonb_exists, jsonb_exists_any and jsonb_exists_all | Open; unverified on current main |
+| [#1043](https://github.com/cognica-io/uqa-engine/issues/1043) | Implement the formatted to_timestamp(text, text) form | Open; unverified on current main |
+| [#1045](https://github.com/cognica-io/uqa-engine/issues/1045) | Implement the pg_operator catalog and the regoper and regoperator types | Open; unverified on current main |
+| [#1046](https://github.com/cognica-io/uqa-engine/issues/1046) | Evaluate Cypher =~ with PostgreSQL's regular expressions as AGE does | Open; unverified on current main |
+| [#1047](https://github.com/cognica-io/uqa-engine/issues/1047) | Decode Cypher string escapes and reject unknown escapes as AGE does | Open; unverified on current main |
+| [#1048](https://github.com/cognica-io/uqa-engine/issues/1048) | Support CREATE, ALTER and DROP for operators, casts, operator classes and operator families | Open; unverified on current main |
+| [#1049](https://github.com/cognica-io/uqa-engine/issues/1049) | Provide the pg_catalog tables and views that PostgreSQL 18 has and UQA lacks | Open; unverified on current main |
+| [#1051](https://github.com/cognica-io/uqa-engine/issues/1051) | Reject ALTER COLUMN TYPE on columns that views, rules, triggers, SQL-standard routine bodies and generated columns use | Open; unverified on current main |
+| [#1052](https://github.com/cognica-io/uqa-engine/issues/1052) | Re-derive input collations and rebuild dependents when ALTER COLUMN TYPE changes a column's collation | Open; unverified on current main |
+| [#1053](https://github.com/cognica-io/uqa-engine/issues/1053) | Support REINDEX | Open; unverified on current main |
+| [#1054](https://github.com/cognica-io/uqa-engine/issues/1054) | Analyze ALTER COLUMN TYPE ... USING under the original columns' collations | Open; unverified on current main |
+| [#1055](https://github.com/cognica-io/uqa-engine/issues/1055) | Derive input collations for top-level CALL arguments and EXECUTE parameters | Open; unverified on current main |
+| [#1056](https://github.com/cognica-io/uqa-engine/issues/1056) | Derive input collations in partition bound expressions | Open; unverified on current main |
+| [#1057](https://github.com/cognica-io/uqa-engine/issues/1057) | Derive the collations of FROM-function columns, FULL JOIN USING merged columns and scalar subquery results | Open; unverified on current main |
+| [#1058](https://github.com/cognica-io/uqa-engine/issues/1058) | Report 42P22 for constant expressions at plan time and for index expressions with an indeterminate collation | Open; unverified on current main |
+| [#1059](https://github.com/cognica-io/uqa-engine/issues/1059) | Report 42P22 for string comparisons, hashing and searches whose collation is indeterminate | Open; unverified on current main |
+| [#1060](https://github.com/cognica-io/uqa-engine/issues/1060) | Infer ON CONFLICT arbiters for partial unique indexes from the target's WHERE predicate | Open; unverified on current main |
+| [#1062](https://github.com/cognica-io/uqa-engine/issues/1062) | Enforce PostgreSQL's 1 GB limits on text results | Open; unverified on current main |
+| [#1071](https://github.com/cognica-io/uqa-engine/issues/1071) | Resolve built-in unnest together with SQL routines of the same name | Open; unverified on current main |
+| [#1104](https://github.com/cognica-io/uqa-engine/issues/1104) | Preserve consumer demand and lazy projection initialization for recursive CTEs | Open; unverified on current main |
+| [#1108](https://github.com/cognica-io/uqa-engine/issues/1108) | Recover the TPC-H-derived query latency lost since the 2026-08-09 snapshot | Open; unverified on current main |
+| [#1115](https://github.com/cognica-io/uqa-engine/issues/1115) | Resolve unknown and polymorphic pseudo-type cast targets | Open; unverified on current main |
+| [#1117](https://github.com/cognica-io/uqa-engine/issues/1117) | Per-execution block binding, validation and privilege analysis dominate TPC-H statement cost after #1113 | Open; unverified on current main |
+| [#1146](https://github.com/cognica-io/uqa-engine/issues/1146) | Preserve PostgreSQL-valid nested queries through protobuf decoding | Open; unverified on current main |
