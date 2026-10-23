@@ -13,6 +13,7 @@ use uqa_core::Value;
 use uqa_sql::catalog::index::IndexDefinition;
 
 mod diskann;
+mod document_attributes;
 mod name_reservations;
 mod physical;
 mod renaming;

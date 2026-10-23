@@ -46,6 +46,7 @@ impl CatalogIndexRelation {
     pub(crate) fn attributes(
         &self,
         table_columns: &[uqa_sql::ast::ColumnDef],
+        columns_declared: bool,
     ) -> Result<Vec<uqa_sql::ast::ColumnDef>, SQLError> {
         let mut columns =
             Vec::with_capacity(self.columns.len() + self.definition.included_columns.len());
@@ -65,6 +66,13 @@ impl CatalogIndexRelation {
                 .key_types
                 .get(position)
                 .or_else(|| source.map(|column| &column.ty))
+                // Document tables have no declared row schema. Their plain fields
+                // use the same text catalog type as SQL index binding; predecessor
+                // and direct-API declarations need not store key_types.
+                .or_else(|| {
+                    (!columns_declared && table_columns.is_empty() && key.column().is_some())
+                        .then_some(&uqa_sql::ast::ColumnType::Text)
+                })
                 .cloned()
                 .ok_or_else(|| {
                     SQLError::Internal("missing expression index attribute type".into())
@@ -72,9 +80,14 @@ impl CatalogIndexRelation {
             columns.push(uqa_sql::ast::ColumnDef::nullable(name, ty));
         }
         for (position, name) in self.definition.included_columns.iter().enumerate() {
-            let source = table_columns
+            let ty = table_columns
                 .iter()
                 .find(|column| column.name == *name)
+                .map(|column| &column.ty)
+                .or_else(|| {
+                    (!columns_declared && table_columns.is_empty())
+                        .then_some(&uqa_sql::ast::ColumnType::Text)
+                })
                 .ok_or_else(|| SQLError::UnknownColumn(name.clone()))?;
             let attribute_name = self
                 .definition
@@ -83,13 +96,15 @@ impl CatalogIndexRelation {
                 .unwrap_or(name);
             columns.push(uqa_sql::ast::ColumnDef::nullable(
                 attribute_name,
-                source.ty.clone(),
+                ty.clone(),
             ));
         }
         Ok(columns)
     }
 }
 
+#[cfg(test)]
+mod attributes_tests;
 mod cache;
 pub(crate) mod legacy;
 pub(in crate::catalog) use cache::IndexRelations;
