@@ -23,8 +23,9 @@ struct Source {
     remaining: usize,
     observed_owners: Arc<AtomicUsize>,
     closes: Arc<AtomicUsize>,
+    pulls: Arc<AtomicUsize>,
     fail_after: Option<usize>,
-    emitted: usize,
+    emitted: Arc<AtomicUsize>,
 }
 
 impl Source {
@@ -36,9 +37,39 @@ impl Source {
             remaining,
             observed_owners: Arc::default(),
             closes: Arc::default(),
+            pulls: Arc::default(),
             fail_after: None,
-            emitted: 0,
+            emitted: Arc::default(),
         }
+    }
+
+    fn pull(&mut self, maximum: usize) -> ExecResult<Option<Batch>> {
+        self.pulls.fetch_add(1, Ordering::Relaxed);
+        self.observed_owners
+            .fetch_max(Arc::strong_count(&self.values), Ordering::Relaxed);
+        if self
+            .fail_after
+            .is_some_and(|limit| self.emitted.load(Ordering::Relaxed) >= limit)
+        {
+            return Err(ExecError::SQL(uqa_sql::SQLError::Routine {
+                sqlstate: "22012".into(),
+                message: "late input failure".into(),
+            }));
+        }
+        let count = self.remaining.min(maximum);
+        self.remaining -= count;
+        self.emitted.fetch_add(count, Ordering::Relaxed);
+        Ok((count != 0).then(|| {
+            let rows = (0..count)
+                .map(|_| {
+                    PhysicalRow::from_shared_values(
+                        Arc::clone(&self.values),
+                        Arc::clone(&self.projection),
+                    )
+                })
+                .collect();
+            Batch::from_physical_rows(self.schema.clone(), rows)
+        }))
     }
 }
 
@@ -52,28 +83,11 @@ impl PhysicalOperator for Source {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        self.observed_owners
-            .fetch_max(Arc::strong_count(&self.values), Ordering::Relaxed);
-        if self.fail_after.is_some_and(|limit| self.emitted >= limit) {
-            return Err(ExecError::SQL(uqa_sql::SQLError::Routine {
-                sqlstate: "22012".into(),
-                message: "late input failure".into(),
-            }));
-        }
-        let count = self.remaining.min(128);
-        self.remaining -= count;
-        self.emitted += count;
-        Ok((count != 0).then(|| {
-            let rows = (0..count)
-                .map(|_| {
-                    PhysicalRow::from_shared_values(
-                        Arc::clone(&self.values),
-                        Arc::clone(&self.projection),
-                    )
-                })
-                .collect();
-            Batch::from_physical_rows(self.schema.clone(), rows)
-        }))
+        self.pull(128)
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(rows.get().min(128))
     }
 
     fn close(&mut self) -> ExecResult<()> {
@@ -88,6 +102,7 @@ fn public_result_collection_releases_physical_batches_before_reading_the_next() 
     let source = Source::new(COUNT);
     let observed_owners = Arc::clone(&source.observed_owners);
     let closes = Arc::clone(&source.closes);
+    let pulls = Arc::clone(&source.pulls);
     let result = collect_source(source).unwrap();
     assert_eq!(result.columns, ["value"]);
     assert_eq!(result.rows.len(), COUNT);
@@ -96,6 +111,11 @@ fn public_result_collection_releases_physical_batches_before_reading_the_next() 
         .iter()
         .all(|row| matches!(row.get("value"), Some(Value::Str(value)) if value == "日本λ")));
     assert_eq!(closes.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        pulls.load(Ordering::Relaxed),
+        COUNT.div_ceil(128) + 1,
+        "complete public output must keep native batches instead of one pull per row"
+    );
     assert_eq!(
         observed_owners.load(Ordering::Relaxed),
         1,
