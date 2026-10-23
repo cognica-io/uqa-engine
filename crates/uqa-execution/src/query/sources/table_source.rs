@@ -83,8 +83,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
         } => {
             let qualifier = qualifier_for(qualifier, alias.as_deref());
             if let Some(materialized) = ctes.materialized_for_scan(name) {
-                let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(crate::SharedSpillScan::new(materialized));
+                let scan: Box<dyn PhysicalOperator + 'a> = materialized.into_operator();
                 if let Some(visible) = uqa_sql::semantics::cte_reference_name(name)
                     .and_then(|name| ctes.recursive_control_width(&name))
                 {
@@ -170,12 +169,10 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                                     query,
                                 )? =>
                         {
-                            try_build_streaming_subquery_operator(
-                                context,
-                                query,
-                                params,
-                                &mut scoped_ctes,
-                            )?
+                            match try_build_streaming_subquery_operator(context, query, params, &mut scoped_ctes)? {
+                                Some(operator) => Some(operator),
+                                None => context.ctes.queries.retained_query(query, params, &scoped_ctes)?,
+                            }
                         }
                         _ => None,
                     }
@@ -216,7 +213,8 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         context.ctes,
                         output,
                         &plan.columns,
-                    )?
+                    )
+                    .map(crate::query::cte::rows::CteRows::Complete)?
                 } else {
                     crate::query::cte::materialize_plan_ctes(
                         context.ctes,
@@ -231,11 +229,10 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                                 "deferred CTE `{name}` did not produce a materialized input"
                             ))
                         })?;
-                    ctes.insert_shared(plan.name.clone(), rows.clone());
+                    ctes.insert_rows(plan.name.clone(), rows.clone());
                     rows
                 };
-                let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(crate::SharedSpillScan::new(materialized));
+                let scan: Box<dyn PhysicalOperator + 'a> = materialized.into_operator();
                 let source_columns = scan.schema().to_vec();
                 let aliases = table_source_aliases(&source_columns, &[], column_aliases);
                 let operator = qualify_source_operator_with_columns(
@@ -376,9 +373,19 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         .optimize_retained_query(&execution_plan)?
                 };
                 let execution_plan = &optimized;
-                if let Some(operator) =
-                    try_build_streaming_subquery_operator(context, execution_plan, params, ctes)?
-                {
+                let streamed = match try_build_streaming_subquery_operator(
+                    context,
+                    execution_plan,
+                    params,
+                    ctes,
+                )? {
+                    Some(operator) => Some(operator),
+                    None => context
+                        .ctes
+                        .queries
+                        .retained_query(execution_plan, params, ctes)?,
+                };
+                if let Some(operator) = streamed {
                     let source_columns = operator.schema().to_vec();
                     let aliases =
                         table_source_aliases(&source_columns, output_columns, column_aliases);

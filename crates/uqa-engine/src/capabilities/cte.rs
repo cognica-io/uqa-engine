@@ -26,6 +26,14 @@ impl Engine {
     }
 }
 impl CteBodyExecutor<StatementReadSnapshot> for Engine {
+    fn retained_query(
+        &self,
+        query: &QueryPlan,
+        params: &[SQLParam],
+        ctes: &CteScope,
+    ) -> Result<Option<Box<dyn uqa_execution::PhysicalOperator>>, SQLError> {
+        self.retained_query_operator(query.clone(), params.to_vec(), ctes.clone())
+    }
     fn execute_query(
         &self,
         query: &QueryPlan,

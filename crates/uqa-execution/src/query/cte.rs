@@ -20,6 +20,7 @@ use uqa_sql::{
 };
 pub mod context;
 pub mod recursive;
+pub mod rows;
 mod statement;
 pub(crate) mod strategy;
 pub use context::CteExecutionContext;
@@ -84,6 +85,9 @@ pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
             continue;
         }
 
+        if install_read_only_prefix(context, plan, params, ctes)? {
+            continue;
+        }
         let outer_row = ctes.row_lock_outer_row().cloned();
         let result = {
             let mut cte_scope = ctes.enter_lock_identity_emission(false);
@@ -160,6 +164,45 @@ pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
         }
     }
     Ok(())
+}
+
+fn install_read_only_prefix<S: Clone>(
+    context: CteExecutionContext<'_, S>,
+    plan: &CtePlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+) -> Result<bool, SQLError> {
+    if let CtePlanBody::Query(query) = &plan.body {
+        let scoped = {
+            let scope = ctes.enter_lock_identity_emission(false);
+            (*scope).clone()
+        };
+        if let Some(operator) = context.queries.retained_query(query, params, &scoped)? {
+            let columns = operator
+                .schema()
+                .iter()
+                .enumerate()
+                .map(|(position, column)| {
+                    (
+                        plan.columns
+                            .get(position)
+                            .cloned()
+                            .unwrap_or_else(|| column.clone()),
+                        position,
+                    )
+                })
+                .collect();
+            let operator = Box::new(
+                crate::ColumnSelection::with_positions(operator, columns).discarding_lock_origins(),
+            );
+            ctes.insert_rows(
+                plan.name.clone(),
+                rows::CteRows::from_producer(operator, context.runtime.work_mem_bytes()?),
+            );
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn execute_command_cte<S: Clone>(

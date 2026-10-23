@@ -47,7 +47,7 @@ pub fn restore_cte_names<S: Clone>(ctes: &mut CteScope<S>, saved: Vec<SavedCteBi
         ctes.remove_materialized(&binding.name);
         ctes.remove_deferred(&binding.name);
         if let Some(rows) = binding.rows {
-            ctes.insert_shared(binding.name, rows);
+            ctes.insert_rows(binding.name, rows);
         } else if let Some(plan) = binding.deferred {
             ctes.deferred_ctes.insert(binding.name, plan);
         }
@@ -66,7 +66,7 @@ pub fn restore_cte_names<S: Clone>(ctes: &mut CteScope<S>, saved: Vec<SavedCteBi
 pub struct SavedCteBinding {
     name: String,
     non_returning: bool,
-    rows: Option<crate::SharedSpill>,
+    rows: Option<crate::query::cte::rows::CteRows>,
     deferred: Option<Arc<CtePlan>>,
     definition: Option<Arc<super::definitions::DefinitionBindings>>,
     folded: bool,

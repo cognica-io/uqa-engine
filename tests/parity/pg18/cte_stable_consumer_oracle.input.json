@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "table",
+      "sql": "CREATE TABLE items(id integer primary key)"
+    },
+    {
+      "id": "rows",
+      "sql": "INSERT INTO items VALUES(1),(2)"
+    },
+    {
+      "id": "function",
+      "sql": "CREATE FUNCTION stable_counter() RETURNS integer LANGUAGE plpgsql STABLE AS $$BEGIN RAISE NOTICE 'stable_counter called'; RETURN 1; END$$"
+    },
+    {
+      "id": "folded_limit",
+      "sql": "WITH c AS (SELECT id, stable_counter() AS marker FROM items) SELECT marker FROM c LIMIT 1"
+    },
+    {
+      "id": "materialized_limit",
+      "sql": "WITH c AS MATERIALIZED (SELECT id, stable_counter() AS marker FROM items) SELECT marker FROM c LIMIT 1"
+    },
+    {
+      "id": "materialized_join",
+      "sql": "WITH c AS (SELECT id, stable_counter() AS marker FROM items) SELECT a.marker AS left_marker,b.marker AS right_marker FROM c a JOIN c b ON a.id=b.id ORDER BY a.id"
+    },
+    {
+      "id": "not_materialized_join",
+      "sql": "WITH c AS NOT MATERIALIZED (SELECT id, stable_counter() AS marker FROM items) SELECT a.marker AS left_marker,b.marker AS right_marker FROM c a JOIN c b ON a.id=b.id ORDER BY a.id"
+    }
+  ]
+}

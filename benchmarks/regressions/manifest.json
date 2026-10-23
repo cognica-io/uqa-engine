@@ -22305,6 +22305,210 @@
       "capability": "Whole-row join identity",
       "workload": "Qualified RETURNING stars over an anonymous zero-column source.",
       "invariant": "A present namespace expands to no columns while an absent namespace retains 42P01."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bounded_filter_and_projection_delay_later_expression_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/relational/tests/consumer_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "A finite consumer stops before the second failing expression.",
+      "invariant": "Rows and errors are observed only at the demanded physical prefix."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bounded_filter_counts_rejected_inputs_and_limit_offsets_without_overreading",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/relational/tests/consumer_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Rejected input candidates and an OFFSET precede one demanded output.",
+      "invariant": "Exact evaluation counts include needed rejected/offset rows and exclude later candidates."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unrestricted_pipeline_retains_batches_and_zero_limit_evaluates_no_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/relational/tests/consumer_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "An unrestricted 16-row pipeline and a zero-row LIMIT.",
+      "invariant": "Complete scans retain native batching; LIMIT 0 produces zero row evaluations."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "hash_join_resumes_duplicate_candidates_before_later_residual_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/tests/input_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Inner and outer joins under fitting and one-byte work allowances.",
+      "invariant": "Candidate evaluation and right-prefix replay preserve demanded effects, errors, multiplicity and spill."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nested_loop_consumes_only_the_requested_prefix_even_when_it_spills",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/tests/input_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Inner and outer joins under fitting and one-byte work allowances.",
+      "invariant": "Candidate evaluation and right-prefix replay preserve demanded effects, errors, multiplicity and spill."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nested_loop_replays_each_consumed_right_prefix_without_repeating_its_effects",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/tests/input_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Inner and outer joins under fitting and one-byte work allowances.",
+      "invariant": "Candidate evaluation and right-prefix replay preserve demanded effects, errors, multiplicity and spill."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "duplicate_probe_cursors_resume_independently_in_memory_and_on_disk",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/canonical_index.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Two independent cursors through 128 duplicate hash entries in memory and spilled buckets.",
+      "invariant": "Probe cursors retain exact positions without collecting a fanout or restarting disk scans."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "growing_flags_preserve_dirty_pages_and_leave_new_ordinals_unmarked",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/match_flags/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Incremental match flags across two complete pages and a partial final page.",
+      "invariant": "Dirty marks survive growth and repeated reads within the page-I/O bound."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "values_source_evaluates_each_row_only_when_its_consumer_requests_it",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/values_source/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "A VALUES producer with a successful first row and failing second row.",
+      "invariant": "The second expression is not evaluated on the first pull."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_readers_share_one_bounded_prefix_and_replay_without_effects",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/cte/rows/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Multiple CTE readers, one-byte forced spill, prefix replay, a late failure and early drop.",
+      "invariant": "One producer evaluates each reached row once, preserves earlier rows/errors and releases unconsumed state."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_prefix_keeps_prior_rows_and_the_reached_error_without_reexecution",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/cte/rows/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Multiple CTE readers, one-byte forced spill, prefix replay, a late failure and early drop.",
+      "invariant": "One producer evaluates each reached row once, preserves earlier rows/errors and releases unconsumed state."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unused_materialized_prefix_releases_its_producer_without_evaluating_input",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/cte/rows/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Multiple CTE readers, one-byte forced spill, prefix replay, a late failure and early drop.",
+      "invariant": "One producer evaluates each reached row once, preserves earlier rows/errors and releases unconsumed state."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "consumer_evaluation_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "52 independent PostgreSQL observations on four providers; 47 after each persistent reopen.",
+      "invariant": "Early consumers match row values, types, errors, sequence effects, shared CTE prefixes and cursor behavior."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "bounded_effects_match_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "50 independent PostgreSQL observations on four providers; 48 after each persistent reopen.",
+      "invariant": "Early consumers match row values, types, errors, sequence effects, shared CTE prefixes and cursor behavior."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "materialized_prefix_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "60 independent PostgreSQL observations on four providers; 57 after each persistent reopen.",
+      "invariant": "Early consumers match row values, types, errors, sequence effects, shared CTE prefixes and cursor behavior."
     }
   ]
 }

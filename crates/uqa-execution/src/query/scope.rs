@@ -31,7 +31,7 @@ use subqueries::ScalarSubqueryCacheEntry;
 
 #[derive(Clone)]
 pub struct CteScope<S: Clone = ()> {
-    pub rows: BTreeMap<String, crate::SharedSpill>,
+    pub rows: BTreeMap<String, crate::query::cte::rows::CteRows>,
     deferred_ctes: BTreeMap<String, Arc<CtePlan>>,
     definition_scopes: BTreeMap<String, Arc<definitions::DefinitionBindings>>,
     folded_ctes: BTreeSet<String>,

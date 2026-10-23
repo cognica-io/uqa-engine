@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Stop nonblocking query inputs at the rows requested by LIMIT, EXISTS and cursors, preserving reached errors and sequence effects through filters, joins, LATERAL, projections, VALUES and UNION ALL. Read-only MATERIALIZED CTE consumers share one spill-bounded prefix and replay produced rows without re-evaluating their expressions; sort, aggregate and hash-build barriers retain their complete input requirements.
+
 - Distinguish absent outer-join rows from present records whose fields are all NULL. Preserve whole-row values and COUNT through LEFT/RIGHT/FULL/LATERAL joins, aliases, correlation and physical spill without copying row payloads. Retain anonymous zero-column relation names through analysis, physical source qualification, stored views and prepared queries; reject excess column aliases for known descriptors while preserving UQA's runtime-discovered columns.
 
 - Preserve whole-row operands in window evaluation, including present all-NULL records, partition and ordering keys, COUNT, lag/lead and frame functions. Retain the physical row lookup's namespace and types through in-memory and spilled execution.

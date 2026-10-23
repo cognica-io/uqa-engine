@@ -1,0 +1,257 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TABLE items(id integer primary key)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "table"
+    },
+    {
+      "sql": "INSERT INTO items VALUES(1),(2)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "rows"
+    },
+    {
+      "sql": "CREATE FUNCTION stable_counter() RETURNS integer LANGUAGE plpgsql STABLE AS $$BEGIN RAISE NOTICE 'stable_counter called'; RETURN 1; END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "function"
+    },
+    {
+      "sql": "WITH c AS (SELECT id, stable_counter() AS marker FROM items) SELECT marker FROM c LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "marker"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "stable_counter called",
+          "detail": null,
+          "hint": null
+        }
+      ],
+      "id": "folded_limit"
+    },
+    {
+      "sql": "WITH c AS MATERIALIZED (SELECT id, stable_counter() AS marker FROM items) SELECT marker FROM c LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "marker"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "stable_counter called",
+          "detail": null,
+          "hint": null
+        }
+      ],
+      "id": "materialized_limit"
+    },
+    {
+      "sql": "WITH c AS (SELECT id, stable_counter() AS marker FROM items) SELECT a.marker AS left_marker,b.marker AS right_marker FROM c a JOIN c b ON a.id=b.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "left_marker",
+            "right_marker"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "stable_counter called",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "stable_counter called",
+          "detail": null,
+          "hint": null
+        }
+      ],
+      "id": "materialized_join"
+    },
+    {
+      "sql": "WITH c AS NOT MATERIALIZED (SELECT id, stable_counter() AS marker FROM items) SELECT a.marker AS left_marker,b.marker AS right_marker FROM c a JOIN c b ON a.id=b.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "left_marker",
+            "right_marker"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "stable_counter called",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "stable_counter called",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "stable_counter called",
+          "detail": null,
+          "hint": null
+        },
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "stable_counter called",
+          "detail": null,
+          "hint": null
+        }
+      ],
+      "id": "not_materialized_join"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "4261f9612f9489ec5ed38d3d3b8376d1ddb6938ef5203c43bd1e081d5220ba27",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ]
+  }
+}

@@ -38,9 +38,9 @@ fn execution_scope_copies_do_not_duplicate_immutable_plan_payloads() {
         "execution scope copies duplicate immutable plans: {allocation:?}"
     );
 
-    let mut child = scope.clone();
+    let child = scope.clone();
     assert!(child.deferred_for_scan("source").is_some());
-    assert!(child.deferred_for_scan("source").is_none());
+    assert!(child.deferred_for_scan("source").is_some());
     assert!(scope.deferred_reference("source").is_some());
 }
 

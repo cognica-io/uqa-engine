@@ -140,12 +140,12 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
     clippy::too_many_lines,
     reason = "preserves SELECT schema and row identity"
 )]
-fn prepare_query_block_output_operator<'a, S: Clone + 'static>(
+pub(crate) fn prepare_query_block_output_operator<'a, S: Clone + 'static>(
     context: RelationalContext<'a, S>,
     mut operator: Box<dyn PhysicalOperator + 'a>,
-    original: &'a QueryBlockPlan,
+    original: &QueryBlockPlan,
     params: &'a [SQLParam],
-    ctes: &'a CteScope<S>,
+    ctes: &CteScope<S>,
     columns: &[String],
     resjunk: RelationalResjunk,
     runtime: QueryRuntimeView<'a>,

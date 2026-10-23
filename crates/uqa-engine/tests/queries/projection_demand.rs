@@ -13,6 +13,34 @@ use uqa_engine::Engine;
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn materialized_prefix_matches_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("materialized-prefix.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/materialized_prefix_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    restored["cases"].as_array_mut().unwrap().retain(|case| {
+        !matches!(
+            case["id"].as_str().unwrap(),
+            "version" | "sequence" | "view"
+        )
+    });
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 57);
+    crate::pg18_oracle::verify(&engine, &restored.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn consumer_evaluation_matches_postgresql_and_reopen(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("consumer-evaluation.db");
@@ -33,6 +61,32 @@ fn consumer_evaluation_matches_postgresql_and_reopen(#[case] provider: usize) {
         )
     });
     assert_eq!(restored["cases"].as_array().unwrap().len(), 47);
+    crate::pg18_oracle::verify(&engine, &restored.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn bounded_effects_match_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bounded-effects.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/bounded_consumer_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    restored["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| !matches!(case["id"].as_str().unwrap(), "version" | "sequence"));
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 48);
     crate::pg18_oracle::verify(&engine, &restored.to_string());
 }
 

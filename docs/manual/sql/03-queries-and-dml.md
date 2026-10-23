@@ -220,6 +220,8 @@ PostgreSQL 18 rejects a recursive query's combined top-level `ORDER BY`, `OFFSET
 
 An ordinary CTE defaults to PostgreSQL's planning policy: a side-effect-free, nonrecursive CTE referenced once may be folded into its parent, while a multiply referenced CTE is evaluated once and shared. `AS MATERIALIZED` is an optimization fence and forces one shared evaluation. `AS NOT MATERIALIZED` allows each reference to be folded and evaluated independently; PostgreSQL ignores that request for recursive or volatile CTEs and UQA Engine does the same.
 
+A read-only materialized CTE produces rows as its consumers request them. Each reference has its own position in one shared, spill-bounded prefix; reading an existing row again does not repeat its expressions or sequence effects. An unused CTE or a LIMIT 0 consumer does not evaluate its rows. A consumer that needs the complete input, such as a sort or aggregate, still drives the producer to completion, including any error reached there. Data-modifying CTEs retain the complete-execution contract below.
+
 Without `RECURSIVE`, each CTE definition sees enclosing bindings and the preceding definitions in its own `WITH` list. Its own name and later local names do not hide an enclosing binding inside that definition. Folding and materialization preserve these definition-time inputs and their output types, including prepared queries and stored views after reopening. An unavailable ordinary self or forward reference reports `42P01` with PostgreSQL's explanation and reorder/`WITH RECURSIVE` hint; `WITH RECURSIVE` retains its separate self-reference and dependency rules.
 
 ```sql execute

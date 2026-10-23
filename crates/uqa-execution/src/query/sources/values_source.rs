@@ -133,7 +133,7 @@ fn build_values_source<'a, S: Clone + 'static>(
 }
 
 /// Bind all input types before execution, then evaluate only rows pulled from the VALUES source. The owned expression rows keep their addresses stable while a source is suspended.
-fn build_values_scan<'a>(
+pub(crate) fn build_values_scan<'a>(
     types: &dyn crate::FunctionTypeResolver,
     hook: Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
     params: &'a [SQLParam],

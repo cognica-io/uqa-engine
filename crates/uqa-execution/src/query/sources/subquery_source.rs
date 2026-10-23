@@ -108,6 +108,21 @@ fn deferred_subquery_operator<'a, S: Clone + Send + Sync + 'static>(
         ctes,
         ctes.row_lock_outer_row().map(|row| &row.schema),
     )?;
+    if let Some(operator) = context.ctes.queries.retained_query(body, params, ctes)? {
+        let positions = schema
+            .columns()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(position, name)| (name, position))
+            .collect::<Vec<_>>();
+        if !schema.columns_are_open(None) {
+            return crate::ColumnSelection::with_bound_output(operator, &positions, schema)
+                .map(|operator| Box::new(operator) as Box<dyn PhysicalOperator + 'a>)
+                .map_err(crate::physical::physical_exec_error);
+        }
+        return Ok(operator);
+    }
     let context_copy = *context;
     let body = body.clone();
     let mut scope = ctes.clone();
