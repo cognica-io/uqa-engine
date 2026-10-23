@@ -22010,6 +22010,48 @@
       "capability": "Derived qualifications and row identity",
       "workload": "Seventeen independent PostgreSQL ROW observations on four providers, including matched and unmatched input behavior.",
       "invariant": "Row fields, nesting, NULL identity, collation, prepared inputs and stored views match the independent reference."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "row_lookup_keeps_present_null_records_and_column_shadowing",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/scalar/tests.rs",
+      "capability": "Whole-row window evaluation",
+      "workload": "Physical and owned row lookups over present all-NULL records and a same-name scalar column.",
+      "invariant": "Whole-row input keeps its resolution schema while a real scalar column retains precedence."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "record_arguments_and_partition_keys_keep_their_schema_after_spill",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/window/tests/source_layout.rs",
+      "capability": "Whole-row window evaluation",
+      "workload": "Record-valued window arguments and partition keys with one-byte and in-memory spill allowances.",
+      "invariant": "Present all-NULL records count as values; partitions and lag retain their source records through physical spill."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "window_record_scope_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Whole-row window evaluation",
+      "workload": "Twenty independent PostgreSQL observations on four providers; eighteen after each persistent reopen.",
+      "invariant": "Whole-row window counts, filters, partition/order keys, lag/lead, frames, views and prepared inputs preserve rows and types."
     }
   ]
 }

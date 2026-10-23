@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve whole-row operands in window evaluation, including present all-NULL records, partition and ordering keys, COUNT, lag/lead and frame functions. Retain the physical row lookup's namespace and types through in-memory and spilled execution.
+
 - Expand qualified relation stars inside ROW constructors in field order while preserving ordinary whole-row nesting, typed fields, collation and neighboring parameter/literal selections.
 
 - Apply eligible predicates before derived-table, view and folded-CTE output evaluation, including correlated LATERAL inputs. Preserve evaluation order for volatile, scalar-subquery and inner-join qualifications over simple derived inputs. Keep independently scoped input aliases distinct through positional internal identities, including scalar-correlated qualifications, local/LATERAL shadows, stored-view reopening and exact quoted CTE declaration names. Preserve implicit output labels and PostgreSQL diagnostics for hidden enclosing columns. Resolve selected whole-row fields without demanding unrelated values, keep consumer ordering after qualification, and preserve SQL92 output aliases, ordinals and ambiguity diagnostics. Move independent scalar-query qualifications with their exclusively owned query slots, including whole-row and ordered consumers and eligible DISTINCT/group/window producers. Preserve volatile and set-returning effects, slicing, group/window boundaries, positional aliases and set-operation type conversions.
