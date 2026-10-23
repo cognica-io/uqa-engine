@@ -22509,6 +22509,142 @@
       "capability": "Bounded physical consumer demand",
       "workload": "60 independent PostgreSQL observations on four providers; 57 after each persistent reopen.",
       "invariant": "Early consumers match row values, types, errors, sequence effects, shared CTE prefixes and cursor behavior."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "the_final_reader_closes_a_partially_consumed_producer_once",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/cte/rows/tests.rs",
+      "capability": "Materialized CTE resource ownership",
+      "workload": "A one-byte spill allowance and independent readers of a finite effect-counted producer.",
+      "invariant": "Dropping the final reader closes the suspended producer once without evaluating its remaining rows."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "a_reached_producer_cleanup_failure_is_retained_without_repeating_cleanup",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/cte/rows/tests.rs",
+      "capability": "Materialized CTE resource ownership",
+      "workload": "A one-byte spill allowance and independent readers of a finite effect-counted producer.",
+      "invariant": "A reached cleanup error is returned at the same boundary without repeating producer evaluation or cleanup."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "first_worker_session_during_insert_keeps_committed_statistics_current",
+      "cases": 6,
+      "case_names": [
+        "provider_1_0::trigger_at_1_0",
+        "provider_1_0::trigger_at_2_2047",
+        "provider_2_1::trigger_at_1_0",
+        "provider_2_1::trigger_at_2_2047",
+        "provider_3_2::trigger_at_1_0",
+        "provider_3_2::trigger_at_2_2047"
+      ],
+      "source": "crates/uqa-engine/src/statistics/worker/tests.rs",
+      "capability": "Automatic statistics publication",
+      "workload": "Construct the first maintenance session at two deterministic positions during a 5,000-row INSERT on native SQLite, SQLite Key/Value and redb.",
+      "invariant": "The subsequent committed statistics have the full row count and no retained pending work."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "writes_committed_after_statistics_staging_remain_due",
+      "cases": 12,
+      "case_names": [
+        "provider_1_0::undo_sample_1_false::automatic_1_false",
+        "provider_1_0::undo_sample_1_false::automatic_2_true",
+        "provider_1_0::undo_sample_2_true::automatic_1_false",
+        "provider_1_0::undo_sample_2_true::automatic_2_true",
+        "provider_2_1::undo_sample_1_false::automatic_1_false",
+        "provider_2_1::undo_sample_1_false::automatic_2_true",
+        "provider_2_1::undo_sample_2_true::automatic_1_false",
+        "provider_2_1::undo_sample_2_true::automatic_2_true",
+        "provider_3_2::undo_sample_1_false::automatic_1_false",
+        "provider_3_2::undo_sample_1_false::automatic_2_true",
+        "provider_3_2::undo_sample_2_true::automatic_1_false",
+        "provider_3_2::undo_sample_2_true::automatic_2_true"
+      ],
+      "source": "crates/uqa-engine/src/session/analyze/automatic/tests.rs",
+      "capability": "Automatic statistics publication",
+      "workload": "Stage automatic or explicit empty-table analysis, commit 5,000 rows from a peer, then commit or roll back that analysis on all three persistent providers.",
+      "invariant": "A later statistics commit cannot erase unsampled changes; savepoint rollback discards the observation and the next analysis sees all committed rows."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unused_grouping_aliases_preserve_keys_but_local_inputs_take_precedence",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_projection.rs",
+      "capability": "Projection output demand",
+      "workload": "An otherwise unused output alias with and without a same-name local GROUP BY input.",
+      "invariant": "Grouping cardinality retains output-key demand while input precedence permits independent unused-value pruning."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "grouping_output_demand_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Projection output demand",
+      "workload": "Thirteen PostgreSQL observations for grouped aliases, ordinals, sets, errors and source precedence across four providers and persistent reopen.",
+      "invariant": "Removing unused outputs preserves GROUP BY cardinality and reached errors."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "physical_subqueries_run_across_relational_scalar_sites",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_subqueries.rs",
+      "capability": "Physical subquery scope",
+      "workload": "Scalar subqueries in aggregates, HAVING, windows, ordering, limits, joins, functions and VALUES.",
+      "invariant": "Declared window slots use the same scoped types as executed rows, including finite consumer demand."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "pruning_visible_recursive_columns_retains_hidden_control_fields",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/source_projection/tests.rs",
+      "capability": "Projection output demand",
+      "workload": "Remove every public recursive working-table column while retaining a demanded hidden control field.",
+      "invariant": "Empty public output does not erase CYCLE path aliases, physical slots or values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "grouping_names_prefer_output_columns_to_enclosing_columns",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_grouping_sets/names.rs",
+      "capability": "Projection output demand",
+      "workload": "A correlated scalar aggregate and a LATERAL aggregate whose GROUP BY output alias matches an enclosing column.",
+      "invariant": "Grouping names bind to local outputs before enclosing names; streaming preserves group cardinality."
     }
   ]
 }

@@ -8,11 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Stop nonblocking query inputs at the rows requested by LIMIT, EXISTS and cursors, preserving reached errors and sequence effects through filters, joins, LATERAL, projections, VALUES and UNION ALL. Read-only MATERIALIZED CTE consumers share one spill-bounded prefix and replay produced rows without re-evaluating their expressions; sort, aggregate and hash-build barriers retain their complete input requirements.
+- Preserve concurrent writes committed after automatic or explicit ANALYZE stages its sample. Final statistics publication rechecks sampled data generations under writer preparation, keeping durable pending work and savepoint rollback behavior.
+
+- Stop nonblocking query inputs at the rows requested by LIMIT, EXISTS and cursors, preserving reached errors and sequence effects through filters, joins, LATERAL, projections, VALUES and UNION ALL. Nonrecursive read-only MATERIALIZED CTE consumers share one spill-bounded prefix and replay produced rows without re-evaluating their expressions; sort, aggregate and hash-build barriers retain their complete input requirements.
 
 - Distinguish absent outer-join rows from present records whose fields are all NULL. Preserve whole-row values and COUNT through LEFT/RIGHT/FULL/LATERAL joins, aliases, correlation and physical spill without copying row payloads. Retain anonymous zero-column relation names through analysis, physical source qualification, stored views and prepared queries; reject excess column aliases for known descriptors while preserving UQA's runtime-discovered columns.
 
-- Preserve whole-row operands in window evaluation, including present all-NULL records, partition and ordering keys, COUNT, lag/lead and frame functions. Retain the physical row lookup's namespace and types through in-memory and spilled execution.
+- Preserve whole-row operands in window evaluation, including present all-NULL records, partition and ordering keys, COUNT, lag/lead and frame functions. Retain the physical row lookup's namespace and types through in-memory and spilled execution, and use the selected scalar-subquery scope for declared window result types.
 
 - Expand qualified relation stars inside ROW constructors in field order while preserving ordinary whole-row nesting, typed fields, collation and neighboring parameter/literal selections.
 
@@ -22,7 +24,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Propagate unused-output demand through joined and lateral sources and folded CTEs, preserving join keys, outer-join rows, positional aliases and CTE dependency order.
 
-- Preserve PostgreSQL output demand through eligible UNION ALL members, including positional aliases, type-coercion barriers, ordering and unused aggregate values. Discarding an aggregate value keeps its group and empty-input row cardinality.
+- Preserve PostgreSQL output demand through eligible UNION ALL members, including positional aliases, type-coercion barriers, ordering and unused aggregate values. Discarding an aggregate value keeps its group and empty-input row cardinality; GROUP BY output aliases remain demanded while local input names retain precedence over outputs and enclosing names do not. Preserve hidden recursive CYCLE fields when pruning every public working-table column.
 
 - Preserve selected aggregate identities through SQL lowering, optimization and execution, including `pg_catalog` qualification and same-name user scalar functions. Resolve a bare function `*` as aggregate syntax with no value arguments, retaining whole-row arguments and PostgreSQL diagnostics for scalar misuse.
 
