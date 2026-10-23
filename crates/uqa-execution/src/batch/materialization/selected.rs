@@ -12,22 +12,58 @@ use super::{Arc, PhysicalRow, RowFragment, RowSchema, SmallVec, Value, NULL_SLOT
 /// slot order. The consumer initializes absent positions with SQL NULL.
 pub(crate) struct SelectedRowMaterializer {
     slots: Box<[(usize, usize)]>,
+    outputs: Box<[usize]>,
 }
 
 impl SelectedRowMaterializer {
     pub(crate) fn new(schema: &RowSchema, positions: &[Option<usize>]) -> Self {
-        let mut slots = positions
+        let outputs = positions
+            .iter()
+            .map(|position| {
+                position
+                    .and_then(|position| schema.layout_slots().get(position).copied())
+                    .unwrap_or(NULL_SLOT)
+            })
+            .collect::<Box<[_]>>();
+        let mut slots = outputs
             .iter()
             .enumerate()
-            .filter_map(|(output, position)| {
-                let slot = *schema.layout_slots().get((*position)?)?;
-                (slot != NULL_SLOT).then_some((slot, output))
-            })
+            .filter_map(|(output, &slot)| (slot != NULL_SLOT).then_some((slot, output)))
             .collect::<Vec<_>>();
         slots.sort_unstable();
         Self {
             slots: slots.into_boxed_slice(),
+            outputs,
         }
+    }
+
+    /// A single externally shared fragment cannot donate its values. Read its
+    /// existing projection directly, without sorting aliases or attempting an
+    /// atomic ownership transfer for every scan row.
+    pub(crate) fn copy_shared_row(
+        &self,
+        row: &mut PhysicalRow,
+        mut emit: impl FnMut(usize, Value),
+    ) -> bool {
+        let [fragment] = row.fragments.as_slice() else {
+            return false;
+        };
+        if Arc::strong_count(&fragment.values) == 1 {
+            return false;
+        }
+        for (output, &slot) in self.outputs.iter().enumerate() {
+            emit(output, fragment.get(slot).cloned().unwrap_or(Value::Null));
+        }
+        // Release this row now: a later row may be the last owner and can then
+        // donate its payload. Keep the inline fragment array in place.
+        row.fragments.clear();
+        row.lock_origins = None;
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ownership_attempts() -> usize {
+        OWNERSHIP_ATTEMPTS.with(std::cell::Cell::get)
     }
 
     pub(crate) fn materialize(&self, row: PhysicalRow, mut emit: impl FnMut(usize, Value)) {
@@ -142,6 +178,8 @@ fn emit_selected_values(
     selected: impl IntoIterator<Item = (usize, usize)>,
     emit: &mut impl FnMut(usize, Value),
 ) {
+    #[cfg(test)]
+    OWNERSHIP_ATTEMPTS.with(|count| count.set(count.get() + 1));
     let mut selected = selected.into_iter().peekable();
     match Arc::try_unwrap(values) {
         Ok(mut values) => {
@@ -168,4 +206,9 @@ fn emit_selected_values(
             }
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static OWNERSHIP_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }

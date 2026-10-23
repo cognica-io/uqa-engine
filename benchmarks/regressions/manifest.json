@@ -462,6 +462,32 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "shared_scan_transfer_reuses_projection_without_row_routing_or_ownership_attempts",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",
+      "capability": "Shared scan columnar transfer work",
+      "workload": "Transfer 1,024 externally shared scalar rows through reversed two- and forty-column projections.",
+      "invariant": "Output and source lifetimes remain exact, atomic ownership attempts stay at zero, and allocation count is bounded by output width rather than row count.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_scan_transfer_releases_consumed_rows_before_the_last_donation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",
+      "capability": "Last shared scan value ownership",
+      "workload": "Eight rows share one projected string/integer fragment only within a consumed batch, with an absent requested column.",
+      "invariant": "Earlier rows copy their selected values, only the final exclusive row attempts donation and retains the original payload address, and every missing position remains NULL.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "owned_columnar_transfer_moves_values_shared_only_between_input_fragments",
       "cases": 1,
       "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",

@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Read externally shared scan rows directly into columnar output, avoiding per-row projection sorting and failed ownership transfers while retaining payload donation from the final exclusive owner.
+
 - Index exact in-memory document layouts and reuse selected-field mappings across pages of the same read handle. Compile only encountered layouts while preserving duplicate/missing fields, COW snapshots, clear/replacement and retained row lifetimes.
 
 - Decode persistent selected fields directly into positional values for native SQLite and common Key/Value providers. Preserve missing fields, duplicate projections, nested values, diagnostic order, snapshots, rollback and reopening without rebuilding selected field-name maps.

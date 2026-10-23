@@ -66,7 +66,7 @@ impl ColumnarBatch {
     /// map-backed row boundary. Repeated output labels are matched to repeated
     /// logical schema positions in order, so differently-valued duplicate
     /// columns remain distinct for wire and cursor consumers.
-    pub fn from_batch(schema: &[String], batch: Batch) -> Self {
+    pub fn from_batch(schema: &[String], mut batch: Batch) -> Self {
         let row_count = batch.rows.len();
         let positions = result_column_positions(&batch.schema, schema);
         let materializer = crate::batch::SelectedRowMaterializer::new(&batch.schema, &positions);
@@ -74,11 +74,19 @@ impl ColumnarBatch {
             .iter()
             .map(|name| ColumnVector {
                 name: name.clone(),
-                values: vec![Value::Null; row_count],
+                values: Vec::with_capacity(row_count),
             })
             .collect::<Vec<_>>();
-        for (index, row) in batch.rows.into_iter().enumerate() {
-            materializer.materialize(row, |output, value| {
+        for (index, row) in batch.rows.iter_mut().enumerate() {
+            if materializer.copy_shared_row(row, |output, value| {
+                columns[output].values.push(value);
+            }) {
+                continue;
+            }
+            for column in &mut columns {
+                column.values.push(Value::Null);
+            }
+            materializer.materialize(std::mem::take(row), |output, value| {
                 columns[output].values[index] = value;
             });
         }

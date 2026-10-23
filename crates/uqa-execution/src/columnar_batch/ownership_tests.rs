@@ -16,6 +16,72 @@ fn text(value: &Value) -> &str {
 }
 
 #[test]
+fn shared_scan_transfer_reuses_projection_without_row_routing_or_ownership_attempts() {
+    for width in [2, 40] {
+        let names = (0..width)
+            .map(|slot| format!("c{slot}"))
+            .collect::<Vec<_>>();
+        let schema = RowSchema::new(names.clone());
+        let source = Arc::new((0..width).map(|slot| Value::Int(slot as i64)).collect());
+        let projection: Arc<[usize]> = (0..width).rev().collect();
+        let rows = (0..1024)
+            .map(|_| PhysicalRow::from_shared_values(Arc::clone(&source), Arc::clone(&projection)))
+            .collect();
+        let batch = Batch::from_physical_rows(schema, rows);
+        let attempts = crate::batch::SelectedRowMaterializer::ownership_attempts();
+        let mut output = None;
+        let allocations = allocation_counter::measure(|| {
+            output = Some(ColumnarBatch::from_batch(&names, batch));
+        });
+        assert_eq!(
+            crate::batch::SelectedRowMaterializer::ownership_attempts(),
+            attempts
+        );
+        assert!(
+            allocations.count_total < width as u64 * 4 + 16,
+            "{allocations:?}"
+        );
+        let output = output.unwrap();
+        assert_eq!(output.len(), 1024);
+        for (slot, column) in output.columns().iter().enumerate() {
+            assert_eq!(
+                column.values,
+                vec![Value::Int((width - slot - 1) as i64); 1024]
+            );
+        }
+        assert_eq!(Arc::strong_count(&source), 1);
+    }
+}
+
+#[test]
+fn shared_scan_transfer_releases_consumed_rows_before_the_last_donation() {
+    let value = "shared within the batch".repeat(1024);
+    let address = value.as_ptr();
+    let values = Arc::new(vec![Value::Str(value), Value::Int(7)]);
+    let projection: Arc<[usize]> = Arc::from([1, 0]);
+    let rows = (0..8)
+        .map(|_| PhysicalRow::from_shared_values(Arc::clone(&values), Arc::clone(&projection)))
+        .collect();
+    drop(values);
+    let names = vec!["number".into(), "text".into(), "absent".into()];
+    let schema = RowSchema::new(names[..2].to_vec());
+    let attempts = crate::batch::SelectedRowMaterializer::ownership_attempts();
+    let result = ColumnarBatch::from_batch(&names, Batch::from_physical_rows(schema, rows));
+    assert_eq!(
+        crate::batch::SelectedRowMaterializer::ownership_attempts() - attempts,
+        1
+    );
+    assert_eq!(result.columns()[0].values, vec![Value::Int(7); 8]);
+    assert_eq!(result.columns()[2].values, vec![Value::Null; 8]);
+    let texts = &result.columns()[1].values;
+    assert_eq!(text(&texts[7]).as_ptr(), address);
+    for value in &texts[..7] {
+        assert_eq!(value, &texts[7]);
+        assert_ne!(text(value).as_ptr(), address);
+    }
+}
+
+#[test]
 fn owned_columnar_transfer_moves_selected_payloads_without_payload_allocations() {
     let names = vec!["text".into(), "array".into()];
     let schema = RowSchema::new(names.clone());
