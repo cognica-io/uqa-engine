@@ -16,7 +16,10 @@ use crate::read_control::StorageReadControl;
 
 use super::{Document, DocumentMetadata, DocumentStore, SharedDocumentRow, StoredDocument};
 
+mod layouts;
 mod projection;
+
+use layouts::DocumentLayouts;
 
 #[derive(Debug, Default)]
 pub struct MemoryDocumentStore {
@@ -36,7 +39,7 @@ impl Clone for MemoryDocumentStore {
 #[derive(Debug, Default, Clone)]
 struct MemoryDocumentState {
     documents: BTreeMap<DocId, MemoryDocumentRow>,
-    layouts: Vec<Vec<String>>,
+    layouts: DocumentLayouts,
 }
 
 #[derive(Debug, Clone)]
@@ -86,15 +89,7 @@ impl MemoryDocumentStore {
     fn put_stored_inner(&mut self, doc_id: DocId, document: StoredDocument) {
         let state = Arc::make_mut(&mut self.state);
         let (document, metadata) = document.into_parts();
-        let (layout_id, values) =
-            if let Some(layout_id) = document_layout_id(&state.layouts, &document) {
-                (layout_id, document.into_values().collect())
-            } else {
-                let (layout, values): (Vec<_>, Vec<_>) = document.into_iter().unzip();
-                let layout_id = state.layouts.len();
-                state.layouts.push(layout);
-                (layout_id, values)
-            };
+        let (layout_id, values) = state.layouts.store(document);
         state.documents.insert(
             doc_id,
             MemoryDocumentRow {
@@ -104,16 +99,6 @@ impl MemoryDocumentStore {
             },
         );
     }
-}
-
-fn document_layout_id(layouts: &[Vec<String>], document: &Document) -> Option<usize> {
-    layouts.iter().position(|layout| {
-        layout.len() == document.len()
-            && layout
-                .iter()
-                .map(String::as_str)
-                .eq(document.keys().map(String::as_str))
-    })
 }
 
 impl DocumentStore for MemoryDocumentStore {

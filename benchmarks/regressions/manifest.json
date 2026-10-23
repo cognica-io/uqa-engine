@@ -2,6 +2,39 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "layout_discovery_checks_only_the_indexed_candidates",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/layouts.rs",
+      "capability": "Indexed document layout discovery",
+      "workload": "Create 2,048 distinct one-field layouts, then replace each in reverse order.",
+      "invariant": "Replacement uses 2,048 exact candidate comparisons instead of scanning the entire layout registry; layout identities and every value remain correct.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "layout_hash_candidates_still_require_exact_field_identity",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/layouts.rs",
+      "capability": "Document layout collision correctness",
+      "workload": "Inject a differently named layout into the selected hash bucket before its matching candidate.",
+      "invariant": "Exact ordered field identity rejects the collision and retains the correct layout ID and values.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "cloned_layout_indexes_share_names_and_keep_independent_additions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/layouts.rs",
+      "capability": "Immutable document layout ownership",
+      "workload": "Clone a populated layout registry and independently add named and zero-column document layouts.",
+      "invariant": "Existing field-name allocations remain shared; hash lookup and subsequent additions stay independent and preserve empty layout identity.",
+      "case_names": [""]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "owned_columnar_transfer_moves_values_shared_only_between_input_fragments",
