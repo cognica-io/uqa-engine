@@ -164,6 +164,7 @@ pub(super) fn prune_positions(
     for (index, projection) in inner.projections.iter().enumerate() {
         if required(index)
             || needed_by_ordering(inner, index)
+            || needed_by_grouping(inner, index, query.analyzed_source.as_deref())
             || !removable(&projection.expr, aggregates)
         {
             continue;
@@ -258,6 +259,30 @@ fn expand_local_stars(
     true
 }
 
+fn needed_by_grouping(
+    block: &QueryBlockPlan,
+    index: usize,
+    source: Option<&uqa_sql::plan::AnalyzedSource>,
+) -> bool {
+    let name = uqa_sql::semantics::projection_label_at(&block.projections[index]);
+    block
+        .group_by
+        .iter()
+        .chain(block.grouping_sets.iter().flatten())
+        .any(|expression| match expression {
+            ScalarExpr::Column(column) if *column == name => source.is_none_or(|source| {
+                uqa_sql::semantics::grouping_sets::grouping_output_name(
+                    expression,
+                    &source.schema,
+                    None,
+                )
+                .is_some()
+            }),
+            ScalarExpr::Position(position) => *position == index,
+            _ => false,
+        })
+}
+
 fn needed_by_ordering(block: &QueryBlockPlan, index: usize) -> bool {
     let projection = &block.projections[index];
     let name = uqa_sql::semantics::projection_label_at(projection);
@@ -318,6 +343,50 @@ mod tests {
     impl AggregateClassifier for NoAggregates {
         fn is_registered_aggregate(&self, _: &str) -> bool {
             false
+        }
+    }
+
+    #[test]
+    fn unused_grouping_aliases_preserve_keys_but_local_inputs_take_precedence() {
+        for (input, pruned) in [("x", true), ("v", false)] {
+            let crate::UnifiedPlan::Query(mut query) = crate::UnifiedPlan::lower(
+                uqa_sql::compile("SELECT 1/0 AS x FROM data GROUP BY x")
+                    .unwrap()
+                    .remove(0),
+            ) else {
+                panic!("query");
+            };
+            query.analyzed_source = Some(std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
+                schema: RowSchema::with_types(
+                    vec![input.into()],
+                    vec![Some(uqa_sql::ColumnType::Integer)],
+                ),
+                children: None,
+            }));
+            let output =
+                RowSchema::with_types(vec!["x".into()], vec![Some(uqa_sql::ColumnType::Integer)]);
+            prune_positions(
+                &mut query,
+                &|_| false,
+                Some(&output),
+                &NoAggregates,
+                None,
+                None,
+            );
+            let RelationalPlan::QueryBlock(block) = &query.root else {
+                panic!("block");
+            };
+            assert_eq!(
+                matches!(
+                    block.projections[0].expr,
+                    ScalarExpr::TypedLiteral {
+                        value: Value::Null,
+                        ..
+                    }
+                ),
+                pruned,
+                "input {input}"
+            );
         }
     }
 
@@ -432,6 +501,8 @@ mod tests {
                 false,
             ),
             ("SELECT 1 FROM (SELECT random() AS x FROM data) q", false),
+            ("SELECT count(*) FROM (SELECT lower(v) AS x FROM data GROUP BY x) q", false),
+            ("SELECT count(*) FROM (SELECT lower(v) AS x FROM data GROUP BY GROUPING SETS ((x), ())) q", false),
         ] {
             let crate::UnifiedPlan::Query(mut query) =
                 crate::UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))

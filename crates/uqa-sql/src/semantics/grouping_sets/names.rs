@@ -46,29 +46,27 @@ pub(crate) fn resolve_grouping_expression_reference<'a>(
     params: &[SQLParam],
 ) -> Result<&'a ScalarExpr, SQLError> {
     let mut resolved = expression;
-    if let ScalarExpr::Column(name) = expression {
-        if !is_input_column(schema, outer, name) {
-            let mut matches = projections
-                .iter()
-                .filter(|projection| crate::semantics::projection_label_at(projection) == *name);
-            if let Some(first) = matches.next() {
-                resolved = &first.expr;
-                let mut identity = None;
-                for candidate in matches {
-                    let first_identity = match &identity {
-                        Some(identity) => identity,
-                        None => identity.insert(super::expression_identity(
-                            routines, resolved, schema, params,
-                        )?),
-                    };
-                    if *first_identity
-                        != super::expression_identity(routines, &candidate.expr, schema, params)?
-                    {
-                        return Err(SQLError::Routine {
-                            sqlstate: "42702".into(),
-                            message: format!("GROUP BY \"{name}\" is ambiguous"),
-                        });
-                    }
+    if let Some(name) = grouping_output_name(expression, schema, outer) {
+        let mut matches = projections
+            .iter()
+            .filter(|projection| crate::semantics::projection_label_at(projection) == name);
+        if let Some(first) = matches.next() {
+            resolved = &first.expr;
+            let mut identity = None;
+            for candidate in matches {
+                let first_identity = match &identity {
+                    Some(identity) => identity,
+                    None => identity.insert(super::expression_identity(
+                        routines, resolved, schema, params,
+                    )?),
+                };
+                if *first_identity
+                    != super::expression_identity(routines, &candidate.expr, schema, params)?
+                {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42702".into(),
+                        message: format!("GROUP BY \"{name}\" is ambiguous"),
+                    });
                 }
             }
         }
@@ -89,6 +87,18 @@ pub(crate) fn resolve_grouping_expression_reference<'a>(
         });
     }
     Ok(resolved)
+}
+
+/// A bare GROUP BY name can select an output only when no input column at this query level takes it. Compound expressions and enclosing columns do not select outputs.
+pub fn grouping_output_name<'a>(
+    expression: &'a ScalarExpr,
+    schema: &RowSchema,
+    outer: Option<&RowSchema>,
+) -> Option<&'a str> {
+    match expression {
+        ScalarExpr::Column(name) if !is_input_column(schema, outer, name) => Some(name),
+        _ => None,
+    }
 }
 
 /// Whether `name` is a column of the query's own sources, ambiguous or not, in `schema`, which holds those columns over `outer`: `findTargetlistEntrySQL92` looks for a GROUP BY name among the columns of the query's own level only.

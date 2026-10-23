@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "alias",
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY x) s"
+    },
+    {
+      "id": "ordinal",
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY 1) s"
+    },
+    {
+      "id": "expression",
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY v+1) s"
+    },
+    {
+      "id": "sets",
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY GROUPING SETS ((x),())) s"
+    },
+    {
+      "id": "rollup",
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY ROLLUP(x)) s"
+    },
+    {
+      "id": "cube",
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY CUBE(x)) s"
+    },
+    {
+      "id": "cte",
+      "sql": "WITH s AS (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY x) SELECT count(*) AS n FROM s"
+    },
+    {
+      "id": "joined",
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY x) s CROSS JOIN (VALUES(1),(2)) q(a)"
+    },
+    {
+      "id": "input_precedence",
+      "sql": "SELECT count(*) AS n FROM (SELECT 1/0 AS x FROM (VALUES(1),(2),(2)) t(x) GROUP BY x) s"
+    },
+    {
+      "id": "unused_output",
+      "sql": "SELECT count(*) AS n FROM (SELECT 1/0 AS unused,v AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY x) s"
+    },
+    {
+      "id": "alias_error",
+      "sql": "SELECT count(*) AS n FROM (SELECT 10/v AS x FROM (VALUES(2),(0)) t(v) GROUP BY x) s"
+    },
+    {
+      "id": "empty",
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (SELECT 1 AS v WHERE false) t GROUP BY x) s"
+    }
+  ]
+}

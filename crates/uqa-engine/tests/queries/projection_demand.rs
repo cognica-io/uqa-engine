@@ -561,3 +561,23 @@ fn cte_definition_scopes_match_postgresql_and_reopen(#[case] provider: usize) {
     assert_eq!(restored["cases"].as_array().unwrap().len(), 11);
     crate::pg18_oracle::verify(&engine, &restored.to_string());
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn grouping_output_demand_matches_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("grouping-output-demand.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/grouping_output_demand_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    crate::pg18_oracle::verify(&engine, transcript);
+}

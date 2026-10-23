@@ -110,7 +110,10 @@ pub fn qualify_source_operator_with_columns<'a>(
         .collect();
     let mut selection = crate::ColumnSelection::with_identities(operator, mapping)
         .rebinding_score_sources(qualifier);
-    if selection.row_schema().is_empty() && !qualifier.is_empty() {
+    if selection.row_schema().is_empty()
+        && !qualifier.is_empty()
+        && !selection.row_schema().has_qualifier(qualifier)
+    {
         selection = selection.with_relation_qualifier(qualifier);
     }
     if rebind_lock_origins {

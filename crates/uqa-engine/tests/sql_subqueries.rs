@@ -10,11 +10,15 @@ use uqa_core::Value;
 use uqa_engine::Engine;
 
 fn exec(engine: &Engine, sql: &str) {
-    engine.sql(sql, &[]).unwrap();
+    engine
+        .sql(sql, &[])
+        .unwrap_or_else(|error| panic!("{sql}: {error:?}"));
 }
 
 fn query(engine: &Engine, sql: &str) -> uqa_sql::SQLResult {
-    engine.sql(sql, &[]).unwrap()
+    engine
+        .sql(sql, &[])
+        .unwrap_or_else(|error| panic!("{sql}: {error:?}"))
 }
 
 fn setup() -> Engine {

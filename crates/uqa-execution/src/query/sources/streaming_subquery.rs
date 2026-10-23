@@ -52,7 +52,7 @@ pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
     let mut ctes = ctes.enter_scalar_subqueries(&block.subqueries);
     let ctes: &mut CteScope<S> = &mut ctes;
     let outer_row = ctes.row_lock_outer_row().cloned();
-    let (block, source_schema) = crate::query::binding::bind_query_block_for_execution(
+    let (mut block, source_schema) = crate::query::binding::bind_query_block_for_execution(
         context.ctes.routines,
         block,
         params,
@@ -60,6 +60,16 @@ pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
         outer_row.as_ref().map(|row| &row.schema),
         uqa_sql::semantics::should_defer_distinct_limit(block),
     )?;
+    // GROUP BY output names precede enclosing columns. Bind them against this block's own input before adding the outer row, as in the lateral executor.
+    if outer_row.is_some() && matches!(block.compute, ComputePlan::Aggregate) {
+        uqa_sql::semantics::grouping_sets::bind_grouping_names(
+            context.ctes.routines,
+            block.to_mut(),
+            &source_schema,
+            None,
+            params,
+        )?;
+    }
     let source_schema = uqa_sql::binding::overlay_outer_schema(
         &source_schema,
         outer_row.as_ref().map(|row| &row.schema),

@@ -111,3 +111,83 @@ fn unused_materialized_prefix_releases_its_producer_without_evaluating_input() {
     assert!(weak.upgrade().is_none());
     assert_eq!(evaluations.load(Ordering::SeqCst), 0);
 }
+
+struct ClosingProducer {
+    input: Box<dyn PhysicalOperator>,
+    closes: Arc<AtomicUsize>,
+    fail_close: bool,
+}
+impl PhysicalOperator for ClosingProducer {
+    fn row_schema(&self) -> &RowSchema {
+        self.input.row_schema()
+    }
+    fn open(&mut self) -> ExecResult<()> {
+        self.input.open()
+    }
+    fn next(&mut self) -> ExecResult<Option<Batch>> {
+        self.input.next()
+    }
+    fn next_with_demand(&mut self, count: NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.input.next_with_demand(count)
+    }
+    fn close(&mut self) -> ExecResult<()> {
+        self.closes.fetch_add(1, Ordering::SeqCst);
+        self.input.close()?;
+        if self.fail_close {
+            Err(ExecError::Other("injected producer close error".into()))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn the_final_reader_closes_a_partially_consumed_producer_once() {
+    let evaluations = Arc::new(AtomicUsize::new(0));
+    let closes = Arc::new(AtomicUsize::new(0));
+    let rows = CteRows::from_producer(
+        Box::new(ClosingProducer {
+            input: producer(&evaluations, None),
+            closes: Arc::clone(&closes),
+            fail_close: false,
+        }),
+        1,
+    );
+    let mut first = rows.clone().into_operator();
+    let second = rows.into_operator();
+    first.open().unwrap();
+    assert_eq!(pull(first.as_mut(), 1), vec![Value::Int(0)]);
+    first.close().unwrap();
+    drop(first);
+    assert_eq!(closes.load(Ordering::SeqCst), 0);
+    drop(second);
+    assert_eq!(closes.load(Ordering::SeqCst), 1);
+    assert_eq!(evaluations.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_reached_producer_cleanup_failure_is_retained_without_repeating_cleanup() {
+    let evaluations = Arc::new(AtomicUsize::new(0));
+    let closes = Arc::new(AtomicUsize::new(0));
+    let rows = CteRows::from_producer(
+        Box::new(ClosingProducer {
+            input: producer(&evaluations, None),
+            closes: Arc::clone(&closes),
+            fail_close: true,
+        }),
+        1,
+    );
+    let mut scan = rows.into_operator();
+    scan.open().unwrap();
+    assert_eq!(pull(scan.as_mut(), 16).len(), 16);
+    for _ in 0..2 {
+        let error = scan.next().unwrap_err();
+        assert!(
+            error.to_string().contains("injected producer close error"),
+            "{error}"
+        );
+    }
+    drop(scan);
+    assert_eq!(closes.load(Ordering::SeqCst), 1);
+    assert_eq!(evaluations.load(Ordering::SeqCst), 16);
+}
