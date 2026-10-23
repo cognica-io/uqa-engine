@@ -57,6 +57,11 @@ pub(super) fn decoded(
         Some(Value::Null) | None => None,
         Some(_) => return Err(malformed("field types are not a sequence")),
     };
+    if let Some(types) = &field_types {
+        // Arc slices receive a compact immutable allocation; the intermediate
+        // typed vector stays admitted until conversion releases it.
+        workspace.reserve(crate::RowDescriptor::buffer_bytes(types.len())?)?;
+    }
     workspace.reserve(RowValue::decoded_header_bytes())?;
     workspace.check()?;
     Ok(Some(RowValue::from_validated_parts(

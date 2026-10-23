@@ -223,18 +223,13 @@ impl<'a> Frame<'a> {
                 match kind {
                     Sequence::List => Value::List(values),
                     Sequence::Row(source) => {
-                        let field_types = source
-                            .field_types()
-                            .map(|types| copier.slice(types))
-                            .transpose()?;
+                        let descriptor = source.descriptor().cloned();
+                        if let Some(descriptor) = &descriptor {
+                            self.memory.grow(descriptor.retained_buffer_bytes()?)?;
+                        }
                         self.memory.grow(RowValue::decoded_header_bytes())?;
-                        let field_types = field_types.map(|types| {
-                            let (types, memory) = types.into_parts();
-                            self.memory.absorb(memory);
-                            types
-                        });
                         (copier.check)()?;
-                        Value::Row(RowValue::from_validated_parts(values, field_types))
+                        Value::Row(RowValue::from_shared_parts(values, descriptor))
                     }
                     Sequence::Array(source, legacy_kind) => {
                         let dimensions = copier.slice(source.dimensions())?;

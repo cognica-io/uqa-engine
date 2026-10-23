@@ -9,6 +9,9 @@
 use super::{Value, ValueRetentionError};
 use crate::memory::{MemoryError, Produced, ProductionControl};
 
+mod descriptor;
+pub use descriptor::RowDescriptor;
+
 /// One field's type identity, supplied by the type-system owner. Core carries this metadata without resolving or interpreting it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RecordFieldType {
@@ -28,7 +31,7 @@ pub struct RowValue {
 #[derive(Debug, Clone, Default)]
 struct RowStorage {
     values: Vec<Value>,
-    field_types: Option<Vec<RecordFieldType>>,
+    descriptor: Option<RowDescriptor>,
 }
 
 impl RowValue {
@@ -63,24 +66,53 @@ impl RowValue {
 
     #[must_use]
     pub fn field_types(&self) -> Option<&[RecordFieldType]> {
-        self.storage.field_types.as_deref()
+        self.storage
+            .descriptor
+            .as_ref()
+            .map(RowDescriptor::field_types)
     }
 
-    /// Consume the carrier when its descriptor is no longer needed. Use `into_parts` when transforming a typed row.
+    #[must_use]
+    pub fn descriptor(&self) -> Option<&RowDescriptor> {
+        self.storage.descriptor.as_ref()
+    }
+
+    /// Form a typed row with its producer's immutable descriptor.
+    pub fn typed_shared(
+        values: Vec<Value>,
+        descriptor: RowDescriptor,
+    ) -> Result<Self, ValueRetentionError> {
+        Self::validate_width(values.len(), descriptor.field_types().len())?;
+        Ok(Self::from_shared_parts(values, Some(descriptor)))
+    }
+
+    /// Consume the carrier when its descriptor is no longer needed. Use
+    /// `into_shared_parts` when transforming values while retaining their types.
     #[must_use]
     pub fn into_values(self) -> Vec<Value> {
         self.storage.values
     }
 
+    /// Return independent owned buffers, copying the shared descriptor's types.
     #[must_use]
     pub fn into_parts(self) -> (Vec<Value>, Option<Vec<RecordFieldType>>) {
-        (self.storage.values, self.storage.field_types)
+        (
+            self.storage.values,
+            self.storage.descriptor.map(RowDescriptor::into_field_types),
+        )
+    }
+
+    /// Consume values and retain the shared producer descriptor without
+    /// materializing its field types as an independently mutable vector.
+    #[must_use]
+    pub fn into_shared_parts(self) -> (Vec<Value>, Option<RowDescriptor>) {
+        (self.storage.values, self.storage.descriptor)
     }
 
     /// Replace field values while retaining their producer descriptor. A typed row cannot change width through this interface.
     pub fn with_values(mut self, values: Vec<Value>) -> Result<Self, ValueRetentionError> {
-        if let Some(types) = &self.storage.field_types {
-            Self::validate_width(values.len(), types.len())?;
+        if let Some(descriptor) = &self.storage.descriptor {
+            Self::validate_width(values.len(), descriptor.field_types().len())?;
         }
         self.storage.values = values;
         Ok(self)
@@ -94,7 +126,9 @@ impl RowValue {
         Self::produce(values, None, control)
     }
 
-    /// Transfer both admitted buffers without copying or giving the descriptor a separate allowance.
+    /// Transfer admitted values and compact admitted field types into one
+    /// immutable descriptor. Both temporary and retained allocations use the
+    /// original allowance; repeated producers can use `typed_shared_with_control`.
     pub fn typed_with_control(
         values: Produced<Vec<Value>>,
         field_types: Produced<Vec<RecordFieldType>>,
@@ -105,15 +139,40 @@ impl RowValue {
         Self::produce(values, Some(field_types), control)
     }
 
+    /// Admit shared metadata under the invoking row's original retention
+    /// allowance without copying its field types or relaxing logical quotas.
+    pub fn typed_shared_with_control(
+        values: Produced<Vec<Value>>,
+        descriptor: RowDescriptor,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, ValueRetentionError> {
+        control.check()?;
+        Self::validate_width(values.len(), descriptor.field_types().len())?;
+        let memory = control.reserve(descriptor.retained_buffer_bytes()?)?;
+        let descriptor = control.finish(descriptor, memory)?;
+        Self::produce_shared(values, Some(descriptor), control)
+    }
+
     fn produce(
         values: Produced<Vec<Value>>,
         field_types: Option<Produced<Vec<RecordFieldType>>>,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, ValueRetentionError> {
+        let descriptor = field_types
+            .map(|fields| RowDescriptor::with_control(fields, control))
+            .transpose()?;
+        Self::produce_shared(values, descriptor, control)
+    }
+
+    fn produce_shared(
+        values: Produced<Vec<Value>>,
+        descriptor: Option<Produced<RowDescriptor>>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, ValueRetentionError> {
         control.check()?;
         let header = control.reserve(Self::decoded_header_bytes())?;
         let (values, values_memory) = values.into_parts();
-        let (field_types, types_memory) = match field_types {
+        let (descriptor, types_memory) = match descriptor {
             Some(types) => {
                 let (types, memory) = types.into_parts();
                 (Some(types), memory)
@@ -121,7 +180,7 @@ impl RowValue {
             None => (None, control.empty_reservation()),
         };
         let memory = control.combine(control.combine(values_memory, types_memory), header);
-        control.finish(Self::from_validated_parts(values, field_types), memory)
+        control.finish(Self::from_shared_parts(values, descriptor), memory)
     }
 
     pub(super) fn validate_width(values: usize, types: usize) -> Result<(), ValueRetentionError> {
@@ -144,35 +203,39 @@ impl RowValue {
         Self::retained_header_bytes()
     }
 
-    /// Values and descriptor have already passed the shape check; callers reserve their buffers and this header before transferring ownership.
+    /// Values and descriptor have passed the shape check; controlled callers
+    /// reserve this header and the new immutable descriptor before conversion.
     pub(super) fn from_validated_parts(
         values: Vec<Value>,
         field_types: Option<Vec<RecordFieldType>>,
     ) -> Self {
-        debug_assert!(field_types
+        Self::from_shared_parts(values, field_types.map(RowDescriptor::new))
+    }
+
+    pub(super) fn from_shared_parts(values: Vec<Value>, descriptor: Option<RowDescriptor>) -> Self {
+        debug_assert!(descriptor
             .as_ref()
-            .is_none_or(|types| types.len() == values.len()));
+            .is_none_or(|descriptor| descriptor.field_types().len() == values.len()));
         Self {
-            storage: Box::new(RowStorage {
-                values,
-                field_types,
-            }),
+            storage: Box::new(RowStorage { values, descriptor }),
         }
     }
 
-    /// Count the boxed header and both owned buffer capacities, excluding nested value payloads. Overflow is reported before an owner admits the retained row.
+    /// Count the boxed header, owned value capacity and logical descriptor
+    /// bytes, excluding nested payloads. Sharing does not weaken admission.
     pub fn retained_buffer_bytes(&self) -> Result<usize, MemoryError> {
         let values = self
             .storage
             .values
             .capacity()
             .checked_mul(size_of::<Value>());
-        let types = self.storage.field_types.as_ref().map_or(Some(0), |types| {
-            types.capacity().checked_mul(size_of::<RecordFieldType>())
-        });
+        let types = self
+            .storage
+            .descriptor
+            .as_ref()
+            .map_or(Ok(0), RowDescriptor::retained_buffer_bytes)?;
         values
-            .zip(types)
-            .and_then(|(values, types)| values.checked_add(types))
+            .and_then(|values| values.checked_add(types))
             .and_then(|bytes| bytes.checked_add(Self::decoded_header_bytes()))
             .ok_or(MemoryError::SizeOverflow)
     }

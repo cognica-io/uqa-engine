@@ -2,6 +2,58 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "anonymous_row_clones_share_descriptor_allocations_and_keep_values_independent",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/row/descriptor/tests.rs",
+      "capability": "Shared anonymous row descriptors",
+      "workload": "Clone a 4,096-field typed row, mutate its copied values, then drop the original owners.",
+      "invariant": "Type metadata retains one allocation while values remain independent; clone allocation is bounded by the value buffer plus 256 bytes, and descriptor lifetime follows surviving rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "controlled_anonymous_row_copies_share_metadata_without_weakening_quotas",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/row/descriptor/tests.rs",
+      "capability": "Shared descriptor admission",
+      "workload": "Copy a typed row under a retained allowance, repeat below its logical size, then cancel.",
+      "invariant": "Metadata allocation is shared but logical retention still charges its bytes; rejected copies and cancellation release all temporary leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "shared_anonymous_descriptors_preserve_owned_conversion_and_zero_field_identity",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/row/descriptor/tests.rs",
+      "capability": "Shared descriptor observations",
+      "workload": "Convert a shared row to independent owned fields, mutate the returned types and reconstruct through the shared interface.",
+      "invariant": "Original metadata and exact JSON stay unchanged; width mismatch rejects, and typed zero-field rows remain distinct from absent descriptors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "controlled_shared_row_construction_moves_values_and_retains_descriptor_identity",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/row/descriptor/tests.rs",
+      "capability": "Controlled shared row construction",
+      "workload": "Move admitted value and string buffers into a row using an existing descriptor.",
+      "invariant": "Value allocation identity and shared descriptor identity are retained, final admission covers the logical row plus payload, and dropping the row releases its own lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "paged_memory_projection_compiles_only_encountered_layouts_once",
@@ -10136,7 +10188,7 @@
       "source": "crates/uqa-core/src/types/value/cloning/tests.rs",
       "capability": "Owned value copy representation",
       "workload": "Every owned payload variant, nested values, array lower bounds and element OID, row descriptors, record/enum identities and packed bit strings.",
-      "invariant": "Clone and clone_from preserve representation and independent owned buffers, including nested type metadata.",
+      "invariant": "Clone and clone_from preserve representation and independent mutable payload buffers; immutable anonymous row descriptors share their owned allocation.",
       "case_names": [
         ""
       ]
