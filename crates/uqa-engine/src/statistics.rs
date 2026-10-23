@@ -25,6 +25,8 @@ use crate::{Engine, TableState};
 
 pub(crate) use uqa_storage::statistics_maintenance::StatisticsMaintenance as MaintenanceState;
 
+type SampledDataGenerations = Arc<[(String, Option<u64>)]>;
+
 #[derive(Clone, Default)]
 pub(crate) struct StatisticsChange {
     object_id: [u8; 16],
@@ -32,6 +34,8 @@ pub(crate) struct StatisticsChange {
     reset: bool,
     /// For changes a session keeps: a commit sequence at or after the last commit that made them, or `None` when its provider numbers no commits. An analysis that sampled at or after it has seen them.
     through: Option<u64>,
+    /// Data generations a staged sample observed. The committing writer rechecks them after earlier publications, including writes whose counters stayed private.
+    sampled_generations: Option<SampledDataGenerations>,
 }
 
 pub(crate) type StatisticsChanges = BTreeMap<String, StatisticsChange>;
@@ -133,6 +137,7 @@ impl Engine {
                     count: 0,
                     reset: false,
                     through: None,
+                    sampled_generations: None,
                 };
             }
             change.count = change.count.saturating_add(count);
@@ -146,6 +151,7 @@ impl Engine {
                 count,
                 reset: false,
                 through: None,
+                sampled_generations: None,
             },
         )]);
         let settlement = self.persist_statistics_changes(&changes)?;
@@ -172,9 +178,17 @@ impl Engine {
                 .is_some_and(|backend| backend.transaction_model().is_versioned());
         let kept = self.session.kept_statistics.lock().clone();
         let now = now_ms();
+        let revisions = if changes
+            .values()
+            .any(|change| change.sampled_generations.is_some())
+        {
+            catalog.cache_revisions()?
+        } else {
+            None
+        };
         let tables = self.storage.tables.read();
         for (name, change) in changes {
-            if change.count == 0 {
+            if change.count == 0 && change.sampled_generations.is_none() {
                 continue;
             }
             // DROP/recreate and rename cannot attach the old relation's
@@ -186,6 +200,22 @@ impl Engine {
                 continue;
             };
             let mut state = MaintenanceState::load_for(catalog, name, change.object_id)?;
+            if let Some(sampled) = &change.sampled_generations {
+                let stale_sample = revisions.as_ref().is_none_or(|current| {
+                    sampled.iter().any(|(member, generation)| {
+                        current.table_data.get(member).copied() != *generation
+                    })
+                });
+                if stale_sample && !state.dirty() {
+                    state.record_changes(change.object_id, 1, None, now)?;
+                    state.save(catalog, name)?;
+                    table.column_stats_dirty.store(true, Ordering::Release);
+                    settlement.recorded.push(name.clone());
+                }
+                if change.count == 0 {
+                    continue;
+                }
+            }
             // What the session kept counts unless an analysis has sampled the commits that made it.
             let earlier = kept
                 .get(name)
@@ -202,6 +232,7 @@ impl Engine {
                         count,
                         reset: false,
                         through: None,
+                        sampled_generations: None,
                     },
                 );
                 continue;
@@ -264,10 +295,37 @@ impl Engine {
             let previous = into.entry(name).or_default();
             if previous.object_id == change.object_id && !change.reset {
                 previous.count = previous.count.saturating_add(change.count);
+                if change.sampled_generations.is_some() {
+                    previous.sampled_generations = change.sampled_generations;
+                }
             } else {
                 *previous = change;
             }
         }
+    }
+
+    /// Keep a sample's observation in the same transaction/savepoint state as its staged statistics. Final commit rechecks it under writer preparation, rather than relying on the earlier publication decision.
+    pub(crate) fn retain_statistics_sample(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        generations: Option<Vec<(String, Option<u64>)>>,
+    ) {
+        let Some(generations) = generations else {
+            return;
+        };
+        let mut stack = self.session.transactions.lock();
+        let frame = stack
+            .last_mut()
+            .expect("statistics publication owns a transaction");
+        let change = frame.statistics_changes.entry(name.to_owned()).or_default();
+        if change.object_id != object_id {
+            *change = StatisticsChange {
+                object_id,
+                ..StatisticsChange::default()
+            };
+        }
+        change.sampled_generations = Some(generations.into());
     }
 
     pub(crate) fn clear_pending_statistics_changes(&self, name: &str, object_id: [u8; 16]) {
@@ -280,6 +338,7 @@ impl Engine {
                     count: 0,
                     reset: true,
                     through: None,
+                    sampled_generations: None,
                 },
             );
         }

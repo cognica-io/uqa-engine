@@ -189,15 +189,24 @@ fn sampled_statistics_preserve_changes_a_writer_keeps_in_its_session(
     writer.sql("INSERT INTO t VALUES (63)", &[]).unwrap();
     assert_eq!(changes(&writer), 1);
 
-    // A sample has not seen this later change. Native SQLite retains it until
-    // the writer's next change; K/V publication keeps its already recorded delta.
+    // A sample has not seen this later change. Native SQLite retains it until the writer's next change, so publication keeps a conservative dirty marker; K/V publication keeps its already recorded delta.
     worker.sql("BEGIN; ANALYZE t", &[]).unwrap();
     writer.sql("INSERT INTO t VALUES (64)", &[]).unwrap();
     assert_eq!(changes(&writer), if provider == 0 { 1 } else { 2 });
     worker.sql("COMMIT", &[]).unwrap();
-    assert_eq!(changes(&writer), u64::from(provider != 0));
+    assert_eq!(changes(&writer), 1);
     writer.sql("INSERT INTO t VALUES (65)", &[]).unwrap();
-    assert_eq!(changes(&writer), 2);
+    // The marker keeps native SQLite dirty while its writer still batches the two later changes. K/V providers publish both changes immediately.
+    assert_eq!(changes(&writer), if provider == 0 { 1 } else { 2 });
+    writer
+        .sql(
+            "INSERT INTO t SELECT n FROM generate_series(66, 120) AS g(n)",
+            &[],
+        )
+        .unwrap();
+    assert!(worker.run_automatic_analyze("public.t").unwrap());
+    assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 120);
+    assert_eq!(changes(&writer), 0);
 }
 
 #[test]
@@ -690,4 +699,53 @@ fn legacy_wide_statistics_are_bounded_on_reopen_and_replaced_without_new_writes(
         .load_column_stats("public.items")
         .unwrap();
     assert!(saved[0].histogram_json.len() < 100);
+}
+
+#[rstest::rstest]
+fn writes_committed_after_statistics_staging_remain_due(
+    #[values(0, 1, 2)] provider: usize,
+    #[values(false, true)] undo_sample: bool,
+    #[values(false, true)] automatic: bool,
+) {
+    let (_directory, writer, worker) = sessions_for(provider);
+    writer.sql("TRUNCATE t", &[]).unwrap();
+    worker.begin().unwrap();
+    worker.sql("SAVEPOINT before_sample", &[]).unwrap();
+    if automatic {
+        let sample = worker
+            .collect_automatic_analysis("public.t")
+            .unwrap()
+            .unwrap();
+        assert_eq!(sample.row_count, 0);
+        assert!(worker
+            .publish_automatic_analysis("public.t", sample)
+            .unwrap());
+    } else {
+        worker.run_analyze(Some("t")).unwrap();
+    }
+    writer
+        .sql(
+            "INSERT INTO t SELECT n FROM generate_series(1, 5000) AS g(n)",
+            &[],
+        )
+        .unwrap();
+    if undo_sample {
+        worker.sql("ROLLBACK TO before_sample", &[]).unwrap();
+    }
+    worker.commit().unwrap();
+    let catalog = worker.storage.catalog.as_deref().unwrap();
+    let pending = MaintenanceState::load(catalog, "public.t").unwrap();
+    assert!(
+        pending.due(
+            false,
+            now_ms(),
+            crate::statistics::value_size::FORMAT_VERSION
+        ),
+        "late writes were lost from statistics maintenance: {pending:?}"
+    );
+    assert!(worker.run_automatic_analyze("public.t").unwrap());
+    assert_eq!(
+        catalog.load_column_stats("public.t").unwrap()[0].row_count,
+        5000
+    );
 }
