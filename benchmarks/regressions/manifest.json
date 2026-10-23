@@ -2,6 +2,71 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_positional_body_borrows_names_and_distinguishes_missing_from_null",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/document_store/native/decoded/positional/tests.rs",
+      "capability": "Native positional body allocation",
+      "workload": "Decode a 32KB field name beside a 64KB unselected string and repeated, missing and NULL selections.",
+      "invariant": "Total allocations remain below 4KB, duplicates share values, field presence is distinct and reservations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_positional_pages_rebind_cache_columns_when_requested_order_changes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/document_store/native/decoded/positional/tests.rs",
+      "capability": "Native decoded-column projection identity",
+      "workload": "Build one cache across pages that reorder and duplicate fields, including absent values.",
+      "invariant": "Every cached column retains its own values, duplicate outputs share the same column, and query leases release after each page.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "positional_compound_failures_keep_field_order_independent_of_projection_order",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/document_store/native/decoded/positional/tests.rs",
+      "capability": "Positional compound diagnostic order",
+      "workload": "Hydrate two corrupt compound markers under reversed projection orders.",
+      "invariant": "The same first stored field fails in both orders and failed hydration releases all temporary reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "test",
+      "test": "positional_document_projections_keep_snapshots_and_reopen_in_every_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/tests/cases/mvcc/documents.rs",
+      "capability": "Persistent positional projection lifetime",
+      "workload": "Read duplicate, missing, NULL, long-name and compound fields through committed/private snapshots, callback writes, rollback and closed-file reopen.",
+      "invariant": "Selected values and their representations, tuple metadata and duplicate aliases remain correct; callbacks retain the original view and rolled-back rows stay private.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "positional_document_projections_keep_snapshots_and_reopen_on_redb",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/documents.rs",
+      "capability": "Persistent positional projection lifetime",
+      "workload": "Read duplicate, missing, NULL, long-name and compound fields through committed/private snapshots, callback writes, rollback and closed-file reopen.",
+      "invariant": "Selected values and their representations, tuple metadata and duplicate aliases remain correct; callbacks retain the original view and rolled-back rows stay private.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-core",
       "kind": "lib",
       "test": "visited_root_fields_borrow_names_and_release_discarded_payloads",

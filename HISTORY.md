@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Decode persistent selected fields directly into positional values for native SQLite and common Key/Value providers. Preserve missing fields, duplicate projections, nested values, diagnostic order, snapshots, rollback and reopening without rebuilding selected field-name maps.
+
 - Preserve concurrent writes committed after automatic or explicit ANALYZE stages its sample. Final statistics publication rechecks sampled data generations under writer preparation, keeping durable pending work and savepoint rollback behavior.
 
 - Stop nonblocking query inputs at the rows requested by LIMIT, EXISTS and cursors, preserving reached errors and sequence effects through filters, joins, LATERAL, projections, VALUES and UNION ALL. Nonrecursive read-only MATERIALIZED CTE consumers share one spill-bounded prefix and replay produced rows without re-evaluating their expressions; sort, aggregate and hash-build barriers retain their complete input requirements.

@@ -13,13 +13,7 @@ use uqa_core::{
     Value,
 };
 use uqa_storage::{
-    document_store::{
-        decoding::{
-            decode_legacy_document_text_fields_budgeted,
-            decode_legacy_document_text_projection_budgeted,
-        },
-        Document,
-    },
+    document_store::{decoding::decode_legacy_document_text_fields_budgeted, Document},
     mvcc::{SelectedRecordRead, VersionError},
     DocumentMetadata, RetainedDocumentFields, RetainedStoredDocument,
 };
@@ -30,6 +24,7 @@ use crate::mvcc::native::{decode_record, NativeRecordFamily as Family, NativeRec
 
 mod borrowed;
 mod points;
+mod positional;
 mod presence;
 
 #[cfg(test)]
@@ -76,23 +71,10 @@ impl NativeDocumentRead<'_> {
     }
 
     fn decode_body(&self, id: DocId, row: &[ValueRef<'_>]) -> SQLiteResult<Decoded> {
-        self.decode_body_with_projection(id, row, None)
-    }
-
-    fn decode_body_with_projection(
-        &self,
-        id: DocId,
-        row: &[ValueRef<'_>],
-        projection: Option<&[&str]>,
-    ) -> SQLiteResult<Decoded> {
         let body = row[2]
             .as_str()
             .map_err(|_| SQLiteError::StorageBackend("native document body must be text".into()))?;
-        let fields = if let Some(fields) = projection {
-            decode_legacy_document_text_projection_budgeted(body, fields, self.control)?
-        } else {
-            decode_legacy_document_text_fields_budgeted(body, self.control)?
-        };
+        let fields = decode_legacy_document_text_fields_budgeted(body, self.control)?;
         let metadata = super::read::metadata(row[3], self.table, id)?;
         let (fields, memory) = fields.into_parts();
         Ok(Decoded {
@@ -124,7 +106,7 @@ impl NativeDocumentRead<'_> {
         selected: &mut SelectedRecordRead<'_>,
         id: DocId,
         fields: &[&str],
-    ) -> SQLiteResult<Option<RetainedStoredDocument>> {
+    ) -> SQLiteResult<Option<positional::Projected>> {
         let Some(key) = self.selection_key(id)? else {
             return Ok(None);
         };
@@ -137,7 +119,7 @@ impl NativeDocumentRead<'_> {
             if let Some(bytes) = record.and_then(|record| record.value) {
                 let (_, values) = decode_record(&key, bytes, self.control)?;
                 row = Some(
-                    self.decode_body_with_projection(id, &values, Some(fields))
+                    self.decode_positional_body(id, &values, fields)
                         .map_err(|error| VersionError::Storage(error.into()))?,
                 );
             }
@@ -145,7 +127,7 @@ impl NativeDocumentRead<'_> {
             self.snapshot.control.check()?;
             Ok(())
         })?;
-        row.map(|row| self.hydrate_decoded(id, row, Some(fields)))
+        row.map(|row| self.hydrate_positional(id, row, fields))
             .transpose()
     }
 
@@ -252,11 +234,11 @@ impl NativeDocumentRead<'_> {
             let present = document.is_some();
             let mut projected = BudgetedVec::new(self.control.memory());
             projected.reserve(fields.len())?;
-            for field in fields {
+            for position in 0..fields.len() {
                 projected.push(
                     document
                         .as_ref()
-                        .and_then(|row| row.fields().get(*field))
+                        .and_then(|row| row.get(position))
                         .unwrap_or(&Value::Null),
                 )?;
             }

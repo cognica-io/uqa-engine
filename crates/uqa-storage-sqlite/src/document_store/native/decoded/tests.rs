@@ -10,7 +10,7 @@ use uqa_storage::{
     mvcc::VersionedSessionOptions, read_control::StorageReadControl, DocumentStore, StoredDocument,
 };
 
-fn fixture() -> SQLiteDocumentStore {
+pub(super) fn fixture() -> SQLiteDocumentStore {
     let connection = ManagedConnection::open_in_memory().unwrap();
     Catalog::open(connection.clone()).unwrap();
     connection
@@ -118,14 +118,10 @@ fn requested_projections_keep_spilled_rows_through_reentrant_writes_and_rollback
     assert_eq!(seen, ids.map(|id| (id, !matches!(id, 32 | 97))));
     assert_eq!(control.memory().used(), 0);
     assert!(store.get(1).unwrap().is_none());
-    let mut selected = captured.view.selected(&control);
-    let row = read
-        .projected(&mut selected, 17, &["bytes"])
-        .unwrap()
-        .unwrap();
+    let row = read.retained(17, Some(&["bytes"])).unwrap().unwrap();
     assert_eq!(row.metadata().tuple_xmin(), Some(42));
     assert_eq!(row.fields()["bytes"], Value::Bytes(vec![17; 8192]));
-    drop((row, selected));
+    drop(row);
     assert_eq!(control.memory().used(), 0);
 }
 

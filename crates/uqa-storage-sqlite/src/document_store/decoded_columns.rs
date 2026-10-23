@@ -130,7 +130,9 @@ impl DecodedColumns {
         let position = parked
             .iter()
             .position(|build| build.continues(table, owner, generation, fields, after))?;
-        Some(parked.remove(position))
+        let mut build = parked.remove(position);
+        build.bind_projection(fields);
+        Some(build)
     }
 
     /// Keep a build whose scan stopped at a page boundary for the page that continues it.
