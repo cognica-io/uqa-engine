@@ -7,10 +7,9 @@
 //! Lateral source execution and correlated query-block remapping.
 
 use super::{
-    build_join_operator_with_ctes, eval_scalar, query_output_shared, resolve_user_table_function,
-    validate_table_function_column_definition, CteScope, PlanSubqueryArena, QueryOutputMode,
-    SQLError, SQLParam, ScalarEvalContext, ScalarExpr, SourceContext, SourcePlan,
-    TableFunctionCall,
+    build_join_operator_with_ctes, eval_scalar, resolve_user_table_function,
+    validate_table_function_column_definition, CteScope, PlanSubqueryArena, SQLError, SQLParam,
+    ScalarEvalContext, ScalarExpr, SourceContext, SourcePlan, TableFunctionCall,
 };
 
 /// Enforce EXECUTE on each function of a lateral FROM item, which the join calls once per outer row, as `PostgreSQL` checks it when it initializes the scan, before any outer row is read.
@@ -92,7 +91,7 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) pinned_right: Option<crate::OwnedPhysicalRow>,
 }
 
-impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSource<'_, S> {
+impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLateralSource<'a, S> {
     fn admits(&mut self, right: &crate::OwnedPhysicalRow) -> crate::ExecResult<bool> {
         let Some(filter) = self.right_filter.as_ref() else {
             return Ok(true);
@@ -112,14 +111,10 @@ impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSour
         ))
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "preserves source schema and row identity"
-    )]
     fn rows_for(
         &mut self,
         left_row: &crate::OwnedPhysicalRow,
-    ) -> crate::ExecResult<crate::LateralRows> {
+    ) -> crate::ExecResult<crate::LateralRows<'a>> {
         if let Some(row) = self.pinned_right.as_ref() {
             return Ok(Box::new(std::iter::once(Ok(row.clone()))));
         }
@@ -133,31 +128,6 @@ impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSour
         } else {
             left_row
         };
-        if matches!(&self.right, SourcePlan::FunctionGroup { .. }) {
-            let mut scoped_ctes = self.ctes.clone();
-            scoped_ctes.set_row_lock_outer_row(left_row.clone());
-            let operator = build_join_operator_with_ctes(
-                &self.context,
-                &self.right,
-                self.params,
-                &mut scoped_ctes,
-                None,
-                None,
-            )?;
-            let columns = operator.schema().to_vec();
-            let output = crate::query::collection::collect_query_operator(
-                self.context.relational.runtime,
-                columns,
-                operator,
-                QueryOutputMode::SharedSpill,
-            )?;
-            let rows = query_output_shared(output, "lateral function group")?;
-            let schema = self.right_schema.clone();
-            return Ok(Box::new(
-                rows.read_rows()?
-                    .map(move |row| row?.relabel(schema.clone())),
-            ));
-        }
         if let SourcePlan::Function {
             name,
             binding,
@@ -232,52 +202,19 @@ impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSour
                 row.map(|row| crate::OwnedPhysicalRow::new(schema.clone(), row))
             })));
         }
-        match &self.right {
-            SourcePlan::Subquery { body, .. } => {
-                let output = self.context.ctes.queries.execute_lateral_query(
-                    body,
-                    left_row,
-                    self.params,
-                    &self.ctes,
-                )?;
-                let rows = query_output_shared(output, "lateral subquery")?;
-                let reader = rows.read_rows()?;
-                let schema = self.right_schema.clone();
-                Ok(Box::new(
-                    reader.map(move |row| row?.relabel(schema.clone())),
-                ))
-            }
-            SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. } => {
-                Err(crate::ExecError::SQL(SQLError::Internal(
-                    "function source reached the relational-source fallback".into(),
-                )))
-            }
-            source => {
-                let mut scoped_ctes = self.ctes.clone();
-                scoped_ctes.set_row_lock_outer_row(left_row.clone());
-                let operator = build_join_operator_with_ctes(
-                    &self.context,
-                    source,
-                    self.params,
-                    &mut scoped_ctes,
-                    None,
-                    None,
-                )?;
-                let columns = operator.schema().to_vec();
-                let output = crate::query::collection::collect_query_operator(
-                    self.context.relational.runtime,
-                    columns,
-                    operator,
-                    QueryOutputMode::SharedSpill,
-                )?;
-                let rows = query_output_shared(output, "lateral source")?;
-                let schema = self.right_schema.clone();
-                Ok(Box::new(
-                    rows.read_rows()?
-                        .map(move |row| row?.relabel(schema.clone())),
-                ))
-            }
-        }
+        let mut scoped_ctes = self.ctes.clone();
+        scoped_ctes.set_row_lock_outer_row(left_row.clone());
+        let operator = build_join_operator_with_ctes(
+            &self.context,
+            &self.right,
+            self.params,
+            &mut scoped_ctes,
+            None,
+            None,
+        )?;
+        let schema = self.right_schema.clone();
+        let rows = crate::physical::demand::OperatorRows::open(operator)?;
+        Ok(Box::new(rows.map(move |row| row?.relabel(schema.clone()))))
     }
 
     fn matches(&mut self, joined: &crate::OwnedPhysicalRow) -> crate::ExecResult<bool> {

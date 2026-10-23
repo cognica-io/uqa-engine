@@ -748,7 +748,7 @@ impl<S: Clone + Send + Sync + 'static> PhysicalOperator for LockRows<'_, S> {
                 }
                 continue;
             }
-            let Some(batch) = self.input.next()? else {
+            let Some(batch) = self.input.next_with_demand(crate::physical::demand::ONE)? else {
                 return Ok(None);
             };
             self.pending_rows = batch.rows.into_iter();

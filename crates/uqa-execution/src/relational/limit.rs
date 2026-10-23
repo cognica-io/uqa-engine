@@ -35,6 +35,7 @@ enum DirectionalLimitState {
 
 pub struct Limit<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
+    input_pending: crate::physical::demand::PendingRows,
     offset: u64,
     limit: Option<u64>,
     skipped: u64,
@@ -51,6 +52,7 @@ impl<'a> Limit<'a> {
         let schema = child.row_schema().clone();
         Self {
             child,
+            input_pending: crate::physical::demand::PendingRows::default(),
             offset,
             limit,
             skipped: 0,
@@ -78,6 +80,7 @@ impl<'a> Limit<'a> {
         }
         Self {
             child,
+            input_pending: crate::physical::demand::PendingRows::default(),
             offset,
             limit: Some(limit),
             skipped: 0,
@@ -363,6 +366,7 @@ impl PhysicalOperator for Limit<'_> {
     }
 
     fn open(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.skipped = 0;
         self.emitted = 0;
         if let Some(with_ties) = self.with_ties.as_mut() {
@@ -387,6 +391,35 @@ impl PhysicalOperator for Limit<'_> {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
+        self.pull(None)
+    }
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(Some(rows))
+    }
+
+    fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
+        self.next_directional(direction)
+    }
+
+    fn rewind(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
+        self.reset_directional_state();
+        self.child.rewind()
+    }
+
+    fn close(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
+        self.directional_current = None;
+        if let Some(with_ties) = self.with_ties.as_mut() {
+            with_ties.boundary = None;
+            with_ties.types = Vec::new();
+        }
+        self.child.close()
+    }
+}
+
+impl Limit<'_> {
+    fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
         if self.limit == Some(0)
             || self
                 .with_ties
@@ -397,7 +430,21 @@ impl PhysicalOperator for Limit<'_> {
             return Ok(None);
         }
         loop {
-            let Some(batch) = self.child.next()? else {
+            let remaining = self.limit.map(|limit| limit.saturating_sub(self.emitted));
+            let requested = demand.map(|rows| rows.get() as u64);
+            let output = match (remaining, requested) {
+                (Some(0), _) if self.with_ties.is_some() => Some(1),
+                (Some(remaining), Some(requested)) => Some(remaining.min(requested)),
+                (remaining, requested) => remaining.or(requested),
+            };
+            let input = output.map(|output| {
+                let count = output
+                    .saturating_add(self.offset.saturating_sub(self.skipped))
+                    .min(crate::batch::DEFAULT_BATCH_SIZE as u64)
+                    .max(1) as usize;
+                std::num::NonZeroUsize::new(count).expect("positive input quota")
+            });
+            let Some(batch) = self.input_pending.pull(self.child.as_mut(), input)? else {
                 return Ok(None);
             };
             let mut buf = Vec::new();
@@ -470,23 +517,5 @@ impl PhysicalOperator for Limit<'_> {
                 return Ok(Some(Batch::from_physical_rows(self.schema.clone(), buf)));
             }
         }
-    }
-
-    fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
-        self.next_directional(direction)
-    }
-
-    fn rewind(&mut self) -> ExecResult<()> {
-        self.reset_directional_state();
-        self.child.rewind()
-    }
-
-    fn close(&mut self) -> ExecResult<()> {
-        self.directional_current = None;
-        if let Some(with_ties) = self.with_ties.as_mut() {
-            with_ties.boundary = None;
-            with_ties.types = Vec::new();
-        }
-        self.child.close()
     }
 }

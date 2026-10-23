@@ -9,9 +9,11 @@
 use crate::RowSchemaExecution;
 mod canonical_index;
 mod direct_index;
+mod iteration;
 mod nested_loop;
 pub(crate) mod presence;
 mod row_store;
+use iteration::HashJoinState;
 
 use smallvec::SmallVec;
 use uqa_core::Value;
@@ -38,8 +40,15 @@ use canonical_index::{stable_hash, DiskHashIndex, HASH_BUCKETS};
 const DEFAULT_JOIN_WORK_MEM_BYTES: usize = 64 * 1024 * 1024;
 
 /// One probe batch establishes whether a join needs its other input, without draining the probe or retaining more than its ordinary batch allowance.
-fn next_nonempty_batch(input: &mut dyn PhysicalOperator) -> ExecResult<Option<Batch>> {
-    while let Some(batch) = input.next()? {
+fn next_nonempty_batch(
+    input: &mut dyn PhysicalOperator,
+    demanded: bool,
+) -> ExecResult<Option<Batch>> {
+    while let Some(batch) = if demanded {
+        input.next_with_demand(crate::physical::demand::ONE)?
+    } else {
+        input.next()?
+    } {
         if !batch.rows.is_empty() {
             return Ok(Some(batch));
         }
@@ -58,23 +67,6 @@ fn output_schema(
         right,
         left_nulls.keys().chain(right_nulls.keys()).cloned(),
     )
-}
-
-fn push_output_row(
-    output: &mut SpillBuffer,
-    pending: &mut Vec<PhysicalRow>,
-    schema: &RowSchema,
-    row: PhysicalRow,
-) -> ExecResult<()> {
-    pending.push(row);
-    if pending.len() == crate::batch::DEFAULT_BATCH_SIZE {
-        output.push(Batch::from_physical_rows(
-            schema.clone(),
-            std::mem::take(pending),
-        ))?;
-        pending.reserve(crate::batch::DEFAULT_BATCH_SIZE);
-    }
-    Ok(())
 }
 
 fn join_io_error(operation: &str, error: impl std::fmt::Display) -> ExecError {
@@ -119,6 +111,9 @@ pub struct HashJoin<'a> {
     work_mem_bytes: usize,
     output: Option<crate::spill::SpillDrain>,
     streaming_unique: Option<UniqueHashJoinState>,
+    streaming: Option<HashJoinState>,
+    probe_pending: crate::physical::demand::PendingRows,
+    initialized: bool,
     prefetched_left: Option<Batch>,
     output_spilled: SpillState,
     right_input_spilled: SpillState,
@@ -291,6 +286,9 @@ impl<'a> HashJoin<'a> {
             work_mem_bytes,
             output: None,
             streaming_unique: None,
+            streaming: None,
+            probe_pending: crate::physical::demand::PendingRows::default(),
+            initialized: false,
             prefetched_left: None,
             output_spilled: SpillState::InMemory,
             right_input_spilled: SpillState::InMemory,
@@ -357,10 +355,14 @@ impl<'a> HashJoin<'a> {
         self.build_left
     }
 
-    fn next_left_batch(&mut self) -> ExecResult<Option<Batch>> {
-        self.prefetched_left
-            .take()
-            .map_or_else(|| self.left.next(), |batch| Ok(Some(batch)))
+    fn next_left_batch(
+        &mut self,
+        demand: Option<std::num::NonZeroUsize>,
+    ) -> ExecResult<Option<Batch>> {
+        if let Some(batch) = self.prefetched_left.take() {
+            self.probe_pending.retain_batch(batch);
+        }
+        self.probe_pending.pull(self.left.as_mut(), demand)
     }
 
     fn rebuild_encoded_index(
@@ -470,7 +472,7 @@ impl<'a> HashJoin<'a> {
             return Ok(());
         }
 
-        let mut left_by_key = match encoded_index {
+        let left_by_key = match encoded_index {
             Some(index) => index,
             None => {
                 let (positions, _) = direct_positions
@@ -494,50 +496,8 @@ impl<'a> HashJoin<'a> {
             });
             return Ok(());
         }
-        let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
-
         self.right.open()?;
-        while let Some(batch) = self.right.next()? {
-            for right_row in batch.rows {
-                let Some(key) = self.key(
-                    &self.right_keys,
-                    &self.right_key_types,
-                    self.right_key_positions.as_deref(),
-                    &right_row,
-                    &batch.schema,
-                )?
-                else {
-                    continue;
-                };
-                if self.predicate.is_none() {
-                    match left_by_key.memory_match_summary(&key) {
-                        Some(MemoryMatchSummary::Absent) => continue,
-                        Some(MemoryMatchSummary::Single(index)) => {
-                            let merged = left.with_row(index, |left_row| {
-                                Ok(PhysicalRow::concat_right_owned(left_row, right_row))
-                            })?;
-                            push_output_row(&mut output, &mut pending, &self.schema, merged)?;
-                            continue;
-                        }
-                        Some(MemoryMatchSummary::Multiple) | None => {}
-                    }
-                }
-                left_by_key.for_each_match(&key, &mut |index| {
-                    left.with_row(index, |left_row| {
-                        let merged = PhysicalRow::concat(left_row, &right_row);
-                        if self.matches(&merged)? {
-                            push_output_row(&mut output, &mut pending, &self.schema, merged)?;
-                        }
-                        Ok(())
-                    })
-                })?;
-            }
-        }
-        if !pending.is_empty() {
-            output.push(Batch::from_physical_rows(self.schema.clone(), pending))?;
-        }
-        self.output_spilled = output.has_spilled().into();
-        self.output = Some(output.drain()?);
+        self.streaming = Some(HashJoinState::new(left, left_by_key, true, self.kind)?);
         Ok(())
     }
 
@@ -602,12 +562,13 @@ impl<'a> HashJoin<'a> {
     fn next_streaming_unique(
         &mut self,
         state: &mut UniqueHashJoinState,
+        demand: Option<std::num::NonZeroUsize>,
     ) -> ExecResult<Option<Batch>> {
         loop {
             let next = if state.build_left {
-                self.right.next()?
+                self.probe_pending.pull(self.right.as_mut(), demand)?
             } else {
-                self.next_left_batch()?
+                self.next_left_batch(demand)?
             };
             let Some(batch) = next else {
                 return Ok(None);
@@ -690,20 +651,12 @@ impl<'a> HashJoin<'a> {
     }
 }
 
-impl PhysicalOperator for HashJoin<'_> {
-    fn row_schema(&self) -> &RowSchema {
-        &self.schema
-    }
-
-    fn estimated_cardinality(&self) -> Option<u64> {
-        self.estimated_cardinality
-    }
-
+impl HashJoin<'_> {
     #[expect(
         clippy::too_many_lines,
         reason = "join driver keeps key layout, NULL policy, and output order aligned"
     )]
-    fn open(&mut self) -> ExecResult<()> {
+    fn initialize(&mut self, demanded: bool) -> ExecResult<()> {
         self.output = None;
         self.left_key_types = self
             .left_keys
@@ -728,7 +681,7 @@ impl PhysicalOperator for HashJoin<'_> {
         }
         if !matches!(self.kind, JoinKind::Right | JoinKind::Full) {
             self.left.open()?;
-            self.prefetched_left = next_nonempty_batch(self.left.as_mut())?;
+            self.prefetched_left = next_nonempty_batch(self.left.as_mut(), demanded)?;
             if self.prefetched_left.is_none() {
                 self.output = Some(SpillBuffer::new(output_budget).drain()?);
                 return Ok(());
@@ -811,7 +764,7 @@ impl PhysicalOperator for HashJoin<'_> {
             return Ok(());
         }
 
-        let mut right_by_key = match encoded_index {
+        let right_by_key = match encoded_index {
             Some(index) => index,
             None => {
                 let (positions, _) = direct_positions
@@ -839,110 +792,65 @@ impl PhysicalOperator for HashJoin<'_> {
             return Ok(());
         }
 
-        let mut matched_right = matches!(self.kind, JoinKind::Right | JoinKind::Full)
-            .then(|| MatchFlags::new(right.len(), "join"))
-            .transpose()?;
-        let mut output = SpillBuffer::new(output_budget);
-        let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
-
         if matches!(self.kind, JoinKind::Right | JoinKind::Full) {
             self.left.open()?;
         }
-        while let Some(batch) = self.next_left_batch()? {
-            for left_row in batch.rows {
-                let mut matched_left = false;
-                if let Some(key) = self.key(
-                    &self.left_keys,
-                    &self.left_key_types,
-                    self.left_key_positions.as_deref(),
-                    &left_row,
-                    &batch.schema,
-                )? {
-                    if self.predicate.is_none() {
-                        match right_by_key.memory_match_summary(&key) {
-                            Some(MemoryMatchSummary::Absent) => {
-                                if matches!(self.kind, JoinKind::Left | JoinKind::Full) {
-                                    push_output_row(
-                                        &mut output,
-                                        &mut pending,
-                                        &self.schema,
-                                        PhysicalRow::concat_left_owned(left_row, &self.right_nulls),
-                                    )?;
-                                }
-                                continue;
-                            }
-                            Some(MemoryMatchSummary::Single(index)) => {
-                                let merged = right.with_row(index, |right_row| {
-                                    Ok(PhysicalRow::concat_left_owned(left_row, right_row))
-                                })?;
-                                push_output_row(&mut output, &mut pending, &self.schema, merged)?;
-                                if let Some(flags) = matched_right.as_mut() {
-                                    flags.mark(index)?;
-                                }
-                                continue;
-                            }
-                            Some(MemoryMatchSummary::Multiple) | None => {}
-                        }
-                    }
-                    right_by_key.for_each_match(&key, &mut |index| {
-                        right.with_row(index, |right_row| {
-                            let merged = PhysicalRow::concat(&left_row, right_row);
-                            if self.matches(&merged)? {
-                                push_output_row(&mut output, &mut pending, &self.schema, merged)?;
-                                if let Some(flags) = matched_right.as_mut() {
-                                    flags.mark(index)?;
-                                }
-                                matched_left = true;
-                            }
-                            Ok(())
-                        })
-                    })?;
-                }
-                if !matched_left && matches!(self.kind, JoinKind::Left | JoinKind::Full) {
-                    push_output_row(
-                        &mut output,
-                        &mut pending,
-                        &self.schema,
-                        PhysicalRow::concat_left_owned(left_row, &self.right_nulls),
-                    )?;
-                }
-            }
-        }
-
-        if matches!(self.kind, JoinKind::Right | JoinKind::Full) {
-            let matched_right = matched_right.as_mut().ok_or_else(|| {
-                ExecError::Other("right/full hash join has no match flags".into())
-            })?;
-            for index in 0..right.len() {
-                if !matched_right.is_marked(index)? {
-                    right.with_row(index, |right_row| {
-                        push_output_row(
-                            &mut output,
-                            &mut pending,
-                            &self.schema,
-                            PhysicalRow::concat(&self.left_nulls, right_row),
-                        )
-                    })?;
-                }
-            }
-        }
-        if !pending.is_empty() {
-            output.push(Batch::from_physical_rows(self.schema.clone(), pending))?;
-        }
-        self.output_spilled = output.has_spilled().into();
-        self.output = Some(output.drain()?);
+        self.streaming = Some(HashJoinState::new(right, right_by_key, false, self.kind)?);
         Ok(())
     }
 
-    fn next(&mut self) -> ExecResult<Option<Batch>> {
+    fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
+        if !self.initialized {
+            self.initialized = true;
+            self.initialize(demand.is_some())?;
+        }
         if let Some(mut state) = self.streaming_unique.take() {
-            let result = self.next_streaming_unique(&mut state);
+            let result = self.next_streaming_unique(&mut state, demand);
             self.streaming_unique = Some(state);
+            return result;
+        }
+        if let Some(mut state) = self.streaming.take() {
+            let rows = demand.map_or(crate::batch::DEFAULT_BATCH_SIZE, |rows| {
+                rows.get().min(crate::batch::DEFAULT_BATCH_SIZE)
+            });
+            let result = self.next_streaming(&mut state, rows, demand.is_some());
+            self.streaming = Some(state);
             return result;
         }
         self.output
             .as_mut()
             .map_or(Ok(None), |output| output.next().transpose())
+    }
+}
+
+impl PhysicalOperator for HashJoin<'_> {
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        self.estimated_cardinality
+    }
+
+    fn open(&mut self) -> ExecResult<()> {
+        self.output = None;
+        self.streaming_unique = None;
+        self.streaming = None;
+        self.probe_pending.clear();
+        self.prefetched_left = None;
+        self.initialized = false;
+        self.output_spilled = SpillState::InMemory;
+        self.right_input_spilled = SpillState::InMemory;
+        self.hash_index_spilled = SpillState::InMemory;
+        Ok(())
+    }
+
+    fn next(&mut self) -> ExecResult<Option<Batch>> {
+        self.pull(None)
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(Some(rows))
     }
 
     fn close(&mut self) -> ExecResult<()> {
@@ -950,6 +858,8 @@ impl PhysicalOperator for HashJoin<'_> {
         self.left_key_types.clear();
         self.right_key_types.clear();
         self.streaming_unique = None;
+        self.streaming = None;
+        self.probe_pending.clear();
         self.prefetched_left = None;
         let left = self.left.close();
         let right = self.right.close();

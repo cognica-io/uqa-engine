@@ -25,6 +25,7 @@ mod tests;
 /// child schema is replaced with the output aliases.
 pub struct Project<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
+    input_pending: crate::physical::demand::PendingRows,
     computed: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
     evaluator: SharedExpressionEvaluator<'a>,
     schema: RowSchema,
@@ -218,6 +219,7 @@ impl<'a> Project<'a> {
             projection_layout(child.row_schema(), projections, &evaluator, false);
         Self {
             child,
+            input_pending: crate::physical::demand::PendingRows::default(),
             computed: crate::scalar::PreparedExpressions::scalars(computed),
             evaluator,
             schema,
@@ -281,6 +283,7 @@ impl<'a> Project<'a> {
             projection_layout(child.row_schema(), projections, &evaluator, true);
         Self {
             child,
+            input_pending: crate::physical::demand::PendingRows::default(),
             computed: crate::scalar::PreparedExpressions::scalars(computed),
             evaluator,
             schema,
@@ -360,6 +363,18 @@ impl<'a> Project<'a> {
     }
 }
 
+impl Project<'_> {
+    fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
+        if let Some(batch) = self.next_pending()? {
+            return Ok(Some(batch));
+        }
+        let Some(batch) = self.input_pending.pull(self.child.as_mut(), demand)? else {
+            return Ok(None);
+        };
+        self.prepare_batch(batch)
+    }
+}
+
 impl PhysicalOperator for Project<'_> {
     fn row_schema(&self) -> &RowSchema {
         &self.schema
@@ -379,18 +394,17 @@ impl PhysicalOperator for Project<'_> {
     }
 
     fn open(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.pending = None;
         self.child.open()
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        if let Some(batch) = self.next_pending()? {
-            return Ok(Some(batch));
-        }
-        let Some(batch) = self.child.next()? else {
-            return Ok(None);
-        };
-        self.prepare_batch(batch)
+        self.pull(None)
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(Some(rows))
     }
 
     fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
@@ -404,11 +418,13 @@ impl PhysicalOperator for Project<'_> {
     }
 
     fn rewind(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.pending = None;
         self.child.rewind()
     }
 
     fn close(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.pending = None;
         self.child.close()
     }

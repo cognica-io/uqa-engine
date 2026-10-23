@@ -14,6 +14,7 @@ use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, InternalRelationId};
 
 mod collations;
+mod consumer_demand;
 mod range_peers;
 
 fn row<const N: usize>(pairs: [(&str, Value); N]) -> ResultRow {

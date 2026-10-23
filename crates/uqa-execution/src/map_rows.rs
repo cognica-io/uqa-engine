@@ -19,6 +19,7 @@ pub type SharedRowMapper<'a> = Arc<dyn Fn(ResultRow) -> ExecResult<ResultRow> + 
 /// backpressure or collecting the child relation.
 pub struct MapRows<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
+    input_pending: crate::physical::demand::PendingRows,
     mapper: SharedRowMapper<'a>,
     schema: RowSchema,
 }
@@ -31,9 +32,24 @@ impl<'a> MapRows<'a> {
     ) -> Self {
         Self {
             child,
+            input_pending: crate::physical::demand::PendingRows::default(),
             mapper,
             schema: RowSchema::new(schema),
         }
+    }
+}
+
+impl MapRows<'_> {
+    fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
+        let Some(batch) = self.input_pending.pull(self.child.as_mut(), demand)? else {
+            return Ok(None);
+        };
+        let rows = batch
+            .rows
+            .iter()
+            .map(|row| (self.mapper)(batch.schema.view(row).to_result_row()))
+            .collect::<ExecResult<Vec<_>>>()?;
+        Ok(Some(Batch::new(self.schema.clone(), rows)))
     }
 }
 
@@ -47,22 +63,20 @@ impl PhysicalOperator for MapRows<'_> {
     }
 
     fn open(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.child.open()
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        let Some(batch) = self.child.next()? else {
-            return Ok(None);
-        };
-        let rows = batch
-            .rows
-            .iter()
-            .map(|row| (self.mapper)(batch.schema.view(row).to_result_row()))
-            .collect::<ExecResult<Vec<_>>>()?;
-        Ok(Some(Batch::new(self.schema.clone(), rows)))
+        self.pull(None)
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(Some(rows))
     }
 
     fn close(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.child.close()
     }
 }

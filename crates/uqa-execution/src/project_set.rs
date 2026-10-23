@@ -59,16 +59,56 @@ impl<'a> ProjectSet<'a> {
         }
     }
 
-    fn next_input(&mut self) -> ExecResult<Option<ResultRow>> {
+    fn next_input(&mut self, demanded: bool) -> ExecResult<Option<ResultRow>> {
         loop {
             if let Some(row) = self.input.next() {
                 return Ok(Some(row));
             }
-            let Some(batch) = self.child.next()? else {
+            let Some(batch) = (if demanded {
+                self.child.next_with_demand(crate::physical::demand::ONE)?
+            } else {
+                self.child.next()?
+            }) else {
                 return Ok(None);
             };
             self.input = batch.into_result_rows().into_iter();
         }
+    }
+}
+
+impl ProjectSet<'_> {
+    fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
+        let batch_size = demand.map_or(DEFAULT_BATCH_SIZE, |rows| {
+            rows.get().min(DEFAULT_BATCH_SIZE)
+        });
+        if self.exhausted && self.projected.is_none() {
+            return Ok(None);
+        }
+
+        let mut rows = Vec::with_capacity(batch_size);
+        while rows.len() < batch_size {
+            if let Some(projected) = self.projected.as_mut() {
+                match projected.next() {
+                    Some(row) => {
+                        rows.push(row?);
+                        continue;
+                    }
+                    None => self.projected = None,
+                }
+            }
+
+            match self.next_input(demand.is_some())? {
+                Some(row) => self.projected = Some(self.projector.project(&row)?),
+                None => {
+                    self.exhausted = true;
+                    break;
+                }
+            }
+        }
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Batch::new(self.schema.clone(), rows)))
     }
 }
 
@@ -85,34 +125,11 @@ impl PhysicalOperator for ProjectSet<'_> {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        if self.exhausted && self.projected.is_none() {
-            return Ok(None);
-        }
+        self.pull(None)
+    }
 
-        let mut rows = Vec::with_capacity(DEFAULT_BATCH_SIZE);
-        while rows.len() < DEFAULT_BATCH_SIZE {
-            if let Some(projected) = self.projected.as_mut() {
-                match projected.next() {
-                    Some(row) => {
-                        rows.push(row?);
-                        continue;
-                    }
-                    None => self.projected = None,
-                }
-            }
-
-            match self.next_input()? {
-                Some(row) => self.projected = Some(self.projector.project(&row)?),
-                None => {
-                    self.exhausted = true;
-                    break;
-                }
-            }
-        }
-        if rows.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(Batch::new(self.schema.clone(), rows)))
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(Some(rows))
     }
 
     fn close(&mut self) -> ExecResult<()> {
@@ -166,16 +183,56 @@ impl<'a> PhysicalProjectSet<'a> {
         }
     }
 
-    fn next_input(&mut self) -> ExecResult<Option<OwnedPhysicalRow>> {
+    fn next_input(&mut self, demanded: bool) -> ExecResult<Option<OwnedPhysicalRow>> {
         loop {
             if let Some(row) = self.input.next() {
                 return Ok(Some(row));
             }
-            let Some(batch) = self.child.next()? else {
+            let Some(batch) = (if demanded {
+                self.child.next_with_demand(crate::physical::demand::ONE)?
+            } else {
+                self.child.next()?
+            }) else {
                 return Ok(None);
             };
             self.input = batch.into_owned_rows().into_iter();
         }
+    }
+}
+
+impl PhysicalProjectSet<'_> {
+    fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
+        let batch_size = demand.map_or(DEFAULT_BATCH_SIZE, |rows| {
+            rows.get().min(DEFAULT_BATCH_SIZE)
+        });
+        if self.exhausted && self.projected.is_none() {
+            return Ok(None);
+        }
+
+        let mut rows = Vec::with_capacity(batch_size);
+        while rows.len() < batch_size {
+            if let Some(projected) = self.projected.as_mut() {
+                match projected.next() {
+                    Some(row) => {
+                        rows.push(row?);
+                        continue;
+                    }
+                    None => self.projected = None,
+                }
+            }
+
+            match self.next_input(demand.is_some())? {
+                Some(row) => self.projected = Some(self.projector.project(row)?),
+                None => {
+                    self.exhausted = true;
+                    break;
+                }
+            }
+        }
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
     }
 }
 
@@ -192,34 +249,11 @@ impl PhysicalOperator for PhysicalProjectSet<'_> {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        if self.exhausted && self.projected.is_none() {
-            return Ok(None);
-        }
+        self.pull(None)
+    }
 
-        let mut rows = Vec::with_capacity(DEFAULT_BATCH_SIZE);
-        while rows.len() < DEFAULT_BATCH_SIZE {
-            if let Some(projected) = self.projected.as_mut() {
-                match projected.next() {
-                    Some(row) => {
-                        rows.push(row?);
-                        continue;
-                    }
-                    None => self.projected = None,
-                }
-            }
-
-            match self.next_input()? {
-                Some(row) => self.projected = Some(self.projector.project(row)?),
-                None => {
-                    self.exhausted = true;
-                    break;
-                }
-            }
-        }
-        if rows.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(Some(rows))
     }
 
     fn close(&mut self) -> ExecResult<()> {

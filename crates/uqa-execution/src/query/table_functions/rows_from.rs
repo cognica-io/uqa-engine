@@ -66,7 +66,10 @@ impl<'a> RowsFromOperator<'a> {
         }
     }
 
-    fn next_child_row(child: &mut RowsFromChild<'a>) -> ExecResult<Option<PhysicalRow>> {
+    fn next_child_row(
+        child: &mut RowsFromChild<'a>,
+        demanded: bool,
+    ) -> ExecResult<Option<PhysicalRow>> {
         loop {
             if let Some(row) = child.pending.pop_front() {
                 return Ok(Some(row));
@@ -74,7 +77,13 @@ impl<'a> RowsFromOperator<'a> {
             if child.exhausted {
                 return Ok(None);
             }
-            match child.operator.next()? {
+            match if demanded {
+                child
+                    .operator
+                    .next_with_demand(crate::physical::demand::ONE)?
+            } else {
+                child.operator.next()?
+            } {
                 Some(batch) => child.pending.extend(batch.rows),
                 None => child.exhausted = true,
             }
@@ -147,15 +156,33 @@ impl PhysicalOperator for RowsFromOperator<'_> {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
+        self.pull(DEFAULT_BATCH_SIZE, false)
+    }
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(rows.get().min(DEFAULT_BATCH_SIZE), true)
+    }
+
+    fn close(&mut self) -> ExecResult<()> {
+        self.exhausted = true;
+        if self.opened {
+            self.close_opened_children()
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl RowsFromOperator<'_> {
+    fn pull(&mut self, rows: usize, demanded: bool) -> ExecResult<Option<Batch>> {
         if self.exhausted {
             return Ok(None);
         }
-        let mut output = Vec::with_capacity(DEFAULT_BATCH_SIZE);
-        while output.len() < DEFAULT_BATCH_SIZE {
+        let mut output = Vec::with_capacity(rows);
+        while output.len() < rows {
             let mut any_member_produced = false;
             let mut row = PhysicalRow::default();
             for child in &mut self.children {
-                let member_row = Self::next_child_row(child)?;
+                let member_row = Self::next_child_row(child, demanded)?;
                 any_member_produced |= member_row.is_some();
                 let member_row = member_row.unwrap_or_else(|| {
                     PhysicalRow::nulls(child.operator.row_schema().physical_width())
@@ -178,15 +205,6 @@ impl PhysicalOperator for RowsFromOperator<'_> {
             Ok(None)
         } else {
             Ok(Some(Batch::from_physical_rows(self.schema.clone(), output)))
-        }
-    }
-
-    fn close(&mut self) -> ExecResult<()> {
-        self.exhausted = true;
-        if self.opened {
-            self.close_opened_children()
-        } else {
-            Ok(())
         }
     }
 }

@@ -106,6 +106,13 @@ impl PhysicalOperator for NullableInput<'_> {
             .map(|batch| self.presence.batch(batch))
             .transpose()
     }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.child
+            .next_with_demand(rows)?
+            .map(|batch| self.presence.batch(batch))
+            .transpose()
+    }
     fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
         self.child
             .next_direction(direction)?

@@ -57,7 +57,7 @@ impl<'a> ScrollMaterialize<'a> {
             if let Some(row) = self.pending.pop_front() {
                 return Ok(Some(row));
             }
-            let Some(batch) = self.child.next()? else {
+            let Some(batch) = self.child.next_with_demand(crate::physical::demand::ONE)? else {
                 return Ok(None);
             };
             if batch.schema != self.schema {

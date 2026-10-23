@@ -19,6 +19,7 @@ const PAGE_BYTES: usize = 16 * 1024;
 pub(crate) struct MatchFlags {
     file: TemporaryFile,
     rows: u64,
+    capacity: u64,
     owner: &'static str,
     page: Box<[u8; PAGE_BYTES]>,
     page_start: Option<u64>,
@@ -39,6 +40,7 @@ impl MatchFlags {
         Ok(Self {
             file,
             rows,
+            capacity: rows,
             owner,
             page: Box::new([0; PAGE_BYTES]),
             page_start: None,
@@ -49,6 +51,34 @@ impl MatchFlags {
             #[cfg(test)]
             page_writes: 0,
         })
+    }
+
+    /// Append an unmatched ordinal without losing a dirty cached page. Capacity grows a page at a time while the visible index range remains exact.
+    pub(crate) fn push_unmarked(&mut self) -> ExecResult<()> {
+        let rows = self
+            .rows
+            .checked_add(1)
+            .ok_or_else(|| ExecError::Other(format!("{} match flag count overflow", self.owner)))?;
+        if rows > self.capacity {
+            let capacity = rows
+                .checked_add(PAGE_BYTES as u64 - 1)
+                .map(|value| value / PAGE_BYTES as u64 * PAGE_BYTES as u64)
+                .ok_or_else(|| {
+                    ExecError::Other(format!("{} match flag capacity overflow", self.owner))
+                })?;
+            self.file
+                .set_len(capacity)
+                .map_err(|error| io_error(self.owner, "grow match flags", error))?;
+            self.capacity = capacity;
+        }
+        if self
+            .page_start
+            .is_some_and(|start| self.rows >= start && self.rows - start < PAGE_BYTES as u64)
+        {
+            self.page_len = (rows - self.page_start.unwrap()) as usize;
+        }
+        self.rows = rows;
+        Ok(())
     }
 
     pub(crate) fn mark(&mut self, index: u64) -> ExecResult<()> {

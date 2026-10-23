@@ -426,10 +426,7 @@ fn unique_inner_hash_join_streams_probe_batches_after_open() {
 
         join.build_left = build_left;
         join.open().unwrap();
-        assert_eq!(
-            batch_calls.load(Ordering::Relaxed),
-            usize::from(!build_left)
-        );
+        assert_eq!(batch_calls.load(Ordering::Relaxed), 0);
         assert_eq!(
             join.next().unwrap().unwrap().rows.len(),
             crate::DEFAULT_BATCH_SIZE

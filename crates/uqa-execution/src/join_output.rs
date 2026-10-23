@@ -19,6 +19,7 @@ pub use uqa_sql::schema::join_output::JoinOutputSource;
 /// only the merged values that cannot be represented by one existing slot.
 pub struct JoinOutput<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
+    input_pending: crate::physical::demand::PendingRows,
     schema: RowSchema,
     computed: Vec<JoinOutputSource>,
 }
@@ -43,6 +44,7 @@ impl<'a> JoinOutput<'a> {
         let (schema, computed) = compile_layout(child.row_schema(), &columns, &aliases)?;
         Ok(Self {
             child,
+            input_pending: crate::physical::demand::PendingRows::default(),
             schema,
             computed,
         })
@@ -51,21 +53,9 @@ impl<'a> JoinOutput<'a> {
 
 pub use uqa_sql::schema::join_output::compile_layout;
 
-impl PhysicalOperator for JoinOutput<'_> {
-    fn row_schema(&self) -> &RowSchema {
-        &self.schema
-    }
-
-    fn estimated_cardinality(&self) -> Option<u64> {
-        self.child.estimated_cardinality()
-    }
-
-    fn open(&mut self) -> ExecResult<()> {
-        self.child.open()
-    }
-
-    fn next(&mut self) -> ExecResult<Option<Batch>> {
-        let Some(batch) = self.child.next()? else {
+impl JoinOutput<'_> {
+    fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
+        let Some(batch) = self.input_pending.pull(self.child.as_mut(), demand)? else {
             return Ok(None);
         };
         if self.computed.is_empty() {
@@ -90,8 +80,32 @@ impl PhysicalOperator for JoinOutput<'_> {
             .collect::<ExecResult<Vec<_>>>()?;
         Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
     }
+}
+
+impl PhysicalOperator for JoinOutput<'_> {
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        self.child.estimated_cardinality()
+    }
+
+    fn open(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
+        self.child.open()
+    }
+
+    fn next(&mut self) -> ExecResult<Option<Batch>> {
+        self.pull(None)
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(Some(rows))
+    }
 
     fn close(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.child.close()
     }
 }

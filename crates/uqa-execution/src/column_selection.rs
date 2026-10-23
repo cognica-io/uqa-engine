@@ -437,6 +437,18 @@ impl<'a> ColumnSelection<'a> {
     }
 }
 
+impl ColumnSelection<'_> {
+    fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
+        let Some(batch) = (match demand {
+            Some(rows) => self.child.next_with_demand(rows)?,
+            None => self.child.next()?,
+        }) else {
+            return Ok(None);
+        };
+        Ok(Some(self.select_batch(batch)))
+    }
+}
+
 impl PhysicalOperator for ColumnSelection<'_> {
     fn row_schema(&self) -> &RowSchema {
         &self.schema
@@ -459,10 +471,11 @@ impl PhysicalOperator for ColumnSelection<'_> {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        let Some(batch) = self.child.next()? else {
-            return Ok(None);
-        };
-        Ok(Some(self.select_batch(batch)))
+        self.pull(None)
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(Some(rows))
     }
 
     fn next_direction(

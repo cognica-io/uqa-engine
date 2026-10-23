@@ -6,7 +6,57 @@
 
 use super::*;
 use crate::query::relational::values::test_support::Services;
+use crate::RowSchemaExecution;
 use uqa_sql::plan::{RelationalPlan, UnifiedPlan};
+
+#[test]
+fn values_source_evaluates_each_row_only_when_its_consumer_requests_it() {
+    let source = SourcePlan::Values {
+        lateral: false,
+        rows: vec![
+            vec![ScalarExpr::Literal(uqa_core::Value::Int(7))],
+            vec![ScalarExpr::Binary {
+                op: uqa_sql::ast::BinaryOp::Divide,
+                lhs: Box::new(ScalarExpr::Literal(uqa_core::Value::Int(1))),
+                rhs: Box::new(ScalarExpr::Literal(uqa_core::Value::Int(0))),
+            }],
+        ],
+        alias: Some("v".into()),
+        column_aliases: vec!["n".into()],
+        internal_relation: None,
+        internal_column_types: vec![],
+        internal_column_collations: vec![],
+    };
+    let scope = crate::catalog::test_support::empty_scope();
+    let mut operator = build_values_source(
+        &Services,
+        &Services,
+        &source,
+        &[],
+        &scope,
+        || Arc::new(Services),
+        None,
+        None,
+        || panic!("no predicate"),
+    )
+    .unwrap();
+    operator.open().unwrap();
+    let first = operator
+        .next_with_demand(crate::physical::demand::ONE)
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(
+        first.schema.view(&first.rows[0]).get("n"),
+        Some(&uqa_core::Value::Int(7))
+    );
+    assert!(operator
+        .next_with_demand(crate::physical::demand::ONE)
+        .unwrap_err()
+        .to_string()
+        .contains("division by zero"));
+    operator.close().unwrap();
+}
 
 #[test]
 fn values_sources_keep_each_outer_row_and_only_expose_their_own_columns() {

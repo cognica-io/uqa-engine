@@ -104,6 +104,9 @@ impl PhysicalOperator for DeferredOperator<'_> {
     fn next(&mut self) -> ExecResult<Option<Batch>> {
         self.input()?.next()
     }
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.input()?.next_with_demand(rows)
+    }
     fn consume_into_aggregate(
         &mut self,
         executor: &mut dyn crate::AggregateExecutor,

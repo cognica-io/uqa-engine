@@ -13,6 +13,34 @@ use uqa_engine::Engine;
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn consumer_evaluation_matches_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("consumer-evaluation.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/projection_consumer_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    restored["cases"].as_array_mut().unwrap().retain(|case| {
+        !matches!(
+            case["id"].as_str().unwrap(),
+            "version" | "table" | "rows" | "sequence" | "view"
+        )
+    });
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 47);
+    crate::pg18_oracle::verify(&engine, &restored.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn empty_derived_scope_matches_postgresql_and_reopen(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("empty-derived-scope.db");

@@ -90,6 +90,7 @@ fn range_join_preserves_direct_encoded_and_spilled_multiplicities() {
                 );
                 join.open().unwrap();
                 assert_eq!(join.builds_left_input(), left_count < right_count);
+                let first_batch = join.next().unwrap();
                 if budget != 1 {
                     let state = join
                         .streaming_unique
@@ -101,7 +102,7 @@ fn range_join_preserves_direct_encoded_and_spilled_multiplicities() {
                             | (super::super::UniqueHashIndex::Encoded(_), true)
                     ));
                 }
-                let mut count = 0;
+                let mut count = first_batch.map_or(0, |batch| batch.len());
                 while let Some(batch) = join.next().unwrap() {
                     count += batch.rows.len();
                 }

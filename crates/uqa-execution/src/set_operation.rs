@@ -75,6 +75,7 @@ fn coerce_set_value(
 }
 
 struct AlignSchema<'a> {
+    input_pending: crate::physical::demand::PendingRows,
     child: Box<dyn PhysicalOperator + 'a>,
     schema: RowSchema,
     coercions: Vec<Option<ColumnType>>,
@@ -115,6 +116,7 @@ impl<'a> AlignSchema<'a> {
             .collect();
         let schema = RowSchema::with_types(output, output_types.to_vec());
         Ok(Self {
+            input_pending: crate::physical::demand::PendingRows::default(),
             child,
             schema,
             coercions,
@@ -132,14 +134,22 @@ impl PhysicalOperator for AlignSchema<'_> {
     }
 
     fn open(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.child.open()
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        let Some(batch) = self.child.next()? else {
+        let Some(batch) = self.input_pending.pull(self.child.as_mut(), None)? else {
             return Ok(None);
         };
         self.align_batch(batch).map(Some)
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.input_pending
+            .pull(self.child.as_mut(), Some(rows))?
+            .map(|batch| self.align_batch(batch))
+            .transpose()
     }
 
     fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
@@ -150,10 +160,12 @@ impl PhysicalOperator for AlignSchema<'_> {
     }
 
     fn rewind(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.child.rewind()
     }
 
     fn close(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.child.close()
     }
 }
@@ -244,11 +256,20 @@ impl<'a> RowCursor<'a> {
     }
 
     fn next_row(&mut self) -> ExecResult<Option<PhysicalRow>> {
+        self.pull_row(false)
+    }
+
+    fn pull_row(&mut self, demanded: bool) -> ExecResult<Option<PhysicalRow>> {
         loop {
             if let Some(row) = self.batch.next() {
                 return Ok(Some(row));
             }
-            let Some(batch) = self.operator.next()? else {
+            let Some(batch) = (if demanded {
+                self.operator
+                    .next_with_demand(crate::physical::demand::ONE)?
+            } else {
+                self.operator.next()?
+            }) else {
                 self.exhausted = true;
                 return Ok(None);
             };
@@ -509,17 +530,17 @@ impl<'a> ExternalSetOperation<'a> {
         })
     }
 
-    fn next_union_all(&mut self) -> ExecResult<Option<Batch>> {
-        let mut rows = Vec::with_capacity(DEFAULT_BATCH_SIZE);
+    fn next_union_all(&mut self, count: usize, demanded: bool) -> ExecResult<Option<Batch>> {
+        let mut rows = Vec::with_capacity(count);
         let mut size = crate::spill::EncodedBatchSizer::new(&self.schema)?;
-        while rows.len() < DEFAULT_BATCH_SIZE {
+        while rows.len() < count {
             let next = if self.union_all_left_done {
-                self.right.next_row()?
-            } else if let Some(row) = self.left.next_row()? {
+                self.right.pull_row(demanded)?
+            } else if let Some(row) = self.left.pull_row(demanded)? {
                 Some(row)
             } else {
                 self.union_all_left_done = true;
-                self.right.next_row()?
+                self.right.pull_row(demanded)?
             };
             let Some(row) = next else {
                 break;
@@ -540,12 +561,12 @@ impl<'a> ExternalSetOperation<'a> {
 
     fn next_union_all_row(&mut self) -> ExecResult<Option<Batch>> {
         let row = if self.union_all_left_done {
-            self.right.next_row()?
-        } else if let Some(row) = self.left.next_row()? {
+            self.right.pull_row(true)?
+        } else if let Some(row) = self.left.pull_row(true)? {
             Some(row)
         } else {
             self.union_all_left_done = true;
-            self.right.next_row()?
+            self.right.pull_row(true)?
         };
         Ok(row.map(|row| self.directional_row_batch(row)))
     }
@@ -731,7 +752,7 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
             return if self.incremental_union_all {
                 self.next_union_all_row()
             } else {
-                self.next_union_all()
+                self.next_union_all(DEFAULT_BATCH_SIZE, false)
             };
         }
         let mut rows = Vec::with_capacity(DEFAULT_BATCH_SIZE);
@@ -767,6 +788,14 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
             Ok(None)
         } else {
             Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
+        }
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        if matches!((self.kind, self.all), (SetOpKind::Union, true)) {
+            self.next_union_all(rows.get().min(DEFAULT_BATCH_SIZE), true)
+        } else {
+            self.next()
         }
     }
 

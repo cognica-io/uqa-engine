@@ -20,6 +20,22 @@ use crate::scalar::plan::PhysicalOuterRow;
 use std::sync::Arc;
 use uqa_sql::{plan::QueryPlan, SQLError, SQLParam};
 
+struct ExistsConsumer(std::cell::Cell<bool>);
+
+impl crate::query::consumer::QueryRowConsumer for ExistsConsumer {
+    fn begin(&self, _columns: &[String], _schema: &crate::RowSchema) -> Result<(), SQLError> {
+        Ok(())
+    }
+
+    fn consume(
+        &self,
+        _row: crate::OwnedPhysicalRow,
+    ) -> Result<crate::query::consumer::QueryConsumerControl, SQLError> {
+        self.0.set(true);
+        Ok(crate::query::consumer::QueryConsumerControl::Stop)
+    }
+}
+
 pub(super) fn build_correlated_exists<S: Clone + Send + Sync + 'static>(
     services: &SubqueryServices<'_, S>,
     ctes: &CteScope<S>,
@@ -50,6 +66,56 @@ pub(super) fn build_correlated_exists<S: Clone + Send + Sync + 'static>(
 }
 
 impl<S: Clone + Send + Sync + 'static> SubqueryContext<'_, S> {
+    pub(super) fn execute_correlated_exists(
+        &self,
+        plan: &QueryPlan,
+        outer_row: PhysicalOuterRow<'_>,
+        params: &[SQLParam],
+    ) -> Result<bool, SQLError> {
+        if matches!(outer_row, PhysicalOuterRow::Absent) {
+            return Err(SQLError::Internal(
+                "correlated subquery reached execution without a positional outer row".into(),
+            ));
+        }
+        self.execute_exists_subquery(plan, outer_row, params)
+    }
+
+    /// EXISTS observes one qualifying row, including when its correlated producer has more rows or a later error.
+    pub(super) fn execute_exists_subquery(
+        &self,
+        plan: &QueryPlan,
+        outer_row: PhysicalOuterRow<'_>,
+        params: &[SQLParam],
+    ) -> Result<bool, SQLError> {
+        let consumer = std::rc::Rc::new(ExistsConsumer(std::cell::Cell::new(false)));
+        let mut scoped_ctes = self.ctes.clone();
+        scoped_ctes.lock_identities.emit = false;
+        match outer_row {
+            PhysicalOuterRow::Physical { schema, row } => {
+                let outer = crate::OwnedPhysicalRow::new(schema.clone(), row.clone());
+                crate::query::sources::lateral_query::execute_lateral_subquery_with_output(
+                    &self.services.queries.source_context(),
+                    plan,
+                    &outer,
+                    params,
+                    &scoped_ctes,
+                    crate::query::consumer::QueryOutputMode::RowConsumer(consumer.clone()),
+                )?;
+            }
+            PhysicalOuterRow::Absent => {
+                scoped_ctes.clear_row_lock_outer_row();
+                execute_query_plan_output(
+                    &self.services.queries.query_context(),
+                    plan,
+                    params,
+                    &mut scoped_ctes,
+                    QueryOutputMode::physical_consumer(consumer.clone()),
+                )?;
+            }
+        }
+        Ok(consumer.0.get())
+    }
+
     pub(super) fn build_correlated_exists(
         &self,
         plan: &QueryPlan,

@@ -7,16 +7,14 @@
 //! Nested-loop physical join execution.
 
 use uqa_sql::ast::JoinKind;
-use uqa_sql::expr::truthy;
 use uqa_sql::ResultRow;
 
-use super::{
-    next_nonempty_batch, output_schema, push_output_row, HybridRowStore, MatchFlags,
-    DEFAULT_JOIN_WORK_MEM_BYTES,
-};
+use super::{output_schema, HybridRowStore, MatchFlags, SpillState, DEFAULT_JOIN_WORK_MEM_BYTES};
+
+mod iteration;
 use crate::{
     Batch, ExecError, ExecResult, PhysicalOperator, PhysicalRow, RowSchema, ScalarExpr,
-    SharedExpressionEvaluator, SpillBuffer,
+    SharedExpressionEvaluator,
 };
 
 /// Nested-loop implementation for arbitrary join predicates and every SQL
@@ -34,8 +32,25 @@ pub struct NestedLoopJoin<'a> {
     schema: RowSchema,
     work_mem_bytes: usize,
     output: Option<crate::spill::SpillDrain>,
-    output_spilled: bool,
-    right_input_spilled: bool,
+    left_pending: crate::physical::demand::PendingRows,
+    right_pending: crate::physical::demand::PendingRows,
+    right_rows: Option<HybridRowStore>,
+    matched_right: Option<MatchFlags>,
+    current_left: Option<PhysicalRow>,
+    right_position: u64,
+    unmatched_position: u64,
+    matched_left: bool,
+    left_finished: bool,
+    right_state: RightInputState,
+    output_spilled: SpillState,
+    right_input_spilled: SpillState,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RightInputState {
+    Unopened,
+    Open,
+    Exhausted,
 }
 
 impl<'a> NestedLoopJoin<'a> {
@@ -95,33 +110,29 @@ impl<'a> NestedLoopJoin<'a> {
             schema,
             work_mem_bytes,
             output: None,
-            output_spilled: false,
-            right_input_spilled: false,
+            left_pending: crate::physical::demand::PendingRows::default(),
+            right_pending: crate::physical::demand::PendingRows::default(),
+            right_rows: None,
+            matched_right: None,
+            current_left: None,
+            right_position: 0,
+            unmatched_position: 0,
+            matched_left: false,
+            left_finished: false,
+            right_state: RightInputState::Unopened,
+            output_spilled: SpillState::InMemory,
+            right_input_spilled: SpillState::InMemory,
         }
     }
 
     pub fn output_has_spilled(&self) -> bool {
-        self.output_spilled
+        self.output_spilled.is_spilled()
     }
 
     /// Whether the repeatable nested-loop build input exceeded its memory
     /// budget and migrated to an indexed temporary row store.
     pub fn right_input_has_spilled(&self) -> bool {
-        self.right_input_spilled
-    }
-
-    fn matches(&self, row: &PhysicalRow) -> ExecResult<bool> {
-        match self.predicate.as_ref() {
-            None => Ok(true),
-            Some(predicate) => Ok(truthy(
-                &self.evaluator.evaluate_physical_with_function_states(
-                    predicate,
-                    &self.schema,
-                    row,
-                    predicate.calls(),
-                )?,
-            )),
-        }
+        self.right_input_spilled.is_spilled()
     }
 }
 
@@ -132,104 +143,48 @@ impl PhysicalOperator for NestedLoopJoin<'_> {
 
     fn open(&mut self) -> ExecResult<()> {
         self.output = None;
-        self.output_spilled = false;
-        self.right_input_spilled = false;
-
-        let right_budget = self.work_mem_bytes / 2;
-        let output_budget = self.work_mem_bytes.saturating_sub(right_budget);
-        let preserve_right = matches!(self.kind, JoinKind::Right | JoinKind::Full);
-        let mut first_left = None;
-        if !preserve_right {
-            self.left.open()?;
-            first_left = next_nonempty_batch(self.left.as_mut())?;
-            if first_left.is_none() {
-                self.output = Some(SpillBuffer::new(output_budget).drain()?);
-                return Ok(());
-            }
-        }
-        let right_schema = self.right.row_schema().clone();
-        let mut right = HybridRowStore::new(right_schema, right_budget);
-        self.right.open()?;
-        while let Some(batch) = self.right.next()? {
-            for row in batch.rows {
-                right.push(row)?;
-            }
-        }
-        self.right_input_spilled = right.has_spilled();
-        let mut matched_right = matches!(self.kind, JoinKind::Right | JoinKind::Full)
-            .then(|| MatchFlags::new(right.len(), "join"))
+        self.output_spilled = SpillState::InMemory;
+        self.right_input_spilled = SpillState::InMemory;
+        self.left_pending.clear();
+        self.right_pending.clear();
+        self.current_left = None;
+        self.right_position = 0;
+        self.unmatched_position = 0;
+        self.matched_left = false;
+        self.left_finished = false;
+        self.right_state = RightInputState::Unopened;
+        self.right_rows = Some(HybridRowStore::new(
+            self.right.row_schema().clone(),
+            self.work_mem_bytes / 2,
+        ));
+        self.matched_right = matches!(self.kind, JoinKind::Right | JoinKind::Full)
+            .then(|| MatchFlags::new(0, "join"))
             .transpose()?;
-        let mut output = SpillBuffer::new(output_budget);
-        let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
-
-        if preserve_right {
-            self.left.open()?;
-        }
-        while let Some(batch) = match first_left.take() {
-            Some(batch) => Some(batch),
-            None => self.left.next()?,
-        } {
-            for left_row in batch.rows {
-                let mut matched_left = false;
-                for right_index in 0..right.len() {
-                    right.with_row(right_index, |right_row| {
-                        let merged = PhysicalRow::concat(&left_row, right_row);
-                        if self.matches(&merged)? {
-                            push_output_row(&mut output, &mut pending, &self.schema, merged)?;
-                            matched_left = true;
-                            if let Some(flags) = matched_right.as_mut() {
-                                flags.mark(right_index)?;
-                            }
-                        }
-                        Ok(())
-                    })?;
-                }
-                if !matched_left && matches!(self.kind, JoinKind::Left | JoinKind::Full) {
-                    push_output_row(
-                        &mut output,
-                        &mut pending,
-                        &self.schema,
-                        PhysicalRow::concat_left_owned(left_row, &self.right_nulls),
-                    )?;
-                }
-            }
-        }
-
-        if matches!(self.kind, JoinKind::Right | JoinKind::Full) {
-            let matched_right = matched_right.as_mut().ok_or_else(|| {
-                ExecError::Other("right/full nested-loop join has no match flags".into())
-            })?;
-            for right_index in 0..right.len() {
-                if !matched_right.is_marked(right_index)? {
-                    right.with_row(right_index, |right_row| {
-                        push_output_row(
-                            &mut output,
-                            &mut pending,
-                            &self.schema,
-                            PhysicalRow::concat(&self.left_nulls, right_row),
-                        )
-                    })?;
-                }
-            }
-        }
-        if !pending.is_empty() {
-            output.push(Batch::from_physical_rows(self.schema.clone(), pending))?;
-        }
-        self.output_spilled = output.has_spilled();
-        self.output = Some(output.drain()?);
-        Ok(())
+        self.left.open()
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        self.output
-            .as_mut()
-            .map_or(Ok(None), |output| output.next().transpose())
+        self.pull(crate::batch::DEFAULT_BATCH_SIZE, false)
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(rows.get().min(crate::batch::DEFAULT_BATCH_SIZE), true)
     }
 
     fn close(&mut self) -> ExecResult<()> {
         self.output = None;
+        self.current_left = None;
+        self.right_rows = None;
+        self.matched_right = None;
+        self.left_pending.clear();
+        self.right_pending.clear();
         let left = self.left.close();
-        let right = self.right.close();
+        let right = if self.right_state == RightInputState::Open {
+            self.right.close()
+        } else {
+            Ok(())
+        };
+        self.right_state = RightInputState::Exhausted;
         crate::physical::with_cleanup(left, right, "close right nested-loop join input")
     }
 }
