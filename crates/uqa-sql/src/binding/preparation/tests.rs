@@ -26,6 +26,7 @@ mod lateral;
 mod literal_collations;
 mod operator_joins;
 mod ordered_calls;
+mod row_stars;
 mod set_contexts;
 mod set_ordering;
 mod stored_inputs;

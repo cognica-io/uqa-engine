@@ -212,6 +212,24 @@ pub fn expand_bound_projection_stars(
     expand_bound_projection_stars_in_scope(projections, schema, schema)
 }
 
+/// A qualified star in a ROW constructor expands its source fields; an ordinary whole-row reference remains one nested value.
+pub(crate) fn row_star_fields(
+    expression: &ScalarExpr,
+    schema: &RowSchema,
+) -> Result<Option<Vec<ScalarExpr>>, SQLError> {
+    if !matches!(expression, ScalarExpr::QualifiedStar(_)) {
+        return Ok(None);
+    }
+    expand_bound_projection_stars(
+        &[ProjectionPlan {
+            expr: expression.clone(),
+            alias: None,
+        }],
+        schema,
+    )
+    .map(|fields| Some(fields.into_iter().map(|field| field.expr).collect()))
+}
+
 /// Bare stars expand the local FROM output, while qualified stars can select an admitted enclosing namespace.
 pub fn expand_bound_projection_stars_in_scope(
     projections: &[ProjectionPlan],

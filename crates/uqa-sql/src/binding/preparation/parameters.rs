@@ -155,6 +155,8 @@ pub(super) struct ParameterTypes<'a> {
     catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
     call_collations: Option<CallCollations>,
     query_schemas: Option<QuerySchemas>,
+    /// Generated field references remain at stable addresses throughout analysis, including inference that does not retain an executable plan.
+    row_expansions: RowExpansions,
 }
 
 /// Original expression identities for input constants and selected fixed calls, used only while one prepared plan remains in place. No pointer is dereferenced. Analysis borrows the original expressions (including grouping aliases and table-function arguments), so neither repeated text nor CTE analysis order can conflate two inputs.
@@ -178,7 +180,10 @@ pub(super) struct InputConstants(
     BTreeMap<NonNull<ScalarExpr>, Option<crate::catalog::collations::CollationSelection>>,
     BTreeMap<NonNull<Option<crate::ast::FunctionBinding>>, crate::ast::FunctionBinding>,
     QuerySchemas,
+    RowExpansions,
 );
+
+type RowExpansions = BTreeMap<NonNull<ScalarExpr>, Vec<(usize, Vec<ScalarExpr>)>>;
 
 #[derive(Default)]
 struct QuerySchemas {
@@ -231,6 +236,32 @@ impl InputConstants {
 
     fn apply_node(&mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
         let identity = NonNull::from(&*expression);
+        if let Some(mut expanded) = self.9.remove(&identity) {
+            for (_, fields) in &mut expanded {
+                for field in fields {
+                    let mut result = Ok(());
+                    crate::plan::rewrite_scalar_expression(field, &mut |node| {
+                        if result.is_ok() {
+                            result = self.apply_node(node);
+                        }
+                    });
+                    result?;
+                }
+            }
+            let ScalarExpr::Row(items) = expression else {
+                return Err(SQLError::Internal(
+                    "analyzed ROW expansion lost its constructor".into(),
+                ));
+            };
+            let mut expanded = expanded.into_iter().peekable();
+            for (position, item) in std::mem::take(items).into_iter().enumerate() {
+                if expanded.peek().is_some_and(|(index, _)| *index == position) {
+                    items.extend(expanded.next().expect("selected expansion").1);
+                } else {
+                    items.push(item);
+                }
+            }
+        }
         if let Some(selected) = self.1.remove(&identity) {
             if let ScalarExpr::Func { binding, .. } = expression {
                 *binding = Some(selected);
@@ -340,6 +371,7 @@ impl InputConstants {
             && self.7.is_empty()
             && self.8.outputs.is_empty()
             && self.8.sources.is_empty()
+            && self.9.is_empty()
     }
 
     fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
@@ -378,6 +410,25 @@ impl InputConstants {
 }
 
 impl<'a> ParameterTypes<'a> {
+    pub(super) fn take_row_expansion(
+        &mut self,
+        expression: &ScalarExpr,
+    ) -> Vec<(usize, Vec<ScalarExpr>)> {
+        self.row_expansions
+            .remove(&NonNull::from(expression))
+            .unwrap_or_default()
+    }
+
+    pub(super) fn retain_row_expansion(
+        &mut self,
+        expression: &ScalarExpr,
+        fields: Vec<(usize, Vec<ScalarExpr>)>,
+    ) {
+        if !fields.is_empty() {
+            self.row_expansions
+                .insert(NonNull::from(expression), fields);
+        }
+    }
     pub(super) fn with_query_schemas(mut self) -> Self {
         self.query_schemas = Some(QuerySchemas::default());
         self
@@ -550,6 +601,7 @@ impl<'a> ParameterTypes<'a> {
             catalog_inputs: None,
             call_collations: None,
             query_schemas: None,
+            row_expansions: RowExpansions::default(),
         }
     }
 
@@ -652,7 +704,9 @@ impl<'a> ParameterTypes<'a> {
     }
 
     pub(super) fn take_input_constants(&mut self) -> InputConstants {
-        self.input_constants.take().unwrap_or_default()
+        let mut constants = self.input_constants.take().unwrap_or_default();
+        constants.9 = std::mem::take(&mut self.row_expansions);
+        constants
     }
 
     pub(super) fn reference(&mut self, number: usize) -> Result<ExpressionType, SQLError> {

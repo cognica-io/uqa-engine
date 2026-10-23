@@ -1,0 +1,260 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "whole_row_capture_order_name",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0 ORDER BY k"
+    },
+    {
+      "id": "whole_row_capture_order_position",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0 ORDER BY 1"
+    },
+    {
+      "id": "whole_row_capture_order_subquery",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0 ORDER BY (SELECT k)"
+    },
+    {
+      "id": "whole_row_capture_whole_row",
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0"
+    },
+    {
+      "id": "whole_row_capture_row_constructor",
+      "sql": "SELECT ROW(s.*) FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0"
+    },
+    {
+      "id": "whole_row_capture_whole_row_count",
+      "sql": "SELECT count(s) FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0"
+    },
+    {
+      "id": "whole_row_capture_field_selection",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE (s).k>0"
+    },
+    {
+      "id": "whole_row_capture_correlated_field_selection",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT (s).k WHERE (s).k>0)"
+    },
+    {
+      "id": "whole_row_capture_whole_row_qualification",
+      "sql": "SELECT k FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE s IS NOT NULL"
+    },
+    {
+      "id": "whole_row_capture_joined_order",
+      "sql": "SELECT s.k,s.z,t.n FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s CROSS JOIN (VALUES(7))t(n) WHERE k>0 ORDER BY s.k"
+    },
+    {
+      "id": "whole_row_capture_producer_order",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x) ORDER BY x)s WHERE k>0"
+    },
+    {
+      "id": "whole_row_capture_consumer_distinct",
+      "sql": "SELECT DISTINCT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0"
+    },
+    {
+      "id": "whole_row_capture_whole_row_order",
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0 ORDER BY s"
+    },
+    {
+      "id": "whole_row_capture_order_name_scalar_qualification",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2) ORDER BY k"
+    },
+    {
+      "id": "whole_row_capture_order_position_scalar_qualification",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2) ORDER BY 1"
+    },
+    {
+      "id": "whole_row_capture_order_subquery_scalar_qualification",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2) ORDER BY (SELECT k)"
+    },
+    {
+      "id": "whole_row_capture_whole_row_scalar_qualification",
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "whole_row_capture_row_constructor_scalar_qualification",
+      "sql": "SELECT ROW(s.*) FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "whole_row_capture_whole_row_count_scalar_qualification",
+      "sql": "SELECT count(s) FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "whole_row_capture_joined_order_scalar_qualification",
+      "sql": "SELECT s.k,s.z,t.n FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s CROSS JOIN (VALUES(7))t(n) WHERE k=(SELECT 2) ORDER BY s.k"
+    },
+    {
+      "id": "whole_row_capture_producer_order_scalar_qualification",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x) ORDER BY x)s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "whole_row_capture_consumer_distinct_scalar_qualification",
+      "sql": "SELECT DISTINCT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "whole_row_capture_whole_row_order_scalar_qualification",
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2) ORDER BY s"
+    },
+    {
+      "id": "distinct_capture_scalar",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "distinct_capture_in",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k IN (SELECT 2)"
+    },
+    {
+      "id": "distinct_capture_exists",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE EXISTS(SELECT 1 WHERE k>0)"
+    },
+    {
+      "id": "distinct_capture_correlated",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT s.k WHERE s.k>0)"
+    },
+    {
+      "id": "distinct_capture_nested",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT (SELECT 2))"
+    },
+    {
+      "id": "distinct_capture_null",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT NULL::int)"
+    },
+    {
+      "id": "distinct_capture_empty",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT 2 WHERE FALSE)"
+    },
+    {
+      "id": "distinct_capture_scalar_error",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT 1/0)"
+    },
+    {
+      "id": "distinct_capture_cardinality_error",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT x FROM (VALUES(2),(3)) t(x))"
+    },
+    {
+      "id": "distinct_capture_distinct_on",
+      "sql": "SELECT * FROM (SELECT DISTINCT ON (x) x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x) ORDER BY x) s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "distinct_capture_offset",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x) OFFSET 0) s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "distinct_capture_limit",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x) LIMIT 1) s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "distinct_capture_group",
+      "sql": "SELECT * FROM (SELECT x AS k,sum(10/x) AS z FROM (VALUES(0),(2),(2)) v(x) GROUP BY x) s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "distinct_capture_window",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z,row_number() OVER(PARTITION BY x) AS r FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "distinct_capture_sequence",
+      "sql": "CREATE SEQUENCE distinct_capture_effect"
+    },
+    {
+      "id": "distinct_capture_volatile_output_reset",
+      "sql": "SELECT setval('distinct_capture_effect',1,false)"
+    },
+    {
+      "id": "distinct_capture_volatile_output",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,nextval('distinct_capture_effect') AS n FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "distinct_capture_volatile_output_effects",
+      "sql": "SELECT last_value,is_called FROM distinct_capture_effect"
+    },
+    {
+      "id": "distinct_capture_volatile_subquery_reset",
+      "sql": "SELECT setval('distinct_capture_effect',1,false)"
+    },
+    {
+      "id": "distinct_capture_volatile_subquery",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,nextval('distinct_capture_effect') AS n FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT nextval('distinct_capture_effect'))"
+    },
+    {
+      "id": "distinct_capture_volatile_subquery_effects",
+      "sql": "SELECT last_value,is_called FROM distinct_capture_effect"
+    },
+    {
+      "id": "distinct_capture_correlated_volatile_reset",
+      "sql": "SELECT setval('distinct_capture_effect',1,false)"
+    },
+    {
+      "id": "distinct_capture_correlated_volatile",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,nextval('distinct_capture_effect') AS n FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT s.k+nextval('distinct_capture_effect')-1 WHERE s.k>0)"
+    },
+    {
+      "id": "distinct_capture_correlated_volatile_effects",
+      "sql": "SELECT last_value,is_called FROM distinct_capture_effect"
+    },
+    {
+      "id": "parent_retained_slot",
+      "sql": "SELECT (SELECT 9) AS q,s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "parent_retained_predicate",
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 2) AND (SELECT TRUE)"
+    },
+    {
+      "id": "producer_existing_slot",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,(SELECT 9) AS q,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "multiple_moved_slots",
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 2) OR k=(SELECT 5) ORDER BY k"
+    },
+    {
+      "id": "enclosing_cte",
+      "sql": "WITH q AS (SELECT 2 AS k) SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT k FROM q)"
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW scalar_predicate_capture_view AS SELECT s::text AS captured FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "view",
+      "sql": "SELECT * FROM scalar_predicate_capture_view"
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE scalar_predicate_capture(int) AS SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT $1)"
+    },
+    {
+      "id": "execute",
+      "sql": "EXECUTE scalar_predicate_capture(2)"
+    },
+    {
+      "id": "deallocate",
+      "sql": "DEALLOCATE scalar_predicate_capture"
+    },
+    {
+      "id": "exists_nullable",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE EXISTS(SELECT 1 WHERE CASE WHEN k=0 THEN NULL ELSE TRUE END)"
+    },
+    {
+      "id": "not_exists_nullable",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE NOT EXISTS(SELECT 1 WHERE CASE WHEN k=0 THEN TRUE ELSE NULL END)"
+    },
+    {
+      "id": "exists_ignored_output",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE EXISTS(SELECT 1/0 WHERE k>0)"
+    },
+    {
+      "id": "exists_set_output",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE EXISTS(SELECT unnest(ARRAY[]::int[]) WHERE k>0)"
+    },
+    {
+      "id": "exists_offset_boundary",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE EXISTS(SELECT 1 WHERE k>0 OFFSET 0)"
+    },
+    {
+      "id": "exists_aggregate_boundary",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE EXISTS(SELECT count(*) WHERE k>0)"
+    }
+  ]
+}

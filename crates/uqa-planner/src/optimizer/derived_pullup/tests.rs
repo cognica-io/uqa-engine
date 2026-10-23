@@ -426,3 +426,184 @@ fn ordering_output_alias_wins_over_input_but_compound_expression_uses_input() {
         assert_eq!(qualified, input_reference, "{sql}");
     }
 }
+
+#[test]
+fn independent_scalar_predicate_moves_once_below_distinct_outputs() {
+    let mut query = analyzed(
+        "SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2))v(x)",
+        "k=(SELECT 2)",
+    );
+    predicates::push(
+        &mut query,
+        &Context {
+            routines: &Catalog,
+            volatility: &Catalog,
+            relations_bound: false,
+        },
+    );
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("block")
+    };
+    assert!(block.r#where.is_none());
+    assert!(block.subqueries.is_empty());
+    let Some(SourcePlan::Subquery { body, .. }) = &block.from else {
+        panic!("producer")
+    };
+    let RelationalPlan::QueryBlock(inner) = &body.root else {
+        panic!("producer block")
+    };
+    assert!(inner.distinct);
+    assert_eq!(inner.subqueries.len(), 1);
+    let mut ids = BTreeSet::new();
+    uqa_sql::semantics::collect_subquery_ids(inner.r#where.as_ref().unwrap(), &mut ids);
+    assert_eq!(ids, BTreeSet::from([0]));
+}
+
+#[test]
+fn correlated_shared_and_sliced_scalar_predicates_keep_their_arenas() {
+    for (body, predicate, shared) in [
+        (
+            "SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2))v(x)",
+            "k=(SELECT s.k)",
+            false,
+        ),
+        (
+            "SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2))v(x) OFFSET 0",
+            "k=(SELECT 2)",
+            false,
+        ),
+        (
+            "SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2))v(x)",
+            "k=(SELECT 2)",
+            true,
+        ),
+    ] {
+        let mut query = analyzed(body, predicate);
+        if shared {
+            let RelationalPlan::QueryBlock(block) = &mut query.root else {
+                panic!("block")
+            };
+            block.projections[0].expr = ScalarExpr::ScalarSubquery(0);
+        }
+        let before = serde_json::to_value(&query).unwrap();
+        predicates::push(
+            &mut query,
+            &Context {
+                routines: &Catalog,
+                volatility: &Catalog,
+                relations_bound: false,
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(&query).unwrap(),
+            before,
+            "{body}: {predicate}"
+        );
+    }
+}
+
+#[test]
+fn source_free_exists_preserves_three_valued_qualification() {
+    for (predicate, expected) in [
+        (
+            "EXISTS(SELECT 1 WHERE k>0)",
+            uqa_sql::ast::BooleanTest::IsTrue,
+        ),
+        (
+            "EXISTS(SELECT 1 WHERE NULLIF(k,0)>0)",
+            uqa_sql::ast::BooleanTest::IsTrue,
+        ),
+    ] {
+        let mut query = analyzed(
+            "SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2))v(x)",
+            predicate,
+        );
+        predicates::push(
+            &mut query,
+            &Context {
+                routines: &Catalog,
+                volatility: &Catalog,
+                relations_bound: false,
+            },
+        );
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("block")
+        };
+        assert!(block.r#where.is_none());
+        let Some(SourcePlan::Subquery { body, .. }) = &block.from else {
+            panic!("producer")
+        };
+        let RelationalPlan::QueryBlock(inner) = &body.root else {
+            panic!("producer block")
+        };
+        let Some(ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        }) = &inner.r#where
+        else {
+            panic!("Boolean qualification")
+        };
+        assert_eq!(
+            binding.dispatch,
+            Some(uqa_sql::ast::FunctionDispatch::BooleanTest(expected))
+        );
+    }
+}
+
+#[test]
+fn exists_with_cardinality_or_effect_boundaries_is_not_inlined() {
+    for predicate in [
+        "NOT EXISTS(SELECT 1 WHERE k>0)",
+        "EXISTS(SELECT count(*) WHERE k>0)",
+        "EXISTS(SELECT unnest(ARRAY[]::int[]) WHERE k>0)",
+        "EXISTS(SELECT 1 WHERE k>0 OFFSET 0)",
+        "EXISTS(SELECT 1 WHERE k>nextval('effect'))",
+    ] {
+        let mut query = analyzed(
+            "SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2))v(x)",
+            predicate,
+        );
+        let before = serde_json::to_value(&query).unwrap();
+        predicates::push(
+            &mut query,
+            &Context {
+                routines: &Catalog,
+                volatility: &Catalog,
+                relations_bound: false,
+            },
+        );
+        assert_eq!(serde_json::to_value(&query).unwrap(), before, "{predicate}");
+    }
+}
+
+#[test]
+fn scalar_output_without_a_query_qualification_allocates_no_transfer_workspace() {
+    let mut query = analyzed(
+        "SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2))v(x)",
+        "k>0",
+    );
+    let UnifiedPlan::Query(extra) =
+        UnifiedPlan::lower(uqa_sql::compile("SELECT (SELECT 1)").unwrap().remove(0))
+    else {
+        panic!("query")
+    };
+    let RelationalPlan::QueryBlock(extra) = extra.root else {
+        panic!("block")
+    };
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
+        panic!("block")
+    };
+    block.subqueries = extra.subqueries;
+    block.projections[0].expr = ScalarExpr::ScalarSubquery(0);
+    let allocation = allocation_counter::measure(|| {
+        predicates::push(
+            &mut query,
+            &Context {
+                routines: &Catalog,
+                volatility: &Catalog,
+                relations_bound: false,
+            },
+        );
+    });
+    assert_eq!(allocation.bytes_total, 0, "{allocation:?}");
+}

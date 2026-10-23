@@ -198,7 +198,7 @@ impl Preparation<'_> {
             ScalarExpr::CompositeRow { items, binding, .. } => {
                 self.composite_row_expression(items, binding, input, subqueries)
             }
-            ScalarExpr::Row(items) => self.row_expression(items, input, subqueries),
+            ScalarExpr::Row(items) => self.row_expression(expression, items, input, subqueries),
             ScalarExpr::Func { .. } => {
                 let mut result = self.function_expression(expression, input, subqueries)?;
                 self.expression_record_fields(&mut result, expression, input, subqueries)?;
@@ -261,14 +261,30 @@ impl Preparation<'_> {
 
     fn row_expression(
         &mut self,
+        expression: &ScalarExpr,
         items: &[ScalarExpr],
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
         let mut fields = Vec::new();
-        for item in items {
-            fields.push(self.expression(item, input, subqueries)?);
+        let mut expanded = self.parameters.take_row_expansion(expression);
+        let mut expansion = 0;
+        for (position, item) in items.iter().enumerate() {
+            if matches!(item, ScalarExpr::QualifiedStar(_)) {
+                if expansion == expanded.len() {
+                    let columns = crate::semantics::row_star_fields(item, input)?
+                        .expect("qualified row star");
+                    expanded.push((position, columns));
+                }
+                for column in &expanded[expansion].1 {
+                    fields.push(self.expression(column, input, subqueries)?);
+                }
+                expansion += 1;
+            } else {
+                fields.push(self.expression(item, input, subqueries)?);
+            }
         }
+        self.parameters.retain_row_expansion(expression, expanded);
         let mut value = ExpressionType::independent(Some(ColumnType::Record), &fields);
         value.record_fields = Some(fields.iter().map(|field| field.ty.clone()).collect());
         value.record_descriptor = Some(std::sync::Arc::new(crate::schema::RecordDescriptor {

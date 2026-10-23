@@ -13,6 +13,59 @@ use uqa_engine::Engine;
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn row_star_expansion_matches_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("row-star-expansion.db");
+    let engine = open(provider, &path);
+    let transcript = include_str!("../../../../tests/parity/pg18/row_star_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    restored["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| !matches!(case["id"].as_str().unwrap(), "version" | "create_view"));
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 15);
+    crate::pg18_oracle::verify(&engine, &restored.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn scalar_predicate_capture_matches_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("scalar-predicate-capture.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/scalar_predicate_capture_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    restored["cases"].as_array_mut().unwrap().retain(|case| {
+        !matches!(
+            case["id"].as_str().unwrap(),
+            "version" | "distinct_capture_sequence" | "create_view"
+        )
+    });
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 61);
+    crate::pg18_oracle::verify(&engine, &restored.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn ordered_field_capture_matches_postgresql_and_reopen(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("ordered-field-capture.db");

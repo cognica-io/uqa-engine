@@ -56,6 +56,8 @@ SELECT 'value=' || 7 AS label, ARRAY[1, 2] || ARRAY[3] AS items;
 
 `ROW(...)` and a parenthesized list of two or more expressions build an anonymous row; casting it to a [composite type](02-ddl.md#composite-types) or assigning it to a column of one coerces each field to its attribute's type, and a row with a different number of fields reports `42846` with PostgreSQL's detail. Text casts to a composite type as `record_in` reads it, and a composite value casts to text as `record_out` writes it, quoting a field that is empty or contains a separator, parenthesis, quote, backslash or whitespace. `(value).field` selects a field: an attribute of a composite value, the `fN` field of an anonymous row, or a column of a relation through its whole-row reference, which `pg_get_viewdef` prints as the column itself. A missing field reports `42703`, as `column t.missing does not exist`, `column "missing" not found in data type pair` or `could not identify column "f3" in record data type`, and field notation on a value that is not composite reports `42809`.
 
+Inside `ROW(...)`, `relation.*` expands the relation's fields in order. A plain relation reference remains one nested operand, so `ROW(relation.*)` and `ROW(relation)` have different field structures.
+
 Composite values compare field by field: equality treats two NULL fields as equal, and ordering places NULL fields after all other values, as PostgreSQL's record operators do; anonymous rows compare with SQL's three-valued row comparison instead. `IS NULL` is true for a row or composite value whose fields are all NULL, and `IS NOT NULL` is true when none of its fields is NULL, so a value with both kinds of fields satisfies neither.
 
 ```sql execute

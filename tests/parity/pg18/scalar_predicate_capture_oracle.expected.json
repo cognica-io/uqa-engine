@@ -1,0 +1,1447 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0 ORDER BY k",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_order_name"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0 ORDER BY 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_order_position"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0 ORDER BY (SELECT k)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_order_subquery"
+    },
+    {
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "s"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_whole_row"
+    },
+    {
+      "sql": "SELECT ROW(s.*) FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_row_constructor"
+    },
+    {
+      "sql": "SELECT count(s) FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_whole_row_count"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE (s).k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_field_selection"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT (s).k WHERE (s).k>0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_correlated_field_selection"
+    },
+    {
+      "sql": "SELECT k FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE s IS NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "whole_row_capture_whole_row_qualification"
+    },
+    {
+      "sql": "SELECT s.k,s.z,t.n FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s CROSS JOIN (VALUES(7))t(n) WHERE k>0 ORDER BY s.k",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_joined_order"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x) ORDER BY x)s WHERE k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_producer_order"
+    },
+    {
+      "sql": "SELECT DISTINCT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_consumer_distinct"
+    },
+    {
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0 ORDER BY s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "s"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_whole_row_order"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2) ORDER BY k",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_order_name_scalar_qualification"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2) ORDER BY 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_order_position_scalar_qualification"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2) ORDER BY (SELECT k)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_order_subquery_scalar_qualification"
+    },
+    {
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "s"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_whole_row_scalar_qualification"
+    },
+    {
+      "sql": "SELECT ROW(s.*) FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_row_constructor_scalar_qualification"
+    },
+    {
+      "sql": "SELECT count(s) FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_whole_row_count_scalar_qualification"
+    },
+    {
+      "sql": "SELECT s.k,s.z,t.n FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s CROSS JOIN (VALUES(7))t(n) WHERE k=(SELECT 2) ORDER BY s.k",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_joined_order_scalar_qualification"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x) ORDER BY x)s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_producer_order_scalar_qualification"
+    },
+    {
+      "sql": "SELECT DISTINCT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_consumer_distinct_scalar_qualification"
+    },
+    {
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2) ORDER BY s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "s"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row_capture_whole_row_order_scalar_qualification"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_scalar"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k IN (SELECT 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_in"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE EXISTS(SELECT 1 WHERE k>0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_exists"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT s.k WHERE s.k>0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "distinct_capture_correlated"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT (SELECT 2))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_nested"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT NULL::int)",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "distinct_capture_null"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT 2 WHERE FALSE)",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "distinct_capture_empty"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT 1/0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "distinct_capture_scalar_error"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT x FROM (VALUES(2),(3)) t(x))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "21000",
+        "message": "more than one row returned by a subquery used as an expression",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "distinct_capture_cardinality_error"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT ON (x) x AS k,10/x AS z FROM (VALUES(0),(2),(2)) v(x) ORDER BY x) s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_distinct_on"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x) OFFSET 0) s WHERE k=(SELECT 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "distinct_capture_offset"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x) LIMIT 1) s WHERE k=(SELECT 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "distinct_capture_limit"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,sum(10/x) AS z FROM (VALUES(0),(2),(2)) v(x) GROUP BY x) s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "10"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_group"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z,row_number() OVER(PARTITION BY x) AS r FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "5",
+              "1"
+            ],
+            [
+              "2",
+              "5",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_window"
+    },
+    {
+      "sql": "CREATE SEQUENCE distinct_capture_effect",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "distinct_capture_sequence"
+    },
+    {
+      "sql": "SELECT setval('distinct_capture_effect',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_volatile_output_reset"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,nextval('distinct_capture_effect') AS n FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_volatile_output"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM distinct_capture_effect",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "2",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_volatile_output_effects"
+    },
+    {
+      "sql": "SELECT setval('distinct_capture_effect',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_volatile_subquery_reset"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,nextval('distinct_capture_effect') AS n FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT nextval('distinct_capture_effect'))",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "id": "distinct_capture_volatile_subquery"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM distinct_capture_effect",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_volatile_subquery_effects"
+    },
+    {
+      "sql": "SELECT setval('distinct_capture_effect',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_correlated_volatile_reset"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,nextval('distinct_capture_effect') AS n FROM (VALUES(0),(2),(2)) v(x)) s WHERE k=(SELECT s.k+nextval('distinct_capture_effect')-1 WHERE s.k>0)",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "id": "distinct_capture_correlated_volatile"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM distinct_capture_effect",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "5",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "distinct_capture_correlated_volatile_effects"
+    },
+    {
+      "sql": "SELECT (SELECT 9) AS q,s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "q",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            2249
+          ],
+          "rows": [
+            [
+              "9",
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "parent_retained_slot"
+    },
+    {
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 2) AND (SELECT TRUE)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "s"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "parent_retained_predicate"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,(SELECT 9) AS q,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "q",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "9",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "producer_existing_slot"
+    },
+    {
+      "sql": "SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 2) OR k=(SELECT 5) ORDER BY k",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "s"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ],
+            [
+              "(5,2)"
+            ]
+          ]
+        }
+      ],
+      "id": "multiple_moved_slots"
+    },
+    {
+      "sql": "WITH q AS (SELECT 2 AS k) SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT k FROM q)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "s"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "enclosing_cte"
+    },
+    {
+      "sql": "CREATE VIEW scalar_predicate_capture_view AS SELECT s::text AS captured FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 2)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_view"
+    },
+    {
+      "sql": "SELECT * FROM scalar_predicate_capture_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "captured"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "view"
+    },
+    {
+      "sql": "PREPARE scalar_predicate_capture(int) AS SELECT s FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT $1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "prepare"
+    },
+    {
+      "sql": "EXECUTE scalar_predicate_capture(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "s"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "execute"
+    },
+    {
+      "sql": "DEALLOCATE scalar_predicate_capture",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "deallocate"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE EXISTS(SELECT 1 WHERE CASE WHEN k=0 THEN NULL ELSE TRUE END)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "exists_nullable"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE NOT EXISTS(SELECT 1 WHERE CASE WHEN k=0 THEN TRUE ELSE NULL END)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "not_exists_nullable"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE EXISTS(SELECT 1/0 WHERE k>0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "exists_ignored_output"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE EXISTS(SELECT unnest(ARRAY[]::int[]) WHERE k>0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "exists_set_output"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE EXISTS(SELECT 1 WHERE k>0 OFFSET 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "exists_offset_boundary"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2),(2))v(x))s WHERE EXISTS(SELECT count(*) WHERE k>0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "exists_aggregate_boundary"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "166c29781cb2da537723fd4a547a86e839a4bd4ff14a5f01192ae625d46a1b8c",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}

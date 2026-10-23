@@ -621,6 +621,32 @@ pub fn specialize_query_block_output_filter(
     filter: &ScalarExpr,
     output_columns_override: Option<&[String]>,
 ) -> Option<()> {
+    let rewritten = derived_output_predicate(
+        context.correlation.routines,
+        context.volatility,
+        block,
+        qualifier,
+        filter,
+        output_columns_override,
+        false,
+    )?;
+    block.r#where = match block.r#where.take() {
+        Some(existing) => Some(ScalarExpr::And(vec![existing, rewritten])),
+        None => Some(rewritten),
+    };
+    Some(())
+}
+
+/// Select a legal producer predicate. Query slots are retained only for a caller that transfers their arena without duplicating their execution identity.
+pub(crate) fn derived_output_predicate(
+    routines: &dyn uqa_sql::routines::RoutineResolution,
+    volatility: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    block: &QueryBlockPlan,
+    qualifier: &str,
+    filter: &ScalarExpr,
+    output_columns_override: Option<&[String]>,
+    retain_query_slots: bool,
+) -> Option<ScalarExpr> {
     if block.limit.is_some() || block.offset.is_some() || !block.grouping_sets.is_empty() {
         return None;
     }
@@ -635,12 +661,13 @@ pub fn specialize_query_block_output_filter(
         }
     }
     let mut used = BTreeSet::new();
-    let rewritten = rewrite_output_filter(
+    let rewritten = rewrite_output_filter_inputs(
         filter,
         qualifier,
         &output_columns,
         &block.projections,
         &mut used,
+        retain_query_slots,
     )?;
     if used.is_empty() {
         return None;
@@ -651,10 +678,9 @@ pub fn specialize_query_block_output_filter(
         if matches!(expression, ScalarExpr::Star)
             || expression.contains_window()
             || expr_contains_subquery(expression)
-            || expr_contains_volatile_function(context.volatility, expression)
+            || expr_contains_volatile_function(volatility, expression)
             || uqa_sql::semantics::sets::static_setness::expression_may_return_set_statically(
-                context.correlation.routines,
-                expression,
+                routines, expression,
             )
         {
             return None;
@@ -664,23 +690,37 @@ pub fn specialize_query_block_output_filter(
         }
     }
 
-    block.r#where = match block.r#where.take() {
-        Some(existing) => Some(ScalarExpr::And(vec![existing, rewritten])),
-        None => Some(rewritten),
-    };
-    Some(())
+    Some(rewritten)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves SELECT schema and row identity"
-)]
 pub fn rewrite_output_filter(
     expression: &ScalarExpr,
     qualifier: &str,
     output_columns: &[String],
     projections: &[ProjectionPlan],
     used: &mut BTreeSet<usize>,
+) -> Option<ScalarExpr> {
+    rewrite_output_filter_inputs(
+        expression,
+        qualifier,
+        output_columns,
+        projections,
+        used,
+        false,
+    )
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
+fn rewrite_output_filter_inputs(
+    expression: &ScalarExpr,
+    qualifier: &str,
+    output_columns: &[String],
+    projections: &[ProjectionPlan],
+    used: &mut BTreeSet<usize>,
+    retain_query_slots: bool,
 ) -> Option<ScalarExpr> {
     let map_column = |column: &str, used: &mut BTreeSet<usize>| {
         let index = output_columns
@@ -690,10 +730,29 @@ pub fn rewrite_output_filter(
         Some(projections[index].expr.clone())
     };
     let recur = |expression: &ScalarExpr, used: &mut BTreeSet<usize>| {
-        rewrite_output_filter(expression, qualifier, output_columns, projections, used)
+        rewrite_output_filter_inputs(
+            expression,
+            qualifier,
+            output_columns,
+            projections,
+            used,
+            retain_query_slots,
+        )
     };
 
     Some(match expression {
+        ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } if retain_query_slots => {
+            expression.clone()
+        }
+        ScalarExpr::InSubquery {
+            expr,
+            subquery,
+            negated,
+        } if retain_query_slots => ScalarExpr::InSubquery {
+            expr: Box::new(recur(expr, used)?),
+            subquery: *subquery,
+            negated: *negated,
+        },
         ScalarExpr::Column(column) => map_column(column, used)?,
         ScalarExpr::QualifiedColumn {
             qualifier: expression_qualifier,

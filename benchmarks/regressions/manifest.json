@@ -21848,6 +21848,168 @@
       "capability": "Ordered and field-selective derived input capture",
       "workload": "Twenty-nine independent PostgreSQL observations on four providers, with twenty-eight after each persistent reopen.",
       "invariant": "Rows, names, types and error fields match for correlated field selection, local shadows, CTEs, SQL92 aliases and ordinals, selected errors and scalar cardinality."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "transfer_preserves_query_ownership_and_nested_arena_indices",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plan/subqueries/transfer.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Selected slots move beside an existing destination query, while parent slots compact and nested arenas retain their identities.",
+      "invariant": "Query ownership and references stay bijective without duplicating evaluation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shared_and_invalid_arena_transfers_leave_all_inputs_unchanged",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plan/subqueries/transfer.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Shared and out-of-range scalar references.",
+      "invariant": "Invalid or shared transfers decline before changing either arena or expression."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "transferring_wide_query_payload_does_not_copy_it",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plan/subqueries/transfer.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "One owned scalar query containing 256 KiB of literal text.",
+      "invariant": "Transfer retains the original payload and allocates less than 16 KiB."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "independent_scalar_predicate_moves_once_below_distinct_outputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "An independent scalar predicate over a DISTINCT producer.",
+      "invariant": "The predicate and its one query slot move together while DISTINCT remains."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "correlated_shared_and_sliced_scalar_predicates_keep_their_arenas",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Correlated, shared-slot and OFFSET producer qualifications.",
+      "invariant": "Unsupported movement leaves the complete plan unchanged."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "source_free_exists_preserves_three_valued_qualification",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Positive source-free EXISTS with ordinary and nullable qualifications.",
+      "invariant": "The structural IS TRUE operator preserves SQL NULL rejection."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "exists_with_cardinality_or_effect_boundaries_is_not_inlined",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Negated EXISTS, aggregate/SRF output, OFFSET and volatile qualifications.",
+      "invariant": "Observable query boundaries remain unchanged."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "scalar_output_without_a_query_qualification_allocates_no_transfer_workspace",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "A scalar output query with an ordinary WHERE qualification.",
+      "invariant": "The unrelated query slot causes no predicate-transfer allocation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "row_stars_expand_before_retained_analysis_without_flattening_whole_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/row_stars.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Qualified stars, nested/mixed row constructors and repeated grouping aliases.",
+      "invariant": "Expansion preserves field order and deliberate whole-row nesting."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "expanded_row_fields_retain_neighboring_parameter_and_literal_selections",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/row_stars.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "A row comparison with expanded columns and neighboring literal/parameter coercions.",
+      "invariant": "The original parameter identities and selected Integer type survive expansion."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "scalar_predicate_capture_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "64 independent PostgreSQL observations on four providers; 61 after each persistent reopen.",
+      "invariant": "Rows, types, diagnostics, whole-row values, group/window boundaries and scalar-query sequence effects match PostgreSQL."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "row_star_expansion_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Seventeen independent PostgreSQL ROW observations on four providers, including matched and unmatched input behavior.",
+      "invariant": "Row fields, nesting, NULL identity, collation, prepared inputs and stored views match the independent reference."
     }
   ]
 }

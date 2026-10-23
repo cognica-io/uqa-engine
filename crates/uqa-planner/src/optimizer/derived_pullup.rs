@@ -20,6 +20,8 @@ use uqa_sql::{
 
 use super::OptimizerConfig;
 
+mod predicates;
+
 pub(super) fn rewrite(
     plan: &mut UnifiedPlan,
     config: &OptimizerConfig<'_>,
@@ -49,6 +51,9 @@ fn rewrite_plan(plan: &mut UnifiedPlan, context: &Context<'_>) -> Result<(), SQL
     plan.visit_queries_mut(&mut |query| {
         if result.is_ok() {
             result = query_block(query, context);
+            if result.is_ok() {
+                predicates::push(query, context);
+            }
         }
     });
     result
