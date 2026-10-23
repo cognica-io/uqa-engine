@@ -53,10 +53,6 @@ impl DocumentLayouts {
         }
         hasher.finish()
     }
-
-    pub(super) fn iter(&self) -> impl Iterator<Item = &[String]> {
-        self.fields.iter().map(AsRef::as_ref)
-    }
 }
 
 impl Index<usize> for DocumentLayouts {

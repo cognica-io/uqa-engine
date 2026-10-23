@@ -20,11 +20,14 @@ mod layouts;
 mod projection;
 
 use layouts::DocumentLayouts;
+use projection::ProjectionCache;
 
 #[derive(Debug, Default)]
 pub struct MemoryDocumentStore {
     /// Rows and their layout IDs advance together when a shared snapshot is changed.
     state: Arc<MemoryDocumentState>,
+    /// A read owner keeps one projection, with mappings only for layouts read.
+    projections: ProjectionCache,
 }
 
 /// Cloning retains independent row maps and layouts; snapshot APIs share them until a write.
@@ -32,6 +35,7 @@ impl Clone for MemoryDocumentStore {
     fn clone(&self) -> Self {
         Self {
             state: Arc::new((*self.state).clone()),
+            projections: ProjectionCache::default(),
         }
     }
 }
@@ -57,6 +61,7 @@ impl MemoryDocumentStore {
     fn shared_snapshot(&self) -> Self {
         Self {
             state: Arc::clone(&self.state),
+            projections: ProjectionCache::default(),
         }
     }
 
@@ -382,6 +387,7 @@ impl DocumentStore for MemoryDocumentStore {
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
+        self.projections = ProjectionCache::default();
         if let Some(state) = Arc::get_mut(&mut self.state) {
             *state = MemoryDocumentState::default();
         } else {

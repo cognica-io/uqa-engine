@@ -2,6 +2,58 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "paged_memory_projection_compiles_only_encountered_layouts_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/projection/cache/tests.rs",
+      "capability": "Read-owned projection work",
+      "workload": "Read repeated eight-row pages and sparse/duplicate IDs from a store with 2,049 layouts.",
+      "invariant": "Only the two encountered layouts compile, shared mappings retain their identity across pages, and ten warm borrowed pages allocate less than 1KB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "read_projection_reentry_releases_replaced_metadata_after_the_active_page",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/projection/cache/tests.rs",
+      "capability": "Projection metadata lifetime",
+      "workload": "Reenter the same read owner with another projection during a borrowed page callback.",
+      "invariant": "Callbacks hold no cache lock, the active page keeps its own mapping, and replaced projection metadata drops after that page ends.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_projection_layout_identity_survives_cow_clear_and_retained_rows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/projection/cache/tests.rs",
+      "capability": "Projection identity across memory snapshots",
+      "workload": "Keep shared rows and a snapshot while clearing/replacing a live store and mutating a cloned snapshot.",
+      "invariant": "Reused numeric layout IDs cannot reuse stale mappings; old values, missing/NULL positions and retained rows remain correct after their stores drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "empty_memory_projections_keep_cardinality_without_per_layout_mapping_work",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/projection/cache/tests.rs",
+      "capability": "Zero-column projected document reads",
+      "workload": "Read 128 differently shaped documents with empty projections, including sparse missing/duplicate point IDs.",
+      "invariant": "Cardinality and presence remain correct while all shapes use one empty mapping.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
       "test": "native_positional_body_borrows_names_and_distinguishes_missing_from_null",
