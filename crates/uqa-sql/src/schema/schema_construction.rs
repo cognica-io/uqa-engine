@@ -288,6 +288,7 @@ impl RowSchema {
         let SchemaBuildMetadata {
             mut collations,
             row_types,
+            row_presence,
             record_fields,
             aliases,
             alias_types,
@@ -368,6 +369,7 @@ impl RowSchema {
                 cold: Box::new(SchemaColdMetadata {
                     collations,
                     row_types,
+                    row_presence,
                     record_fields,
                     columns: types.into_boxed_slice(),
                     aliases: alias_types,

@@ -10,6 +10,7 @@ use crate::RowSchemaExecution;
 mod canonical_index;
 mod direct_index;
 mod nested_loop;
+pub(crate) mod presence;
 mod row_store;
 
 use smallvec::SmallVec;
@@ -237,6 +238,8 @@ impl<'a> HashJoin<'a> {
         right_nulls: ResultRow,
         work_mem_bytes: usize,
     ) -> Self {
+        let left = presence::input(left, matches!(kind, JoinKind::Right | JoinKind::Full));
+        let right = presence::input(right, matches!(kind, JoinKind::Left | JoinKind::Full));
         let left_key_positions = simple_key_positions(left.row_schema(), &left_keys);
         let right_key_positions = simple_key_positions(right.row_schema(), &right_keys);
         let schema = output_schema(

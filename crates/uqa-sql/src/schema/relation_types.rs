@@ -98,6 +98,7 @@ impl RowSchema {
             .chain(self.index.aliases.keys())
             .filter_map(ColumnIdentity::qualifier)
             .chain(self.index.cold.row_types.qualifiers())
+            .chain(self.whole_row_presences().map(|(qualifier, _)| qualifier))
     }
 
     /// Retain a relation's actual named composite identity without adding an ordinary column or a physical value slot. The existing source namespace must belong to that relation; a zero-column relation acquires its namespace here.

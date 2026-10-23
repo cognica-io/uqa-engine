@@ -74,6 +74,8 @@ impl<'a> NestedLoopJoin<'a> {
         right_nulls: ResultRow,
         work_mem_bytes: usize,
     ) -> Self {
+        let left = super::presence::input(left, matches!(kind, JoinKind::Right | JoinKind::Full));
+        let right = super::presence::input(right, matches!(kind, JoinKind::Left | JoinKind::Full));
         let schema = output_schema(
             left.row_schema(),
             right.row_schema(),

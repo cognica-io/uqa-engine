@@ -22008,7 +22008,7 @@
       ],
       "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
       "capability": "Derived qualifications and row identity",
-      "workload": "Seventeen independent PostgreSQL ROW observations on four providers, including matched and unmatched input behavior.",
+      "workload": "Seventeen independent PostgreSQL ROW observations on four providers; fifteen after each persistent reopen, including matched and unmatched inputs.",
       "invariant": "Row fields, nesting, NULL identity, collation, prepared inputs and stored views match the independent reference."
     },
     {
@@ -22052,6 +22052,165 @@
       "capability": "Whole-row window evaluation",
       "workload": "Twenty independent PostgreSQL observations on four providers; eighteen after each persistent reopen.",
       "invariant": "Whole-row window counts, filters, partition/order keys, lag/lead, frames, views and prepared inputs preserve rows and types."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nullable_relations_keep_hidden_identity_through_join_projection_and_scope",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Joined, canonical, correlated, aliased and projected namespaces.",
+      "invariant": "Opaque presence follows the owning relation namespace without changing visible columns."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "presence_relayout_uses_relation_identity_when_internal_ids_change",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Two physical layouts with fresh internal relation identities.",
+      "invariant": "Relayout preserves the source marker through its semantic relation qualifier."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_presence_rejects_missing_wrong_type_and_duplicate_bindings",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Missing, non-Boolean and duplicate marker bindings.",
+      "invariant": "Malformed metadata cannot expose a whole-row identity."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "removing_internal_attributes_retires_only_their_presence_bindings",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Removal of one, all or no marker identities across joined scopes.",
+      "invariant": "No dangling internal binding remains and independent markers survive."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "outer_join_records_preserve_presence_in_hash_and_nested_spills",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "LEFT, RIGHT and FULL joins under one-byte and in-memory allowances.",
+      "invariant": "Hash and nested-loop joins preserve present and absent record values through spill."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "a_matched_null_valued_row_is_not_a_null_extended_row",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Matched and rejected all-NULL right rows with forced spill.",
+      "invariant": "A present all-NULL record differs from an absent NULL record."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "marking_a_wide_input_shares_its_payload_without_allocation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "One nullable row with a 256 KiB text value.",
+      "invariant": "Adding a shared presence fragment allocates zero bytes and retains the payload."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nullable_rows_relayout_existing_presence_before_adding_a_marker",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Retained lateral rows with new marker identities and a missing-marker control.",
+      "invariant": "Relayout preserves actual row presence and rejects absent required metadata."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "malformed_whole_row_markers_are_not_treated_as_absent_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Missing, false and non-Boolean marker values.",
+      "invariant": "Invalid executor provenance fails explicitly instead of silently returning NULL."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "batch_spill_preserves_present_and_absent_record_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/tests/presence.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Present all-NULL and absent records through one-byte spill plus every truncated byte prefix.",
+      "invariant": "Exact byte accounting, bounded decoding and whole-row NULL identity survive spill."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "malformed_presence_records_fail_before_exposing_a_schema",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/format/binary/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Duplicate and missing bindings, oversized attribute identities and impossible counts.",
+      "invariant": "The codec validates counts and internal identities before exposing decoded metadata."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "relation_presence_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Whole-row join identity",
+      "workload": "33 independent PostgreSQL observations on four providers; 29 after each persistent reopen.",
+      "invariant": "LEFT/RIGHT/FULL/LATERAL joins, USING, aliases, correlation, COUNT, materialization, named zero-column relations, stored views and prepared inputs retain record NULL identity."
     }
   ]
 }

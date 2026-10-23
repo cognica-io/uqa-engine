@@ -22,6 +22,7 @@ impl RowSchema {
             || !self.index.cold.open_qualifiers.is_empty()
             || self.index.cold.row_types.qualifiers().next().is_some()
             || !self.index.cold.score_sources.is_empty()
+            || self.whole_row_presences().next().is_some()
     }
 
     /// Bind every SQL-visible column to one relation qualifier while preserving executor-only internal attributes and rebinding carried retrieval scores to the same relation boundary.
@@ -80,6 +81,7 @@ impl RowSchema {
                 .any(|identity| identity.qualifier() == Some(qualifier))
             || self.columns_are_open(Some(qualifier))
             || self.index.cold.row_types.get(qualifier).is_some()
+            || self.whole_row_presence(qualifier).is_some()
     }
 
     /// Whether a visible, aliased, or static binding-only identity contains this exact unqualified column, independently of its declared type.
@@ -220,6 +222,7 @@ impl RowSchema {
                 binding_only: input.index.cold.binding_only.clone(),
                 lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
                 extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
@@ -269,6 +272,7 @@ impl RowSchema {
                 binding_only: input.index.cold.binding_only.clone(),
                 lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
@@ -314,6 +318,7 @@ impl RowSchema {
                 binding_only: input.index.cold.binding_only.clone(),
                 lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
                 extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
@@ -371,6 +376,7 @@ impl RowSchema {
                 binding_only: input.index.cold.binding_only.clone(),
                 lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
                 extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
@@ -405,6 +411,7 @@ impl RowSchema {
                 binding_only: input.index.cold.binding_only.clone(),
                 lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
@@ -475,6 +482,7 @@ impl RowSchema {
                 binding_only: input.index.cold.binding_only.clone(),
                 lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
@@ -511,6 +519,7 @@ impl RowSchema {
                 binding_only: input.index.cold.binding_only.clone(),
                 lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
@@ -644,6 +653,7 @@ impl RowSchema {
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only,
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: ambiguous_unqualified,
                 extra_ambiguous_qualified: ambiguous_qualified,

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Distinguish absent outer-join rows from present records whose fields are all NULL. Preserve whole-row values and COUNT through LEFT/RIGHT/FULL/LATERAL joins, aliases, correlation and physical spill without copying row payloads.
+
 - Preserve whole-row operands in window evaluation, including present all-NULL records, partition and ordering keys, COUNT, lag/lead and frame functions. Retain the physical row lookup's namespace and types through in-memory and spilled execution.
 
 - Expand qualified relation stars inside ROW constructors in field order while preserving ordinary whole-row nesting, typed fields, collation and neighboring parameter/literal selections.

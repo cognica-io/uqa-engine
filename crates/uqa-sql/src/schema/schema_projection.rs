@@ -60,6 +60,11 @@ impl RowSchema {
             .filter(|source| internal.contains_key(&source.column))
             .cloned()
             .collect();
+        let row_presence = input
+            .index
+            .cold
+            .row_presence
+            .retaining(|marker| internal.contains_key(&marker));
         Self::from_typed_parts_with_aliases_and_exact_precedence(
             input.columns().to_vec(),
             input.identities().to_vec(),
@@ -77,6 +82,7 @@ impl RowSchema {
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence,
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
@@ -204,6 +210,7 @@ impl RowSchema {
                     wildcard_hidden: wildcard_hidden.into_iter().collect(),
                     binding_only: input.index.cold.binding_only.clone(),
                     row_types: input.index.cold.row_types.clone(),
+                    row_presence: input.index.cold.row_presence.clone(),
                     open_qualifiers: input.index.cold.open_qualifiers.clone(),
                     ..SchemaBuildMetadata::default()
                 },
@@ -320,6 +327,7 @@ impl RowSchema {
                     wildcard_hidden: self.index.cold.wildcard_hidden.clone(),
                     binding_only: self.index.cold.binding_only.clone(),
                     row_types: self.index.cold.row_types.clone(),
+                    row_presence: self.index.cold.row_presence.clone(),
                     open_qualifiers: self.index.cold.open_qualifiers.clone(),
                     ..SchemaBuildMetadata::default()
                 },
@@ -616,6 +624,7 @@ impl RowSchema {
                 wildcard_hidden,
                 binding_only: input.index.cold.binding_only.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
