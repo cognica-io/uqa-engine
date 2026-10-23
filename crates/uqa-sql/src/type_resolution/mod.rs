@@ -31,6 +31,7 @@ mod containment;
 pub(crate) mod enums;
 mod equality;
 pub(crate) mod field_selection;
+pub use field_selection::relation_column as relation_field_column;
 mod fixed_builtin;
 pub(crate) use fixed_builtin::overloads as fixed_builtin_overloads;
 mod function_inputs;

@@ -73,7 +73,6 @@ fn query_block(query: &mut QueryPlan, context: &Context<'_>) -> Result<(), SQLEr
         return Ok(());
     };
     if block.r#where.is_none()
-        || !block.order_by.is_empty()
         || !block.locking.is_empty()
         || !block.privilege_columns.is_empty()
         || input.schema.columns_are_open(None)
@@ -417,6 +416,9 @@ fn ordinary_inner_source(source: &SourcePlan) -> bool {
 fn qualify_block(block: &mut QueryBlockPlan, schema: &RowSchema) -> bool {
     let mut valid = true;
     rewrite_expressions(block, &mut |node| {
+        if let Some(identity) = uqa_sql::type_resolution::relation_field_column(node, schema) {
+            *node = identity_expression(&identity);
+        }
         if let Some(identity) = column_identity(node) {
             if let Some(identity) = qualified_identity(&identity, schema) {
                 *node = identity_expression(&identity);
@@ -468,16 +470,27 @@ fn rewrite_expressions(block: &mut QueryBlockPlan, rewrite: &mut dyn FnMut(&mut 
         .chain(&mut block.group_by)
         .chain(block.grouping_sets.iter_mut().flatten())
         .chain(block.having.iter_mut())
-        .chain(block.order_by.iter_mut().map(|order| &mut order.expr))
         .chain(block.limit.iter_mut())
         .chain(block.offset.iter_mut())
+    {
+        expression.visit_mut(&mut |node| rewrite(node));
+    }
+    for expression in block
+        .order_by
+        .iter_mut()
+        .map(|order| &mut order.expr)
         .chain(&mut block.distinct_on)
     {
-        uqa_sql::plan::rewrite_scalar_expression(expression, rewrite);
+        if !uqa_sql::binding::scoped_references::ordering_uses_output(
+            expression,
+            &block.projections,
+        ) {
+            expression.visit_mut(&mut |node| rewrite(node));
+        }
     }
     for window in &mut block.windows {
         for expression in window.spec.expressions_mut() {
-            uqa_sql::plan::rewrite_scalar_expression(expression, rewrite);
+            expression.visit_mut(&mut |node| rewrite(node));
         }
     }
     if let Some(source) = &mut block.from {
@@ -493,7 +506,7 @@ fn rewrite_join_conditions(source: &mut SourcePlan, rewrite: &mut dyn FnMut(&mut
         rewrite_join_conditions(left, rewrite);
         rewrite_join_conditions(right, rewrite);
         if let Some(predicate) = on {
-            uqa_sql::plan::rewrite_scalar_expression(predicate, rewrite);
+            predicate.visit_mut(&mut |node| rewrite(node));
         }
     }
 }

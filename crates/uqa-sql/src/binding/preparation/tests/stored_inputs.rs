@@ -162,6 +162,10 @@ fn enclosing_column_substitution_preserves_nested_and_preceding_namespaces() {
     )]);
     for (sql, expected) in [
         ("SELECT s.k WHERE k>0", 2),
+        ("SELECT (s).k WHERE (s).k>0", 2),
+        ("SELECT (SELECT (s).k) WHERE (s).k>0", 2),
+        ("SELECT (SELECT (s).k) FROM (VALUES(2)) s(k)", 0),
+        ("SELECT (s).k FROM (VALUES(2)) t(n)", 1),
         ("SELECT (SELECT s.k) WHERE k>0", 2),
         ("SELECT (SELECT s.k) FROM (VALUES(2)) s(k)", 0),
         ("SELECT (SELECT k) FROM (VALUES(2)) t(k)", 0),

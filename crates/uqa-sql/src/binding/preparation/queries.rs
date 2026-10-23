@@ -528,9 +528,13 @@ impl Preparation<'_> {
             ScalarExpr::Literal(uqa_core::Value::Int(position)) => Some(
                 crate::semantics::query_output_position(*position, primary.len(), clause)?,
             ),
-            ScalarExpr::Column(name) if !primary.column_is_ambiguous(name) => {
-                primary.column_slot(name)
+            ScalarExpr::Column(name) if primary.column_is_ambiguous(name) => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42702".into(),
+                    message: format!("{clause} \"{name}\" is ambiguous"),
+                });
             }
+            ScalarExpr::Column(name) => primary.column_slot(name),
             ScalarExpr::Position(position) if *position < output.types.len() => Some(*position),
             _ => None,
         };

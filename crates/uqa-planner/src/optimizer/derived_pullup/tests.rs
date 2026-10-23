@@ -361,3 +361,68 @@ fn stored_query_definitions_never_retain_transient_input_captures() {
         assert_eq!(serde_json::to_value(&plan).unwrap(), before, "{sql}");
     }
 }
+
+#[test]
+fn field_qualification_and_ordering_keep_selected_input_identity() {
+    for predicate in [
+        "(s).k>0",
+        "k=(SELECT 2) ORDER BY k",
+        "k=(SELECT 2) ORDER BY 1",
+        "k=(SELECT 2) ORDER BY s.k+1",
+    ] {
+        let mut query = analyzed(
+            "SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)",
+            predicate,
+        );
+        lift(&mut query);
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("query block")
+        };
+        assert!(
+            matches!(
+                block.from,
+                Some(SourcePlan::Subquery {
+                    captured_output: Some(_),
+                    ..
+                })
+            ),
+            "{predicate}"
+        );
+        if predicate.ends_with("ORDER BY k") {
+            assert!(
+                matches!(&block.order_by[0].expr, ScalarExpr::Column(name) if name.as_str()=="k")
+            );
+        }
+        if predicate.ends_with("ORDER BY 1") {
+            assert!(matches!(
+                &block.order_by[0].expr,
+                ScalarExpr::Literal(uqa_core::Value::Int(1)) | ScalarExpr::Position(0)
+            ));
+        }
+    }
+}
+
+#[test]
+fn ordering_output_alias_wins_over_input_but_compound_expression_uses_input() {
+    let schema =
+        RowSchema::with_qualified_types("s", vec!["k".into()], vec![Some(ColumnType::Integer)]);
+    for (sql, input_reference) in [
+        ("SELECT -k AS k FROM s ORDER BY k", false),
+        ("SELECT -k AS k FROM s ORDER BY k+1", true),
+    ] {
+        let UnifiedPlan::Query(query) =
+            UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        let RelationalPlan::QueryBlock(mut block) = query.root else {
+            panic!("block")
+        };
+        assert!(qualify_block(&mut block, &schema));
+        let mut qualified = false;
+        block.order_by[0]
+            .expr
+            .visit(&mut |node| qualified |= matches!(node, ScalarExpr::QualifiedColumn { .. }));
+        assert_eq!(qualified, input_reference, "{sql}");
+    }
+}

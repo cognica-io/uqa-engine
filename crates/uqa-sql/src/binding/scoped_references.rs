@@ -46,12 +46,11 @@ impl<'a> ScopedReferences<'a> {
                 } else {
                     self.complete = false;
                 }
-            } else if !self
-                .scopes
-                .iter()
-                .rev()
-                .any(|schema| locally_resolved(part, schema))
-            {
+            } else if !self.scopes.iter().rev().any(|schema| {
+                let reference = crate::type_resolution::field_selection::field_reference(part)
+                    .map_or(part, |(base, _)| base);
+                locally_resolved(reference, schema)
+            }) {
                 (self.visitor)(part);
             }
         });
@@ -221,13 +220,20 @@ pub fn query_inputs(block: &crate::plan::QueryBlockPlan) -> impl Iterator<Item =
             .map(|order| &order.expr)
             .chain(&block.distinct_on)
             .any(|order| std::ptr::eq(order, *expression));
-        !ordering
-            || !match expression {
-                ScalarExpr::Position(_) | ScalarExpr::Literal(uqa_core::Value::Int(_)) => true,
-                ScalarExpr::Column(name) => block.projections.iter().any(|projection| {
-                    crate::semantics::projection_label_at(projection) == name.as_str()
-                }),
-                _ => false,
-            }
+        !ordering || !ordering_uses_output(expression, &block.projections)
     })
+}
+
+/// SQL92 output names and ordinals bind to the selected output, while compound ordering expressions use the input namespace.
+pub fn ordering_uses_output(
+    expression: &ScalarExpr,
+    projections: &[crate::plan::ProjectionPlan],
+) -> bool {
+    match expression {
+        ScalarExpr::Position(_) | ScalarExpr::Literal(uqa_core::Value::Int(_)) => true,
+        ScalarExpr::Column(name) => projections
+            .iter()
+            .any(|projection| crate::semantics::projection_label_at(projection) == name.as_str()),
+        _ => false,
+    }
 }

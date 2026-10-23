@@ -6,7 +6,10 @@
 
 //! Replace only references to one analyzed enclosing row.
 
-use std::{collections::BTreeMap, ptr::NonNull};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ptr::NonNull,
+};
 
 use crate::{plan::QueryPlan, ColumnIdentity, RowSchema, ScalarExpr};
 
@@ -39,7 +42,22 @@ pub fn substitute_outer_columns(
         return false;
     }
     let mut replacements = BTreeMap::new();
+    let mut selected_fields = BTreeSet::new();
     let mut visit = |node: &ScalarExpr| {
+        if selected_fields.contains(&NonNull::from(node)) {
+            return;
+        }
+        if let Some(identity) =
+            crate::type_resolution::field_selection::relation_column(node, target)
+        {
+            if let Some(replacement) = inputs.get(&identity) {
+                let (base, _) = crate::type_resolution::field_selection::field_reference(node)
+                    .expect("selected relation field");
+                selected_fields.insert(NonNull::from(base));
+                replacements.insert(NonNull::from(node), replacement.clone());
+                return;
+            }
+        }
         let position = match node {
             ScalarExpr::Column(column) => {
                 if target.has_qualifier(column)

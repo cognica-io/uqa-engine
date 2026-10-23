@@ -21780,6 +21780,74 @@
       "capability": "Scoped missing-column diagnostics",
       "workload": "Fourteen PostgreSQL observations on four providers, with thirteen after persistent reopen.",
       "invariant": "Exact SQLSTATE, primary, DETAIL/HINT and successful shadowing controls agree with PostgreSQL."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "relation_field_selection_respects_column_shadowing_and_structural_dispatch",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/field_selection.rs",
+      "capability": "Ordered and field-selective derived input capture",
+      "workload": "Whole-row field selection and a real column sharing its relation name.",
+      "invariant": "Only a selected structural field access to the relation resolves to an individual input column."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_ordering_preserves_ambiguous_output_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/set_ordering.rs",
+      "capability": "Ordered and field-selective derived input capture",
+      "workload": "Two distinct outputs with one ORDER BY alias and two input columns in a compound ordering expression.",
+      "invariant": "An ambiguous output reports the clause diagnostic while an ambiguous input retains the column-reference diagnostic."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "field_qualification_and_ordering_keep_selected_input_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Ordered and field-selective derived input capture",
+      "workload": "Whole-row field qualification, scalar-subquery predicates and named, ordinal or compound sort keys.",
+      "invariant": "Eligible producer outputs remain after consumer qualification and SQL92 sort references keep their output identity."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "ordering_output_alias_wins_over_input_but_compound_expression_uses_input",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Ordered and field-selective derived input capture",
+      "workload": "A negated output has the same label as its input, with simple and compound ORDER BY expressions.",
+      "invariant": "Only a complete output-name reference binds to the projected alias; compound expressions bind to source columns."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "ordered_field_capture_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Ordered and field-selective derived input capture",
+      "workload": "Twenty-nine independent PostgreSQL observations on four providers, with twenty-eight after each persistent reopen.",
+      "invariant": "Rows, names, types and error fields match for correlated field selection, local shadows, CTEs, SQL92 aliases and ordinals, selected errors and scalar cardinality."
     }
   ]
 }

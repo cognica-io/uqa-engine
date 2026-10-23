@@ -13,6 +13,32 @@ use uqa_engine::Engine;
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn ordered_field_capture_matches_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("ordered-field-capture.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/ordered_field_capture_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    restored["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["id"] != "version");
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 28);
+    crate::pg18_oracle::verify(&engine, &restored.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn shadowed_column_diagnostics_match_postgresql_and_reopen(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("shadowed-column.db");
