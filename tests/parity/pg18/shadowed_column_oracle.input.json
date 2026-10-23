@@ -1,0 +1,60 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "same_alias",
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(2)) s(k)"
+    },
+    {
+      "id": "different_alias",
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(2)) q(k)"
+    },
+    {
+      "id": "two_ancestors",
+      "sql": "SELECT (SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(3)) s(k)) FROM (VALUES(2)) s(k)"
+    },
+    {
+      "id": "ancestor_missing",
+      "sql": "SELECT (SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(3)) s(m)) FROM (VALUES(2)) s(k)"
+    },
+    {
+      "id": "duplicate_outer",
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(2,3)) s(k,k)"
+    },
+    {
+      "id": "available_unqualified",
+      "sql": "SELECT (SELECT k FROM (VALUES(1)) s(j)) FROM (VALUES(2)) s(k)"
+    },
+    {
+      "id": "local_wins",
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(k)) FROM (VALUES(2)) s(k)"
+    },
+    {
+      "id": "quoted",
+      "sql": "SELECT (SELECT \"S\".\"K\" FROM (VALUES(1)) \"S\"(j)) FROM (VALUES(2)) \"S\"(\"K\")"
+    },
+    {
+      "id": "different_case",
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(2)) \"S\"(k)"
+    },
+    {
+      "id": "multiple_outer_columns",
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(2,3)) s(k,m)"
+    },
+    {
+      "id": "missing_from_join_alias",
+      "sql": "SELECT s.ka FROM ((VALUES(1))a(k) CROSS JOIN (VALUES(2))b(j)) s"
+    },
+    {
+      "id": "two_hint_candidates",
+      "sql": "SELECT s.k FROM (VALUES(1))s(j) CROSS JOIN (VALUES(2))q(k) CROSS JOIN (VALUES(3))r(k)"
+    },
+    {
+      "id": "three_hint_candidates",
+      "sql": "SELECT s.k FROM (VALUES(1))s(j) CROSS JOIN (VALUES(2))q(k) CROSS JOIN (VALUES(3))r(k) CROSS JOIN (VALUES(4))t(k)"
+    }
+  ]
+}

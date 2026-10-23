@@ -1,0 +1,120 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "present",
+      "sql": "SELECT ROW(q)::text AS r,count(q) OVER() AS n FROM (SELECT)q"
+    },
+    {
+      "id": "star_projection",
+      "sql": "SELECT q.* FROM (SELECT)q"
+    },
+    {
+      "id": "star_absent_projection",
+      "sql": "SELECT q.* FROM (VALUES(1))l(k) LEFT JOIN (SELECT)q ON FALSE"
+    },
+    {
+      "id": "star_no_rows",
+      "sql": "SELECT q.* FROM (SELECT WHERE FALSE)q"
+    },
+    {
+      "id": "expanded",
+      "sql": "SELECT ROW(q.*)::text AS expanded,ROW(q)::text AS nested,count(q) OVER() AS n FROM (SELECT)q"
+    },
+    {
+      "id": "left_present",
+      "sql": "SELECT k,ROW(q)::text AS r,count(q) OVER() AS n FROM (VALUES(1))l(k) LEFT JOIN (SELECT)q ON TRUE"
+    },
+    {
+      "id": "left_absent",
+      "sql": "SELECT k,ROW(q)::text AS r,count(q) OVER() AS n FROM (VALUES(1))l(k) LEFT JOIN (SELECT)q ON FALSE"
+    },
+    {
+      "id": "right_absent",
+      "sql": "SELECT k,ROW(q)::text AS r,count(q) OVER() AS n FROM (SELECT)q RIGHT JOIN (VALUES(1))r(k) ON FALSE"
+    },
+    {
+      "id": "full_empty",
+      "sql": "SELECT ROW(l)::text AS l,ROW(r)::text AS r,count(l) OVER() AS ln,count(r) OVER() AS rn FROM (SELECT)l FULL JOIN (SELECT)r ON FALSE ORDER BY 1,2"
+    },
+    {
+      "id": "lateral",
+      "sql": "SELECT k,ROW(q)::text AS r,count(q) OVER() AS n FROM (VALUES(1),(2))l(k) LEFT JOIN LATERAL(SELECT WHERE k=2)q ON TRUE ORDER BY k"
+    },
+    {
+      "id": "correlated_present",
+      "sql": "SELECT ROW(q)::text AS direct,(SELECT ROW(q)::text) AS nested FROM (SELECT)q"
+    },
+    {
+      "id": "correlated_absent",
+      "sql": "SELECT ROW(q)::text AS direct,(SELECT ROW(q)::text) AS nested FROM (VALUES(1))l(k) LEFT JOIN (SELECT)q ON FALSE"
+    },
+    {
+      "id": "join_alias",
+      "sql": "SELECT ROW(j)::text AS r,count(j) OVER() AS n FROM ((SELECT)l LEFT JOIN (SELECT)r ON FALSE)j"
+    },
+    {
+      "id": "join_alias_absent",
+      "sql": "SELECT ROW(j)::text AS r,count(j) OVER() AS n FROM (VALUES(1))x(k) LEFT JOIN ((SELECT)l LEFT JOIN (SELECT)r ON FALSE)j ON FALSE"
+    },
+    {
+      "id": "cte",
+      "sql": "WITH q AS (SELECT) SELECT ROW(q)::text AS r,count(q) OVER() AS n FROM q"
+    },
+    {
+      "id": "materialized",
+      "sql": "WITH q AS MATERIALIZED(SELECT) SELECT ROW(q)::text AS r,count(q) OVER() AS n FROM q"
+    },
+    {
+      "id": "union",
+      "sql": "SELECT ROW(q)::text AS r,count(q) OVER() AS n FROM (SELECT UNION ALL SELECT)q"
+    },
+    {
+      "id": "no_rows",
+      "sql": "SELECT ROW(q)::text AS r FROM (SELECT WHERE FALSE)q"
+    },
+    {
+      "id": "null_predicates",
+      "sql": "SELECT q IS NULL AS row_null,q IS NOT NULL AS row_not_null,ROW(q) IS NULL AS datum_null,ROW(q) IS NOT NULL AS datum_present FROM (SELECT)q"
+    },
+    {
+      "id": "shadow",
+      "sql": "SELECT q,ROW(e)::text AS empty FROM (SELECT)e,(SELECT 7 AS q)s"
+    },
+    {
+      "id": "unknown_field",
+      "sql": "SELECT q.missing FROM (SELECT)q"
+    },
+    {
+      "id": "too_many_aliases",
+      "sql": "SELECT * FROM (SELECT)q(a)"
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW empty_derived_scope_view AS SELECT ROW(q)::text AS body,count(q) OVER() AS n FROM (SELECT)q"
+    },
+    {
+      "id": "view",
+      "sql": "SELECT * FROM empty_derived_scope_view"
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE empty_derived_scope(bool) AS SELECT ROW(q)::text AS r,count(q) OVER() AS n FROM (VALUES(1))l(k) LEFT JOIN (SELECT)q ON $1"
+    },
+    {
+      "id": "execute_present",
+      "sql": "EXECUTE empty_derived_scope(TRUE)"
+    },
+    {
+      "id": "execute_absent",
+      "sql": "EXECUTE empty_derived_scope(FALSE)"
+    },
+    {
+      "id": "deallocate",
+      "sql": "DEALLOCATE empty_derived_scope"
+    }
+  ]
+}

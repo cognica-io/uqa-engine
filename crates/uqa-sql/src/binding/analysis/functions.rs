@@ -88,7 +88,7 @@ pub(super) fn validate_qualified_column(
         {
             return Ok(());
         }
-        return Err(SQLError::unknown_qualified_column(qualifier, column));
+        return Err(candidate.missing_qualified_column(qualifier, column));
     }
     for candidate in std::iter::once(schema).chain(fallback) {
         if let Some(error) = candidate.unavailable_qualifier_error(qualifier) {
@@ -294,7 +294,7 @@ pub(super) fn validate_ordered_function(
         name,
         kind,
         super::super::ordered_calls::Modifiers {
-            direct: args.len(),
+            direct: super::super::ordered_calls::DirectArguments::from(*args),
             ordered: order_by.len(),
             within_group,
             distinct,
@@ -674,13 +674,18 @@ fn builtin_scalar_function(name: &str, argument_count: usize) -> bool {
     )
 }
 
-fn undefined_function(
+pub(super) fn undefined_function(
     name: &str,
     args: &[ScalarExpr],
     schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> SQLError {
+    let args = if matches!(args, [ScalarExpr::Star]) {
+        &[]
+    } else {
+        args
+    };
     let signature = args
         .iter()
         .map(|argument| {

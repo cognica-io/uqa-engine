@@ -137,6 +137,8 @@ fn project(body: Box<QueryPlan>, width: usize) -> QueryPlan {
         .map(|index| format!("column{index}"))
         .collect::<Vec<_>>();
     QueryPlan {
+        analyzed_output: None,
+        analyzed_source: None,
         relations_bound: body.relations_bound,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
@@ -148,6 +150,7 @@ fn project(body: Box<QueryPlan>, width: usize) -> QueryPlan {
                 })
                 .collect(),
             from: Some(SourcePlan::Subquery {
+                captured_output: None,
                 lateral: false,
                 body,
                 alias: None,

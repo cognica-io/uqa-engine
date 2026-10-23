@@ -180,8 +180,11 @@ fn compile_plan(
     else {
         return ProjectedAggregatePlan::General;
     };
-    if context.is_registered_aggregate(name)
-        || filter.is_some()
+    if context.is_registered_aggregate(name) {
+        return ProjectedAggregatePlan::General;
+    }
+    let name = uqa_sql::semantics::builtin_aggregate_dispatch_name(name);
+    if filter.is_some()
         || *distinct
         || !order_by.is_empty()
         || is_ordered_set_aggregate(name)

@@ -172,7 +172,21 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                             .map_err(physical_exec_error)
                     })
                     .transpose()?;
-                // The right relation is evaluated per left row, so the predicates placed on its qualifiers are applied to each produced row instead of being passed to a source builder. Its row carries every column of those qualifiers, so a placed predicate that reads another one is reported when a row is admitted, as for any closed source.
+                let specialized_right = if pinned_right.is_none() {
+                    super::output_filter::specialize_lateral_source(
+                        context,
+                        right,
+                        right_filter_ref,
+                    )?
+                } else {
+                    None
+                };
+                let right_filter_ref = if specialized_right.is_some() {
+                    None
+                } else {
+                    right_filter_ref
+                };
+                // A predicate that cannot move inside the right query still applies to each produced row, including a tuple supplied by a lock recheck.
                 let right_qualifiers = from_qualifier_set(right);
                 let right_filter = combine_filters(
                     right_qualifiers
@@ -194,7 +208,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 });
                 let source = QueryLateralSource {
                     context: *context,
-                    right: (**right).clone(),
+                    right: specialized_right.unwrap_or_else(|| (**right).clone()),
                     right_filter,
                     on: effective_on.map(|expression| {
                         let joined = crate::RowSchema::join(

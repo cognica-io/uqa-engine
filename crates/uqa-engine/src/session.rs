@@ -44,3 +44,4 @@ use uqa_sql::binding::view_dependencies::sequence_function_reference_mut;
 mod tests;
 
 mod directional_query;
+mod retained_query;

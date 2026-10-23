@@ -1,0 +1,120 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "order_name",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0 ORDER BY k"
+    },
+    {
+      "id": "order_position",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0 ORDER BY 1"
+    },
+    {
+      "id": "order_subquery",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0 ORDER BY (SELECT k)"
+    },
+    {
+      "id": "field_selection",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE (s).k>0"
+    },
+    {
+      "id": "correlated_field_selection",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT (s).k WHERE (s).k>0)"
+    },
+    {
+      "id": "whole_row_qualification",
+      "sql": "SELECT k FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE s IS NOT NULL"
+    },
+    {
+      "id": "joined_order",
+      "sql": "SELECT s.k,s.z,t.n FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s CROSS JOIN (VALUES(7))t(n) WHERE k>0 ORDER BY s.k"
+    },
+    {
+      "id": "consumer_distinct",
+      "sql": "SELECT DISTINCT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k>0"
+    },
+    {
+      "id": "order_name_scalar_qualification",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2) ORDER BY k"
+    },
+    {
+      "id": "order_position_scalar_qualification",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2) ORDER BY 1"
+    },
+    {
+      "id": "order_subquery_scalar_qualification",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2) ORDER BY (SELECT k)"
+    },
+    {
+      "id": "joined_order_scalar_qualification",
+      "sql": "SELECT s.k,s.z,t.n FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s CROSS JOIN (VALUES(7))t(n) WHERE k=(SELECT 2) ORDER BY s.k"
+    },
+    {
+      "id": "consumer_distinct_scalar_qualification",
+      "sql": "SELECT DISTINCT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "order_output_alias",
+      "sql": "SELECT -k AS k,z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k>=(SELECT 2) ORDER BY k"
+    },
+    {
+      "id": "order_input_expression",
+      "sql": "SELECT -k AS k,z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k>=(SELECT 2) ORDER BY k+1"
+    },
+    {
+      "id": "order_qualified_input",
+      "sql": "SELECT -k AS k,z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k>=(SELECT 2) ORDER BY s.k"
+    },
+    {
+      "id": "order_scalar_input",
+      "sql": "SELECT -k AS k,z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k>=(SELECT 2) ORDER BY (SELECT k)"
+    },
+    {
+      "id": "field_order_scalar_predicate",
+      "sql": "SELECT (s).k,(s).z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE (s).k=(SELECT 2) ORDER BY (s).k"
+    },
+    {
+      "id": "field_inner_shadow",
+      "sql": "SELECT k,z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT (s).k FROM (VALUES(2))s(k))"
+    },
+    {
+      "id": "field_nested_capture",
+      "sql": "SELECT k,z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT (SELECT (s).k) WHERE (s).k>0) ORDER BY k"
+    },
+    {
+      "id": "field_cte_capture",
+      "sql": "SELECT k,z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(WITH q AS (SELECT (s).k WHERE (s).k>0) SELECT q.k FROM q) ORDER BY k"
+    },
+    {
+      "id": "field_value_column_shadow",
+      "sql": "SELECT (s).f1,z FROM (SELECT ROW(x) AS s,10/x AS z,x AS k FROM (VALUES(0),(2))v(x))s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "field_missing",
+      "sql": "SELECT (s).missing FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 2)"
+    },
+    {
+      "id": "field_selected_error",
+      "sql": "SELECT k FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE (s).z>(SELECT 0)"
+    },
+    {
+      "id": "order_selected_error",
+      "sql": "SELECT k FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 0) ORDER BY z"
+    },
+    {
+      "id": "order_duplicate_label",
+      "sql": "SELECT k AS a,z AS a FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 2) ORDER BY a"
+    },
+    {
+      "id": "order_empty_scalar",
+      "sql": "SELECT k,z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT 2 WHERE FALSE) ORDER BY k"
+    },
+    {
+      "id": "order_scalar_cardinality",
+      "sql": "SELECT k,z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2),(5))v(x))s WHERE k=(SELECT n FROM (VALUES(2),(5))v(n)) ORDER BY k"
+    }
+  ]
+}

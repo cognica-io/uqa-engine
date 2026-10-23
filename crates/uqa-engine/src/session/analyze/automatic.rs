@@ -19,7 +19,7 @@ use crate::statistics::{now_ms, MaintenanceState};
 use crate::{ColumnStatsMap, Engine};
 
 /// The data generation of each table a sample read, in scan order.
-type DataGenerations = Vec<(String, Option<u64>)>;
+pub(super) type DataGenerations = Vec<(String, Option<u64>)>;
 
 struct AutomaticAnalysis {
     object_id: [u8; 16],
@@ -104,7 +104,7 @@ impl Engine {
             .map(|column| column.name.clone())
             .collect::<Vec<_>>();
         // Both are read before the sample: a write that commits in between advances a generation past the recorded one, and the sample reads at the recorded sequence or a later one.
-        let data_generations = self.sampled_data_generations(name)?;
+        let data_generations = self.sampled_data_generations(name, true)?;
         let publication = self.statistics_publication_identity(name)?;
         let sampled_at = self.statistics_sample_sequence();
         let (statistics, row_count) = sampling::collect(self, name, &columns)?;
@@ -137,9 +137,10 @@ impl Engine {
     }
 
     /// The data generations of the tables an analysis of `name` samples, or `None` when the provider reports no generations and every commit rewrites the maintenance record instead.
-    fn sampled_data_generations(
+    pub(super) fn sampled_data_generations(
         &self,
         name: &str,
+        include_descendants: bool,
     ) -> StorageBackendResult<Option<DataGenerations>> {
         let Some(catalog) = self.storage.catalog.as_deref() else {
             return Ok(None);
@@ -147,9 +148,12 @@ impl Engine {
         let Some(revisions) = catalog.cache_revisions()? else {
             return Ok(None);
         };
-        let members = self
-            .hierarchy_scan_tables(name, true)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        let members = if include_descendants {
+            self.hierarchy_scan_tables(name, true)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?
+        } else {
+            vec![name.to_owned()]
+        };
         Ok(Some(
             members
                 .into_iter()
@@ -208,7 +212,8 @@ impl Engine {
             {
                 return Ok(false);
             }
-            let data_changed = engine.sampled_data_generations(name)? != analysis.data_generations;
+            let data_changed =
+                engine.sampled_data_generations(name, true)? != analysis.data_generations;
             let mut published = analysis.maintenance.clone();
             published.analyzed(
                 table.object_id(),
@@ -223,6 +228,7 @@ impl Engine {
             };
             Self::persist_column_stats_rows(catalog, name, &analysis.statistics)?;
             published.save(catalog, name)?;
+            engine.retain_statistics_sample(name, table.object_id(), analysis.data_generations);
             *table.column_stats.write() = analysis.statistics;
             table.column_stats_loaded.store(true, Ordering::Release);
             table

@@ -28,6 +28,7 @@ mod model;
 mod optimization;
 pub use optimization::ExecutablePlanOptimizer;
 mod query;
+mod query_visit;
 mod rewrite;
 mod scalar;
 mod source_metadata;

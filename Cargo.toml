@@ -88,6 +88,8 @@ ciborium = "0.2"
 thiserror = "1.0"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 parking_lot = "0.12"
+# Retained physical pipelines borrow their session owner without a worker thread.
+self_cell = "=1.3.0"
 # Private allowance and change-set owners need atomic strong references without a weak counter.
 triomphe = { version = "=0.1.16", default-features = false, features = ["std"] }
 libc = "0.2"

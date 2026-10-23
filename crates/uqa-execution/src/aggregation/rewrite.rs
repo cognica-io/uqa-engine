@@ -17,6 +17,7 @@ pub fn aggregate_input_value(
     order_by: &[ScalarOrder],
     ctx: &ScalarEvalContext<'_>,
 ) -> Result<Value, SQLError> {
+    let name = uqa_sql::semantics::builtin_aggregate_dispatch_name(name);
     if name.eq_ignore_ascii_case("count") && (args.is_empty() || matches!(args, [ScalarExpr::Star]))
     {
         return Ok(Value::Int(1));
@@ -146,6 +147,7 @@ pub fn aggregate_accumulator_templates(
                         .with_ordering(if has_enums { ordering_types.len() } else { 0 })
                         .with_ordering_types(ordering_types));
                 }
+                let name = uqa_sql::semantics::builtin_aggregate_dispatch_name(name);
                 let input_type = args
                     .first()
                     .map(|argument| {

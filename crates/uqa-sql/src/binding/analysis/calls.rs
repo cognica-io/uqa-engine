@@ -69,29 +69,30 @@ pub(in crate::binding) fn validate_call(
                     resolver,
                 },
             )?;
-            if crate::semantics::is_builtin_aggregate(expression)
-                || routines.has_registered_aggregate_function(name)
-            {
+            if crate::semantics::is_builtin_aggregate(expression) {
+                return super::super::ordered_calls::validate_builtin_aggregate_arguments(
+                    name,
+                    binding.as_ref(),
+                    args,
+                    || super::functions::undefined_function(name, args, schema, params, resolver),
+                );
+            }
+            if routines.has_registered_aggregate_function(name) {
                 return Ok(());
             }
-            // `ParseFuncOrColumn` names the first aggregate modifier an ordinary function cannot take.
-            let modifier = if *distinct {
-                Some("DISTINCT")
-            } else if !order_by.is_empty() {
-                Some("ORDER BY")
-            } else if filter.is_some() {
-                Some("FILTER")
-            } else {
-                None
-            };
-            modifier.map_or(Ok(()), |modifier| {
-                Err(SQLError::Routine {
-                    sqlstate: "42809".into(),
-                    message: format!(
-                        "{modifier} specified, but {name} is not an aggregate function"
-                    ),
-                })
-            })
+            super::super::ordered_calls::validate(
+                name,
+                super::super::ordered_calls::Kind::Ordinary,
+                super::super::ordered_calls::Modifiers {
+                    direct: super::super::ordered_calls::DirectArguments::from(args.as_slice()),
+                    ordered: order_by.len(),
+                    within_group: false,
+                    distinct: *distinct,
+                    filtered: filter.is_some(),
+                },
+                &[],
+                &[],
+            )
         }
         ScalarExpr::WindowCall {
             name,

@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "qualified",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT s.k WHERE s.k>0)"
+    },
+    {
+      "id": "unqualified",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT k WHERE k>0)"
+    },
+    {
+      "id": "nested",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT (SELECT s.k WHERE s.k>0))"
+    },
+    {
+      "id": "local_alias",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT s.k FROM (VALUES(2)) s(k))"
+    },
+    {
+      "id": "local_column",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT k FROM (VALUES(2)) t(k))"
+    },
+    {
+      "id": "missing_local_column",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT s.k FROM (VALUES(2)) s(j))"
+    },
+    {
+      "id": "intermediate_alias",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT (SELECT s.k) FROM (VALUES(2)) s(k))"
+    },
+    {
+      "id": "intermediate_column",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT (SELECT k) FROM (VALUES(2)) t(k))"
+    },
+    {
+      "id": "joined_inner",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT a.n+b.n FROM (VALUES(1)) a(n) CROSS JOIN (VALUES(1)) b(n) WHERE s.k>0)"
+    },
+    {
+      "id": "lateral_inner",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT t.n FROM (VALUES(2)) q(n) CROSS JOIN LATERAL (SELECT q.n WHERE s.k>0) t)"
+    },
+    {
+      "id": "lateral_shadow",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT t.n FROM (VALUES(2)) s(n) CROSS JOIN LATERAL (SELECT s.n) t)"
+    },
+    {
+      "id": "in_subquery",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k IN (SELECT s.k WHERE s.k>0)"
+    },
+    {
+      "id": "exists_subquery",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE EXISTS (SELECT 1 WHERE s.k>0)"
+    },
+    {
+      "id": "set_members",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT s.k WHERE s.k>0 UNION ALL SELECT 4 WHERE FALSE)"
+    },
+    {
+      "id": "cte_outer",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(WITH q AS (SELECT s.k WHERE s.k>0) SELECT * FROM q)"
+    },
+    {
+      "id": "cte_materialized_outer",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(WITH q AS MATERIALIZED (SELECT s.k WHERE s.k>0) SELECT * FROM q)"
+    },
+    {
+      "id": "cte_scope_shadow",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(WITH q AS (SELECT s.k WHERE s.k>0) SELECT q.k FROM q CROSS JOIN (VALUES(9)) s(k))"
+    },
+    {
+      "id": "function_argument",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT n FROM generate_series(s.k,s.k) n WHERE n>0)"
+    },
+    {
+      "id": "unrelated_outer",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT t.n FROM (VALUES(2)) t(n) WHERE t.n>0)"
+    },
+    {
+      "id": "null_predicate",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT s.k WHERE NULL::boolean)"
+    },
+    {
+      "id": "empty_inner",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT s.k FROM (VALUES(1)) t(n) WHERE FALSE)"
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW correlated_capture_view AS SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT s.k WHERE s.k>0)"
+    },
+    {
+      "id": "stored_view",
+      "sql": "SELECT * FROM correlated_capture_view"
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE correlated_capture_plan(int) AS SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT s.k WHERE s.k>$1)"
+    },
+    {
+      "id": "prepared",
+      "sql": "EXECUTE correlated_capture_plan(0)"
+    }
+  ]
+}

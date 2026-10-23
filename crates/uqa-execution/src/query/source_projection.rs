@@ -108,8 +108,14 @@ pub fn qualify_source_operator_with_columns<'a>(
             Some((column.to_string(), identity, index))
         })
         .collect();
-    let selection = crate::ColumnSelection::with_identities(operator, mapping)
+    let mut selection = crate::ColumnSelection::with_identities(operator, mapping)
         .rebinding_score_sources(qualifier);
+    if selection.row_schema().is_empty()
+        && !qualifier.is_empty()
+        && !selection.row_schema().has_qualifier(qualifier)
+    {
+        selection = selection.with_relation_qualifier(qualifier);
+    }
     if rebind_lock_origins {
         Box::new(selection.rebinding_lock_origins(qualifier))
     } else {
@@ -144,8 +150,13 @@ pub fn alias_join_operator<'a>(
             )
         })
         .collect();
-    Ok(Box::new(
-        crate::ColumnSelection::with_fresh_identities(operator, mapping)
-            .rebinding_score_sources(alias),
-    ))
+    let mut selection = crate::ColumnSelection::with_fresh_identities(operator, mapping)
+        .rebinding_score_sources(alias);
+    if selection.row_schema().is_empty() {
+        selection = selection.with_relation_qualifier(alias);
+    }
+    Ok(Box::new(selection))
 }
+
+#[cfg(test)]
+mod tests;

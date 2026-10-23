@@ -154,6 +154,9 @@ pub(super) struct ParameterTypes<'a> {
     enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
     catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
     call_collations: Option<CallCollations>,
+    query_schemas: Option<QuerySchemas>,
+    /// Generated field references remain at stable addresses throughout analysis, including inference that does not retain an executable plan.
+    row_expansions: RowExpansions,
 }
 
 /// Original expression identities for input constants and selected fixed calls, used only while one prepared plan remains in place. No pointer is dereferenced. Analysis borrows the original expressions (including grouping aliases and table-function arguments), so neither repeated text nor CTE analysis order can conflate two inputs.
@@ -176,7 +179,46 @@ pub(super) struct InputConstants(
     /// Each analyzed call's input collation, recorded on the binding the call keeps.
     BTreeMap<NonNull<ScalarExpr>, Option<crate::catalog::collations::CollationSelection>>,
     BTreeMap<NonNull<Option<crate::ast::FunctionBinding>>, crate::ast::FunctionBinding>,
+    QuerySchemas,
+    RowExpansions,
 );
+
+type RowExpansions = BTreeMap<NonNull<ScalarExpr>, Vec<(usize, Vec<ScalarExpr>)>>;
+
+#[derive(Default)]
+struct QuerySchemas {
+    outputs: BTreeMap<NonNull<crate::plan::QueryPlan>, crate::RowSchema>,
+    sources: BTreeMap<NonNull<crate::plan::SourcePlan>, crate::RowSchema>,
+}
+
+impl QuerySchemas {
+    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
+        query.analyzed_output = self.outputs.remove(&NonNull::from(&*query));
+        query.analyzed_source = match &query.root {
+            crate::plan::RelationalPlan::QueryBlock(block) => block
+                .from
+                .as_ref()
+                .and_then(|source| self.take_source(source))
+                .map(std::sync::Arc::new),
+            _ => None,
+        };
+    }
+
+    fn take_source(
+        &mut self,
+        source: &crate::plan::SourcePlan,
+    ) -> Option<crate::plan::AnalyzedSource> {
+        let schema = self.sources.remove(&NonNull::from(source))?;
+        let children = match source {
+            crate::plan::SourcePlan::Join { left, right, .. } => Some(Box::new((
+                self.take_source(left)?,
+                self.take_source(right)?,
+            ))),
+            _ => None,
+        };
+        Some(crate::plan::AnalyzedSource { schema, children })
+    }
+}
 
 impl InputConstants {
     /// Ordinary messages must repeat session/catalog-dependent input functions.
@@ -194,6 +236,32 @@ impl InputConstants {
 
     fn apply_node(&mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
         let identity = NonNull::from(&*expression);
+        if let Some(mut expanded) = self.9.remove(&identity) {
+            for (_, fields) in &mut expanded {
+                for field in fields {
+                    let mut result = Ok(());
+                    crate::plan::rewrite_scalar_expression(field, &mut |node| {
+                        if result.is_ok() {
+                            result = self.apply_node(node);
+                        }
+                    });
+                    result?;
+                }
+            }
+            let ScalarExpr::Row(items) = expression else {
+                return Err(SQLError::Internal(
+                    "analyzed ROW expansion lost its constructor".into(),
+                ));
+            };
+            let mut expanded = expanded.into_iter().peekable();
+            for (position, item) in std::mem::take(items).into_iter().enumerate() {
+                if expanded.peek().is_some_and(|(index, _)| *index == position) {
+                    items.extend(expanded.next().expect("selected expansion").1);
+                } else {
+                    items.push(item);
+                }
+            }
+        }
         if let Some(selected) = self.1.remove(&identity) {
             if let ScalarExpr::Func { binding, .. } = expression {
                 *binding = Some(selected);
@@ -236,6 +304,7 @@ impl InputConstants {
         subqueries: &mut Vec<crate::plan::QueryPlan>,
     ) -> Result<(), SQLError> {
         for query in subqueries.iter_mut() {
+            query.visit_queries_mut(&mut |query| self.apply_query(query));
             query.visit_sources_mut(&mut |source| self.apply_source(source));
         }
         let mut result = Ok(());
@@ -266,6 +335,7 @@ impl InputConstants {
     }
 
     pub(super) fn apply(mut self, plan: &mut UnifiedPlan) -> Result<(), SQLError> {
+        plan.visit_queries_mut(&mut |query| self.apply_query(query));
         // Source selections are consumed before expression rewrites can move their enclosing nodes.
         plan.visit_sources_mut(&mut |source| self.apply_source(source));
         // Children are rewritten before their enclosing clauses move them; every retained identity is consumed at its original address.
@@ -299,9 +369,18 @@ impl InputConstants {
             && self.5.is_empty()
             && self.6.is_empty()
             && self.7.is_empty()
+            && self.8.outputs.is_empty()
+            && self.8.sources.is_empty()
+            && self.9.is_empty()
+    }
+
+    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
+        self.8.apply_query(query);
     }
 
     fn apply_source(&mut self, source: &mut crate::plan::SourcePlan) {
+        // Command inputs have no enclosing QueryPlan; their validated descriptors are not needed by query-output pruning.
+        self.8.sources.remove(&NonNull::from(&*source));
         let mut apply = |binding: &mut Option<crate::ast::FunctionBinding>| {
             if let Some(selected) = self.7.remove(&NonNull::from(&*binding)) {
                 *binding = Some(selected);
@@ -331,6 +410,131 @@ impl InputConstants {
 }
 
 impl<'a> ParameterTypes<'a> {
+    pub(super) fn take_row_expansion(
+        &mut self,
+        expression: &ScalarExpr,
+    ) -> Vec<(usize, Vec<ScalarExpr>)> {
+        self.row_expansions
+            .remove(&NonNull::from(expression))
+            .unwrap_or_default()
+    }
+
+    pub(super) fn retain_row_expansion(
+        &mut self,
+        expression: &ScalarExpr,
+        fields: Vec<(usize, Vec<ScalarExpr>)>,
+    ) {
+        if !fields.is_empty() {
+            self.row_expansions
+                .insert(NonNull::from(expression), fields);
+        }
+    }
+    pub(super) fn with_query_schemas(mut self) -> Self {
+        self.query_schemas = Some(QuerySchemas::default());
+        self
+    }
+
+    pub(super) fn apply_query_schemas(self, query: &mut crate::plan::QueryPlan) {
+        let mut schemas = self.query_schemas.unwrap_or_default();
+        query.visit_queries_mut(&mut |query| schemas.apply_query(query));
+    }
+
+    fn query_schemas(&self) -> Option<&QuerySchemas> {
+        self.input_constants
+            .as_ref()
+            .map(|constants| &constants.8)
+            .or(self.query_schemas.as_ref())
+    }
+
+    fn query_schemas_mut(&mut self) -> Option<&mut QuerySchemas> {
+        self.input_constants
+            .as_mut()
+            .map(|constants| &mut constants.8)
+            .or(self.query_schemas.as_mut())
+    }
+
+    pub(super) fn retain_source_schema(
+        &mut self,
+        source: &crate::plan::SourcePlan,
+        schema: &crate::RowSchema,
+    ) {
+        if let Some(schemas) = self.query_schemas_mut() {
+            schemas
+                .sources
+                .insert(NonNull::from(source), schema.clone());
+        }
+    }
+
+    pub(super) fn query_output_schema(
+        &self,
+        query: &crate::plan::QueryPlan,
+    ) -> Option<&crate::RowSchema> {
+        self.query_schemas()?.outputs.get(&NonNull::from(query))
+    }
+
+    pub(super) fn retain_set_operand_coercions(
+        &mut self,
+        query: &crate::plan::QueryPlan,
+        positions: &[usize],
+        output: &super::QueryOutput,
+    ) {
+        if positions.is_empty() {
+            return;
+        }
+        let Some(schema) = self
+            .query_schemas_mut()
+            .and_then(|schemas| schemas.outputs.get_mut(&NonNull::from(query)))
+        else {
+            return;
+        };
+        let original = schema.clone();
+        *schema = crate::RowSchema::with_column_metadata(
+            None,
+            original.columns().iter().enumerate().map(|(index, name)| {
+                let (ty, collation) = if positions.contains(&index) {
+                    let value = &output.types[index];
+                    (
+                        value.ty.as_ref().map(ColumnType::without_type_modifiers),
+                        value
+                            .ty
+                            .as_ref()
+                            .filter(|ty| crate::schema::composites::type_is_collatable(ty))
+                            .map(|ty| {
+                                u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(
+                                    ty,
+                                ))
+                                .expect("selected collation is an OID")
+                            }),
+                    )
+                } else {
+                    (
+                        original.column_type(index).cloned(),
+                        original.column_collation(index),
+                    )
+                };
+                (name.clone(), ty, collation)
+            }),
+        )
+        .with_record_metadata((0..original.columns().len()).filter_map(|index| {
+            original
+                .record_metadata(index)
+                .cloned()
+                .map(|metadata| (index, metadata))
+        }));
+    }
+
+    pub(super) fn retain_query_output(
+        &mut self,
+        query: &crate::plan::QueryPlan,
+        output: &super::QueryOutput,
+    ) {
+        if let Some(schemas) = self.query_schemas_mut() {
+            schemas
+                .outputs
+                .insert(NonNull::from(query), output.schema());
+        }
+    }
+
     pub(super) fn retain_input_coercion(&mut self, expression: &ScalarExpr, target: ColumnType) {
         if let Some(constants) = &mut self.input_constants {
             constants.5.insert(NonNull::from(expression), target);
@@ -396,6 +600,8 @@ impl<'a> ParameterTypes<'a> {
             enum_labels: None,
             catalog_inputs: None,
             call_collations: None,
+            query_schemas: None,
+            row_expansions: RowExpansions::default(),
         }
     }
 
@@ -498,7 +704,9 @@ impl<'a> ParameterTypes<'a> {
     }
 
     pub(super) fn take_input_constants(&mut self) -> InputConstants {
-        self.input_constants.take().unwrap_or_default()
+        let mut constants = self.input_constants.take().unwrap_or_default();
+        constants.9 = std::mem::take(&mut self.row_expansions);
+        constants
     }
 
     pub(super) fn reference(&mut self, number: usize) -> Result<ExpressionType, SQLError> {

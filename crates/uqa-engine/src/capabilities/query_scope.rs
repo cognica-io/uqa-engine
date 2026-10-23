@@ -26,9 +26,16 @@ pub(crate) fn new_for_statement(
         privilege_subject.cloned(),
     );
     scope.set_catalog_revision(engine.session_id, revision);
-    scope
-        .rows
-        .extend(uqa_execution::mutation::triggers::current_transition_relations());
+    scope.rows.extend(
+        uqa_execution::mutation::triggers::current_transition_relations()
+            .into_iter()
+            .map(|(name, rows)| {
+                (
+                    name,
+                    uqa_execution::query::cte::rows::CteRows::Complete(rows),
+                )
+            }),
+    );
     if crate::roles::active_routine_reads_command_overlay() == Some(false) {
         scope.set_reads_command_overlay(false);
     }

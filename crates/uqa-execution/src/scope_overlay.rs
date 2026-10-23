@@ -27,6 +27,23 @@ impl<'a> ScopeOverlay<'a> {
     }
 }
 
+impl ScopeOverlay<'_> {
+    fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
+        let Some(batch) = (match demand {
+            Some(rows) => self.child.next_with_demand(rows)?,
+            None => self.child.next()?,
+        }) else {
+            return Ok(None);
+        };
+        let rows = batch
+            .rows
+            .into_iter()
+            .map(|row| PhysicalRow::concat_left_owned(row, &self.outer))
+            .collect();
+        Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
+    }
+}
+
 impl PhysicalOperator for ScopeOverlay<'_> {
     fn row_schema(&self) -> &RowSchema {
         &self.schema
@@ -41,15 +58,11 @@ impl PhysicalOperator for ScopeOverlay<'_> {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        let Some(batch) = self.child.next()? else {
-            return Ok(None);
-        };
-        let rows = batch
-            .rows
-            .into_iter()
-            .map(|row| PhysicalRow::concat_left_owned(row, &self.outer))
-            .collect();
-        Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
+        self.pull(None)
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(Some(rows))
     }
 
     fn close(&mut self) -> ExecResult<()> {

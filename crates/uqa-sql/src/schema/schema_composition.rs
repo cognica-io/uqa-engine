@@ -64,6 +64,7 @@ impl RowSchema {
                 wildcard_hidden,
                 binding_only: input.index.cold.binding_only.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
@@ -91,6 +92,7 @@ impl RowSchema {
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
@@ -129,6 +131,7 @@ impl RowSchema {
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
                 row_types: input.index.cold.row_types.clone(),
+                row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
@@ -237,6 +240,7 @@ impl RowSchema {
                 wildcard_hidden,
                 binding_only,
                 row_types: super::relation_types::RelationRowTypes::joined(left, right),
+                row_presence: super::relation_presence::RelationPresence::joined(left, right),
                 lateral_restrictions: Self::joined_diagnostic_names(left, right),
                 open_qualifiers,
                 ..SchemaBuildMetadata::default()
@@ -336,6 +340,7 @@ impl RowSchema {
                         .map(|source| source.qualifier.as_deref())
                         .and_then(|qualifier| self.score_source_slot(qualifier))
                 })
+                .or_else(|| self.relayout_presence_slot(target, *column))
                 .ok_or_else(|| {
                     SchemaLayoutError(format!(
                         "physical relayout source is missing internal relation attribute `{column:?}`"

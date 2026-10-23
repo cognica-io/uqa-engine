@@ -59,6 +59,10 @@ impl PhysicalOperator for SetOperation<'_> {
         self.inner.next()
     }
 
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.inner.next_with_demand(rows)
+    }
+
     fn close(&mut self) -> ExecResult<()> {
         self.inner.close()
     }

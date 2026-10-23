@@ -45,12 +45,13 @@ impl<'a> ScalarEvalContext<'a> {
         }
     }
 
+    /// Keep the lookup's own namespace and type layout together with its values. A caller may override that layout when it supplies a wider analysis scope.
     #[must_use]
     pub fn from_row_lookup(row: &'a dyn RowLookup, params: &'a [SQLParam]) -> Self {
         Self {
             row: None,
             row_lookup: Some(row),
-            row_schema: None,
+            row_schema: row.resolution_schema(),
             params,
             function_hook: None,
             subquery_runner: None,

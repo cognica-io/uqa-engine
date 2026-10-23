@@ -204,7 +204,7 @@ fn scalar_relation_stars_and_aliases_materialize_named_whole_rows() {
     );
     let row = PhysicalRow::from_values(vec![Value::Int(7), Value::Str("seven".into())]);
     let view = schema.view(&row);
-    let context = ScalarEvalContext::from_row_lookup(&view, &[]).with_row_schema(&schema);
+    let context = ScalarEvalContext::from_row_lookup(&view, &[]);
     let expected = Value::Record(
         vec![
             ("a".into(), Value::Int(7)),
@@ -220,6 +220,33 @@ fn scalar_relation_stars_and_aliases_materialize_named_whole_rows() {
         eval_scalar(&ScalarExpr::Column("item".into()), &context).unwrap(),
         expected
     );
+}
+
+#[test]
+fn row_lookup_keeps_present_null_records_and_column_shadowing() {
+    for (columns, expected) in [
+        (
+            vec!["a".into(), "b".into()],
+            Value::Record(vec![("a".into(), Value::Null), ("b".into(), Value::Null)].into()),
+        ),
+        (vec!["item".into(), "b".into()], Value::Null),
+    ] {
+        let schema =
+            RowSchema::with_qualified_types("item", columns, vec![Some(ColumnType::Integer); 2]);
+        let row = crate::OwnedPhysicalRow::new(
+            schema,
+            PhysicalRow::from_values(vec![Value::Null, Value::Null]),
+        );
+        let context = ScalarEvalContext::from_row_lookup(&row, &[]);
+        assert_eq!(
+            eval_scalar(&ScalarExpr::Column("item".into()), &context).unwrap(),
+            expected
+        );
+        assert!(matches!(
+            eval_scalar(&ScalarExpr::QualifiedStar("item".into()), &context).unwrap(),
+            Value::Record(_)
+        ));
+    }
 }
 
 #[test]

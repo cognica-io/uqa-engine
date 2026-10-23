@@ -11,6 +11,9 @@ use std::collections::BTreeMap;
 
 use super::{CommandPlan, QueryPlan, RelationalPlan, SourcePlan};
 
+mod transfer;
+pub use transfer::transfer_expression;
+
 mod transform;
 pub(crate) use transform::{
     copy_occurrences, query_nodes as rewrite_query_with_arenas, rewrite_expression_with_arena,
@@ -112,34 +115,9 @@ fn subquery_id(expression: &mut ScalarExpr) -> Option<&mut usize> {
     }
 }
 
-fn visit_root(root: &mut RelationalPlan, visitor: &mut dyn FnMut(&mut ScalarExpr)) {
+pub(crate) fn visit_root(root: &mut RelationalPlan, visitor: &mut dyn FnMut(&mut ScalarExpr)) {
     match root {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(source) = &mut block.from {
-                visit_source(source, visitor);
-            }
-            for expression in block
-                .projections
-                .iter_mut()
-                .map(|projection| &mut projection.expr)
-                .chain(block.r#where.iter_mut())
-                .chain(block.group_by.iter_mut())
-                .chain(block.grouping_sets.iter_mut().flatten())
-                .chain(block.having.iter_mut())
-                .chain(block.order_by.iter_mut().map(|order| &mut order.expr))
-                .chain(block.limit.iter_mut())
-                .chain(block.offset.iter_mut())
-                .chain(block.distinct_on.iter_mut())
-                .chain(
-                    block
-                        .windows
-                        .iter_mut()
-                        .flat_map(|window| window.spec.expressions_mut()),
-                )
-            {
-                super::rewrite_scalar_expression(expression, visitor);
-            }
-        }
+        RelationalPlan::QueryBlock(block) => visit_block(block, visitor),
         RelationalPlan::Values { rows, .. } => {
             for expression in rows.iter_mut().flatten() {
                 super::rewrite_scalar_expression(expression, visitor);
@@ -192,5 +170,32 @@ fn visit_source(source: &mut SourcePlan, visitor: &mut dyn FnMut(&mut ScalarExpr
         }
         // A derived query owns its own scalar-subquery arena.
         SourcePlan::Subquery { .. } | SourcePlan::Table { .. } => {}
+    }
+}
+
+fn visit_block(block: &mut super::QueryBlockPlan, visitor: &mut dyn FnMut(&mut ScalarExpr)) {
+    if let Some(source) = &mut block.from {
+        visit_source(source, visitor);
+    }
+    for expression in block
+        .projections
+        .iter_mut()
+        .map(|projection| &mut projection.expr)
+        .chain(block.r#where.iter_mut())
+        .chain(block.group_by.iter_mut())
+        .chain(block.grouping_sets.iter_mut().flatten())
+        .chain(block.having.iter_mut())
+        .chain(block.order_by.iter_mut().map(|order| &mut order.expr))
+        .chain(block.limit.iter_mut())
+        .chain(block.offset.iter_mut())
+        .chain(block.distinct_on.iter_mut())
+        .chain(
+            block
+                .windows
+                .iter_mut()
+                .flat_map(|window| window.spec.expressions_mut()),
+        )
+    {
+        super::rewrite_scalar_expression(expression, visitor);
     }
 }

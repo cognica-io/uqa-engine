@@ -21113,6 +21113,1538 @@
       "capability": "Independent FROM input dependencies",
       "workload": "Overloaded user table functions with partial positional aliases and independent versus caller-dependent projected columns.",
       "invariant": "Correlation reads the selected routine identity and complete declared output without parsing or executing the routine body."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bare_star_has_no_argument_allocation_but_still_observes_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/ir/call_arguments/production_tests.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Bare function star under a zero-byte allowance, whole-row argument allocation rejection and cancellation.",
+      "invariant": "The star modifier carries no value argument or scratch allocation; whole-row values remain admitted and cancellation is observed."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bare_star_resolves_the_zero_argument_user_overload_without_reading_its_body",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/routines/inlining/tests.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Qualified and unqualified user count overloads with distinct zero- and one-argument signatures.",
+      "invariant": "Bare star selects the zero-argument catalog identity without evaluating the routine body."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "function_star_identity_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Twenty-eight independent PostgreSQL observations and twenty-four retained observations after persistent reopen.",
+      "invariant": "Selected user and builtin identities, rows, declared result types and exact diagnostics preserve the distinction between COUNT(*), whole-row values and invalid scalar-star syntax."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "count_rows_and_whole_row_references_have_different_output_demand",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_projection.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Derived projections under row counts, qualified counts, whole-row counts, FILTER and relation-name column shadowing.",
+      "invariant": "A selected row count does not observe discarded output values; whole-row, filter and explicitly selected columns retain their value demand."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_row_count_keeps_filters_and_column_shadowing",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/cte_projection.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Folded CTE outputs under row counts, filters and positional aliases that shadow the CTE relation name.",
+      "invariant": "CTE demand is established before constant folding while preserving aliases, filter inputs and whole-row observations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "qualified_aggregates_keep_aggregate_compute_during_lowering",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plan/tests.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Qualified count and sum calls during SQL plan lowering.",
+      "invariant": "System-qualified aggregates retain aggregate computation before optimization."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "recomputed_aggregate_kind_preserves_qualified_builtin_and_selected_scalar",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/tests/aggregate_identity.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Qualified builtin aggregates and a selected same-name user scalar after optimization.",
+      "invariant": "Compute classification preserves the selected routine kind without resolving a different overload."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "qualified_streaming_aggregates_keep_the_same_bounded_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/aggregation/tests.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "4097 input values through system-qualified count, sum and extrema.",
+      "invariant": "Qualified builtin kernels retain no per-input rows or spill records and return the same aggregate values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_output_descriptors_reuse_analysis_and_do_not_enter_stored_syntax",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Nested derived UNION queries with integer, unknown and numeric-modifier outputs.",
+      "invariant": "Each block is analyzed once, clones share descriptors, unknown input coercions retain their selected type and stored syntax omits transient metadata."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unused_append_outputs_preserve_postgresql_member_boundaries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/union_projection.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "UNION ALL members with WHERE, LIMIT, OFFSET and DISTINCT boundaries.",
+      "invariant": "Only unused outputs behind retained member boundaries are discarded; unconditional append members preserve constant errors."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "discarded_aggregate_values_keep_the_implicit_group",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/union_projection.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "An unused aggregate contains a failing constant argument.",
+      "invariant": "Removing an unobserved aggregate value keeps the block aggregate and its implicit empty-input group."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "union_output_demand_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Fifty-six independent PostgreSQL observations across four storage providers. Fifty observations are replayed after each persistent reopen, including retained SQL and PL/pgSQL routines.",
+      "invariant": "Typed results, errors, aggregate cardinality, ordering, type coercion, SRF multiplicity and sequence effects match the independent PostgreSQL reference."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzed_join_sources_share_input_layouts_without_persisting_namespaces",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Analyzed USING aliases and LATERAL input trees, plan cloning and syntax serialization.",
+      "invariant": "Clones share the analyzed input layout; query-root traversal visits its root once and stored syntax excludes transient namespaces."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "positional_demand_distinguishes_duplicate_output_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_projection.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Two same-named outputs with demand for only the second physical position.",
+      "invariant": "Duplicate labels cannot keep an unobserved failing output or remove a consumed value."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "join_output_demand_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "Thirty independent PostgreSQL observations across four storage providers.",
+      "invariant": "Join keys, whole rows, output aliases, outer joins, LATERAL producer demand and folded CTE outputs preserve typed values and diagnostics."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "original_output_demand_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Projection and consumer demand",
+      "workload": "The complete original output-demand report, additional scope/ordering boundaries and CTE dependency controls in 124 independent PostgreSQL observations across four providers.",
+      "invariant": "Unobserved outputs, whole-row and selected routine demands, constant errors, SRF multiplicity, materialization, lexical scopes and data-modifying CTE values match the independent reference."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cte_analysis_distinguishes_enclosing_names_from_recursive_self_bindings",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "CTE definition scopes",
+      "workload": "Ordinary same-name CTEs, earlier definitions and actual recursive self/forward references.",
+      "invariant": "Analysis preserves definition visibility and does not classify ordinary references as recursive."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "invisible_cte_diagnostics_preserve_postgresql_detail_and_hint",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/statements/tests/retained_analysis.rs",
+      "capability": "CTE definition scopes",
+      "workload": "Undefined ordinary self and forward CTE references.",
+      "invariant": "SQLSTATE, primary text, DETAIL and HINT match the independent PostgreSQL fixture."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "single_consumer_counts_follow_cte_definition_visibility",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/cte_strategy/tests.rs",
+      "capability": "CTE definition scopes",
+      "workload": "Nested ordinary and recursive definitions shadow enclosing names alongside genuine repeated consumers.",
+      "invariant": "Only references to the same lexical binding determine materialization and output demand."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_definitions_keep_only_their_original_lexical_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/scope/retained_plans.rs",
+      "capability": "CTE definition scopes",
+      "workload": "Deferred inputs survive later and same-name declarations.",
+      "invariant": "Only directly referenced bindings are retained and immutable plans retain their original Arc identity."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "restored_definition_keeps_shared_inputs_and_invoking_scalar_arena",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/scope/retained_plans.rs",
+      "capability": "CTE definition scopes",
+      "workload": "A shadowed NOT MATERIALIZED definition is restored and scanned repeatedly.",
+      "invariant": "The original shared inputs remain available while the invoking scalar arena is preserved."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "cte_definition_scopes_match_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "CTE definition scopes",
+      "workload": "56 independent PostgreSQL observations on four providers and 11 observations after persistent reopen.",
+      "invariant": "Typed values, diagnostics, materialization, recursive references, prepared/stored definitions and routine privileges retain the definition namespace."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "ordinary_predicates_select_inputs_before_unrelated_volatile_and_set_outputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/output_filters.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "Pure predicates select inputs before independent erroring, volatile and set-returning outputs.",
+      "invariant": "Ordinary source specialization preserves selected output expressions and the recursive volatile barrier."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "referenced_effects_and_slicing_keep_the_output_predicate_outside",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/output_filters.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "Predicates read volatile/SRF outputs or cross LIMIT, OFFSET and window boundaries.",
+      "invariant": "Unsafe substitutions retain the original output boundary."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "output_substitution_preserves_quoted_identity_and_alias_tails",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/output_filters.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "Quoted names, differently cased qualifiers and a partial source alias list.",
+      "invariant": "Only the exact visible output is substituted and unlisted aliases keep their original tail."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "predicates_preserve_complete_distinct_groups_and_window_partitions",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/output_filters.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "Whole-group filters and filters that split DISTINCT ON groups or window partitions.",
+      "invariant": "Only complete groups and every affected window partition can be removed before output evaluation."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "derived_predicate_order_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "60 independent PostgreSQL observations across four providers and seven stored-definition observations after every persistent reopen.",
+      "invariant": "Predicates preserve typed rows, required errors, exact sequence effects, aliases, materialization, grouping, windows and set coercions."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "explaining_derived_filters_keeps_output_effects_at_execution",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived predicate evaluation order",
+      "workload": "Static and executing JSON plans over derived, aliased view and folded CTE filters.",
+      "invariant": "Static EXPLAIN consumes no sequence values; ANALYZE executes one original query with the corrected output demand."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "volatile_and_subquery_qualifications_precede_pure_outputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "Volatile and scalar-subquery qualifications over analyzed derived arithmetic.",
+      "invariant": "Lifted expressions preserve public labels and descriptors and leave scalar-subquery slots in the original consumer arena."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "observable_producer_boundaries_keep_their_query_level",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "LIMIT, OFFSET, DISTINCT, volatile calls, SRFs and window outputs.",
+      "invariant": "Observable producer boundaries are not erased by projection pull-up."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "independent_inputs_keep_distinct_structural_identities",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "Two independently captured producers with identical SQL aliases and output names.",
+      "invariant": "Each producer has distinct structural attribute identities, and its lifted outputs keep their own owner."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "quoted_column_identity_and_whole_row_references_remain_distinct",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "Differently cased output columns and a relation whole-row name.",
+      "invariant": "Binding uses exact structured column identities and does not reinterpret a whole row as an arbitrary field."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_relation_lookup_modes_keep_their_definition_boundary",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "A stored-identity producer inside a name-resolving consumer.",
+      "invariant": "Pull-up cannot change the relation lookup mode of a definition."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "derived_query_pullup_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived projection placement",
+      "workload": "25 independent PostgreSQL observations on four providers; twenty-one repeated after each persistent reopen, including stored views, prepared inputs and NULL producer qualification.",
+      "invariant": "Simple pure derived outputs are evaluated after volatile, scalar-subquery and joined qualifications, preserving labels, types, sequence effects and required boundary errors. A producer qualification that rejects NULL consumes no volatile consumer effect."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "ordinary_sources_require_no_pullup_workspace",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived projection placement",
+      "workload": "Repeat projection placement over an analyzed ordinary source with a qualification.",
+      "invariant": "A query without a derived source allocates no pull-up workspace: zero allocations and zero bytes."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "output_capture_keeps_positional_metadata_without_sql_aliases",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/schema_projection.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Noncompact duplicate-label outputs with record types and collations, captured twice and joined.",
+      "invariant": "Opaque attributes preserve positional types, collations, record descriptors and physical offsets without SQL-visible names."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "output_capture_assigns_a_slot_to_implicit_null_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/schema_projection.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "A selected missing value represented by an implicit NULL slot.",
+      "invariant": "Capture assigns implicit NULL to an appended owned slot while preserving existing value and score slots."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_output_shares_values_without_exposing_input_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/column_selection.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Capture a wide payload behind a noncompact physical layout.",
+      "invariant": "Captured attributes share original value storage, materialize implicit NULL and hide the input SQL namespace."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "input_capture_reads_only_demanded_values_and_keeps_producer_filter",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Pure derived outputs over a wider input with a producer qualification.",
+      "invariant": "Capture reads only demanded attributes and preserves producer filtering; it does not broaden column authority or payload reads."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "captured_source_keeps_pure_predicates_at_its_scan_without_duplicate_evaluation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "A pure condition over a lifted derived output.",
+      "invariant": "The predicate reaches original scan columns exactly once, retaining index planning rather than forcing a post-scan internal-attribute filter."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_query_definitions_never_retain_transient_input_captures",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Analyzed CREATE VIEW, CREATE MATERIALIZED VIEW and PREPARE definitions.",
+      "invariant": "Serialized definitions remain unchanged by transient execution capture; optimization occurs when their queries execute."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "derived_input_capture_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Seventeen independent PostgreSQL observations on four providers; fifteen repeated after persistent reopen.",
+      "invariant": "Cross-level aliases, duplicate input names, nested producers, nullable/composite/collated values, views, prepared execution and quoted materialized/recursive CTEs retain exact PostgreSQL results and descriptors."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_query_layouts_preserve_syntax_scopes_and_parameter_types",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/stored_inputs.rs",
+      "capability": "Derived input identity and evaluation order",
+      "workload": "Stored query syntax with outer inputs, explicit parameters, CTE shadowing and set coercions.",
+      "invariant": "Restoration attaches transient source and output layouts without changing serialized syntax or selected constants and calls."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "definition_declarations_do_not_reparse_quoted_names_as_references",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/scope/retained_plans.rs",
+      "capability": "CTE declaration identity",
+      "workload": "Decoded declaration names containing dots and embedded quotes, with quoted and schema-qualified references.",
+      "invariant": "Declarations resolve by exact owned names, quoted references resolve through SQL syntax, and schema-qualified references do not select CTE declarations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enclosing_column_substitution_preserves_nested_and_preceding_namespaces",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/stored_inputs.rs",
+      "capability": "Correlated derived input identity",
+      "workload": "Nested scalar, CTE, set, JOIN and LATERAL inputs with local/ancestor aliases and unqualified columns.",
+      "invariant": "Only references to the selected enclosing row become opaque attributes; local and preceding sources keep their original identity."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enclosing_column_substitution_declines_incomplete_layouts_and_whole_rows_atomically",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/stored_inputs.rs",
+      "capability": "Correlated derived input identity",
+      "workload": "A partial input layout and a whole-row reference alongside a substitutable scalar column.",
+      "invariant": "An unsupported substitution leaves all serialized query syntax unchanged."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "correlated_input_capture_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Correlated derived input identity",
+      "workload": "Twenty-six independent PostgreSQL observations on four providers, with twenty-four after persistent reopen.",
+      "invariant": "Correlated qualifications, local shadows, nested and lateral inputs, CTEs, sets, null/empty results, stored views and prepared inputs preserve exact rows, types and diagnostics."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "missing_qualified_columns_preserve_hidden_namespace_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/stored_inputs.rs",
+      "capability": "Scoped missing-column diagnostics",
+      "workload": "Thirteen independent PostgreSQL diagnostics and successful local/outer lookup controls, including joined aliases and tied hint candidates.",
+      "invariant": "Hidden outer relation names remain diagnostic-only; exact matches, duplicate fields, quoted names and alternate qualifier hints match PostgreSQL."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "shadowed_column_diagnostics_match_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Scoped missing-column diagnostics",
+      "workload": "Fourteen PostgreSQL observations on four providers, with thirteen after persistent reopen.",
+      "invariant": "Exact SQLSTATE, primary, DETAIL/HINT and successful shadowing controls agree with PostgreSQL."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "relation_field_selection_respects_column_shadowing_and_structural_dispatch",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/field_selection.rs",
+      "capability": "Ordered and field-selective derived input capture",
+      "workload": "Whole-row field selection and a real column sharing its relation name.",
+      "invariant": "Only a selected structural field access to the relation resolves to an individual input column."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_ordering_preserves_ambiguous_output_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/set_ordering.rs",
+      "capability": "Ordered and field-selective derived input capture",
+      "workload": "Two distinct outputs with one ORDER BY alias and two input columns in a compound ordering expression.",
+      "invariant": "An ambiguous output reports the clause diagnostic while an ambiguous input retains the column-reference diagnostic."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "field_qualification_and_ordering_keep_selected_input_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Ordered and field-selective derived input capture",
+      "workload": "Whole-row field qualification, scalar-subquery predicates and named, ordinal or compound sort keys.",
+      "invariant": "Eligible producer outputs remain after consumer qualification and SQL92 sort references keep their output identity."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "ordering_output_alias_wins_over_input_but_compound_expression_uses_input",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Ordered and field-selective derived input capture",
+      "workload": "A negated output has the same label as its input, with simple and compound ORDER BY expressions.",
+      "invariant": "Only a complete output-name reference binds to the projected alias; compound expressions bind to source columns."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "ordered_field_capture_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Ordered and field-selective derived input capture",
+      "workload": "Twenty-nine independent PostgreSQL observations on four providers, with twenty-eight after each persistent reopen.",
+      "invariant": "Rows, names, types and error fields match for correlated field selection, local shadows, CTEs, SQL92 aliases and ordinals, selected errors and scalar cardinality."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "transfer_preserves_query_ownership_and_nested_arena_indices",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plan/subqueries/transfer.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Selected slots move beside an existing destination query, while parent slots compact and nested arenas retain their identities.",
+      "invariant": "Query ownership and references stay bijective without duplicating evaluation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shared_and_invalid_arena_transfers_leave_all_inputs_unchanged",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plan/subqueries/transfer.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Shared and out-of-range scalar references.",
+      "invariant": "Invalid or shared transfers decline before changing either arena or expression."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "transferring_wide_query_payload_does_not_copy_it",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plan/subqueries/transfer.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "One owned scalar query containing 256 KiB of literal text.",
+      "invariant": "Transfer retains the original payload and allocates less than 16 KiB."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "independent_scalar_predicate_moves_once_below_distinct_outputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "An independent scalar predicate over a DISTINCT producer.",
+      "invariant": "The predicate and its one query slot move together while DISTINCT remains."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "correlated_shared_and_sliced_scalar_predicates_keep_their_arenas",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Correlated, shared-slot and OFFSET producer qualifications.",
+      "invariant": "Unsupported movement leaves the complete plan unchanged."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "source_free_exists_preserves_three_valued_qualification",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Positive source-free EXISTS with ordinary and nullable qualifications.",
+      "invariant": "The structural IS TRUE operator preserves SQL NULL rejection."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "exists_with_cardinality_or_effect_boundaries_is_not_inlined",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Negated EXISTS, aggregate/SRF output, OFFSET and volatile qualifications.",
+      "invariant": "Observable query boundaries remain unchanged."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "scalar_output_without_a_query_qualification_allocates_no_transfer_workspace",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "A scalar output query with an ordinary WHERE qualification.",
+      "invariant": "The unrelated query slot causes no predicate-transfer allocation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "row_stars_expand_before_retained_analysis_without_flattening_whole_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/row_stars.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Qualified stars, nested/mixed row constructors and repeated grouping aliases.",
+      "invariant": "Expansion preserves field order and deliberate whole-row nesting."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "expanded_row_fields_retain_neighboring_parameter_and_literal_selections",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/row_stars.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "A row comparison with expanded columns and neighboring literal/parameter coercions.",
+      "invariant": "The original parameter identities and selected Integer type survive expansion."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "scalar_predicate_capture_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "64 independent PostgreSQL observations on four providers; 61 after each persistent reopen.",
+      "invariant": "Rows, types, diagnostics, whole-row values, group/window boundaries and scalar-query sequence effects match PostgreSQL."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "row_star_expansion_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Derived qualifications and row identity",
+      "workload": "Seventeen independent PostgreSQL ROW observations on four providers; fifteen after each persistent reopen, including matched and unmatched inputs.",
+      "invariant": "Row fields, nesting, NULL identity, collation, prepared inputs and stored views match the independent reference."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "row_lookup_keeps_present_null_records_and_column_shadowing",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/scalar/tests.rs",
+      "capability": "Whole-row window evaluation",
+      "workload": "Physical and owned row lookups over present all-NULL records and a same-name scalar column.",
+      "invariant": "Whole-row input keeps its resolution schema while a real scalar column retains precedence."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "record_arguments_and_partition_keys_keep_their_schema_after_spill",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/window/tests/source_layout.rs",
+      "capability": "Whole-row window evaluation",
+      "workload": "Record-valued window arguments and partition keys with one-byte and in-memory spill allowances.",
+      "invariant": "Present all-NULL records count as values; partitions and lag retain their source records through physical spill."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "window_record_scope_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Whole-row window evaluation",
+      "workload": "Twenty independent PostgreSQL observations on four providers; eighteen after each persistent reopen.",
+      "invariant": "Whole-row window counts, filters, partition/order keys, lag/lead, frames, views and prepared inputs preserve rows and types."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nullable_relations_keep_hidden_identity_through_join_projection_and_scope",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Joined, canonical, correlated, aliased and projected namespaces.",
+      "invariant": "Opaque presence follows the owning relation namespace without changing visible columns."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "presence_relayout_uses_relation_identity_when_internal_ids_change",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Two physical layouts with fresh internal relation identities.",
+      "invariant": "Relayout preserves the source marker through its semantic relation qualifier."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_presence_rejects_missing_wrong_type_and_duplicate_bindings",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Missing, non-Boolean and duplicate marker bindings.",
+      "invariant": "Malformed metadata cannot expose a whole-row identity."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "removing_internal_attributes_retires_only_their_presence_bindings",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Removal of one, all or no marker identities across joined scopes.",
+      "invariant": "No dangling internal binding remains and independent markers survive."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "outer_join_records_preserve_presence_in_hash_and_nested_spills",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "LEFT, RIGHT and FULL joins under one-byte and in-memory allowances.",
+      "invariant": "Hash and nested-loop joins preserve present and absent record values through spill."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "a_matched_null_valued_row_is_not_a_null_extended_row",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Matched and rejected all-NULL right rows with forced spill.",
+      "invariant": "A present all-NULL record differs from an absent NULL record."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "marking_a_wide_input_shares_its_payload_without_allocation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "One nullable row with a 256 KiB text value.",
+      "invariant": "Adding a shared presence fragment allocates zero bytes and retains the payload."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nullable_rows_relayout_existing_presence_before_adding_a_marker",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Retained lateral rows with new marker identities and a missing-marker control.",
+      "invariant": "Relayout preserves actual row presence and rejects absent required metadata."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "malformed_whole_row_markers_are_not_treated_as_absent_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Missing, false and non-Boolean marker values.",
+      "invariant": "Invalid executor provenance fails explicitly instead of silently returning NULL."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "batch_spill_preserves_present_and_absent_record_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/tests/presence.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Present all-NULL and absent records through one-byte spill plus every truncated byte prefix.",
+      "invariant": "Exact byte accounting, bounded decoding and whole-row NULL identity survive spill."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "malformed_presence_records_fail_before_exposing_a_schema",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/format/binary/presence/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Duplicate and missing bindings, oversized attribute identities and impossible counts.",
+      "invariant": "The codec validates counts and internal identities before exposing decoded metadata."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "relation_presence_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Whole-row join identity",
+      "workload": "33 independent PostgreSQL observations on four providers; 29 after each persistent reopen.",
+      "invariant": "LEFT/RIGHT/FULL/LATERAL joins, USING, aliases, correlation, COUNT, materialization, named zero-column relations, stored views and prepared inputs retain record NULL identity."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "anonymous_empty_sources_keep_names_without_claiming_a_named_type",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_types/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Empty anonymous sources, aliases, joins, canonical layouts and discarded projections.",
+      "invariant": "Namespace existence is independent of named composite identity; nonempty anonymous sources allocate no namespace map."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "anonymous_empty_namespaces_shadow_named_outer_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_types/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "A zero-column local alias shadows a named outer relation.",
+      "invariant": "Whole-row and qualified-field resolution obey the same lexical scope."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "empty_derived_rows_bind_and_reject_excess_aliases_without_execution",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/tests/empty_relations.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Empty derived rows, joins, CTEs and scalar correlation.",
+      "invariant": "Analysis retains anonymous record types and rejects unknown fields and excess aliases before execution."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "anonymous_empty_namespace_survives_spill_without_a_named_type",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/tests/schemas.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Zero-budget draining and shared spill readers with an empty anonymous row.",
+      "invariant": "Spill keeps the original namespace without inventing a named type or value slot."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "empty_derived_scope_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Whole-row join identity",
+      "workload": "29 independent PostgreSQL observations on four providers; 27 after each persistent reopen.",
+      "invariant": "Empty derived relations preserve aliases, outer-join presence, correlation, CTEs, zero-width sets, views, prepared inputs and PostgreSQL diagnostics."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_qualification_and_join_aliases_retain_empty_namespaces",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/source_projection/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Source and join-alias selections over a produced row with no columns.",
+      "invariant": "Physical qualification retains the empty relation namespace and hides the previous alias without adding a value slot."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "empty_returning_source_stars_keep_relation_scope",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/returning.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Qualified RETURNING stars over an anonymous zero-column source.",
+      "invariant": "A present namespace expands to no columns while an absent namespace retains 42P01."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bounded_filter_and_projection_delay_later_expression_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/relational/tests/consumer_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "A finite consumer stops before the second failing expression.",
+      "invariant": "Rows and errors are observed only at the demanded physical prefix."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bounded_filter_counts_rejected_inputs_and_limit_offsets_without_overreading",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/relational/tests/consumer_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Rejected input candidates and an OFFSET precede one demanded output.",
+      "invariant": "Exact evaluation counts include needed rejected/offset rows and exclude later candidates."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unrestricted_pipeline_retains_batches_and_zero_limit_evaluates_no_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/relational/tests/consumer_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "An unrestricted 16-row pipeline and a zero-row LIMIT.",
+      "invariant": "Complete scans retain native batching; LIMIT 0 produces zero row evaluations."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "hash_join_resumes_duplicate_candidates_before_later_residual_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/tests/input_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Inner and outer joins under fitting and one-byte work allowances.",
+      "invariant": "Candidate evaluation and right-prefix replay preserve demanded effects, errors, multiplicity and spill."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nested_loop_consumes_only_the_requested_prefix_even_when_it_spills",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/tests/input_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Inner and outer joins under fitting and one-byte work allowances.",
+      "invariant": "Candidate evaluation and right-prefix replay preserve demanded effects, errors, multiplicity and spill."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nested_loop_replays_each_consumed_right_prefix_without_repeating_its_effects",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/tests/input_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Inner and outer joins under fitting and one-byte work allowances.",
+      "invariant": "Candidate evaluation and right-prefix replay preserve demanded effects, errors, multiplicity and spill."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "duplicate_probe_cursors_resume_independently_in_memory_and_on_disk",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/join/canonical_index.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Two independent cursors through 128 duplicate hash entries in memory and spilled buckets.",
+      "invariant": "Probe cursors retain exact positions without collecting a fanout or restarting disk scans."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "growing_flags_preserve_dirty_pages_and_leave_new_ordinals_unmarked",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/match_flags/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Incremental match flags across two complete pages and a partial final page.",
+      "invariant": "Dirty marks survive growth and repeated reads within the page-I/O bound."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "values_source_evaluates_each_row_only_when_its_consumer_requests_it",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/values_source/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "A VALUES producer with a successful first row and failing second row.",
+      "invariant": "The second expression is not evaluated on the first pull."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_readers_share_one_bounded_prefix_and_replay_without_effects",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/cte/rows/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Multiple CTE readers, one-byte forced spill, prefix replay, a late failure and early drop.",
+      "invariant": "One producer evaluates each reached row once, preserves earlier rows/errors and releases unconsumed state."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_prefix_keeps_prior_rows_and_the_reached_error_without_reexecution",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/cte/rows/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Multiple CTE readers, one-byte forced spill, prefix replay, a late failure and early drop.",
+      "invariant": "One producer evaluates each reached row once, preserves earlier rows/errors and releases unconsumed state."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unused_materialized_prefix_releases_its_producer_without_evaluating_input",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/cte/rows/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Multiple CTE readers, one-byte forced spill, prefix replay, a late failure and early drop.",
+      "invariant": "One producer evaluates each reached row once, preserves earlier rows/errors and releases unconsumed state."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "consumer_evaluation_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "52 independent PostgreSQL observations on four providers; 47 after each persistent reopen.",
+      "invariant": "Early consumers match row values, types, errors, sequence effects, shared CTE prefixes and cursor behavior."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "bounded_effects_match_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "50 independent PostgreSQL observations on four providers; 48 after each persistent reopen.",
+      "invariant": "Early consumers match row values, types, errors, sequence effects, shared CTE prefixes and cursor behavior."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "materialized_prefix_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "60 independent PostgreSQL observations on four providers; 57 after each persistent reopen.",
+      "invariant": "Early consumers match row values, types, errors, sequence effects, shared CTE prefixes and cursor behavior."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "the_final_reader_closes_a_partially_consumed_producer_once",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/cte/rows/tests.rs",
+      "capability": "Materialized CTE resource ownership",
+      "workload": "A one-byte spill allowance and independent readers of a finite effect-counted producer.",
+      "invariant": "Dropping the final reader closes the suspended producer once without evaluating its remaining rows."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "a_reached_producer_cleanup_failure_is_retained_without_repeating_cleanup",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/cte/rows/tests.rs",
+      "capability": "Materialized CTE resource ownership",
+      "workload": "A one-byte spill allowance and independent readers of a finite effect-counted producer.",
+      "invariant": "A reached cleanup error is returned at the same boundary without repeating producer evaluation or cleanup."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "first_worker_session_during_insert_keeps_committed_statistics_current",
+      "cases": 6,
+      "case_names": [
+        "provider_1_0::trigger_at_1_0",
+        "provider_1_0::trigger_at_2_2047",
+        "provider_2_1::trigger_at_1_0",
+        "provider_2_1::trigger_at_2_2047",
+        "provider_3_2::trigger_at_1_0",
+        "provider_3_2::trigger_at_2_2047"
+      ],
+      "source": "crates/uqa-engine/src/statistics/worker/tests.rs",
+      "capability": "Automatic statistics publication",
+      "workload": "Construct the first maintenance session at two deterministic positions during a 5,000-row INSERT on native SQLite, SQLite Key/Value and redb.",
+      "invariant": "The subsequent committed statistics have the full row count and no retained pending work."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "writes_committed_after_statistics_staging_remain_due",
+      "cases": 12,
+      "case_names": [
+        "provider_1_0::undo_sample_1_false::automatic_1_false",
+        "provider_1_0::undo_sample_1_false::automatic_2_true",
+        "provider_1_0::undo_sample_2_true::automatic_1_false",
+        "provider_1_0::undo_sample_2_true::automatic_2_true",
+        "provider_2_1::undo_sample_1_false::automatic_1_false",
+        "provider_2_1::undo_sample_1_false::automatic_2_true",
+        "provider_2_1::undo_sample_2_true::automatic_1_false",
+        "provider_2_1::undo_sample_2_true::automatic_2_true",
+        "provider_3_2::undo_sample_1_false::automatic_1_false",
+        "provider_3_2::undo_sample_1_false::automatic_2_true",
+        "provider_3_2::undo_sample_2_true::automatic_1_false",
+        "provider_3_2::undo_sample_2_true::automatic_2_true"
+      ],
+      "source": "crates/uqa-engine/src/session/analyze/automatic/tests.rs",
+      "capability": "Automatic statistics publication",
+      "workload": "Stage automatic or explicit empty-table analysis, commit 5,000 rows from a peer, then commit or roll back that analysis on all three persistent providers.",
+      "invariant": "A later statistics commit cannot erase unsampled changes; savepoint rollback discards the observation and the next analysis sees all committed rows."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unused_grouping_aliases_preserve_keys_but_local_inputs_take_precedence",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/derived_projection.rs",
+      "capability": "Projection output demand",
+      "workload": "An otherwise unused output alias with and without a same-name local GROUP BY input.",
+      "invariant": "Grouping cardinality retains output-key demand while input precedence permits independent unused-value pruning."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "grouping_output_demand_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Projection output demand",
+      "workload": "Thirteen PostgreSQL observations for grouped aliases, ordinals, sets, errors and source precedence across four providers and persistent reopen.",
+      "invariant": "Removing unused outputs preserves GROUP BY cardinality and reached errors."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "physical_subqueries_run_across_relational_scalar_sites",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_subqueries.rs",
+      "capability": "Physical subquery scope",
+      "workload": "Scalar subqueries in aggregates, HAVING, windows, ordering, limits, joins, functions and VALUES.",
+      "invariant": "Declared window slots use the same scoped types as executed rows, including finite consumer demand."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "pruning_visible_recursive_columns_retains_hidden_control_fields",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/source_projection/tests.rs",
+      "capability": "Projection output demand",
+      "workload": "Remove every public recursive working-table column while retaining a demanded hidden control field.",
+      "invariant": "Empty public output does not erase CYCLE path aliases, physical slots or values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "grouping_names_prefer_output_columns_to_enclosing_columns",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_grouping_sets/names.rs",
+      "capability": "Projection output demand",
+      "workload": "A correlated scalar aggregate and a LATERAL aggregate whose GROUP BY output alias matches an enclosing column.",
+      "invariant": "Grouping names bind to local outputs before enclosing names; streaming preserves group cardinality."
     }
   ]
 }

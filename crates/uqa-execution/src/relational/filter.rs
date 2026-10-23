@@ -16,6 +16,7 @@ use super::{
 /// to `false` or `NULL`; truthy rows pass through unchanged.
 pub struct Filter<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
+    input_pending: crate::physical::demand::PendingRows,
     condition: FilterCondition<'a>,
     schema: RowSchema,
 }
@@ -50,6 +51,7 @@ impl<'a> Filter<'a> {
         let predicate = evaluator.bind_type_introspection(predicate, &schema);
         Self {
             child,
+            input_pending: crate::physical::demand::PendingRows::default(),
             condition: FilterCondition::Expression {
                 predicate: crate::scalar::PreparedExpressions::scalar(predicate),
                 evaluator,
@@ -65,6 +67,7 @@ impl<'a> Filter<'a> {
         let schema = child.row_schema().clone();
         Self {
             child,
+            input_pending: crate::physical::demand::PendingRows::default(),
             condition: FilterCondition::Row(predicate),
             schema,
         }
@@ -75,6 +78,7 @@ impl<'a> Filter<'a> {
         let schema = child.row_schema().clone();
         Self {
             child,
+            input_pending: crate::physical::demand::PendingRows::default(),
             condition: FilterCondition::Unresolved(column),
             schema,
         }
@@ -108,6 +112,34 @@ impl<'a> Filter<'a> {
     }
 }
 
+impl Filter<'_> {
+    fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
+        let Some(demand) = demand else {
+            loop {
+                let Some(batch) = self.input_pending.pull(self.child.as_mut(), None)? else {
+                    return Ok(None);
+                };
+                if let Some(batch) = self.filter_batch(batch)? {
+                    return Ok(Some(batch));
+                }
+            }
+        };
+        let mut kept = Vec::new();
+        while kept.len() < demand.get() {
+            let Some(batch) = self
+                .input_pending
+                .pull(self.child.as_mut(), Some(crate::physical::demand::ONE))?
+            else {
+                break;
+            };
+            if let Some(batch) = self.filter_batch(batch)? {
+                kept.extend(batch.rows);
+            }
+        }
+        Ok((!kept.is_empty()).then(|| Batch::from_physical_rows(self.schema.clone(), kept)))
+    }
+}
+
 impl PhysicalOperator for Filter<'_> {
     fn row_schema(&self) -> &RowSchema {
         &self.schema
@@ -130,18 +162,16 @@ impl PhysicalOperator for Filter<'_> {
     }
 
     fn open(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.child.open()
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        loop {
-            let Some(batch) = self.child.next()? else {
-                return Ok(None);
-            };
-            if let Some(batch) = self.filter_batch(batch)? {
-                return Ok(Some(batch));
-            }
-        }
+        self.pull(None)
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(Some(rows))
     }
 
     fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
@@ -156,10 +186,12 @@ impl PhysicalOperator for Filter<'_> {
     }
 
     fn rewind(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.child.rewind()
     }
 
     fn close(&mut self) -> ExecResult<()> {
+        self.input_pending.clear();
         self.child.close()
     }
 }

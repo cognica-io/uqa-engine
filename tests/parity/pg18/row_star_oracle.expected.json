@@ -1,0 +1,399 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT ROW(s.*) AS expanded,ROW(s) AS nested FROM (VALUES(2,5))s(k,z)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "expanded",
+            "nested"
+          ],
+          "type_oids": [
+            2249,
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)",
+              "(\"(2,5)\")"
+            ]
+          ]
+        }
+      ],
+      "id": "expansion_and_nesting"
+    },
+    {
+      "sql": "SELECT ROW(7,s.*,ROW(s.*),s) FROM (VALUES(2,5))s(k,z)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(7,2,5,\"(2,5)\",\"(2,5)\")"
+            ]
+          ]
+        }
+      ],
+      "id": "mixed"
+    },
+    {
+      "sql": "SELECT ROW(s.*) FROM (VALUES(2,5))s(k,k)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "duplicate_names"
+    },
+    {
+      "sql": "SELECT ROW(s.*),ROW(s) FROM (VALUES(2,5))s(s,z)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row",
+            "row"
+          ],
+          "type_oids": [
+            2249,
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)",
+              "(2)"
+            ]
+          ]
+        }
+      ],
+      "id": "column_shadow"
+    },
+    {
+      "sql": "SELECT ROW(s.*) FROM (VALUES(NULL::int,5))s(k,z)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "nullable"
+    },
+    {
+      "sql": "SELECT ROW(s.*),ROW(s) FROM (VALUES(1))t(x) LEFT JOIN (VALUES(2,5))s(k,z) ON FALSE",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row",
+            "row"
+          ],
+          "type_oids": [
+            2249,
+            2249
+          ],
+          "rows": [
+            [
+              "(,)",
+              "()"
+            ]
+          ]
+        }
+      ],
+      "id": "outer_join"
+    },
+    {
+      "sql": "SELECT (SELECT ROW(s.*)) FROM (VALUES(2,5))s(k,z)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "correlation"
+    },
+    {
+      "sql": "SELECT ROW(s.*)=ROW(2,5),ROW(s.*) IS DISTINCT FROM ROW(2,5) FROM (VALUES(2,5))s(k,z)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "id": "comparison"
+    },
+    {
+      "sql": "SELECT pg_collation_for((ROW(s.*)).f1), (ROW(s.*)).f2 FROM (SELECT 'a'::text COLLATE \"C\" AS a,5 AS b)s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for",
+            "f2"
+          ],
+          "type_oids": [
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "\"C\"",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "collation"
+    },
+    {
+      "sql": "SELECT ROW(s.*) AS r FROM (VALUES(2,5),(2,5))s(k,z) GROUP BY r ORDER BY r",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5)"
+            ]
+          ]
+        }
+      ],
+      "id": "group_alias"
+    },
+    {
+      "sql": "SELECT ROW(s.*,t.*) FROM (VALUES(2,5))s(k,z) CROSS JOIN (VALUES(7,8))t(a,b)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row"
+          ],
+          "type_oids": [
+            2249
+          ],
+          "rows": [
+            [
+              "(2,5,7,8)"
+            ]
+          ]
+        }
+      ],
+      "id": "multiple"
+    },
+    {
+      "sql": "CREATE VIEW row_star_view AS SELECT ROW(s.*)::text AS expanded,ROW(s)::text AS nested FROM (VALUES(2,5))s(k,z)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_view"
+    },
+    {
+      "sql": "SELECT * FROM row_star_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "expanded",
+            "nested"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "(2,5)",
+              "(\"(2,5)\")"
+            ]
+          ]
+        }
+      ],
+      "id": "view"
+    },
+    {
+      "sql": "PREPARE row_star_prepared(int) AS SELECT ROW(s.*,$1::int,'1'::int)=ROW(2,5,$1,1) FROM (VALUES(2,5))s(k,z)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "prepare"
+    },
+    {
+      "sql": "EXECUTE row_star_prepared(7)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "execute"
+    },
+    {
+      "sql": "DEALLOCATE row_star_prepared",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "deallocate"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "c1fd1d7ac018dcb49e0d7622ea5f054eb79d34af5742116c3c7de53a92626941",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}

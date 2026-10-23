@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "alias_collision",
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0"
+    },
+    {
+      "id": "two_producers",
+      "sql": "SELECT a.z,b.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) a CROSS JOIN (SELECT x AS k,12/x AS z FROM (VALUES(0),(3)) v(x)) b WHERE a.k+b.k=5"
+    },
+    {
+      "id": "shared_outer_alias",
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) s(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0"
+    },
+    {
+      "id": "duplicate_input_names",
+      "sql": "SELECT s.z FROM (SELECT a.x AS k,10/a.x+b.x AS z FROM (VALUES(0),(2)) a(x) CROSS JOIN (VALUES(3)) b(x)) s CROSS JOIN (VALUES(0)) a(y) WHERE s.k+a.y>0"
+    },
+    {
+      "id": "nested_inputs",
+      "sql": "SELECT s.z FROM (SELECT k,10/k AS z FROM (SELECT x AS k FROM (VALUES(0),(2)) v(x)) v) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0"
+    },
+    {
+      "id": "quoted_aliases",
+      "sql": "SELECT \"s\".\"Z\" FROM (SELECT \"X\" AS \"K\",10/\"X\" AS \"Z\" FROM (VALUES(0),(2)) \"v\"(\"X\")) \"s\" CROSS JOIN (VALUES(0)) \"v\"(\"Y\") WHERE \"s\".\"K\"+\"v\".\"Y\">0"
+    },
+    {
+      "id": "nullable_input",
+      "sql": "SELECT s.z,s.n FROM (SELECT a.x AS k,10/a.x AS z,b.y AS n FROM (VALUES(0),(2)) a(x) LEFT JOIN (VALUES(1)) b(y) ON a.x=b.y) s CROSS JOIN (VALUES(0)) a(y) WHERE s.k+a.y>0"
+    },
+    {
+      "id": "record_input",
+      "sql": "SELECT s.z,(s.r).f1,(s.r).f2 FROM (SELECT x AS k,10/x AS z,ROW(x::smallint,NULL::text) AS r FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0"
+    },
+    {
+      "id": "text_collation",
+      "sql": "SELECT s.z,pg_typeof(s.t),s.t COLLATE \"C\" FROM (SELECT x AS k,10/x AS z,'text'::text COLLATE \"C\" AS t FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0"
+    },
+    {
+      "id": "empty_join",
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (SELECT 1 AS y WHERE false) v WHERE s.k+v.y>0"
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW capture_scope_view AS SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0"
+    },
+    {
+      "id": "stored_view",
+      "sql": "SELECT * FROM capture_scope_view"
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE capture_scope_query(integer) AS SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>$1"
+    },
+    {
+      "id": "prepared",
+      "sql": "EXECUTE capture_scope_query(0)"
+    },
+    {
+      "id": "quoted_materialized_cte",
+      "sql": "WITH \"Q.CTE\"(n) AS MATERIALIZED (VALUES(1),(2)) SELECT sum(a.n+b.n)::text AS result FROM \"Q.CTE\" a CROSS JOIN \"Q.CTE\" b"
+    },
+    {
+      "id": "quoted_recursive_cte",
+      "sql": "WITH RECURSIVE \"Q.\"\"CTE\"(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM \"Q.\"\"CTE\" WHERE n<3) SELECT sum(n)::text AS result FROM \"Q.\"\"CTE\""
+    }
+  ]
+}

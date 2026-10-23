@@ -178,6 +178,11 @@ fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usi
         super::collations::encoded_size(schema)?,
         "schema collations",
     )?;
+    add_size(
+        &mut bytes,
+        super::presence::encoded_size(schema)?,
+        "schema whole-row presence",
+    )?;
     add_size(&mut bytes, 8, "batch row count")?;
     for row in rows {
         let mut row_bytes = encoded_physical_row_record_size(row, schema.physical_width())?;
@@ -196,7 +201,7 @@ pub(super) fn add_size(total: &mut usize, bytes: usize, description: &str) -> Ex
     Ok(())
 }
 
-fn add_string_size(total: &mut usize, value: &str, description: &str) -> ExecResult<()> {
+pub(super) fn add_string_size(total: &mut usize, value: &str, description: &str) -> ExecResult<()> {
     add_size(total, 8, description)?;
     add_size(total, value.len(), description)
 }
@@ -474,6 +479,7 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
     }
     let has_lock_origins = batch.rows.iter().any(|row| !row.lock_origins().is_empty());
     let has_collations = batch.schema.collation_overrides().next().is_some();
+    let has_presence = batch.schema.whole_row_presences().next().is_some();
     let flags = if has_lock_origins {
         ROW_METADATA_LOCK_ORIGINS
     } else {
@@ -482,10 +488,17 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
         usize::from(super::collations::FLAG)
     } else {
         0
+    } | if has_presence {
+        usize::from(super::presence::FLAG)
+    } else {
+        0
     };
     write_u64(writer, flags)?;
     if has_collations {
         super::collations::encode(writer, &batch.schema)?;
+    }
+    if has_presence {
+        super::presence::encode(writer, &batch.schema)?;
     }
     write_u64(writer, batch.rows.len())?;
     for row in &batch.rows {
@@ -770,12 +783,16 @@ pub(super) fn write_u64(writer: &mut impl Write, value: usize) -> ExecResult<()>
     write_raw(writer, &value.to_le_bytes(), "length")
 }
 
-fn write_bytes(writer: &mut impl Write, value: &[u8]) -> ExecResult<()> {
+pub(super) fn write_bytes(writer: &mut impl Write, value: &[u8]) -> ExecResult<()> {
     write_u64(writer, value.len())?;
     write_raw(writer, value, "byte payload")
 }
 
-fn write_raw(writer: &mut impl Write, value: &[u8], description: &str) -> ExecResult<()> {
+pub(super) fn write_raw(
+    writer: &mut impl Write,
+    value: &[u8],
+    description: &str,
+) -> ExecResult<()> {
     writer
         .write_all(value)
         .map_err(|error| spill_error(format!("failed to write spill {description}: {error}")))

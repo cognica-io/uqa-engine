@@ -170,6 +170,17 @@ fn materialize_qualified_whole_row(
     row: &dyn uqa_sql::expr::RowLookup,
     qualifier: &str,
 ) -> Result<Value, SQLError> {
+    if let Some(marker) = schema.whole_row_presence(qualifier) {
+        match row.internal_column(marker) {
+            Some(Value::Null) => return Ok(Value::Null),
+            Some(Value::Bool(true)) => {}
+            _ => {
+                return Err(SQLError::Internal(format!(
+                    "whole-row presence for {qualifier} is unavailable or invalid"
+                )))
+            }
+        }
+    }
     schema
         .qualified_star_position_layout(qualifier)
         .into_iter()

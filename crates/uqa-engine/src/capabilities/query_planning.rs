@@ -115,6 +115,24 @@ pub(crate) fn column_prune_for_stmt(
     column_prune_for_stmt_with_filter(engine, stmt, from, stmt.r#where.as_ref(), ctes, schema)
 }
 
+pub(crate) fn push_derived_output_filter(
+    engine: &Engine,
+    plan: &QueryPlan,
+    qualifier: &str,
+    filter: &ScalarExpr,
+    output_columns: Option<&[String]>,
+) -> Result<Option<QueryPlan>, SQLError> {
+    with_context(engine, |context| {
+        uqa_planner::filter_pushdown::push_derived_output_filter(
+            context,
+            plan,
+            qualifier,
+            filter,
+            output_columns,
+        )
+    })
+}
+
 pub(crate) fn column_prune_for_stmt_with_filter(
     engine: &Engine,
     stmt: &QueryBlockPlan,

@@ -148,6 +148,22 @@ ORDER BY sequence;
 
 Supported expression and relation subqueries include scalar subqueries, correlated subqueries, `EXISTS`, `IN`, and derived tables.
 
+Eligible pure predicates on one derived-table, view or folded-CTE source select its input rows before evaluating outputs that the predicate discards, including correlated LATERAL inputs. A pure condition on one output can therefore avoid a different output's division-by-zero error or volatile/set-returning call for an excluded row. A predicate that reads a volatile or set-returning output stays outside that output's evaluation; LIMIT/OFFSET, materialized CTEs, set-member type conversions and predicates that split DISTINCT ON groups or window partitions preserve their respective boundaries. Partial source aliases retain the remaining output names.
+
+Simple derived projections also preserve the qualification-before-output order in these scalar-subquery and joined-input examples:
+
+```sql execute
+SELECT * FROM (SELECT x AS k, 10/x AS z FROM (VALUES (0), (2)) v(x)) s WHERE k = (SELECT 2);
+SELECT s.z FROM (SELECT x AS k, 10/x AS z FROM (VALUES (0), (2)) v(x)) s CROSS JOIN (VALUES (0)) a(y) WHERE s.k + a.y > 0;
+```
+
+
+```sql execute
+SELECT s.z
+FROM (SELECT x AS k, 10 / x AS z FROM (VALUES (0), (2)) v(x)) s
+WHERE s.k > 0;
+```
+
 ```sql
 SELECT e.employee_id, e.name
 FROM employees AS e
@@ -203,6 +219,10 @@ SELECT n, is_cycle, cardinality(path) AS path_length FROM ring ORDER BY path_len
 PostgreSQL 18 rejects a recursive query's combined top-level `ORDER BY`, `OFFSET`, and `LIMIT` or `FETCH` clauses with feature-not-supported (`0A000`), and UQA Engine rejects the same shapes before execution. Parenthesized clauses local to a nonrecursive or recursive UNION operand remain distinct and follow PostgreSQL's operand-local behavior.
 
 An ordinary CTE defaults to PostgreSQL's planning policy: a side-effect-free, nonrecursive CTE referenced once may be folded into its parent, while a multiply referenced CTE is evaluated once and shared. `AS MATERIALIZED` is an optimization fence and forces one shared evaluation. `AS NOT MATERIALIZED` allows each reference to be folded and evaluated independently; PostgreSQL ignores that request for recursive or volatile CTEs and UQA Engine does the same.
+
+A nonrecursive read-only materialized CTE produces rows as its consumers request them. Each reference has its own position in one shared, spill-bounded prefix; reading an existing row again does not repeat its expressions or sequence effects. An unused CTE or a LIMIT 0 consumer does not evaluate its rows. A consumer that needs the complete input, such as a sort or aggregate, still drives the producer to completion, including any error reached there. Data-modifying CTEs retain the complete-execution contract below.
+
+Without `RECURSIVE`, each CTE definition sees enclosing bindings and the preceding definitions in its own `WITH` list. Its own name and later local names do not hide an enclosing binding inside that definition. Folding and materialization preserve these definition-time inputs and their output types, including prepared queries and stored views after reopening. An unavailable ordinary self or forward reference reports `42P01` with PostgreSQL's explanation and reorder/`WITH RECURSIVE` hint; `WITH RECURSIVE` retains its separate self-reference and dependency rules.
 
 ```sql execute
 WITH source AS NOT MATERIALIZED (

@@ -125,6 +125,7 @@ impl AggregateStatePlan {
         input_type: Option<&uqa_sql::ast::ColumnType>,
     ) -> Self {
         use uqa_sql::ast::ColumnType;
+        let name = uqa_sql::semantics::builtin_aggregate_dispatch_name(name);
         if let Some(ColumnType::Domain { base, .. }) = input_type {
             return Self::builtin_with_input_type(name, Some(base));
         }
@@ -140,6 +141,7 @@ impl AggregateStatePlan {
     }
 
     pub(super) fn builtin(name: &str) -> Self {
+        let name = uqa_sql::semantics::builtin_aggregate_dispatch_name(name);
         match name.to_ascii_lowercase().as_str() {
             "count" => Self::Count,
             "sum" | "avg" => Self::Sum,

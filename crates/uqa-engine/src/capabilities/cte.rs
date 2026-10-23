@@ -26,6 +26,14 @@ impl Engine {
     }
 }
 impl CteBodyExecutor<StatementReadSnapshot> for Engine {
+    fn retained_query(
+        &self,
+        query: &QueryPlan,
+        params: &[SQLParam],
+        ctes: &CteScope,
+    ) -> Result<Option<Box<dyn uqa_execution::PhysicalOperator>>, SQLError> {
+        self.retained_query_operator(query.clone(), params.to_vec(), ctes.clone())
+    }
     fn execute_query(
         &self,
         query: &QueryPlan,
@@ -89,6 +97,8 @@ impl QueryOutputRewriter for Engine {
             &|name| projection.contains(name),
             Some(schema),
             self,
+            Some(self),
+            Some(self),
         );
     }
 
@@ -106,5 +116,15 @@ impl QueryOutputRewriter for Engine {
         super::query_planning::push_output_filter_into_query_plan(
             self, query, qualifier, filter, columns,
         )
+    }
+
+    fn push_derived_output_filter(
+        &self,
+        query: &QueryPlan,
+        qualifier: &str,
+        filter: &ScalarExpr,
+        columns: Option<&[String]>,
+    ) -> Result<Option<QueryPlan>, SQLError> {
+        super::query_planning::push_derived_output_filter(self, query, qualifier, filter, columns)
     }
 }

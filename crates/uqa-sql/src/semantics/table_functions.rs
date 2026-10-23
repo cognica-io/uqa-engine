@@ -832,11 +832,10 @@ pub fn alias_join_schema(
         ));
     };
     let columns = join_alias_columns(schema, alias, column_aliases)?;
-    Ok(crate::RowSchema::with_qualified_types(
-        alias,
-        columns,
-        schema.column_types().to_vec(),
-    ))
+    Ok(
+        crate::RowSchema::with_qualified_types(alias, columns, schema.column_types().to_vec())
+            .with_column_diagnostic_names_from(schema),
+    )
 }
 
 #[cfg(test)]

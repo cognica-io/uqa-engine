@@ -18,6 +18,13 @@ use uqa_sql::{
 };
 
 pub trait CteBodyExecutor<S: Clone>: Sync {
+    /// Retain one read-only physical producer and its selected session inputs. A semantic materialization that cannot expose a pull operator returns None.
+    fn retained_query(
+        &self,
+        query: &QueryPlan,
+        params: &[SQLParam],
+        ctes: &CteScope<S>,
+    ) -> Result<Option<Box<dyn crate::PhysicalOperator>>, SQLError>;
     fn execute_query(
         &self,
         query: &QueryPlan,
@@ -65,6 +72,17 @@ pub trait QueryOutputRewriter: Sync {
         filter: &ScalarExpr,
         output_columns: Option<&[String]>,
     ) -> Result<Option<QueryPlan>, SQLError>;
+
+    /// Place a predicate inside an ordinary derived source. Recursive specialization keeps its separate effect boundary through `push_output_filter`.
+    fn push_derived_output_filter(
+        &self,
+        query: &QueryPlan,
+        qualifier: &str,
+        filter: &ScalarExpr,
+        output_columns: Option<&[String]>,
+    ) -> Result<Option<QueryPlan>, SQLError> {
+        self.push_output_filter(query, qualifier, filter, output_columns)
+    }
 }
 
 #[derive(Clone)]

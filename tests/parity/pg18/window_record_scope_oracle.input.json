@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "nonnull_counts",
+      "sql": "SELECT count(s) AS n,count(s.*) AS star_n,count(ROW(s)) AS nested_n FROM (VALUES(2,5),(3,6))s(k,z)"
+    },
+    {
+      "id": "window_nonnull_counts",
+      "sql": "SELECT k,count(s) OVER() AS n,count(s.*) OVER() AS star_n,count(ROW(s)) OVER() AS nested_n FROM (VALUES(2,5),(3,6))s(k,z) ORDER BY k"
+    },
+    {
+      "id": "all_null_count",
+      "sql": "SELECT count(s) AS n,count(s.*) AS star_n,count(ROW(s)) AS nested_n FROM (VALUES(NULL::int,NULL::int))s(k,z)"
+    },
+    {
+      "id": "window_all_null_count",
+      "sql": "SELECT ROW(s)::text AS r,count(s) OVER() AS n,count(s.*) OVER() AS star_n,count(ROW(s)) OVER() AS nested_n FROM (VALUES(NULL::int,NULL::int))s(k,z)"
+    },
+    {
+      "id": "window_matched_null_row",
+      "sql": "SELECT ROW(s)::text AS r,count(s) OVER() AS n FROM (VALUES(1))t(x) LEFT JOIN (VALUES(NULL::int,NULL::int))s(k,z) ON TRUE"
+    },
+    {
+      "id": "window_filtered_count",
+      "sql": "SELECT k,count(s) FILTER(WHERE s IS NULL) OVER() AS all_null,count(s) FILTER(WHERE s IS NOT NULL) OVER() AS nonnull FROM (VALUES(NULL::int,NULL::int),(1,NULL),(2,3))s(k,z) ORDER BY k NULLS FIRST"
+    },
+    {
+      "id": "window_alias_shadow",
+      "sql": "SELECT count(s) OVER() AS column_n,count(s.*) OVER() AS row_n FROM (VALUES(NULL::int,2))s(s,z)"
+    },
+    {
+      "id": "window_partition_row",
+      "sql": "SELECT k,z,count(*) OVER(PARTITION BY s) AS n,count(s) OVER(PARTITION BY s) AS row_n FROM (VALUES(1,2),(1,2),(1,3),(NULL::int,NULL::int))s(k,z) ORDER BY k NULLS FIRST,z NULLS FIRST"
+    },
+    {
+      "id": "window_order_row",
+      "sql": "SELECT k,z,row_number() OVER(ORDER BY s) AS n FROM (VALUES(2,1),(1,2),(1,1))s(k,z) ORDER BY n"
+    },
+    {
+      "id": "window_record_lag",
+      "sql": "SELECT k,lag(s) OVER(ORDER BY k)::text AS previous,lead(s) OVER(ORDER BY k)::text AS following FROM (VALUES(1,2),(2,3),(3,4))s(k,z) ORDER BY k"
+    },
+    {
+      "id": "window_record_first_last",
+      "sql": "SELECT k,first_value(s) OVER(ORDER BY k)::text AS first,last_value(s) OVER(ORDER BY k)::text AS last FROM (VALUES(1,2),(2,3),(3,4))s(k,z) ORDER BY k"
+    },
+    {
+      "id": "window_row_constructor",
+      "sql": "SELECT k,first_value(ROW(s)) OVER(ORDER BY k)::text AS nested,first_value(ROW(s.*)) OVER(ORDER BY k)::text AS expanded FROM (VALUES(1,2),(2,3))s(k,z) ORDER BY k"
+    },
+    {
+      "id": "window_record_frame",
+      "sql": "SELECT k,count(s) OVER(ORDER BY k ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS n FROM (VALUES(1,NULL::int),(2,3),(3,4))s(k,z) ORDER BY k"
+    },
+    {
+      "id": "window_record_exclusion",
+      "sql": "SELECT k,count(s) OVER(ORDER BY k ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING EXCLUDE CURRENT ROW) AS n FROM (VALUES(1,NULL::int),(2,3),(3,4))s(k,z) ORDER BY k"
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW window_record_scope AS SELECT k,count(s) OVER() AS n,lag(s) OVER(ORDER BY k)::text AS previous FROM (VALUES(1,2),(2,3))s(k,z)"
+    },
+    {
+      "id": "read_view",
+      "sql": "SELECT * FROM window_record_scope ORDER BY k"
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE window_record_scope_plan(int) AS SELECT k,count(s) OVER() AS n FROM (VALUES($1,2),(3,4))s(k,z) ORDER BY k"
+    },
+    {
+      "id": "execute",
+      "sql": "EXECUTE window_record_scope_plan(1)"
+    },
+    {
+      "id": "deallocate",
+      "sql": "DEALLOCATE window_record_scope_plan"
+    }
+  ]
+}

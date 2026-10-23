@@ -55,7 +55,7 @@ impl crate::PhysicalOperator for RowAtATime<'_> {
                     vec![row],
                 )));
             }
-            let Some(batch) = self.input.next()? else {
+            let Some(batch) = self.input.next_with_demand(crate::physical::demand::ONE)? else {
                 return Ok(None);
             };
             if batch.schema != self.schema {

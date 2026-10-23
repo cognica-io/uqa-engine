@@ -75,8 +75,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
                 Some((column.to_string(), output_identity, position))
             })
             .collect();
-        let scan: Box<dyn crate::PhysicalOperator + 'a> =
-            Box::new(crate::SharedSpillScan::new(materialized));
+        let scan: Box<dyn crate::PhysicalOperator + 'a> = materialized.into_operator();
         let selection = crate::ColumnSelection::with_identities(scan, mapping);
         let selection = if ctes.lock_identities.emit {
             selection.rebinding_lock_origins(qualifier)

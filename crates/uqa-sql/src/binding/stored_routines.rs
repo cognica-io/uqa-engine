@@ -236,6 +236,8 @@ fn command_statement_query(
         }))
         .collect();
     let mut query = QueryPlan {
+        analyzed_output: None,
+        analyzed_source: None,
         relations_bound: true,
         ctes: inputs.ctes,
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
@@ -394,6 +396,7 @@ fn insert_statement_routine_inputs(
             .map(|projection| projection.expr.clone()),
     );
     let source = plan.source.as_ref().map(|source| SourcePlan::Subquery {
+        captured_output: None,
         lateral: false,
         body: Box::new((**source).clone()),
         alias: Some("__uqa_catalog_statement_source".into()),

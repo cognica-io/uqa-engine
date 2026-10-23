@@ -1,0 +1,560 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE SCHEMA count_identity_probe",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "schema"
+    },
+    {
+      "sql": "CREATE FUNCTION count_identity_probe.count() RETURNS integer LANGUAGE sql IMMUTABLE RETURN 10",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "routine"
+    },
+    {
+      "sql": "CREATE FUNCTION count_identity_probe.scalar(integer) RETURNS integer LANGUAGE sql IMMUTABLE RETURN $1",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "one_argument_routine"
+    },
+    {
+      "sql": "SELECT count_identity_probe.count()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "10"
+            ]
+          ]
+        }
+      ],
+      "id": "ordinary"
+    },
+    {
+      "sql": "SELECT count_identity_probe.count(*)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "count_identity_probe.count(*) specified, but count_identity_probe.count is not an aggregate function",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "ordinary_star"
+    },
+    {
+      "sql": "SELECT count_identity_probe.count(*) FILTER (WHERE true)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "count_identity_probe.count(*) specified, but count_identity_probe.count is not an aggregate function",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "ordinary_star_filter"
+    },
+    {
+      "sql": "SELECT count_identity_probe.count(* ORDER BY 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "syntax error at or near \"ORDER\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "ordinary_star_order"
+    },
+    {
+      "sql": "SELECT absent_star_function(*)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function absent_star_function() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "id": "absent"
+    },
+    {
+      "sql": "SELECT count_identity_probe.scalar(*)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function count_identity_probe.scalar() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "id": "one_argument"
+    },
+    {
+      "sql": "SELECT random(*)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "random(*) specified, but random is not an aggregate function",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "builtin_scalar"
+    },
+    {
+      "sql": "SELECT pg_catalog.count(*) FROM (VALUES(1),(2)) q(x)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "builtin_count"
+    },
+    {
+      "sql": "SELECT pg_catalog.count(q.*) FROM (VALUES(1),(2)) q(x)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "whole_row"
+    },
+    {
+      "sql": "SET search_path=count_identity_probe,pg_catalog",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "search_path"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id,1/0 AS z) q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "count(*) specified, but count is not an aggregate function",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "shadowed"
+    },
+    {
+      "sql": "SELECT pg_catalog.count(*) FROM (SELECT 1 AS id,1/0 AS z) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "explicit_builtin"
+    },
+    {
+      "sql": "SELECT pg_catalog.count(*), pg_catalog.count(x), pg_catalog.sum(x), pg_catalog.avg(x), pg_catalog.min(x), pg_catalog.max(x) FROM (VALUES (1),(2),(NULL)) q(x)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count",
+            "count",
+            "sum",
+            "avg",
+            "min",
+            "max"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20,
+            1700,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "2",
+              "3",
+              "1.5000000000000000",
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "qualified_scalar_aggregate_mix"
+    },
+    {
+      "sql": "SELECT pg_catalog.array_agg(x ORDER BY x DESC), pg_catalog.string_agg(x::text, ',' ORDER BY x) FROM (VALUES(2),(1)) q(x)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_agg",
+            "string_agg"
+          ],
+          "type_oids": [
+            1007,
+            25
+          ],
+          "rows": [
+            [
+              "{2,1}",
+              "1,2"
+            ]
+          ]
+        }
+      ],
+      "id": "qualified_ordered_collections"
+    },
+    {
+      "sql": "SELECT x, pg_catalog.count(*) FILTER (WHERE y > 1), pg_catalog.sum(y) FROM (VALUES (1,1),(1,2),(2,3)) q(x,y) GROUP BY x ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "count",
+            "sum"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "1",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "qualified_group_filter"
+    },
+    {
+      "sql": "SELECT pg_catalog.count(DISTINCT x), pg_catalog.sum(DISTINCT x) FROM (VALUES(1),(1),(2)) q(x)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count",
+            "sum"
+          ],
+          "type_oids": [
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "qualified_distinct"
+    },
+    {
+      "sql": "SELECT x, pg_catalog.count(*) OVER (ORDER BY x), pg_catalog.sum(x) OVER () FROM (VALUES(1),(2)) q(x) ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "count",
+            "sum"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "2",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "qualified_window"
+    },
+    {
+      "sql": "SELECT pg_catalog.percentile_cont(0.5) WITHIN GROUP (ORDER BY x), pg_catalog.mode() WITHIN GROUP (ORDER BY x) FROM (VALUES(1),(1),(2)) q(x)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "percentile_cont",
+            "mode"
+          ],
+          "type_oids": [
+            701,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "qualified_ordered_set"
+    },
+    {
+      "sql": "SELECT count() FROM (VALUES(1),(2)) q(x)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "10"
+            ],
+            [
+              "10"
+            ]
+          ]
+        }
+      ],
+      "id": "shadowed_ordinary_rows"
+    },
+    {
+      "sql": "SELECT pg_catalog.count(*), pg_catalog.sum(x), pg_catalog.array_agg(x) FROM (SELECT 1 AS x WHERE false) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count",
+            "sum",
+            "array_agg"
+          ],
+          "type_oids": [
+            20,
+            20,
+            1007
+          ],
+          "rows": [
+            [
+              "0",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "id": "qualified_empty"
+    },
+    {
+      "sql": "SELECT pg_catalog.sum(*)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function pg_catalog.sum() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "id": "star_numeric_missing_signature"
+    },
+    {
+      "sql": "SELECT pg_catalog.array_agg(*)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function pg_catalog.array_agg() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "id": "star_array_missing_signature"
+    },
+    {
+      "sql": "SELECT pg_catalog.count()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "pg_catalog.count(*) must be used to call a parameterless aggregate function",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "count_without_star"
+    },
+    {
+      "sql": "SELECT pg_catalog.sum()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function pg_catalog.sum() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "id": "numeric_without_argument"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "165c81046bf2cc2bca0e1d042585a7629da17f23c7ff117387b48e9279b5671e",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}

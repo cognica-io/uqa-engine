@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "schema",
+      "sql": "CREATE SCHEMA count_identity_probe"
+    },
+    {
+      "id": "routine",
+      "sql": "CREATE FUNCTION count_identity_probe.count() RETURNS integer LANGUAGE sql IMMUTABLE RETURN 10"
+    },
+    {
+      "id": "one_argument_routine",
+      "sql": "CREATE FUNCTION count_identity_probe.scalar(integer) RETURNS integer LANGUAGE sql IMMUTABLE RETURN $1"
+    },
+    {
+      "id": "ordinary",
+      "sql": "SELECT count_identity_probe.count()"
+    },
+    {
+      "id": "ordinary_star",
+      "sql": "SELECT count_identity_probe.count(*)"
+    },
+    {
+      "id": "ordinary_star_filter",
+      "sql": "SELECT count_identity_probe.count(*) FILTER (WHERE true)"
+    },
+    {
+      "id": "ordinary_star_order",
+      "sql": "SELECT count_identity_probe.count(* ORDER BY 1)"
+    },
+    {
+      "id": "absent",
+      "sql": "SELECT absent_star_function(*)"
+    },
+    {
+      "id": "one_argument",
+      "sql": "SELECT count_identity_probe.scalar(*)"
+    },
+    {
+      "id": "builtin_scalar",
+      "sql": "SELECT random(*)"
+    },
+    {
+      "id": "builtin_count",
+      "sql": "SELECT pg_catalog.count(*) FROM (VALUES(1),(2)) q(x)"
+    },
+    {
+      "id": "whole_row",
+      "sql": "SELECT pg_catalog.count(q.*) FROM (VALUES(1),(2)) q(x)"
+    },
+    {
+      "id": "search_path",
+      "sql": "SET search_path=count_identity_probe,pg_catalog"
+    },
+    {
+      "id": "shadowed",
+      "sql": "SELECT count(*) FROM (SELECT 1 AS id,1/0 AS z) q"
+    },
+    {
+      "id": "explicit_builtin",
+      "sql": "SELECT pg_catalog.count(*) FROM (SELECT 1 AS id,1/0 AS z) q"
+    },
+    {
+      "id": "qualified_scalar_aggregate_mix",
+      "sql": "SELECT pg_catalog.count(*), pg_catalog.count(x), pg_catalog.sum(x), pg_catalog.avg(x), pg_catalog.min(x), pg_catalog.max(x) FROM (VALUES (1),(2),(NULL)) q(x)"
+    },
+    {
+      "id": "qualified_ordered_collections",
+      "sql": "SELECT pg_catalog.array_agg(x ORDER BY x DESC), pg_catalog.string_agg(x::text, ',' ORDER BY x) FROM (VALUES(2),(1)) q(x)"
+    },
+    {
+      "id": "qualified_group_filter",
+      "sql": "SELECT x, pg_catalog.count(*) FILTER (WHERE y > 1), pg_catalog.sum(y) FROM (VALUES (1,1),(1,2),(2,3)) q(x,y) GROUP BY x ORDER BY x"
+    },
+    {
+      "id": "qualified_distinct",
+      "sql": "SELECT pg_catalog.count(DISTINCT x), pg_catalog.sum(DISTINCT x) FROM (VALUES(1),(1),(2)) q(x)"
+    },
+    {
+      "id": "qualified_window",
+      "sql": "SELECT x, pg_catalog.count(*) OVER (ORDER BY x), pg_catalog.sum(x) OVER () FROM (VALUES(1),(2)) q(x) ORDER BY x"
+    },
+    {
+      "id": "qualified_ordered_set",
+      "sql": "SELECT pg_catalog.percentile_cont(0.5) WITHIN GROUP (ORDER BY x), pg_catalog.mode() WITHIN GROUP (ORDER BY x) FROM (VALUES(1),(1),(2)) q(x)"
+    },
+    {
+      "id": "shadowed_ordinary_rows",
+      "sql": "SELECT count() FROM (VALUES(1),(2)) q(x)"
+    },
+    {
+      "id": "qualified_empty",
+      "sql": "SELECT pg_catalog.count(*), pg_catalog.sum(x), pg_catalog.array_agg(x) FROM (SELECT 1 AS x WHERE false) q"
+    },
+    {
+      "id": "star_numeric_missing_signature",
+      "sql": "SELECT pg_catalog.sum(*)"
+    },
+    {
+      "id": "star_array_missing_signature",
+      "sql": "SELECT pg_catalog.array_agg(*)"
+    },
+    {
+      "id": "count_without_star",
+      "sql": "SELECT pg_catalog.count()"
+    },
+    {
+      "id": "numeric_without_argument",
+      "sql": "SELECT pg_catalog.sum()"
+    }
+  ]
+}

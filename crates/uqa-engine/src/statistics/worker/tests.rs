@@ -231,3 +231,144 @@ fn unchanged_statistics_poll_needs_no_catalog_records() {
         uqa_core::Value::Int(1)
     );
 }
+
+#[rstest::rstest]
+fn a_committed_insert_invalidates_an_empty_statistics_publication(
+    #[values(0, 1, 2)] provider: usize,
+    #[values(false, true)] insert_started: bool,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = persistent(provider, &directory.path().join("empty-sample.db"));
+    manual_worker(&writer);
+    writer
+        .sql(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, category TEXT)",
+            &[],
+        )
+        .unwrap();
+    let worker = writer.new_session().unwrap();
+    manual_worker(&worker);
+    let insert = || {
+        writer
+            .sql(
+                "BEGIN; INSERT INTO items SELECT n, 'same' FROM generate_series(1, 5000) AS g(n)",
+                &[],
+            )
+            .unwrap();
+    };
+    if insert_started {
+        insert();
+    }
+    let mut cache = cache::MaintenanceCache::default();
+    refresh_due_tables(&worker, &mut cache).unwrap();
+    let catalog = worker.storage.catalog.as_ref().unwrap();
+    assert_eq!(
+        catalog.load_column_stats("public.items").unwrap()[0].row_count,
+        0
+    );
+    if !insert_started {
+        insert();
+    }
+    writer.sql("COMMIT", &[]).unwrap();
+    refresh_due_tables(&worker, &mut cache).unwrap();
+    let state = MaintenanceState::load(catalog.as_ref(), "public.items").unwrap();
+    assert_eq!(
+        catalog.load_column_stats("public.items").unwrap()[0].row_count,
+        5000,
+        "pending state: {state:?}; status: {:?}",
+        worker.automatic_statistics_status(),
+    );
+    assert!(!state.dirty(), "pending state: {state:?}");
+}
+
+#[rstest::rstest]
+fn first_worker_session_during_insert_keeps_committed_statistics_current(
+    #[values(0, 1, 2)] provider: usize,
+    #[values(0, 2047)] trigger_at: usize,
+) {
+    use std::sync::atomic::AtomicUsize;
+    use uqa_core::Value;
+
+    let directory = tempfile::tempdir().unwrap();
+    let writer = persistent(provider, &directory.path().join("initial-worker.db"));
+    manual_worker(&writer);
+    writer
+        .sql(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, category TEXT)",
+            &[],
+        )
+        .unwrap();
+    let provider = Arc::clone(writer.storage.provider.as_ref().unwrap());
+    let manager = Arc::clone(&writer.row_locks);
+    let statistics = Arc::clone(&writer.statistics);
+    let (request, requested) = mpsc::sync_channel(1);
+    let (completion, completed) = mpsc::sync_channel(1);
+    let completed = parking_lot::Mutex::new(completed);
+    let worker = std::thread::spawn(move || {
+        requested.recv_timeout(Duration::from_secs(30)).unwrap();
+        let storage = provider.open_session().unwrap();
+        let mut worker =
+            Engine::from_initialized_persistent_session(storage, Some(provider)).unwrap();
+        worker
+            .session
+            .statistics_worker
+            .store(true, Ordering::Release);
+        worker.session_id = manager.allocate_session();
+        worker.row_locks = manager;
+        worker.statistics = statistics;
+        let mut cache = cache::MaintenanceCache::default();
+        refresh_due_tables(&worker, &mut cache).unwrap();
+        assert_eq!(
+            worker
+                .storage
+                .catalog
+                .as_ref()
+                .unwrap()
+                .load_column_stats("public.items")
+                .unwrap()[0]
+                .row_count,
+            0
+        );
+        completion.send(()).unwrap();
+        (worker, cache)
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    writer
+        .register_scalar_function("start_statistics", move |arguments: &[Value]| {
+            if observed.fetch_add(1, Ordering::AcqRel) == trigger_at {
+                request.send(()).unwrap();
+                completed
+                    .lock()
+                    .recv_timeout(Duration::from_secs(30))
+                    .unwrap();
+            }
+            Ok::<_, uqa_sql::SQLError>(arguments[0].clone())
+        })
+        .unwrap();
+    writer
+        .sql(
+            "INSERT INTO items SELECT start_statistics(n),'same' FROM generate_series(1,5000)g(n)",
+            &[],
+        )
+        .unwrap();
+    let (worker, mut cache) = worker.join().unwrap();
+    assert_eq!(calls.load(Ordering::Acquire), 5000);
+    assert_eq!(
+        writer
+            .sql("SELECT count(*) AS n FROM items", &[])
+            .unwrap()
+            .rows[0]["n"],
+        Value::Int(5000)
+    );
+    refresh_due_tables(&worker, &mut cache).unwrap();
+    let catalog = worker.storage.catalog.as_ref().unwrap();
+    let state = MaintenanceState::load(catalog.as_ref(), "public.items").unwrap();
+    assert_eq!(
+        catalog.load_column_stats("public.items").unwrap()[0].row_count,
+        5000,
+        "pending state: {state:?}; status: {:?}",
+        worker.automatic_statistics_status()
+    );
+    assert!(!state.dirty(), "pending state: {state:?}");
+}

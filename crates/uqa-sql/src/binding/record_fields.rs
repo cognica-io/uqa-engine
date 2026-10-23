@@ -62,20 +62,32 @@ impl SchemaScope {
             return Ok(Some(fields));
         }
         match expression {
-            ScalarExpr::Row(fields) => fields
-                .iter()
-                .map(|field| {
-                    if matches!(
-                        field,
-                        ScalarExpr::Literal(uqa_core::Value::Str(_) | uqa_core::Value::Null)
-                    ) {
-                        Ok(None)
-                    } else {
-                        self.bind_expression_type(routines, field, schema, subqueries, params)
+            ScalarExpr::Row(fields) => {
+                let mut types = Vec::new();
+                for field in fields {
+                    let expanded = crate::semantics::row_star_fields(field, schema)?;
+                    for field in expanded
+                        .as_deref()
+                        .unwrap_or_else(|| std::slice::from_ref(field))
+                    {
+                        types.push(
+                            if matches!(
+                                field,
+                                ScalarExpr::Literal(
+                                    uqa_core::Value::Str(_) | uqa_core::Value::Null
+                                )
+                            ) {
+                                None
+                            } else {
+                                self.bind_expression_type(
+                                    routines, field, schema, subqueries, params,
+                                )?
+                            },
+                        );
                     }
-                })
-                .collect::<Result<Vec<_>, _>>()
-                .map(|fields| Some(fields.into())),
+                }
+                Ok(Some(types.into()))
+            }
             ScalarExpr::Cast { expr, ty, .. }
                 if matches!(
                     routines

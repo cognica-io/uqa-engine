@@ -308,6 +308,21 @@ fn recursive_control_validation_matches_postgresql_18_sqlstates() {
 
 #[test]
 fn materialization_controls_choose_the_postgresql_18_execution_policy() {
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/parity/pg18/cte_stable_consumer_oracle.expected.json"
+    ))
+    .unwrap();
+    let expected_calls = |id: &str| {
+        reference["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"] == id)
+            .unwrap()["notices"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
     let engine = Engine::new();
     engine
         .sql("CREATE TABLE items(id integer primary key)", &[])
@@ -329,7 +344,10 @@ fn materialization_controls_choose_the_postgresql_18_execution_policy() {
             &[],
         )
         .unwrap();
-    assert_eq!(calls.swap(0, Ordering::SeqCst), 2);
+    assert_eq!(
+        calls.swap(0, Ordering::SeqCst),
+        expected_calls("folded_limit")
+    );
 
     engine
         .sql(
@@ -338,7 +356,10 @@ fn materialization_controls_choose_the_postgresql_18_execution_policy() {
             &[],
         )
         .unwrap();
-    assert_eq!(calls.swap(0, Ordering::SeqCst), 2);
+    assert_eq!(
+        calls.swap(0, Ordering::SeqCst),
+        expected_calls("materialized_limit")
+    );
 
     engine
         .sql(
@@ -348,7 +369,10 @@ fn materialization_controls_choose_the_postgresql_18_execution_policy() {
             &[],
         )
         .unwrap();
-    assert_eq!(calls.swap(0, Ordering::SeqCst), 2);
+    assert_eq!(
+        calls.swap(0, Ordering::SeqCst),
+        expected_calls("materialized_join")
+    );
 
     engine
         .sql(
@@ -358,7 +382,10 @@ fn materialization_controls_choose_the_postgresql_18_execution_policy() {
             &[],
         )
         .unwrap();
-    assert_eq!(calls.swap(0, Ordering::SeqCst), 4);
+    assert_eq!(
+        calls.swap(0, Ordering::SeqCst),
+        expected_calls("not_materialized_join")
+    );
 
     engine
         .register_scalar_function_with_options(

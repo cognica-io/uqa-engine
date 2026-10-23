@@ -51,6 +51,7 @@ pub(super) fn optimize(
                 false,
             );
             *source = SourcePlan::Subquery {
+                captured_output: None,
                 lateral: true,
                 body: inlined.query,
                 alias: Some(alias.as_deref().unwrap_or(output_name).to_string()),
@@ -88,6 +89,7 @@ pub(super) fn optimize(
         return Ok(());
     }
     *source = SourcePlan::Subquery {
+        captured_output: None,
         lateral: true,
         body: Box::new(scalar_query(expression, &columns, *ordinality)),
         alias: Some(alias.as_deref().unwrap_or(output_name).to_string()),
@@ -157,6 +159,8 @@ fn scalar_query(
         });
     }
     let mut query = uqa_sql::plan::QueryPlan {
+        analyzed_output: None,
+        analyzed_source: None,
         relations_bound: false,
         ctes: Vec::new(),
         root: uqa_sql::plan::RelationalPlan::QueryBlock(Box::new(uqa_sql::plan::QueryBlockPlan {

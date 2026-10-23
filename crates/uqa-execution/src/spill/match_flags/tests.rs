@@ -7,6 +7,27 @@
 use super::*;
 
 #[test]
+fn growing_flags_preserve_dirty_pages_and_leave_new_ordinals_unmarked() {
+    let count = (PAGE_BYTES * 2 + 7) as u64;
+    let mut flags = MatchFlags::new(0, "join").unwrap();
+    for index in 0..count {
+        flags.push_unmarked().unwrap();
+        assert!(!flags.is_marked(index).unwrap(), "new ordinal {index}");
+        if index % 3 == 0 {
+            flags.mark(index).unwrap();
+        }
+        assert!(flags.is_marked(index + 1).is_err());
+    }
+    for _ in 0..2 {
+        for index in 0..count {
+            assert_eq!(flags.is_marked(index).unwrap(), index % 3 == 0);
+        }
+    }
+    assert!(flags.page_writes <= 3, "{}", flags.page_writes);
+    assert!(flags.page_reads <= 9, "{}", flags.page_reads);
+}
+
+#[test]
 fn match_flags_cache_bounds_page_io_and_preserves_union() {
     let count = (PAGE_BYTES * 2 + 7) as u64;
     let mut flags = MatchFlags::new(count, "join").unwrap();

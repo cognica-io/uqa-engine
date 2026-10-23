@@ -162,8 +162,24 @@ pub(super) fn is_polymorphic(name: &str) -> bool {
 }
 
 #[derive(Clone, Copy)]
+pub(super) enum DirectArguments {
+    Values(usize),
+    Star,
+}
+
+impl From<&[crate::ScalarExpr]> for DirectArguments {
+    fn from(arguments: &[crate::ScalarExpr]) -> Self {
+        if matches!(arguments, [crate::ScalarExpr::Star]) {
+            Self::Star
+        } else {
+            Self::Values(arguments.len())
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct Modifiers {
-    pub direct: usize,
+    pub direct: DirectArguments,
     pub ordered: usize,
     pub within_group: bool,
     pub distinct: bool,
@@ -184,12 +200,20 @@ pub(super) fn validate(
         distinct,
         filtered,
     } = modifiers;
+    let bare_star = matches!(direct, DirectArguments::Star);
+    let direct = match direct {
+        DirectArguments::Values(count) => count,
+        DirectArguments::Star => 0,
+    };
     let wrong = |message| SQLError::Routine {
         sqlstate: "42809".into(),
         message,
     };
     match kind {
         Kind::Ordinary => {
+            if bare_star {
+                return Err(wrong(format!("{name}(*) specified, but {name} is not an aggregate function")));
+            }
             let modifier = if distinct { Some("DISTINCT") }
             else if within_group { Some("WITHIN GROUP") }
             else if ordered > 0 { Some("ORDER BY") }
@@ -254,6 +278,44 @@ fn invalid_split(
     error
 }
 
+/// Validate an ordinary built-in aggregate's selected signature before inferring its result or evaluating an input conversion. A bare star is not an unknown-typed argument.
+pub(super) fn validate_builtin_aggregate_arguments(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    arguments: &[crate::ScalarExpr],
+    missing_signature: impl FnOnce() -> SQLError,
+) -> Result<(), SQLError> {
+    let selected = binding.map_or(name, |binding| binding.name.as_str());
+    if !crate::semantics::is_builtin_aggregate_call(name, binding) || is_ordered_set(selected) {
+        return Ok(());
+    }
+    let local = crate::semantics::builtin_aggregate_dispatch_name(selected);
+    let argument_count = match DirectArguments::from(arguments) {
+        DirectArguments::Values(count) => count,
+        DirectArguments::Star => 0,
+    };
+    let accepts = if local.eq_ignore_ascii_case("count") {
+        argument_count <= 1
+    } else if ["string_agg", "json_object_agg", "jsonb_object_agg"]
+        .iter()
+        .any(|expected| local.eq_ignore_ascii_case(expected))
+    {
+        argument_count == 2
+    } else {
+        argument_count == 1
+    };
+    if !accepts {
+        return Err(missing_signature());
+    }
+    if argument_count == 0 && !matches!(arguments, [crate::ScalarExpr::Star]) {
+        return Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!("{name}(*) must be used to call a parameterless aggregate function"),
+        });
+    }
+    Ok(())
+}
+
 impl super::SchemaScope {
     pub(super) fn bind_ordered_function_for_storage(
         &mut self,
@@ -308,7 +370,7 @@ impl super::SchemaScope {
                 name,
                 kind,
                 Modifiers {
-                    direct: args.len(),
+                    direct: DirectArguments::from(args.as_slice()),
                     ordered: order_by.len(),
                     within_group,
                     distinct: *distinct,

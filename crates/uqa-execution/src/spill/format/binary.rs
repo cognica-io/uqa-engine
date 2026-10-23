@@ -9,6 +9,7 @@
 mod collations;
 mod decode;
 mod encode;
+mod presence;
 
 pub(crate) use decode::{decode_batch, decode_document, decode_physical_row_record};
 pub(crate) use encode::{

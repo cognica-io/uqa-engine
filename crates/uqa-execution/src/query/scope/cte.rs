@@ -58,6 +58,8 @@ impl<S: Clone> CteScope<S> {
     pub fn inherit_cte_bindings(&mut self, parent: &Self) {
         self.rows.clone_from(&parent.rows);
         self.deferred_ctes.clone_from(&parent.deferred_ctes);
+        self.definition_scopes.clone_from(&parent.definition_scopes);
+        self.folded_ctes.clone_from(&parent.folded_ctes);
         self.non_returning_ctes
             .clone_from(&parent.non_returning_ctes);
         self.visible_cte_names.clone_from(&parent.visible_cte_names);
@@ -107,41 +109,38 @@ impl<S: Clone> CteScope<S> {
     }
 
     pub fn insert_shared(&mut self, name: String, rows: crate::SharedSpill) {
+        self.insert_rows(name, crate::query::cte::rows::CteRows::Complete(rows));
+    }
+
+    pub fn insert_rows(&mut self, name: String, rows: crate::query::cte::rows::CteRows) {
         self.deferred_ctes.remove(&name);
+        self.definition_scopes.remove(&name);
+        self.folded_ctes.remove(&name);
         self.non_returning_ctes.remove(&name);
         self.rows.insert(name, rows);
     }
 
     pub fn insert_deferred(&mut self, plan: CtePlan) {
-        self.rows.remove(&plan.name);
-        if plan.body.returns_rows() {
-            self.non_returning_ctes.remove(&plan.name);
-        } else {
-            self.non_returning_ctes.insert(plan.name.clone());
-        }
-        self.deferred_ctes.insert(plan.name.clone(), Arc::new(plan));
+        self.insert_preparation_cte(plan, true);
     }
 
     pub fn remove_deferred(&mut self, name: &str) -> Option<CtePlan> {
         self.non_returning_ctes.remove(name);
+        self.definition_scopes.remove(name);
+        self.folded_ctes.remove(name);
         self.deferred_ctes.remove(name).map(Arc::unwrap_or_clone)
     }
 
-    /// Return one deferred CTE for a scan. `NOT MATERIALIZED` definitions remain available so every syntactic reference is independently folded, while the default single-reference fast path is consumed exactly once.
-    pub fn deferred_for_scan(&mut self, name: &str) -> Option<CtePlan> {
+    /// Return a folded definition without consuming its lexical binding. A single syntactic reference can be built again by a recursive working-table iteration or a correlated consumer. Materialized producers replace the definition explicitly when installed.
+    pub fn deferred_for_scan(&self, name: &str) -> Option<CtePlan> {
         let name = uqa_sql::semantics::cte_reference_name(name)?;
-        let persistent = self.deferred_ctes.get(&name).is_some_and(|plan| {
-            plan.materialization == uqa_sql::ast::CteMaterialization::NotMaterialized
-        });
-        let plan = if persistent {
-            self.deferred_ctes.get(&name).cloned()
-        } else {
-            self.deferred_ctes.remove(&name)
-        };
-        plan.map(Arc::unwrap_or_clone)
+        self.deferred_ctes.get(&name).map(|plan| (**plan).clone())
     }
 
-    pub fn materialized_for_scan(&self, reference: &str) -> Option<crate::SharedSpill> {
+    pub fn materialized_for_scan(
+        &self,
+        reference: &str,
+    ) -> Option<crate::query::cte::rows::CteRows> {
         self.rows
             .get(&uqa_sql::semantics::cte_reference_name(reference)?)
             .cloned()
@@ -177,7 +176,7 @@ impl<S: Clone> CteScope<S> {
         }
     }
 
-    pub fn remove_materialized(&mut self, name: &str) -> Option<crate::SharedSpill> {
+    pub fn remove_materialized(&mut self, name: &str) -> Option<crate::query::cte::rows::CteRows> {
         self.non_returning_ctes.remove(name);
         self.rows.remove(name)
     }

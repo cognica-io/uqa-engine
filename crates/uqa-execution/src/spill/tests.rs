@@ -18,6 +18,7 @@ mod collations;
 mod datums;
 mod enums;
 mod legacy_vectors;
+mod presence;
 mod schemas;
 
 fn dummy_batch(start: usize, n: usize) -> Batch {

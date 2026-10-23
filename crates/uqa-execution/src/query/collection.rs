@@ -200,7 +200,7 @@ fn collect_consumed_rows(
         ));
     }
     loop {
-        let batch = match operator.next() {
+        let batch = match operator.next_with_demand(crate::physical::demand::ONE) {
             Ok(batch) => batch,
             Err(error) => {
                 return Err(close_after_physical_failure(

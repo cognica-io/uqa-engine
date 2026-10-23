@@ -11,6 +11,40 @@ use crate::SQLError;
 
 use super::FunctionTypeResolver;
 
+/// The structural field-selection operation, independently of its rendered function name.
+pub(crate) fn field_reference(
+    expression: &crate::ScalarExpr,
+) -> Option<(&crate::ScalarExpr, &str)> {
+    let crate::ScalarExpr::Func {
+        binding: Some(binding),
+        args,
+        ..
+    } = expression
+    else {
+        return None;
+    };
+    if binding.dispatch != Some(crate::ast::FunctionDispatch::FieldSelect) {
+        return None;
+    }
+    let [base, crate::ScalarExpr::Literal(uqa_core::Value::Str(field))] = args.as_slice() else {
+        return None;
+    };
+    Some((base, field))
+}
+
+/// Resolve `(relation).field` to its column without reading the other fields. A real column with the same name as the relation retains ordinary composite-value selection.
+pub fn relation_column(
+    expression: &crate::ScalarExpr,
+    schema: &crate::RowSchema,
+) -> Option<crate::ColumnIdentity> {
+    let (base, field) = field_reference(expression)?;
+    let qualifier = whole_row_qualifier(base, schema)?;
+    schema
+        .qualified_position(qualifier, field)
+        .and_then(|position| schema.identity(position))
+        .cloned()
+}
+
 /// Whole-row projection resolves directly against the relation namespace, before consulting a named composite descriptor.
 pub(crate) fn whole_row_qualifier<'a>(
     base: &'a crate::ScalarExpr,
@@ -192,4 +226,43 @@ pub fn row_field_type(
     anonymous_field_position(field, items.len())
         .map(|position| items[position].clone())
         .ok_or_else(|| undefined_record_field(field))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        plan::{RelationalPlan, UnifiedPlan},
+        ColumnIdentity, RowSchema,
+    };
+
+    #[test]
+    fn relation_field_selection_respects_column_shadowing_and_structural_dispatch() {
+        let UnifiedPlan::Query(query) =
+            UnifiedPlan::lower(crate::compile("SELECT (s).k").unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        let RelationalPlan::QueryBlock(block) = query.root else {
+            panic!("block")
+        };
+        let expression = &block.projections[0].expr;
+        let schema =
+            RowSchema::with_qualified_types("s", vec!["k".into()], vec![Some(ColumnType::Integer)]);
+        assert_eq!(
+            relation_column(expression, &schema),
+            Some(ColumnIdentity::qualified("s", "k"))
+        );
+        let shadowed = RowSchema::with_qualified_types(
+            "s",
+            vec!["k".into(), "s".into()],
+            vec![Some(ColumnType::Integer), Some(ColumnType::Record)],
+        );
+        assert!(relation_column(expression, &shadowed).is_none());
+        let mut ordinary_call = expression.clone();
+        if let crate::ScalarExpr::Func { binding, .. } = &mut ordinary_call {
+            *binding = None;
+        }
+        assert!(relation_column(&ordinary_call, &schema).is_none());
+    }
 }

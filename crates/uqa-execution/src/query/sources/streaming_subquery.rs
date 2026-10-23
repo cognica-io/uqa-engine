@@ -16,7 +16,7 @@ use crate::query::row_at_a_time::RowAtATime;
     clippy::too_many_lines,
     reason = "preserves source schema and row identity"
 )]
-pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync + 'static>(
+pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
     body: &uqa_sql::plan::QueryPlan,
     params: &'a [SQLParam],
@@ -31,15 +31,11 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
         return Ok(None);
     };
     // A block whose qualification calls a registered retrieval function (text_match, knn_match, graph_traverse, rpq, ...) executes it through the operator-tree bridge of the single-table executor; the residual scalar filter of a streamed block cannot evaluate such calls. Plain comparisons keep streaming so an outer LIMIT still bounds locking demand inside the derived table.
-    if !matches!(block.compute, ComputePlan::Project)
-        || matches!(block.access, AccessPathPlan::Hybrid)
+    if matches!(block.access, AccessPathPlan::Hybrid)
         || block
             .r#where
             .as_ref()
             .is_some_and(uqa_sql::semantics::contains_retrieval)
-        || block.from.is_none()
-        || block.distinct
-        || !block.distinct_on.is_empty()
     {
         return Ok(None);
     }
@@ -56,79 +52,119 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
     let mut ctes = ctes.enter_scalar_subqueries(&block.subqueries);
     let ctes: &mut CteScope<S> = &mut ctes;
     let outer_row = ctes.row_lock_outer_row().cloned();
-    let (block, source_schema) = crate::query::binding::bind_query_block_for_execution(
+    let (mut block, source_schema) = crate::query::binding::bind_query_block_for_execution(
         context.ctes.routines,
         block,
         params,
         ctes,
         outer_row.as_ref().map(|row| &row.schema),
-        false,
+        uqa_sql::semantics::should_defer_distinct_limit(block),
     )?;
+    // GROUP BY output names precede enclosing columns. Bind them against this block's own input before adding the outer row, as in the lateral executor.
+    if outer_row.is_some() && matches!(block.compute, ComputePlan::Aggregate) {
+        uqa_sql::semantics::grouping_sets::bind_grouping_names(
+            context.ctes.routines,
+            block.to_mut(),
+            &source_schema,
+            None,
+            params,
+        )?;
+    }
     let source_schema = uqa_sql::binding::overlay_outer_schema(
         &source_schema,
         outer_row.as_ref().map(|row| &row.schema),
     );
+    let original = match &body.root {
+        RelationalPlan::QueryBlock(original) => original,
+        _ => unreachable!(),
+    };
     let block = block.as_ref();
-    let from = block
-        .from
-        .as_ref()
-        .expect("derived-table FROM checked above");
-    crate::query::privileges::ensure_select_privileges_for_query_block(block, from, ctes)?;
-    let projections = crate::query::projection::physical_projections(&block.projections);
-    let type_resolver = context.relational.expression_scope(ctes.clone());
-    if uqa_sql::semantics::sets::validation::projections_may_return_set(
-        context.relational.catalog,
-        type_resolver.as_ref(),
-        &projections,
+    if let Some(from) = &block.from {
+        crate::query::privileges::ensure_select_privileges_for_query_block(block, from, ctes)?;
+    }
+    crate::query::binding::validate_query_block_expression_types(
+        context.ctes.routines,
+        block,
         &source_schema,
         params,
-    )? {
-        return Ok(None);
-    }
-    let (_, order_output) =
-        crate::query::ordering::order_projection(&block.projections, &source_schema)?;
-    for order in &block.order_by {
-        let expression =
-            crate::query::ordering::resolve_order_expression(&order.expr, &order_output)?;
-        if uqa_sql::semantics::sets::validation::expression_may_return_set(
+        ctes,
+    )?;
+    crate::query::binding::validate_query_block_references(
+        context.ctes.routines,
+        block,
+        &source_schema,
+        params,
+        ctes,
+        outer_row.as_ref().map(|row| &row.schema),
+    )?;
+    let resolver = context.relational.expression_scope(ctes.clone());
+    uqa_sql::semantics::sets::validation::validate_query_set_contexts(
+        context.relational.catalog,
+        resolver.as_ref(),
+        block,
+        &source_schema,
+        params,
+    )?;
+    if let Some(from) = &block.from {
+        uqa_sql::semantics::sets::validation::validate_source_set_contexts_before_build(
             context.relational.catalog,
-            type_resolver.as_ref(),
-            &expression,
-            &source_schema,
+            resolver.as_ref(),
+            from,
             params,
-        )? {
-            return Ok(None);
-        }
+            &crate::query::binding::binding_context(ctes)?,
+            outer_row.as_ref().map(|row| &row.schema),
+        )?;
     }
-
-    let emit_lock_identities = ctes.lock_identities.emit || !block.locking.is_empty();
+    let row_identity_barrier = original.distinct
+        || !original.distinct_on.is_empty()
+        || matches!(
+            original.compute,
+            ComputePlan::Aggregate | ComputePlan::Window
+        );
+    let emit_lock_identities =
+        (ctes.lock_identities.emit && !row_identity_barrier) || !block.locking.is_empty();
     let previous_lock_identities = ctes.lock_identities;
     ctes.lock_identities.emit = emit_lock_identities;
-    ctes.lock_identities.retain_after_lock = previous_lock_identities.emit;
+    ctes.lock_identities.retain_after_lock = previous_lock_identities.emit && !row_identity_barrier;
     let result = (|| {
-        let column_prune =
-            context
-                .planning
-                .column_prune(block, from, ctes, Some(&source_schema))?;
-        let qualifier_filters = context.planning.qualifier_filters(block, from, ctes)?;
-        let source_row_locks = crate::query::locking::resolve_row_locks(
-            context.locking,
-            from,
-            &block.locking,
-            block.r#where.as_ref(),
-            params,
-            ctes,
-        )?;
-        let operator = {
-            let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
-            build_join_operator_with_ctes(
-                context,
+        let (operator, residual) = if let Some(from) = &block.from {
+            let column_prune =
+                context
+                    .planning
+                    .column_prune(block, from, ctes, Some(&source_schema))?;
+            let qualifier_filters = context.planning.qualifier_filters(block, from, ctes)?;
+            let source_row_locks = crate::query::locking::resolve_row_locks(
+                context.locking,
                 from,
+                &block.locking,
+                block.r#where.as_ref(),
                 params,
-                &mut scoped_ctes,
-                column_prune.as_ref(),
-                qualifier_filters.as_ref(),
-            )?
+                ctes,
+            )?;
+            let operator = {
+                let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
+                build_join_operator_with_ctes(
+                    context,
+                    from,
+                    params,
+                    &mut scoped_ctes,
+                    column_prune.as_ref(),
+                    qualifier_filters.as_ref(),
+                )?
+            };
+            let residual =
+                context
+                    .planning
+                    .residual_filter(block, from, qualifier_filters.as_ref(), ctes)?;
+            (operator, residual)
+        } else {
+            (
+                Box::new(crate::TableScan::from_physical_rows(
+                    crate::RowSchema::default(),
+                    vec![crate::PhysicalRow::default()],
+                )) as Box<dyn crate::PhysicalOperator + 'a>,
+                block.r#where.clone(),
+            )
         };
         let operator: Box<dyn crate::PhysicalOperator + 'a> = match outer_row {
             Some(outer) => Box::new(crate::ScopeOverlay::new(operator, outer)),
@@ -140,11 +176,12 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
         } else {
             operator
         };
-        let residual =
-            context
-                .planning
-                .residual_filter(block, from, qualifier_filters.as_ref(), ctes)?;
-        let (mut operator, resjunk) = crate::query::relational::build_relational_operator(
+        let columns = crate::query::projection::expand_from_star_columns(
+            uqa_sql::semantics::projection_columns(&block.projections),
+            &block.projections,
+            operator.row_schema(),
+        )?;
+        let (operator, resjunk) = crate::query::relational::build_relational_operator(
             context.relational,
             operator,
             residual,
@@ -153,12 +190,16 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
             ctes,
             context.relational.runtime,
         )?;
-        if !resjunk.is_empty() {
-            operator = Box::new(crate::ColumnSelection::dropping_internal_attributes(
-                operator,
-                &resjunk.columns(),
-            ));
-        }
+        let operator = crate::query::relational::output::prepare_query_block_output_operator(
+            context.relational,
+            operator,
+            original,
+            params,
+            ctes,
+            &columns,
+            resjunk,
+            context.relational.runtime,
+        )?;
         Ok(Some(operator))
     })();
     ctes.lock_identities = previous_lock_identities;

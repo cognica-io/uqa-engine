@@ -43,6 +43,7 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
         "pg_catalog" => {
             crate::registry::is_registered(local)
                 || crate::type_resolution::is_fixed_builtin(local)
+                || crate::ast::is_builtin_aggregate_function(local)
                 || is_pg_catalog_function(local)
         }
         _ => false,
@@ -166,11 +167,16 @@ pub fn is_builtin_aggregate_call(
     if binding.is_some_and(|binding| !binding.builtin || binding.dispatch.is_some()) {
         return false;
     }
-    let name = binding
-        .map_or(name, |binding| binding.name.as_str())
-        .to_ascii_lowercase();
-    let local = name.strip_prefix("pg_catalog.").unwrap_or(&name);
-    crate::ast::is_builtin_aggregate_function(local)
+    let name = binding.map_or(name, |binding| binding.name.as_str());
+    crate::ast::is_builtin_aggregate_function(builtin_aggregate_dispatch_name(name))
+}
+
+/// Borrow the local name for an already selected built-in aggregate kernel. This does not select a routine: registered aggregates and scalar overloads must keep their selected identities before entering built-in execution. No name or argument allocation occurs for each input row.
+pub fn builtin_aggregate_dispatch_name(name: &str) -> &str {
+    match name.split_once('.') {
+        Some((schema, local)) if schema.eq_ignore_ascii_case("pg_catalog") => local,
+        _ => name,
+    }
 }
 
 pub enum MultiFieldMatchShape<'a> {
@@ -426,6 +432,10 @@ mod tests {
             "pg_sequence_parameters",
             "date_trunc",
             "mod",
+            "count",
+            "sum",
+            "array_agg",
+            "percentile_cont",
         ] {
             assert_eq!(builtin_function_dispatch_name(name), name);
             assert_eq!(

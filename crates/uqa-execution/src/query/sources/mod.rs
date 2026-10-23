@@ -46,6 +46,7 @@ mod join_source;
 mod join_validation;
 mod lateral_source;
 mod output_descriptor;
+mod output_filter;
 pub(crate) mod prepared_queries;
 pub mod retained_source;
 mod source_operator;
@@ -53,7 +54,7 @@ mod source_qualification;
 mod streaming_subquery;
 mod subquery_source;
 mod table_source;
-mod values_source;
+pub(crate) mod values_source;
 use function_source::{build_function_group_source_operator, build_function_source_operator};
 use join_source::build_join_source_operator;
 use join_validation::validate_join_on_schema;
@@ -65,7 +66,7 @@ use source_qualification::{
     execute_view_plan_output_with_parent_cache, filter_closed_source, null_row_for_schema,
     unproduced_column,
 };
-use streaming_subquery::try_build_streaming_subquery_operator;
+pub(crate) use streaming_subquery::try_build_streaming_subquery_operator;
 use subquery_source::build_subquery_source_operator;
 use table_source::build_table_source_operator;
 use uqa_sql::semantics::{join_using_predicate, resolve_join_using};

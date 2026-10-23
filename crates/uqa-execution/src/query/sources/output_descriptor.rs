@@ -94,22 +94,28 @@ impl<'a, S: Clone> DescriptorScope<'a, S> {
 
     fn table(&mut self, name: &str, bound: bool) -> Result<bool, SQLError> {
         if let Some(reference) = cte_reference_name(name) {
-            if let Some((scope, cte)) =
+            if let Some((scope, position, cte)) =
                 self.local_ctes
                     .iter()
                     .enumerate()
                     .rev()
                     .find_map(|(scope, ctes)| {
                         ctes.iter()
-                            .find(|cte| cte.name == reference)
-                            .map(|cte| (scope, cte))
+                            .enumerate()
+                            .find(|(_, cte)| cte.name == reference)
+                            .map(|(position, cte)| (scope, position, cte))
                     })
             {
                 let hidden = self.local_ctes.split_off(scope + 1);
+                let definitions = self.local_ctes[scope];
+                if !cte.recursive {
+                    self.local_ctes[scope] = &definitions[..position];
+                }
                 let result = cte
                     .body
                     .query()
                     .map_or(Ok(false), |query| self.query(query));
+                self.local_ctes[scope] = definitions;
                 self.local_ctes.extend(hidden);
                 return result;
             }
@@ -117,6 +123,11 @@ impl<'a, S: Clone> DescriptorScope<'a, S> {
                 return Ok(rows.row_schema().score_sources().next().is_some());
             }
             if let Some(cte) = self.ctes.deferred_reference(name) {
+                if let Some(definition) = self.ctes.definition_scope(name) {
+                    return cte.body.query().map_or(Ok(false), |query| {
+                        requires_physical_descriptor(query, &definition)
+                    });
+                }
                 let hidden = std::mem::take(&mut self.local_ctes);
                 let result = cte
                     .body

@@ -164,11 +164,17 @@ impl PhysicalOperator for RowIteratorScan<'_> {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
+        self.next_with_demand(
+            std::num::NonZeroUsize::new(DEFAULT_BATCH_SIZE).expect("nonempty scan batch"),
+        )
+    }
+
+    fn next_with_demand(&mut self, demand: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
         if self.exhausted {
             return Ok(None);
         }
-        let mut batch = Vec::with_capacity(DEFAULT_BATCH_SIZE);
-        while batch.len() < DEFAULT_BATCH_SIZE {
+        let mut batch = Vec::with_capacity(DEFAULT_BATCH_SIZE.min(demand.get()));
+        while batch.len() < DEFAULT_BATCH_SIZE.min(demand.get()) {
             match self.rows.next() {
                 Some(Ok(row)) => batch.push(row),
                 Some(Err(error)) => return Err(error),
@@ -227,11 +233,17 @@ impl PhysicalOperator for PhysicalRowIteratorScan<'_> {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
+        self.next_with_demand(
+            std::num::NonZeroUsize::new(self.batch_size.get()).expect("nonempty scan batch"),
+        )
+    }
+
+    fn next_with_demand(&mut self, demand: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
         if self.exhausted {
             return Ok(None);
         }
-        let mut batch = Vec::with_capacity(self.batch_size.get());
-        while batch.len() < self.batch_size.get() {
+        let mut batch = Vec::with_capacity(self.batch_size.get().min(demand.get()));
+        while batch.len() < self.batch_size.get().min(demand.get()) {
             match self.rows.next() {
                 Some(Ok(row)) => batch.push(row),
                 Some(Err(error)) => return Err(error),
@@ -421,13 +433,19 @@ impl PhysicalOperator for TableScan {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
+        self.next_with_demand(
+            std::num::NonZeroUsize::new(DEFAULT_BATCH_SIZE).expect("nonempty scan batch"),
+        )
+    }
+
+    fn next_with_demand(&mut self, demand: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
         if self.exhausted {
             return Ok(None);
         }
         let Some(src) = self.source.as_mut() else {
             return Ok(None);
         };
-        let buf = src.next_physical_batch(DEFAULT_BATCH_SIZE)?;
+        let buf = src.next_physical_batch(DEFAULT_BATCH_SIZE.min(demand.get()))?;
         if buf.is_empty() {
             self.exhausted = true;
             return Ok(None);

@@ -46,7 +46,7 @@ fn build_values_source<'a, S: Clone + 'static>(
     routines: &dyn uqa_sql::routines::RoutineResolution,
     types: &dyn crate::FunctionTypeResolver,
     from: &SourcePlan,
-    params: &[SQLParam],
+    params: &'a [SQLParam],
     ctes: &CteScope<S>,
     expression_scope: impl FnOnce() -> Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
     prune: Option<&ColumnPrune>,
@@ -103,19 +103,18 @@ fn build_values_source<'a, S: Clone + 'static>(
             };
             let source_columns = schema.columns().to_vec();
             let hook = expression_scope();
-            let rows = build_values_physical_rows(
+            let operator = build_values_scan(
                 types,
-                hook.as_ref(),
+                hook,
                 params,
                 rows,
                 column_types,
-                outer,
+                outer.cloned(),
+                internal_schema.clone().unwrap_or_else(|| schema.clone()),
             )?;
-            if let Some(schema) = internal_schema {
-                return Ok(Box::new(crate::TableScan::from_physical_rows(schema, rows)));
+            if internal_schema.is_some() {
+                return Ok(operator);
             }
-            let operator: Box<dyn crate::PhysicalOperator> =
-                Box::new(crate::TableScan::from_physical_rows(schema, rows));
             let operator = qualify_source_operator_with_columns(
                 operator,
                 &source_columns,
@@ -133,41 +132,66 @@ fn build_values_source<'a, S: Clone + 'static>(
     }
 }
 
-fn build_values_physical_rows(
+/// Bind all input types before execution, then evaluate only rows pulled from the VALUES source. The owned expression rows keep their addresses stable while a source is suspended.
+pub(crate) fn build_values_scan<'a>(
     types: &dyn crate::FunctionTypeResolver,
-    hook: &dyn crate::scalar::plan::QueryExpressionContext,
-    params: &[SQLParam],
+    hook: Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
+    params: &'a [SQLParam],
     rows: &[Vec<ScalarExpr>],
     column_types: &[Option<uqa_sql::ast::ColumnType>],
-    outer: Option<&crate::OwnedPhysicalRow>,
-) -> Result<Vec<crate::PhysicalRow>, SQLError> {
-    if rows.is_empty() {
-        return Ok(Vec::new());
-    }
-    let subquery_arena = PlanSubqueryArena::new(hook.subquery_plans(), Some(hook));
-    let ctx = outer
-        .map_or_else(
-            || ScalarEvalContext::new(None, params),
-            |row| ScalarEvalContext::from_row_lookup(row, params).with_row_schema(&row.schema),
-        )
-        .with_function_hook(hook)
-        .with_subquery_runner(&subquery_arena);
+    outer: Option<crate::OwnedPhysicalRow>,
+    schema: crate::RowSchema,
+) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     let empty_schema = crate::RowSchema::default();
-    let source_schema = outer.map_or(&empty_schema, |row| &row.schema);
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        let mut values = Vec::with_capacity(row.len());
-        for (i, expr) in row.iter().enumerate() {
-            let source_type =
-                crate::common_context_expression_type(expr, source_schema, params, Some(types))?;
-            let v = uqa_sql::coerce_common_context_value(
-                eval_scalar(expr, &ctx)?,
-                source_type.as_ref(),
-                column_types.get(i).and_then(Option::as_ref),
-            )?;
-            values.push(v);
-        }
-        out.push(crate::PhysicalRow::from_values(values));
-    }
-    Ok(out)
+    let source_schema = outer.as_ref().map_or(&empty_schema, |row| &row.schema);
+    let source_types = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|expression| {
+                    crate::common_context_expression_type(
+                        expression,
+                        source_schema,
+                        params,
+                        Some(types),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let column_types = column_types.to_vec();
+    let expressions = rows.to_vec();
+    let rows = expressions
+        .into_iter()
+        .zip(source_types)
+        .map(move |(row, source_types)| {
+            let subquery_arena = PlanSubqueryArena::new(hook.subquery_plans(), Some(hook.as_ref()));
+            let ctx = outer
+                .as_ref()
+                .map_or_else(
+                    || ScalarEvalContext::new(None, params),
+                    |outer| {
+                        ScalarEvalContext::from_row_lookup(outer, params)
+                            .with_row_schema(&outer.schema)
+                    },
+                )
+                .with_function_hook(hook.as_ref())
+                .with_subquery_runner(&subquery_arena);
+            let values = row
+                .iter()
+                .enumerate()
+                .map(|(position, expression)| {
+                    uqa_sql::coerce_common_context_value(
+                        eval_scalar(expression, &ctx)?,
+                        source_types[position].as_ref(),
+                        column_types.get(position).and_then(Option::as_ref),
+                    )
+                })
+                .collect::<Result<Vec<_>, SQLError>>()?;
+            Ok(crate::PhysicalRow::from_values(values))
+        });
+    Ok(Box::new(crate::PhysicalRowIteratorScan::new(
+        schema,
+        Box::new(rows),
+    )))
 }

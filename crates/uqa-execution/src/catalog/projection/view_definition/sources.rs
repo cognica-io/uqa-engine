@@ -248,6 +248,7 @@ impl Deparser<'_> {
                 alias,
                 column_aliases,
                 lateral,
+                ..
             } => {
                 let mut rendered = format!(
                     "{}({})",

@@ -56,6 +56,8 @@ SELECT 'value=' || 7 AS label, ARRAY[1, 2] || ARRAY[3] AS items;
 
 `ROW(...)` and a parenthesized list of two or more expressions build an anonymous row; casting it to a [composite type](02-ddl.md#composite-types) or assigning it to a column of one coerces each field to its attribute's type, and a row with a different number of fields reports `42846` with PostgreSQL's detail. Text casts to a composite type as `record_in` reads it, and a composite value casts to text as `record_out` writes it, quoting a field that is empty or contains a separator, parenthesis, quote, backslash or whitespace. `(value).field` selects a field: an attribute of a composite value, the `fN` field of an anonymous row, or a column of a relation through its whole-row reference, which `pg_get_viewdef` prints as the column itself. A missing field reports `42703`, as `column t.missing does not exist`, `column "missing" not found in data type pair` or `could not identify column "f3" in record data type`, and field notation on a value that is not composite reports `42809`.
 
+Inside `ROW(...)`, `relation.*` expands the relation's fields in order. A plain relation reference remains one nested operand, so `ROW(relation.*)` and `ROW(relation)` have different field structures.
+
 Composite values compare field by field: equality treats two NULL fields as equal, and ordering places NULL fields after all other values, as PostgreSQL's record operators do; anonymous rows compare with SQL's three-valued row comparison instead. `IS NULL` is true for a row or composite value whose fields are all NULL, and `IS NOT NULL` is true when none of its fields is NULL, so a value with both kinds of fields satisfies neither.
 
 ```sql execute
@@ -570,6 +572,8 @@ SELECT lastval() AS last_allocated;
 `sum` and `avg` also take `interval` input: the sum adds months, days, and time separately and reports SQLSTATE `22008` when a field overflows, and the average divides that sum by the input count as interval division does, so the average of `1 mon` and `0` is `15 days`.
 
 Aggregates support `DISTINCT`, aggregate-local `ORDER BY`, and `FILTER` where the function shape permits it; on an ordinary function each is `42809` (`FILTER specified, but abs is not an aggregate function`). `min` and `max` compare arrays and record-like map values lexicographically in addition to their scalar inputs.
+
+The selected routine determines whether a call is an aggregate. `pg_catalog.count(*)` selects the system aggregate even when the search path contains a user scalar named `count`. The bare star is syntax for a zero-argument aggregate call; `count(q.*)` instead observes the whole row. A selected scalar invoked with `*` reports `42809`, while a missing zero-argument signature reports `42883`. Qualified built-ins retain the same grouping, filtering, ordering, window and bounded-state behavior as unqualified aggregate calls.
 
 `mode() WITHIN GROUP (ORDER BY value [ASC | DESC])` returns the most frequent non-NULL value with the input's type, or NULL for empty or all-NULL input. SQL-equal values count together, including signed floating zero, equal intervals and equivalent JSONB representations. When frequencies tie, the first value in the requested ordering wins. Memory and spilled aggregate execution use the same equality and tie rules.
 

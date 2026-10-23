@@ -27,11 +27,24 @@ pub enum UnifiedPlan {
 /// A relational query with its CTE scope and one relational root.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryPlan {
+    /// Positional output metadata from this statement's analysis. Stored syntax must be analyzed in its next catalog scope instead of retaining these descriptors.
+    #[serde(skip)]
+    pub analyzed_output: Option<crate::RowSchema>,
+    /// Already-analyzed input layouts, consumed before any optimizer rewrite changes source topology. Stored syntax never retains them.
+    #[serde(skip)]
+    pub analyzed_source: Option<std::sync::Arc<AnalyzedSource>>,
     /// Whether relation references in this tree are stored catalog identities rather than names that must be resolved in the executing session.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub relations_bound: bool,
     pub ctes: Vec<CtePlan>,
     pub root: RelationalPlan,
+}
+
+/// Input schemas from one ordered analysis, sharing immutable row metadata. Join children preserve their own namespaces before the join's aliases and USING projection.
+#[derive(Debug, Clone)]
+pub struct AnalyzedSource {
+    pub schema: crate::RowSchema,
+    pub children: Option<Box<(Self, Self)>>,
 }
 
 /// A named query child owned by a [`QueryPlan`].
@@ -311,6 +324,9 @@ pub enum SourcePlan {
         ordinality: bool,
     },
     Subquery {
+        /// Transient positional input capture for a lifted pure projection. Its attributes have no SQL-visible names and never enter stored syntax.
+        #[serde(skip)]
+        captured_output: Option<crate::ast::InternalRelationId>,
         /// Whether this range item may read preceding FROM items at its query level.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         lateral: bool,

@@ -1,0 +1,634 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT count(s) AS n,count(s.*) AS star_n,count(ROW(s)) AS nested_n FROM (VALUES(2,5),(3,6))s(k,z)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "star_n",
+            "nested_n"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "nonnull_counts"
+    },
+    {
+      "sql": "SELECT k,count(s) OVER() AS n,count(s.*) OVER() AS star_n,count(ROW(s)) OVER() AS nested_n FROM (VALUES(2,5),(3,6))s(k,z) ORDER BY k",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "n",
+            "star_n",
+            "nested_n"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "2",
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "2",
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "window_nonnull_counts"
+    },
+    {
+      "sql": "SELECT count(s) AS n,count(s.*) AS star_n,count(ROW(s)) AS nested_n FROM (VALUES(NULL::int,NULL::int))s(k,z)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "star_n",
+            "nested_n"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "all_null_count"
+    },
+    {
+      "sql": "SELECT ROW(s)::text AS r,count(s) OVER() AS n,count(s.*) OVER() AS star_n,count(ROW(s)) OVER() AS nested_n FROM (VALUES(NULL::int,NULL::int))s(k,z)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "n",
+            "star_n",
+            "nested_n"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "(\"(,)\")",
+              "1",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "window_all_null_count"
+    },
+    {
+      "sql": "SELECT ROW(s)::text AS r,count(s) OVER() AS n FROM (VALUES(1))t(x) LEFT JOIN (VALUES(NULL::int,NULL::int))s(k,z) ON TRUE",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "(\"(,)\")",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "window_matched_null_row"
+    },
+    {
+      "sql": "SELECT k,count(s) FILTER(WHERE s IS NULL) OVER() AS all_null,count(s) FILTER(WHERE s IS NOT NULL) OVER() AS nonnull FROM (VALUES(NULL::int,NULL::int),(1,NULL),(2,3))s(k,z) ORDER BY k NULLS FIRST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "all_null",
+            "nonnull"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "window_filtered_count"
+    },
+    {
+      "sql": "SELECT count(s) OVER() AS column_n,count(s.*) OVER() AS row_n FROM (VALUES(NULL::int,2))s(s,z)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "column_n",
+            "row_n"
+          ],
+          "type_oids": [
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "window_alias_shadow"
+    },
+    {
+      "sql": "SELECT k,z,count(*) OVER(PARTITION BY s) AS n,count(s) OVER(PARTITION BY s) AS row_n FROM (VALUES(1,2),(1,2),(1,3),(NULL::int,NULL::int))s(k,z) ORDER BY k NULLS FIRST,z NULLS FIRST",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z",
+            "n",
+            "row_n"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2",
+              "2",
+              "2"
+            ],
+            [
+              "1",
+              "2",
+              "2",
+              "2"
+            ],
+            [
+              "1",
+              "3",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "window_partition_row"
+    },
+    {
+      "sql": "SELECT k,z,row_number() OVER(ORDER BY s) AS n FROM (VALUES(2,1),(1,2),(1,1))s(k,z) ORDER BY n",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "z",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2",
+              "2"
+            ],
+            [
+              "2",
+              "1",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "window_order_row"
+    },
+    {
+      "sql": "SELECT k,lag(s) OVER(ORDER BY k)::text AS previous,lead(s) OVER(ORDER BY k)::text AS following FROM (VALUES(1,2),(2,3),(3,4))s(k,z) ORDER BY k",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "previous",
+            "following"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              null,
+              "(2,3)"
+            ],
+            [
+              "2",
+              "(1,2)",
+              "(3,4)"
+            ],
+            [
+              "3",
+              "(2,3)",
+              null
+            ]
+          ]
+        }
+      ],
+      "id": "window_record_lag"
+    },
+    {
+      "sql": "SELECT k,first_value(s) OVER(ORDER BY k)::text AS first,last_value(s) OVER(ORDER BY k)::text AS last FROM (VALUES(1,2),(2,3),(3,4))s(k,z) ORDER BY k",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "first",
+            "last"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "(1,2)",
+              "(1,2)"
+            ],
+            [
+              "2",
+              "(1,2)",
+              "(2,3)"
+            ],
+            [
+              "3",
+              "(1,2)",
+              "(3,4)"
+            ]
+          ]
+        }
+      ],
+      "id": "window_record_first_last"
+    },
+    {
+      "sql": "SELECT k,first_value(ROW(s)) OVER(ORDER BY k)::text AS nested,first_value(ROW(s.*)) OVER(ORDER BY k)::text AS expanded FROM (VALUES(1,2),(2,3))s(k,z) ORDER BY k",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "nested",
+            "expanded"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "(\"(1,2)\")",
+              "(1,2)"
+            ],
+            [
+              "2",
+              "(\"(1,2)\")",
+              "(1,2)"
+            ]
+          ]
+        }
+      ],
+      "id": "window_row_constructor"
+    },
+    {
+      "sql": "SELECT k,count(s) OVER(ORDER BY k ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS n FROM (VALUES(1,NULL::int),(2,3),(3,4))s(k,z) ORDER BY k",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "window_record_frame"
+    },
+    {
+      "sql": "SELECT k,count(s) OVER(ORDER BY k ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING EXCLUDE CURRENT ROW) AS n FROM (VALUES(1,NULL::int),(2,3),(3,4))s(k,z) ORDER BY k",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "window_record_exclusion"
+    },
+    {
+      "sql": "CREATE VIEW window_record_scope AS SELECT k,count(s) OVER() AS n,lag(s) OVER(ORDER BY k)::text AS previous FROM (VALUES(1,2),(2,3))s(k,z)",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_view"
+    },
+    {
+      "sql": "SELECT * FROM window_record_scope ORDER BY k",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "n",
+            "previous"
+          ],
+          "type_oids": [
+            23,
+            20,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              null
+            ],
+            [
+              "2",
+              "2",
+              "(1,2)"
+            ]
+          ]
+        }
+      ],
+      "id": "read_view"
+    },
+    {
+      "sql": "PREPARE window_record_scope_plan(int) AS SELECT k,count(s) OVER() AS n FROM (VALUES($1,2),(3,4))s(k,z) ORDER BY k",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "prepare"
+    },
+    {
+      "sql": "EXECUTE window_record_scope_plan(1)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "execute"
+    },
+    {
+      "sql": "DEALLOCATE window_record_scope_plan",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "deallocate"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "d7e46df3a7652b52ac910ae1fe9c0cbc01fdeef5280f81673cf79fc4e3abe9c6",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}

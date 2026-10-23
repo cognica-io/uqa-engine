@@ -41,8 +41,7 @@ pub(super) fn constant_expression<S: Clone>(
             let Some(query) = cte.body.query() else {
                 return Ok(false);
             };
-            let mut parent = ctes.clone();
-            parent.remove_deferred(&cte.name);
+            let parent = ctes.definition_scope(name).expect("declared CTE scope");
             constant_output(
                 routines,
                 query,

@@ -180,7 +180,7 @@ pub fn expand_from_star_columns(
                     })
                     .map(|(column, _, _, _)| column)
                     .collect::<Vec<_>>();
-                if qualified_columns.is_empty() {
+                if qualified_columns.is_empty() && !source_schema.has_qualifier(qualifier) {
                     return Err(SQLError::UnknownTable(qualifier.to_string()));
                 }
                 output.extend(qualified_columns);
@@ -212,6 +212,24 @@ pub fn expand_bound_projection_stars(
     expand_bound_projection_stars_in_scope(projections, schema, schema)
 }
 
+/// A qualified star in a ROW constructor expands its source fields; an ordinary whole-row reference remains one nested value.
+pub(crate) fn row_star_fields(
+    expression: &ScalarExpr,
+    schema: &RowSchema,
+) -> Result<Option<Vec<ScalarExpr>>, SQLError> {
+    if !matches!(expression, ScalarExpr::QualifiedStar(_)) {
+        return Ok(None);
+    }
+    expand_bound_projection_stars(
+        &[ProjectionPlan {
+            expr: expression.clone(),
+            alias: None,
+        }],
+        schema,
+    )
+    .map(|fields| Some(fields.into_iter().map(|field| field.expr).collect()))
+}
+
 /// Bare stars expand the local FROM output, while qualified stars can select an admitted enclosing namespace.
 pub fn expand_bound_projection_stars_in_scope(
     projections: &[ProjectionPlan],
@@ -236,7 +254,7 @@ pub fn expand_bound_projection_stars_in_scope(
                 let schema = expression_schema;
                 schema.require_lateral_qualifier(qualifier)?;
                 let layout = schema.qualified_star_position_layout(qualifier);
-                if layout.is_empty() {
+                if layout.is_empty() && !schema.has_qualifier(qualifier) {
                     if let Some(error) = schema.unavailable_qualifier_error(qualifier) {
                         return Err(error);
                     }

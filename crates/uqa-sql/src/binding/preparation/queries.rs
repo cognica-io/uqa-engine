@@ -43,8 +43,12 @@ impl Preparation<'_> {
         plan: &QueryPlan,
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
-        self.query_output(plan, outer, false)
-            .map(|output| output.schema())
+        let output = self.query_output(plan, outer, false)?;
+        Ok(self
+            .parameters
+            .query_output_schema(plan)
+            .cloned()
+            .unwrap_or_else(|| output.schema()))
     }
 
     pub(super) fn query_output(
@@ -77,6 +81,7 @@ impl Preparation<'_> {
             for value in &output.types {
                 value.derivation.validate()?;
             }
+            self.parameters.retain_query_output(plan, &output);
             Ok(output)
         })();
         self.scope.resolution.set_lookup_mode(lookup);
@@ -107,7 +112,21 @@ impl Preparation<'_> {
                 let mut right_output = self.query_output(right, outer, true)?;
                 left_output.retain_set_operand_names(left);
                 right_output.retain_set_operand_names(right);
+                let unknowns = |output: &QueryOutput| {
+                    output
+                        .types
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, value)| value.is_sql_unknown().then_some(index))
+                        .collect::<Vec<_>>()
+                };
+                let left_unknowns = unknowns(&left_output);
+                let right_unknowns = unknowns(&right_output);
                 let output = self.set_output(left_output, right_output, *kind, *all)?;
+                self.parameters
+                    .retain_set_operand_coercions(left, &left_unknowns, &output);
+                self.parameters
+                    .retain_set_operand_coercions(right, &right_unknowns, &output);
                 self.set_ordering(order_by, &output, subqueries)?;
                 let input = overlay_outer_schema(&RowSchema::default(), outer);
                 self.slice(limit.as_deref(), offset.as_deref(), &input, subqueries)?;
@@ -187,6 +206,9 @@ impl Preparation<'_> {
             .transpose()?
             .unwrap_or_default();
         let source = analysis::with_query_source_columns(&source, block);
+        if let Some(from) = &block.from {
+            self.parameters.retain_source_schema(from, &source);
+        }
         self.block_with_source(block, &source, outer, preserve_unknown)
     }
 
@@ -506,9 +528,13 @@ impl Preparation<'_> {
             ScalarExpr::Literal(uqa_core::Value::Int(position)) => Some(
                 crate::semantics::query_output_position(*position, primary.len(), clause)?,
             ),
-            ScalarExpr::Column(name) if !primary.column_is_ambiguous(name) => {
-                primary.column_slot(name)
+            ScalarExpr::Column(name) if primary.column_is_ambiguous(name) => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42702".into(),
+                    message: format!("{clause} \"{name}\" is ambiguous"),
+                });
             }
+            ScalarExpr::Column(name) => primary.column_slot(name),
             ScalarExpr::Position(position) if *position < output.types.len() => Some(*position),
             _ => None,
         };

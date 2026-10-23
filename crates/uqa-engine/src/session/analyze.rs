@@ -242,6 +242,12 @@ impl Engine {
                 "column `{column}` of relation `{canonical_table_name}` does not exist"
             )));
         }
+        let sampled_generations =
+            if persist && t.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+                self.sampled_data_generations(canonical_table_name, include_descendants)?
+            } else {
+                None
+            };
         // Read before the sample, which reads at this sequence or a later one.
         let sampled_at = self.statistics_sample_sequence();
         let (stats_out, row_count) = self.collect_hierarchy_analyze_statistics(
@@ -279,6 +285,7 @@ impl Engine {
             None,
         )?;
         self.clear_pending_statistics_changes(canonical_table_name, t.object_id());
+        self.retain_statistics_sample(canonical_table_name, t.object_id(), sampled_generations);
         Ok(())
     }
 

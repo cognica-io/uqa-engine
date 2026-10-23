@@ -200,6 +200,16 @@ pub fn bind_expression_plan_routines_for_storage<S: Clone>(
     )
 }
 
+pub(crate) fn restore_query_layouts<S: Clone>(
+    routines: &dyn RoutineResolution,
+    plan: &mut QueryPlan,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    outer: Option<&RowSchema>,
+) -> Result<(), SQLError> {
+    uqa_sql::binding::restore_query_layouts(routines, plan, params, &binding_context(ctes)?, outer)
+}
+
 pub fn bind_query_plan_schema<S: Clone>(
     routines: &dyn RoutineResolution,
     plan: &QueryPlan,

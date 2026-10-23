@@ -97,14 +97,13 @@ pub struct SourceScope<'a> {
 
 impl<'a> SourceScope<'a> {
     pub fn describe_output(source: &crate::plan::SourcePlan, schema: RowSchema) -> RowSchema {
-        if matches!(
-            source,
+        match source {
+            crate::plan::SourcePlan::Join { alias: Some(_), .. } => {
+                RowSchema::with_join_diagnostic_namespace(&schema, source_namespace(source))
+            }
             crate::plan::SourcePlan::Join { alias: None, .. }
-                | crate::plan::SourcePlan::RetainedRows(_)
-        ) {
-            schema
-        } else {
-            RowSchema::with_source_diagnostic_namespace(&schema, source_namespace(source))
+            | crate::plan::SourcePlan::RetainedRows(_) => schema,
+            _ => RowSchema::with_source_diagnostic_namespace(&schema, source_namespace(source)),
         }
     }
 

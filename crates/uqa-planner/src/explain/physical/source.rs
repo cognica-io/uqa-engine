@@ -7,13 +7,21 @@
 //! Bind physical retrieval leaves to the source that receives their predicate.
 
 use super::{Collector, Scope};
-use crate::filter_pushdown::push_output_filter_into_query_plan;
+use crate::filter_pushdown::push_derived_output_filter;
 use uqa_sql::{
     ast::OperatorJoinRelations,
-    plan::{source_projection::QualifierFilters, SourcePlan},
+    plan::{source_projection::QualifierFilters, QueryPlan, SourcePlan},
     semantics::{cte_reference_name, source_filters::qualifier_filter},
     SQLError, ScalarExpr,
 };
+
+fn output_aliases(declared: &[String], range: &[String]) -> Vec<String> {
+    range
+        .iter()
+        .chain(declared.iter().skip(range.len()))
+        .cloned()
+        .collect()
+}
 
 impl Collector<'_> {
     pub(super) fn source(
@@ -30,7 +38,19 @@ impl Collector<'_> {
                 self.source(left, filters, scope, &format!("{path}/Left"))?;
                 self.source(right, filters, scope, &format!("{path}/Right"))
             }
-            SourcePlan::Subquery { body, .. } => self.query(body, scope, &format!("{path}/Source")),
+            SourcePlan::Subquery {
+                body,
+                alias,
+                column_aliases,
+                ..
+            } => self.derived_query(
+                body,
+                scope,
+                &format!("{path}/Source"),
+                alias.as_deref().unwrap_or_default(),
+                column_aliases,
+                filters,
+            ),
             SourcePlan::Function {
                 relations, args, ..
             } => self.operator_join(relations.as_ref(), args, path),
@@ -46,6 +66,30 @@ impl Collector<'_> {
             }
             SourcePlan::Values { .. } => Ok(()),
         }
+    }
+
+    fn derived_query(
+        &mut self,
+        query: &QueryPlan,
+        scope: &Scope,
+        path: &str,
+        qualifier: &str,
+        aliases: &[String],
+        filters: Option<&QualifierFilters>,
+    ) -> Result<(), SQLError> {
+        let specialized = qualifier_filter(filters, qualifier)
+            .map(|predicate| {
+                push_derived_output_filter(
+                    self.context.filters,
+                    query,
+                    qualifier,
+                    &predicate,
+                    Some(aliases),
+                )
+            })
+            .transpose()?
+            .flatten();
+        self.query(specialized.as_ref().unwrap_or(query), scope, path)
     }
 
     fn table_source(
@@ -71,7 +115,15 @@ impl Collector<'_> {
         if let Some(cte) = cte_reference_name(name).and_then(|name| scope.get(&name)) {
             if let Some(cte) = cte {
                 if let Some(query) = cte.plan.body.query() {
-                    self.query(query, &cte.outer, &format!("{path}/CTE {}", cte.plan.name))?;
+                    let aliases = output_aliases(&cte.plan.columns, column_aliases);
+                    self.derived_query(
+                        query,
+                        &cte.outer,
+                        &format!("{path}/CTE {}", cte.plan.name),
+                        qualifier,
+                        &aliases,
+                        filters,
+                    )?;
                 }
             }
             return Ok(());
@@ -83,27 +135,17 @@ impl Collector<'_> {
             .view_resolved(correlation.resolution, name)?
         {
             if !view.materialized {
-                let specialized = if column_aliases.is_empty() {
-                    predicate
-                        .as_ref()
-                        .map(|predicate| {
-                            push_output_filter_into_query_plan(
-                                self.context.filters,
-                                &view.query,
-                                qualifier,
-                                predicate,
-                                view.output_columns.as_deref(),
-                            )
-                        })
-                        .transpose()?
-                        .flatten()
-                } else {
-                    None
-                };
-                self.query(
-                    specialized.as_ref().unwrap_or(&view.query),
+                let aliases = output_aliases(
+                    view.output_columns.as_deref().unwrap_or(&[]),
+                    column_aliases,
+                );
+                self.derived_query(
+                    &view.query,
                     &Scope::new(),
                     &format!("{path}/View {name}"),
+                    qualifier,
+                    &aliases,
+                    filters,
                 )?;
             }
             return Ok(());
@@ -130,10 +172,7 @@ impl Collector<'_> {
             if let ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. } =
                 expression
             {
-                if let Some(position) = column_aliases
-                    .iter()
-                    .position(|alias| alias.eq_ignore_ascii_case(column))
-                {
+                if let Some(position) = column_aliases.iter().position(|alias| alias == column) {
                     if let Some(physical) = columns.get(position) {
                         column.rename(physical);
                     }

@@ -8,7 +8,7 @@
 //! and the independently captured `routine_parser_lifetime` oracle.
 
 use super::*;
-use crate::ast::Statement;
+use crate::{ast::Statement, FunctionTypeResolver};
 use std::sync::{atomic::Ordering, Arc};
 use uqa_core::Value;
 mod concatenation;
@@ -42,6 +42,34 @@ fn call(binding: FunctionBinding, args: Vec<ScalarExpr>) -> ScalarExpr {
         filter: None,
         order_syntax: crate::ast::FunctionCallSyntax::Ordinary,
     }
+}
+
+#[test]
+fn bare_star_resolves_the_zero_argument_user_overload_without_reading_its_body() {
+    let catalog = Catalog::new(
+        "CREATE FUNCTION count() RETURNS integer LANGUAGE sql IMMUTABLE AS $$SELECT 10$$;
+         CREATE FUNCTION count(integer) RETURNS text LANGUAGE sql IMMUTABLE AS $$SELECT 'one argument'$$",
+    );
+    let (names, types, variadic) = crate::function_call_argument_signature(
+        &[ScalarExpr::Star],
+        &crate::RowSchema::default(),
+        &[],
+        Some(&catalog),
+    )
+    .unwrap();
+    for name in ["count", "public.count"] {
+        let resolved = catalog
+            .resolve_function_overload(name, None, &names, &types, variadic)
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.return_type, ColumnType::Integer);
+        assert_eq!(
+            resolved.binding.object_id,
+            catalog.functions[0].def.object_id
+        );
+        assert!(!resolved.binding.builtin);
+    }
+    assert_eq!(catalog.evaluations.load(Ordering::SeqCst), 0);
 }
 
 #[test]

@@ -26,7 +26,10 @@ pub(super) fn resolve_with_control(
     }
     if !schema.has_qualified_column(qualifier, column) && !schema.columns_are_open(Some(qualifier))
     {
-        return Err(SQLError::unknown_qualified_column(qualifier, column));
+        return Err(schema.physical_schema().map_or_else(
+            || SQLError::unknown_qualified_column(qualifier, column),
+            |schema| schema.missing_qualified_column(qualifier, column),
+        ));
     }
     schema
         .qualified_type(qualifier, column)

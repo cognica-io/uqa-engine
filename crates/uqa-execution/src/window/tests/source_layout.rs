@@ -167,3 +167,81 @@ fn projected_source_layout_survives_multiple_window_sort_passes() {
         );
     }
 }
+
+#[test]
+fn record_arguments_and_partition_keys_keep_their_schema_after_spill() {
+    let schema = RowSchema::with_qualified_types(
+        "s",
+        vec!["k".into(), "z".into()],
+        vec![Some(ColumnType::Integer); 2],
+    );
+    let uqa_sql::Statement::Select(select) = uqa_sql::compile(
+        "SELECT k,count(s) OVER(PARTITION BY s),lag(s) OVER(ORDER BY k,z) FROM sample s",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("expected SELECT")
+    };
+    let RelationalPlan::QueryBlock(block) = QueryPlan::lower(*select).root else {
+        panic!("expected query block")
+    };
+    let record = |k, z| Value::Record(vec![("k".into(), k), ("z".into(), z)].into());
+    for budget in [1, 1 << 20] {
+        let context = Arc::new(NoSequences);
+        let plan = prepare_window_plan(&block.projections);
+        let results = plan.projections()[1..]
+            .iter()
+            .map(|projection| match projection.expr {
+                ScalarExpr::InternalColumn(column) => column,
+                _ => panic!("expected window result slot"),
+            })
+            .collect::<Vec<_>>();
+        let mut executor = PhysicalWindowExecutor::new(context, plan, &[], schema.clone(), budget);
+        executor
+            .consume(Batch::from_physical_rows(
+                schema.clone(),
+                [(None, None), (Some(1), Some(2)), (Some(2), Some(3))]
+                    .into_iter()
+                    .map(|(k, z)| {
+                        PhysicalRow::from_values(vec![
+                            k.map_or(Value::Null, Value::Int),
+                            z.map_or(Value::Null, Value::Int),
+                        ])
+                    })
+                    .collect(),
+            ))
+            .unwrap();
+        let mut output = executor.finish().unwrap();
+        assert_eq!(output.has_spilled(), budget == 1);
+        let mut actual = Vec::new();
+        for batch in output.drain().unwrap() {
+            let batch = batch.unwrap();
+            for row in &batch.rows {
+                let view = batch.schema.view(row);
+                actual.push(vec![
+                    view.column("k").unwrap().clone(),
+                    view.internal_column(results[0]).unwrap().clone(),
+                    view.internal_column(results[1]).unwrap().clone(),
+                ]);
+            }
+        }
+        // PostgreSQL's window_record_scope oracle counts each present record,
+        // partitions by its fields and preserves the preceding record value.
+        let mut expected = vec![
+            vec![Value::Int(1), Value::Int(1), Value::Null],
+            vec![
+                Value::Int(2),
+                Value::Int(1),
+                record(Value::Int(1), Value::Int(2)),
+            ],
+            vec![
+                Value::Null,
+                Value::Int(1),
+                record(Value::Int(2), Value::Int(3)),
+            ],
+        ];
+        actual.sort();
+        expected.sort();
+        assert_eq!(actual, expected);
+    }
+}

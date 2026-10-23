@@ -1,0 +1,212 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "table",
+      "sql": "CREATE TABLE demand_rows (x integer)"
+    },
+    {
+      "id": "rows",
+      "sql": "INSERT INTO demand_rows VALUES (2),(0)"
+    },
+    {
+      "id": "sequence",
+      "sql": "CREATE SEQUENCE demand_sequence START 1"
+    },
+    {
+      "id": "view",
+      "sql": "CREATE VIEW demand_view AS SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)"
+    },
+    {
+      "id": "table_filter",
+      "sql": "SELECT x FROM demand_rows WHERE 10/x>1 LIMIT 1"
+    },
+    {
+      "id": "values_filter",
+      "sql": "SELECT x FROM (VALUES (2),(0)) v(x) WHERE 10/x>1 LIMIT 1"
+    },
+    {
+      "id": "function_filter",
+      "sql": "SELECT x FROM generate_series(2,0,-2) v(x) WHERE 10/x>1 LIMIT 1"
+    },
+    {
+      "id": "lateral_filter",
+      "sql": "SELECT a.x FROM (VALUES (2),(0)) a(x),LATERAL (SELECT a.x AS z) r WHERE 10/r.z>1 LIMIT 1"
+    },
+    {
+      "id": "join_filter",
+      "sql": "SELECT a.x FROM (VALUES (2),(0)) a(x) CROSS JOIN (VALUES (1)) b(y) WHERE 10/a.x>1 LIMIT 1"
+    },
+    {
+      "id": "project_limit",
+      "sql": "SELECT 10/x AS z FROM demand_rows LIMIT 1"
+    },
+    {
+      "id": "set_projection_limit",
+      "sql": "SELECT unnest(ARRAY[10/x]) AS z FROM demand_rows LIMIT 1"
+    },
+    {
+      "id": "exists_filter",
+      "sql": "SELECT EXISTS(SELECT 1 FROM demand_rows WHERE 10/x>1) AS found"
+    },
+    {
+      "id": "offset_filter",
+      "sql": "SELECT x FROM demand_rows WHERE 10/x>1 OFFSET 0 LIMIT 1"
+    },
+    {
+      "id": "sort_barrier",
+      "sql": "SELECT x FROM demand_rows WHERE 10/x>1 ORDER BY x DESC LIMIT 1"
+    },
+    {
+      "id": "aggregate_barrier",
+      "sql": "SELECT count(*) FROM demand_rows WHERE 10/x>1 LIMIT 1"
+    },
+    {
+      "id": "limit_zero",
+      "sql": "SELECT x FROM demand_rows WHERE 10/x>1 LIMIT 0"
+    },
+    {
+      "id": "derived_output",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "function_derived_output",
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM generate_series(0,2,2) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "derived_unread_output",
+      "sql": "SELECT k FROM (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "view_output",
+      "sql": "SELECT * FROM demand_view WHERE k>0"
+    },
+    {
+      "id": "inline_cte_output",
+      "sql": "WITH q AS (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) SELECT * FROM q WHERE k>0"
+    },
+    {
+      "id": "not_materialized_output",
+      "sql": "WITH q AS NOT MATERIALIZED (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) SELECT * FROM q WHERE k>0"
+    },
+    {
+      "id": "materialized_output",
+      "sql": "WITH q AS MATERIALIZED (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x)) SELECT * FROM q WHERE k>0"
+    },
+    {
+      "id": "limit_barrier",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES (0),(2)) v(x) LIMIT 2) s WHERE s.k>0"
+    },
+    {
+      "id": "set_output",
+      "sql": "SELECT * FROM (SELECT x AS k,unnest(ARRAY[10/x]) AS z FROM (VALUES (0),(2)) v(x)) s WHERE s.k>0"
+    },
+    {
+      "id": "volatile_filter_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_filter",
+      "sql": "SELECT x FROM demand_rows WHERE nextval('demand_sequence')>0 LIMIT 1"
+    },
+    {
+      "id": "volatile_filter_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "volatile_error_filter_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_error_filter",
+      "sql": "SELECT x FROM demand_rows WHERE CASE WHEN nextval('demand_sequence')>0 THEN 10/x>1 ELSE false END LIMIT 1"
+    },
+    {
+      "id": "volatile_error_filter_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "volatile_projection_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_projection",
+      "sql": "SELECT nextval('demand_sequence') AS z FROM demand_rows LIMIT 1"
+    },
+    {
+      "id": "volatile_projection_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "volatile_join_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_join",
+      "sql": "SELECT a.x FROM demand_rows a CROSS JOIN (VALUES(1)) b(y) WHERE nextval('demand_sequence')>0 LIMIT 1"
+    },
+    {
+      "id": "volatile_join_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "volatile_exists_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_exists",
+      "sql": "SELECT EXISTS(SELECT 1 FROM demand_rows WHERE nextval('demand_sequence')>0) AS found"
+    },
+    {
+      "id": "volatile_exists_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "volatile_derived_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_derived",
+      "sql": "SELECT * FROM (SELECT x AS k,nextval('demand_sequence') AS z FROM (VALUES(0),(2)) v(x)) q WHERE k>0"
+    },
+    {
+      "id": "volatile_derived_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "volatile_unread_reset",
+      "sql": "SELECT setval('demand_sequence',1,false)"
+    },
+    {
+      "id": "volatile_unread",
+      "sql": "SELECT k FROM (SELECT x AS k,nextval('demand_sequence') AS z FROM (VALUES(0),(2)) v(x)) q WHERE k>0"
+    },
+    {
+      "id": "volatile_unread_effects",
+      "sql": "SELECT nextval('demand_sequence') AS next_value"
+    },
+    {
+      "id": "cursor_begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "cursor_declare",
+      "sql": "DECLARE demand_cursor NO SCROLL CURSOR FOR SELECT x FROM demand_rows WHERE 10/x>1"
+    },
+    {
+      "id": "cursor_first",
+      "sql": "FETCH 1 FROM demand_cursor"
+    },
+    {
+      "id": "cursor_next",
+      "sql": "FETCH 1 FROM demand_cursor"
+    },
+    {
+      "id": "cursor_rollback",
+      "sql": "ROLLBACK"
+    }
+  ]
+}

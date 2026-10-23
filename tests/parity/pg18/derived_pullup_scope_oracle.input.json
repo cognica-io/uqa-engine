@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "alias_collision",
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0"
+    },
+    {
+      "id": "correlated_qualification",
+      "sql": "SELECT * FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT s.k WHERE s.k>0)"
+    },
+    {
+      "id": "distinct_subquery",
+      "sql": "SELECT * FROM (SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE k=(SELECT 2)"
+    }
+  ]
+}

@@ -14,6 +14,20 @@ fn analyze(sql: &str, parameters: &[Option<ColumnType>]) -> Result<(), SQLError>
 }
 
 #[test]
+fn query_ordering_preserves_ambiguous_output_diagnostics() {
+    let error = analyze("SELECT 1 AS a,2 AS a ORDER BY a", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42702"));
+    assert_eq!(error.to_string(), "ORDER BY \"a\" is ambiguous");
+    let error = analyze(
+        "SELECT q.a FROM (VALUES(1))q(a) CROSS JOIN (VALUES(2))s(a) ORDER BY a+1",
+        &[],
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42702"));
+    assert_eq!(error.to_string(), "column reference \"a\" is ambiguous");
+}
+
+#[test]
 fn set_ordering_accepts_output_names_positions_and_outer_expressions() {
     for operation in [
         "UNION",

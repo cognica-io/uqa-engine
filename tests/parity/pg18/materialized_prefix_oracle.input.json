@@ -1,0 +1,244 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "sequence",
+      "sql": "CREATE SEQUENCE prefix_effects"
+    },
+    {
+      "id": "one_consumer_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "one_consumer",
+      "sql": "WITH s AS MATERIALIZED(SELECT nextval('prefix_effects') AS v FROM generate_series(1,5)) SELECT v FROM s LIMIT 1"
+    },
+    {
+      "id": "one_consumer_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "two_prefixes_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "two_prefixes",
+      "sql": "WITH s AS MATERIALIZED(SELECT nextval('prefix_effects') AS v FROM generate_series(1,5)) SELECT (SELECT v FROM s LIMIT 1) AS first,(SELECT v FROM s OFFSET 2 LIMIT 1) AS third,(SELECT v FROM s LIMIT 1) AS replay"
+    },
+    {
+      "id": "two_prefixes_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "two_join_readers_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "two_join_readers",
+      "sql": "WITH s AS MATERIALIZED(SELECT nextval('prefix_effects') AS v FROM generate_series(1,5)) SELECT a.v AS first,b.v AS second FROM s a CROSS JOIN s b LIMIT 1"
+    },
+    {
+      "id": "two_join_readers_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "unused_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "unused",
+      "sql": "WITH s AS MATERIALIZED(SELECT nextval('prefix_effects') AS v FROM generate_series(1,5)) SELECT 9 AS v"
+    },
+    {
+      "id": "unused_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "limit_zero_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "limit_zero",
+      "sql": "WITH s AS MATERIALIZED(SELECT nextval('prefix_effects') AS v FROM generate_series(1,5)) SELECT v FROM s LIMIT 0"
+    },
+    {
+      "id": "limit_zero_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "complete_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "complete",
+      "sql": "WITH s AS MATERIALIZED(SELECT nextval('prefix_effects') AS v FROM generate_series(1,5)) SELECT sum(v) AS total FROM s"
+    },
+    {
+      "id": "complete_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "union_prefix_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "union_prefix",
+      "sql": "WITH s AS MATERIALIZED(SELECT nextval('prefix_effects') AS v UNION ALL SELECT nextval('prefix_effects')) SELECT v FROM s LIMIT 1"
+    },
+    {
+      "id": "union_prefix_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "values_prefix_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "values_prefix",
+      "sql": "WITH s(v) AS MATERIALIZED(VALUES(nextval('prefix_effects')),(nextval('prefix_effects'))) SELECT v FROM s LIMIT 1"
+    },
+    {
+      "id": "values_prefix_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "nested_prefix_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "nested_prefix",
+      "sql": "WITH a AS MATERIALIZED(SELECT nextval('prefix_effects') AS v FROM generate_series(1,5)), b AS MATERIALIZED(SELECT v+10 AS w FROM a) SELECT w FROM b LIMIT 1"
+    },
+    {
+      "id": "nested_prefix_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "sort_barrier_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "sort_barrier",
+      "sql": "WITH s AS MATERIALIZED(SELECT nextval('prefix_effects') AS v FROM generate_series(1,5) ORDER BY v) SELECT v FROM s LIMIT 1"
+    },
+    {
+      "id": "sort_barrier_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "aggregate_projection_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "aggregate_projection",
+      "sql": "WITH s AS MATERIALIZED(SELECT count(*) AS n,nextval('prefix_effects') AS v FROM generate_series(1,4) g(i) GROUP BY i) SELECT n,v FROM s LIMIT 1"
+    },
+    {
+      "id": "aggregate_projection_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "error_unreached",
+      "sql": "WITH s AS MATERIALIZED(SELECT 10/x AS v FROM (VALUES(2),(0))q(x)) SELECT v FROM s LIMIT 1"
+    },
+    {
+      "id": "error_reached",
+      "sql": "WITH s AS MATERIALIZED(SELECT 10/x AS v FROM (VALUES(2),(0))q(x)) SELECT v FROM s"
+    },
+    {
+      "id": "predicate_error_unreached",
+      "sql": "WITH s AS MATERIALIZED(SELECT x FROM (VALUES(2),(0))q(x) WHERE 10/x>1) SELECT x FROM s LIMIT 1"
+    },
+    {
+      "id": "two_readers_late_error",
+      "sql": "WITH s AS MATERIALIZED(SELECT 10/x AS v FROM (VALUES(2),(0))q(x)) SELECT (SELECT v FROM s LIMIT 1) AS a,(SELECT v FROM s OFFSET 1 LIMIT 1) AS b"
+    },
+    {
+      "id": "union_error_unreached",
+      "sql": "WITH s AS MATERIALIZED(SELECT 10/x AS v FROM (VALUES(2),(0))q(x) UNION ALL SELECT 10) SELECT v FROM s LIMIT 1"
+    },
+    {
+      "id": "outer_correlation",
+      "sql": "SELECT q.x,r.v FROM (VALUES(2),(4))q(x) CROSS JOIN LATERAL(WITH s AS MATERIALIZED(SELECT q.x+i AS v FROM generate_series(1,3)g(i)) SELECT v FROM s LIMIT 1)r"
+    },
+    {
+      "id": "nested_scope",
+      "sql": "WITH a AS MATERIALIZED(SELECT 7 AS v), b AS MATERIALIZED(WITH a AS MATERIALIZED(SELECT v+1 AS v FROM a) SELECT v FROM a) SELECT v FROM b"
+    },
+    {
+      "id": "view",
+      "sql": "CREATE VIEW prefix_view AS WITH s AS MATERIALIZED(SELECT nextval('prefix_effects') AS v FROM generate_series(1,5)) SELECT v FROM s"
+    },
+    {
+      "id": "view_prefix_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "view_prefix",
+      "sql": "SELECT v FROM prefix_view LIMIT 1"
+    },
+    {
+      "id": "view_prefix_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "srf_projection_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "srf_projection",
+      "sql": "WITH s AS MATERIALIZED(SELECT generate_series(1,3) AS i,nextval('prefix_effects') AS v) SELECT i,v FROM s LIMIT 1"
+    },
+    {
+      "id": "srf_projection_state",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "cursor_reset",
+      "sql": "SELECT setval('prefix_effects',1,false)"
+    },
+    {
+      "id": "cursor_declare",
+      "sql": "DECLARE prefix_cursor SCROLL CURSOR FOR WITH s AS MATERIALIZED(SELECT nextval('prefix_effects') AS v FROM generate_series(1,5)) SELECT v FROM s"
+    },
+    {
+      "id": "cursor_first",
+      "sql": "FETCH FORWARD 1 FROM prefix_cursor"
+    },
+    {
+      "id": "cursor_state_first",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "cursor_second",
+      "sql": "FETCH FORWARD 1 FROM prefix_cursor"
+    },
+    {
+      "id": "cursor_back",
+      "sql": "FETCH BACKWARD 1 FROM prefix_cursor"
+    },
+    {
+      "id": "cursor_replay",
+      "sql": "FETCH FORWARD 1 FROM prefix_cursor"
+    },
+    {
+      "id": "cursor_state_replay",
+      "sql": "SELECT last_value,is_called FROM prefix_effects"
+    },
+    {
+      "id": "cursor_close",
+      "sql": "CLOSE prefix_cursor"
+    },
+    {
+      "id": "rollback",
+      "sql": "ROLLBACK"
+    }
+  ]
+}

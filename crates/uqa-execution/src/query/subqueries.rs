@@ -154,9 +154,9 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
         let cached = self.ctes.cached_subquery(subquery);
         if let Some(entry) = cached {
             return match entry {
-                ScalarSubqueryCacheEntry::Correlated => self
-                    .execute_correlated_subquery(plan, outer_row, params)?
-                    .into_exists(),
+                ScalarSubqueryCacheEntry::Correlated => {
+                    self.execute_correlated_exists(plan, outer_row, params)
+                }
                 ScalarSubqueryCacheEntry::CorrelatedExists(lookup) => {
                     self.correlated_exists_matches(&lookup, outer_row, params)
                 }
@@ -185,15 +185,9 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
             }
             self.ctes
                 .cache_subquery(subquery, ScalarSubqueryCacheEntry::Correlated);
-            return self
-                .execute_correlated_subquery(plan, outer_row, params)?
-                .into_exists();
+            return self.execute_correlated_exists(plan, outer_row, params);
         }
-        let exists = self
-            .execute_uncorrelated_subquery(plan, params)?
-            .rows
-            .rows()
-            != 0;
+        let exists = self.execute_exists_subquery(plan, PhysicalOuterRow::Absent, params)?;
         self.ctes
             .cache_subquery(subquery, ScalarSubqueryCacheEntry::Exists(exists));
         Ok(exists)

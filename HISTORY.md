@@ -8,6 +8,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve concurrent writes committed after automatic or explicit ANALYZE stages its sample. Final statistics publication rechecks sampled data generations under writer preparation, keeping durable pending work and savepoint rollback behavior.
+
+- Stop nonblocking query inputs at the rows requested by LIMIT, EXISTS and cursors, preserving reached errors and sequence effects through filters, joins, LATERAL, projections, VALUES and UNION ALL. Nonrecursive read-only MATERIALIZED CTE consumers share one spill-bounded prefix and replay produced rows without re-evaluating their expressions; sort, aggregate and hash-build barriers retain their complete input requirements.
+
+- Distinguish absent outer-join rows from present records whose fields are all NULL. Preserve whole-row values and COUNT through LEFT/RIGHT/FULL/LATERAL joins, aliases, correlation and physical spill without copying row payloads. Retain anonymous zero-column relation names through analysis, physical source qualification, stored views and prepared queries; reject excess column aliases for known descriptors while preserving UQA's runtime-discovered columns.
+
+- Preserve whole-row operands in window evaluation, including present all-NULL records, partition and ordering keys, COUNT, lag/lead and frame functions. Retain the physical row lookup's namespace and types through in-memory and spilled execution, and use the selected scalar-subquery scope for declared window result types.
+
+- Expand qualified relation stars inside ROW constructors in field order while preserving ordinary whole-row nesting, typed fields, collation and neighboring parameter/literal selections.
+
+- Apply eligible predicates before derived-table, view and folded-CTE output evaluation, including correlated LATERAL inputs. Preserve evaluation order for volatile, scalar-subquery and inner-join qualifications over simple derived inputs. Keep independently scoped input aliases distinct through positional internal identities, including scalar-correlated qualifications, local/LATERAL shadows, stored-view reopening and exact quoted CTE declaration names. Preserve implicit output labels and PostgreSQL diagnostics for hidden enclosing columns. Resolve selected whole-row fields without demanding unrelated values, keep consumer ordering after qualification, and preserve SQL92 output aliases, ordinals and ambiguity diagnostics. Move independent scalar-query qualifications with their exclusively owned query slots, including whole-row and ordered consumers and eligible DISTINCT/group/window producers. Preserve volatile and set-returning effects, slicing, group/window boundaries, positional aliases and set-operation type conversions.
+
+- Preserve each nonrecursive CTE's enclosing and preceding definitions across folding, materialization, prepared execution and stored-view reopening. Later same-name declarations no longer change its inputs or output types, and unavailable forward references retain PostgreSQL diagnostics.
+
+- Propagate unused-output demand through joined and lateral sources and folded CTEs, preserving join keys, outer-join rows, positional aliases and CTE dependency order.
+
+- Preserve PostgreSQL output demand through eligible UNION ALL members, including positional aliases, type-coercion barriers, ordering and unused aggregate values. Discarding an aggregate value keeps its group and empty-input row cardinality; GROUP BY output aliases remain demanded while local input names retain precedence over outputs and enclosing names do not. Preserve hidden recursive CYCLE fields when pruning every public working-table column.
+
+- Preserve selected aggregate identities through SQL lowering, optimization and execution, including `pg_catalog` qualification and same-name user scalar functions. Resolve a bare function `*` as aggregate syntax with no value arguments, retaining whole-row arguments and PostgreSQL diagnostics for scalar misuse.
+
+- Distinguish row-count demand from whole-row values when pruning unused direct derived-table and folded-CTE outputs, retaining aggregate filters, ordering and relation-name column shadowing.
+
 - Preserve catalog attributes and table dependencies for legacy document indexes without stored key types, so an undeclared document schema no longer blocks catalog reads or unrelated table deletion.
 
 - Evaluate LATERAL VALUES against the current outer row, preserving common column types, correlated subqueries, SQL routines and durable views across storage providers.
@@ -23,6 +45,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Preserve PostgreSQL LATERAL reference error positions through SQL lowering, plan copies and stored-definition binding, including Unicode and multiple-statement requests. SQL function source errors retain creation-statement positions or the separate internal-query cursor when PostgreSQL cannot transpose them.
 
 ### Changed
+
+- Custom Rust `QueryPlan` constructors initialize `analyzed_output: None` and `analyzed_source: None`. Executable plans share positional output and input descriptors from statement analysis; serialized definitions omit them and resolve their next catalog scope normally. Custom `prune_query_outputs` callers also pass optional selected-routine and volatility catalogs for UNION-member boundaries.
 
 - Custom Rust correlation and subquery adapters now supply the invoking routine catalog so declared TABLE and composite results preserve the selected function identity and full output schema.
 

@@ -299,6 +299,11 @@ pub fn expr_contains_volatile_function(catalog: &dyn VolatilityCatalog, expr: &S
     expr_contains_volatile_function_with(catalog, expr, true)
 }
 
+/// Inspect calls in this scalar expression only. The caller must inspect query-valued children through their owning arena before moving or duplicating an expression.
+pub fn scalar_calls_are_volatile(catalog: &dyn VolatilityCatalog, expr: &ScalarExpr) -> bool {
+    expr_contains_volatile_function_with(catalog, expr, false)
+}
+
 /// Query-level walks inspect a block's subquery plans themselves, so their expression scan treats a subquery reference as opaque-but-inspected (`conservative_subqueries == false`) instead of assuming volatility.
 fn expr_contains_volatile_function_with(
     catalog: &dyn VolatilityCatalog,

@@ -45,6 +45,8 @@ impl UnifiedPlan {
                     })
                     .collect();
                 Self::Query(Box::new(QueryPlan {
+                    analyzed_output: None,
+                    analyzed_source: None,
                     relations_bound: false,
                     ctes: Vec::new(),
                     root: RelationalPlan::Values { rows, subqueries },

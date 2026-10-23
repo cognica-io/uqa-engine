@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "expansion_and_nesting",
+      "sql": "SELECT ROW(s.*) AS expanded,ROW(s) AS nested FROM (VALUES(2,5))s(k,z)"
+    },
+    {
+      "id": "mixed",
+      "sql": "SELECT ROW(7,s.*,ROW(s.*),s) FROM (VALUES(2,5))s(k,z)"
+    },
+    {
+      "id": "duplicate_names",
+      "sql": "SELECT ROW(s.*) FROM (VALUES(2,5))s(k,k)"
+    },
+    {
+      "id": "column_shadow",
+      "sql": "SELECT ROW(s.*),ROW(s) FROM (VALUES(2,5))s(s,z)"
+    },
+    {
+      "id": "nullable",
+      "sql": "SELECT ROW(s.*) FROM (VALUES(NULL::int,5))s(k,z)"
+    },
+    {
+      "id": "outer_join",
+      "sql": "SELECT ROW(s.*),ROW(s) FROM (VALUES(1))t(x) LEFT JOIN (VALUES(2,5))s(k,z) ON FALSE"
+    },
+    {
+      "id": "correlation",
+      "sql": "SELECT (SELECT ROW(s.*)) FROM (VALUES(2,5))s(k,z)"
+    },
+    {
+      "id": "comparison",
+      "sql": "SELECT ROW(s.*)=ROW(2,5),ROW(s.*) IS DISTINCT FROM ROW(2,5) FROM (VALUES(2,5))s(k,z)"
+    },
+    {
+      "id": "collation",
+      "sql": "SELECT pg_collation_for((ROW(s.*)).f1), (ROW(s.*)).f2 FROM (SELECT 'a'::text COLLATE \"C\" AS a,5 AS b)s"
+    },
+    {
+      "id": "group_alias",
+      "sql": "SELECT ROW(s.*) AS r FROM (VALUES(2,5),(2,5))s(k,z) GROUP BY r ORDER BY r"
+    },
+    {
+      "id": "multiple",
+      "sql": "SELECT ROW(s.*,t.*) FROM (VALUES(2,5))s(k,z) CROSS JOIN (VALUES(7,8))t(a,b)"
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW row_star_view AS SELECT ROW(s.*)::text AS expanded,ROW(s)::text AS nested FROM (VALUES(2,5))s(k,z)"
+    },
+    {
+      "id": "view",
+      "sql": "SELECT * FROM row_star_view"
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE row_star_prepared(int) AS SELECT ROW(s.*,$1::int,'1'::int)=ROW(2,5,$1,1) FROM (VALUES(2,5))s(k,z)"
+    },
+    {
+      "id": "execute",
+      "sql": "EXECUTE row_star_prepared(7)"
+    },
+    {
+      "id": "deallocate",
+      "sql": "DEALLOCATE row_star_prepared"
+    }
+  ]
+}

@@ -7,8 +7,9 @@
 //! Canonical encoded index, disk buckets, match flags, and spill transition.
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::{BufRead, BufReader, ErrorKind, IoSlice, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, ErrorKind, IoSlice, Read, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::sync::Arc;
 use uqa_storage::temporary_file::TemporaryFile as File;
 
 use tempfile::{Builder as TempBuilder, TempDir};
@@ -17,6 +18,8 @@ use crate::distinct::EncodedKey;
 use crate::{ExecError, ExecResult};
 
 use super::join_io_error;
+mod cursor;
+pub(super) use cursor::HashMatches;
 
 pub(super) const HASH_BUCKETS: u64 = 64;
 
@@ -25,7 +28,7 @@ pub(super) const HASH_BUCKETS: u64 = 64;
 /// row-index records would exceed its byte budget. Disk probes always compare
 /// the full key, so bucket hash collisions cannot create false join matches.
 pub(super) struct HybridHashIndex {
-    memory: HashMap<EncodedKey, Vec<u64>, ahash::RandomState>,
+    memory: HashMap<EncodedKey, Arc<Vec<u64>>, ahash::RandomState>,
     memory_bytes: usize,
     budget_bytes: usize,
     disk: Option<DiskHashIndex>,
@@ -58,21 +61,30 @@ impl HybridHashIndex {
 
         let record_bytes = key
             .len()
-            .checked_add(16)
+            .checked_add(if self.memory.contains_key(key.as_slice()) {
+                16
+            } else {
+                16 + std::mem::size_of::<Vec<u64>>() + 2 * std::mem::size_of::<usize>()
+            })
             .ok_or_else(|| ExecError::Other("join hash-index size overflow".into()))?;
         let fits = self
             .memory_bytes
             .checked_add(record_bytes)
             .is_some_and(|bytes| bytes <= self.budget_bytes);
         if fits {
-            self.memory.entry(key).or_default().push(row_index);
+            let indices = self.memory.entry(key).or_default();
+            Arc::get_mut(indices)
+                .ok_or_else(|| {
+                    ExecError::Other("join index mutated during an active probe".into())
+                })?
+                .push(row_index);
             self.memory_bytes += record_bytes;
             return Ok(());
         }
 
         let mut disk = DiskHashIndex::new(None)?;
         for (existing_key, indices) in &self.memory {
-            for index in indices {
+            for index in indices.iter() {
                 disk.insert(existing_key, *index)?;
             }
         }
@@ -83,21 +95,28 @@ impl HybridHashIndex {
         Ok(())
     }
 
-    pub(super) fn for_each_match(
-        &mut self,
-        key: &[u8],
-        visitor: &mut dyn FnMut(u64) -> ExecResult<()>,
-    ) -> ExecResult<bool> {
-        if let Some(disk) = self.disk.as_mut() {
-            return disk.for_each_match(key, visitor);
-        }
-        let Some(indices) = self.memory.get(key) else {
-            return Ok(false);
+    pub(super) fn match_cursor(&self, key: EncodedKey) -> ExecResult<HashMatches> {
+        let Some(disk) = self.disk.as_ref() else {
+            return Ok(self
+                .memory
+                .get(key.as_slice())
+                .map_or_else(HashMatches::empty, |indices| {
+                    HashMatches::memory(Arc::clone(indices))
+                }));
         };
-        for index in indices {
-            visitor(*index)?;
-        }
-        Ok(!indices.is_empty())
+        let bucket = u8::try_from(stable_hash(&key) % HASH_BUCKETS)
+            .map_err(|_| ExecError::Other("join spill bucket exceeds u8".into()))?;
+        let Some(file) = disk.buckets.get(&bucket) else {
+            return Ok(HashMatches::empty());
+        };
+        let length = file
+            .metadata()
+            .map_err(|error| join_io_error("inspect hash bucket", error))?
+            .len();
+        let file = file
+            .reopen()
+            .map_err(|error| join_io_error("open hash probe", error))?;
+        Ok(HashMatches::disk(key, file, length))
     }
 
     /// Summarize a probe without allocation when the index still resides in
@@ -106,11 +125,13 @@ impl HybridHashIndex {
         if self.disk.is_some() {
             return None;
         }
-        Some(match self.memory.get(key).map(Vec::as_slice) {
-            None | Some([]) => MemoryMatchSummary::Absent,
-            Some([index]) => MemoryMatchSummary::Single(*index),
-            Some(_) => MemoryMatchSummary::Multiple,
-        })
+        Some(
+            match self.memory.get(key).map(|indices| indices.as_slice()) {
+                None | Some([]) => MemoryMatchSummary::Absent,
+                Some([index]) => MemoryMatchSummary::Single(*index),
+                Some(_) => MemoryMatchSummary::Multiple,
+            },
+        )
     }
 
     pub(super) fn has_spilled(&self) -> bool {
@@ -177,6 +198,7 @@ impl DiskHashIndex {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn for_each_match(
         &mut self,
         key: &[u8],
@@ -197,34 +219,18 @@ impl DiskHashIndex {
     }
 }
 
+#[cfg(test)]
 fn visit_bucket(
     file: &mut impl Read,
     file_len: u64,
     key: &[u8],
     visitor: &mut dyn FnMut(u64) -> ExecResult<()>,
 ) -> ExecResult<bool> {
-    // Keep a single bounded probe buffer, independent of key size and bucket count.
-    let mut reader = BufReader::with_capacity(8 * 1024, file);
-    let mut position = 0_u64;
+    let mut cursor = cursor::BucketReader::new(file, file_len);
     let mut matched = false;
-    while let Some(key_len) = read_u64(&mut reader, "read hash key length")? {
-        let record_end = position
-            .checked_add(16)
-            .and_then(|position| position.checked_add(key_len))
-            .ok_or_else(|| ExecError::Other("join hash record offset overflow".into()))?;
-        if record_end > file_len {
-            return Err(ExecError::Other(format!(
-                "join hash key length {key_len} exceeds remaining bucket record bytes"
-            )));
-        }
-        let key_matches = compare_hash_key(&mut reader, key_len, key)?;
-        let row_index = read_u64(&mut reader, "read hash row index")?
-            .ok_or_else(|| ExecError::Other("truncated join hash row index".into()))?;
-        if key_matches {
-            visitor(row_index)?;
-            matched = true;
-        }
-        position = record_end;
+    while let Some(position) = cursor.next(key)? {
+        visitor(position)?;
+        matched = true;
     }
     Ok(matched)
 }
@@ -288,6 +294,39 @@ pub(super) fn stable_hash(bytes: &[u8]) -> u64 {
 mod probe_tests {
     use super::*;
     use std::io::{self, Cursor};
+
+    #[test]
+    fn duplicate_probe_cursors_resume_independently_in_memory_and_on_disk() {
+        for budget in [1, 64 * 1024] {
+            let mut index = HybridHashIndex::new(budget);
+            for ordinal in 0..128 {
+                index
+                    .insert(EncodedKey::from_slice(b"same"), ordinal)
+                    .unwrap();
+            }
+            let mut first = index.match_cursor(EncodedKey::from_slice(b"same")).unwrap();
+            let mut second = index.match_cursor(EncodedKey::from_slice(b"same")).unwrap();
+            for ordinal in 0..128 {
+                assert_eq!(first.next().unwrap(), Some(ordinal));
+                if ordinal % 2 == 0 {
+                    assert_eq!(second.next().unwrap(), Some(ordinal / 2));
+                }
+            }
+            assert_eq!(first.next().unwrap(), None);
+            for ordinal in 64..128 {
+                assert_eq!(second.next().unwrap(), Some(ordinal));
+            }
+            assert_eq!(second.next().unwrap(), None);
+            assert_eq!(
+                index
+                    .match_cursor(EncodedKey::from_slice(b"absent"))
+                    .unwrap()
+                    .next()
+                    .unwrap(),
+                None
+            );
+        }
+    }
 
     struct Reads {
         input: Cursor<Vec<u8>>,

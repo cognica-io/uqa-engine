@@ -20,6 +20,7 @@ mod name_binding;
 mod open_columns;
 mod outer_scope;
 mod record_fields;
+mod relation_presence;
 mod relation_types;
 mod result_columns;
 mod schema_composition;
@@ -115,6 +116,7 @@ struct SchemaIndex {
 struct SchemaColdMetadata {
     collations: Collations,
     row_types: relation_types::RelationRowTypes,
+    row_presence: relation_presence::RelationPresence,
     record_fields: SchemaMap<usize, RecordMetadata>,
     /// `None` is an as-yet unresolved type, not a runtime NULL value.
     columns: Box<[Option<ColumnType>]>,
@@ -140,6 +142,7 @@ struct SchemaColdMetadata {
 struct SchemaBuildMetadata {
     collations: Collations,
     row_types: relation_types::RelationRowTypes,
+    row_presence: relation_presence::RelationPresence,
     record_fields: SchemaMap<usize, RecordMetadata>,
     aliases: SchemaMap<ColumnIdentity, usize>,
     alias_types: SchemaMap<ColumnIdentity, Option<ColumnType>>,

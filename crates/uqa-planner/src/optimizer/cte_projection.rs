@@ -14,6 +14,7 @@ pub(super) fn prune(
     query: &mut QueryPlan,
     aggregates: &dyn AggregateClassifier,
     volatility: &dyn VolatilityCatalog,
+    routines: Option<&dyn uqa_sql::routines::RoutineResolution>,
 ) -> Result<(), SQLError> {
     let folded = uqa_sql::semantics::cte_strategy::schedule_plan_ctes(volatility, query)?
         .into_iter()
@@ -65,6 +66,8 @@ pub(super) fn prune(
                 &|column| required.contains(column),
                 None,
                 aggregates,
+                routines,
+                Some(volatility),
             );
         }
     }
@@ -148,23 +151,30 @@ fn collect_source(
                 *all = true;
             }
             for expression in block.expressions() {
-                expression.visit(&mut |part| {
+                super::output_demand::visit(expression, &mut |part| {
                     let column = match part {
                         ScalarExpr::Column(column) => Some(column),
                         ScalarExpr::QualifiedColumn {
                             qualifier: selected,
                             column,
                         } if selected == qualifier => Some(column),
-                        ScalarExpr::Star
-                        | ScalarExpr::QualifiedStar(_)
-                        | ScalarExpr::Position(_) => {
+                        ScalarExpr::QualifiedStar(selected) if selected == qualifier => {
+                            *all = true;
+                            None
+                        }
+                        ScalarExpr::Star | ScalarExpr::Position(_) => {
                             *all = true;
                             None
                         }
                         _ => None,
                     };
                     if let Some(column) = column {
-                        if column == qualifier {
+                        if matches!(part, ScalarExpr::Column(_))
+                            && column == qualifier
+                            && !names.iter().enumerate().any(|(position, name)| {
+                                column_aliases.get(position).unwrap_or(name) == column
+                            })
+                        {
                             *all = true;
                         }
                         for (position, original) in names.iter().enumerate() {
@@ -236,9 +246,64 @@ mod tests {
             query.rewrite_scalar_expressions(&mut |expression| {
                 *expression = uqa_sql::bind_type_introspection(expression.clone(), &uqa_sql::RowSchema::default(), &[]);
             });
-            prune(&mut query, &Catalog, &Catalog).unwrap();
+            prune(&mut query, &Catalog, &Catalog, None).unwrap();
             let RelationalPlan::QueryBlock(block) = &query.ctes[0].body.query().unwrap().root else { panic!("block"); };
             assert_eq!(matches!(block.projections[1].expr, ScalarExpr::TypedLiteral { value: uqa_core::Value::Null, .. }), removed, "{sql}");
+        }
+    }
+    #[test]
+    fn folded_cte_row_count_keeps_filters_and_column_shadowing() {
+        for (sql, removed) in [
+            (
+                "WITH q AS(SELECT 1 AS id,1/0 AS z) SELECT count(*) FROM q",
+                true,
+            ),
+            (
+                "WITH q AS(SELECT 1 AS id,1/0 AS z) SELECT count(*) FILTER(WHERE id>0) FROM q",
+                true,
+            ),
+            (
+                "WITH q AS(SELECT 1 AS id,1/0 AS z) SELECT count(q) FROM q",
+                false,
+            ),
+            (
+                "WITH q AS(SELECT 1 AS id,1/0 AS z) SELECT count(q.*) FROM q",
+                false,
+            ),
+            (
+                "WITH q AS(SELECT 1 AS q,1/0 AS z) SELECT count(q) FROM q",
+                true,
+            ),
+            (
+                "WITH r AS(SELECT 1 AS id,1/0 AS z) SELECT count(q) FROM r AS q(q,z)",
+                true,
+            ),
+            (
+                "WITH q AS MATERIALIZED(SELECT 1 AS id,1/0 AS z) SELECT count(*) FROM q",
+                false,
+            ),
+        ] {
+            let crate::UnifiedPlan::Query(mut query) =
+                crate::UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
+            else {
+                panic!("query");
+            };
+            prune(&mut query, &Catalog, &Catalog, None).unwrap();
+            let RelationalPlan::QueryBlock(inner) = &query.ctes[0].body.query().unwrap().root
+            else {
+                panic!("CTE block");
+            };
+            assert_eq!(
+                matches!(
+                    inner.projections[1].expr,
+                    ScalarExpr::TypedLiteral {
+                        value: uqa_core::Value::Null,
+                        ..
+                    }
+                ),
+                removed,
+                "{sql}"
+            );
         }
     }
 }

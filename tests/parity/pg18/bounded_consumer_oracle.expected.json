@@ -1,0 +1,1203 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE SEQUENCE bounded_effects",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "sequence"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "values_effect_reset"
+    },
+    {
+      "sql": "SELECT v FROM (VALUES(nextval('bounded_effects')),(nextval('bounded_effects')))s(v) LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "values_effect"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "values_effect_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "values_filter_effect_reset"
+    },
+    {
+      "sql": "SELECT v FROM (VALUES(nextval('bounded_effects')),(nextval('bounded_effects')))s(v) WHERE v>0 LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "values_filter_effect"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "values_filter_effect_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "lateral_outer_error_reset"
+    },
+    {
+      "sql": "SELECT r.z FROM (VALUES(2),(0))a(x) CROSS JOIN LATERAL(SELECT 10/a.x AS z OFFSET 0)r LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "lateral_outer_error"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "id": "lateral_outer_error_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "lateral_inner_error_reset"
+    },
+    {
+      "sql": "SELECT r.z FROM (VALUES(1))a(k) CROSS JOIN LATERAL(SELECT 10/x AS z FROM (VALUES(2),(0))b(x) WHERE a.k>0 OFFSET 0)r LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "lateral_inner_error"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "id": "lateral_inner_error_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "lateral_inner_effect_reset"
+    },
+    {
+      "sql": "SELECT r.z FROM (VALUES(1))a(k) CROSS JOIN LATERAL(SELECT nextval('bounded_effects') AS z FROM (VALUES(2),(0))b(x) WHERE a.k>0 OFFSET 0)r LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "lateral_inner_effect"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "lateral_inner_effect_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_on_error_reset"
+    },
+    {
+      "sql": "SELECT a.x FROM (VALUES(2),(0))a(x) JOIN (VALUES(1))b(y) ON 10/a.x>b.y LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_on_error"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_on_error_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_right_error_reset"
+    },
+    {
+      "sql": "SELECT a.x FROM (VALUES(1))a(x) CROSS JOIN (SELECT y FROM (VALUES(2),(0))b(y) WHERE 10/y>1 OFFSET 0)r LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_right_error"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_right_error_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_left_effect_reset"
+    },
+    {
+      "sql": "SELECT a.n FROM (SELECT nextval('bounded_effects') AS n FROM (VALUES(1),(2))v(x) OFFSET 0)a CROSS JOIN (VALUES(1))b(y) LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_left_effect"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_left_effect_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_right_effect_reset"
+    },
+    {
+      "sql": "SELECT b.n FROM (VALUES(1))a(x) CROSS JOIN (SELECT nextval('bounded_effects') AS n FROM (VALUES(1),(2))v(x) OFFSET 0)b LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_right_effect"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_right_effect_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "set_argument_error_reset"
+    },
+    {
+      "sql": "SELECT generate_series(1,10/x) AS n FROM (VALUES(2),(0))v(x) LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "set_argument_error"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "id": "set_argument_error_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "set_argument_effect_reset"
+    },
+    {
+      "sql": "SELECT generate_series(1,nextval('bounded_effects')) AS n FROM (VALUES(1),(2))v(x) LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "set_argument_effect"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "set_argument_effect_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "set_project_effect_reset"
+    },
+    {
+      "sql": "SELECT generate_series(1,3) AS n,nextval('bounded_effects') AS v LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "set_project_effect"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "set_project_effect_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "offset_effect_reset"
+    },
+    {
+      "sql": "SELECT nextval('bounded_effects') AS n FROM generate_series(1,10)g(x) OFFSET 2 LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "offset_effect"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "3",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "offset_effect_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "filtered_offset_effect_reset"
+    },
+    {
+      "sql": "SELECT x FROM generate_series(1,10)g(x) WHERE nextval('bounded_effects')>0 OFFSET 2 LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "filtered_offset_effect"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "3",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "filtered_offset_effect_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "limit_zero_effect_reset"
+    },
+    {
+      "sql": "SELECT * FROM (VALUES(nextval('bounded_effects')))s(x) LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "id": "limit_zero_effect"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "id": "limit_zero_effect_effects"
+    },
+    {
+      "sql": "SELECT setval('bounded_effects',1,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "materialized_effect_reset"
+    },
+    {
+      "sql": "WITH q AS MATERIALIZED(SELECT nextval('bounded_effects') AS n FROM generate_series(1,3)) SELECT n FROM q LIMIT 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "materialized_effect"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM bounded_effects",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "materialized_effect_effects"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "e678548df0554f0a3b69d4127a102607d40ae58a4a9eb34378861cc27f0038ce",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}

@@ -23,6 +23,7 @@ impl RowSchema {
             && left.cold.aliases == right.cold.aliases
             && left.cold.executor_attribute_types == right.cold.executor_attribute_types
             && left.cold.score_sources == right.cold.score_sources
+            && left.cold.row_presence == right.cold.row_presence
             && left.cold.wildcard_hidden == right.cold.wildcard_hidden
             && left
                 .cold

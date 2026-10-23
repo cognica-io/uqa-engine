@@ -122,12 +122,16 @@ impl<'a> SetProjection<'a> {
         }
     }
 
-    fn next_input(&mut self) -> ExecResult<Option<OwnedPhysicalRow>> {
+    fn next_input(&mut self, demanded: bool) -> ExecResult<Option<OwnedPhysicalRow>> {
         loop {
             if let Some(row) = self.input.next() {
                 return Ok(Some(row));
             }
-            let Some(batch) = self.child.next()? else {
+            let Some(batch) = (if demanded {
+                self.child.next_with_demand(crate::physical::demand::ONE)?
+            } else {
+                self.child.next()?
+            }) else {
                 return Ok(None);
             };
             self.input = batch.into_owned_rows().into_iter();
@@ -311,6 +315,35 @@ impl<'a> SetProjection<'a> {
     }
 }
 
+impl SetProjection<'_> {
+    fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
+        let batch_size = demand.map_or(self.output_batch_size, |rows| {
+            rows.get().min(self.output_batch_size)
+        });
+        if self.exhausted && self.expansion.is_none() {
+            return Ok(None);
+        }
+        let mut output = Vec::with_capacity(batch_size);
+        while output.len() < batch_size {
+            if let Some(row) = self.next_projected()? {
+                output.push(row);
+                continue;
+            }
+            self.expansion = None;
+            if let Some(input) = self.next_input(demand.is_some())? {
+                self.expansion = Some(self.start_expansion(input)?);
+            } else {
+                self.exhausted = true;
+                break;
+            }
+        }
+        if output.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Batch::from_physical_rows(self.schema.clone(), output)))
+    }
+}
+
 impl PhysicalOperator for SetProjection<'_> {
     fn row_schema(&self) -> &RowSchema {
         &self.schema
@@ -324,27 +357,11 @@ impl PhysicalOperator for SetProjection<'_> {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        if self.exhausted && self.expansion.is_none() {
-            return Ok(None);
-        }
-        let mut output = Vec::with_capacity(self.output_batch_size);
-        while output.len() < self.output_batch_size {
-            if let Some(row) = self.next_projected()? {
-                output.push(row);
-                continue;
-            }
-            self.expansion = None;
-            if let Some(input) = self.next_input()? {
-                self.expansion = Some(self.start_expansion(input)?);
-            } else {
-                self.exhausted = true;
-                break;
-            }
-        }
-        if output.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(Batch::from_physical_rows(self.schema.clone(), output)))
+        self.pull(None)
+    }
+
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.pull(Some(rows))
     }
 
     fn close(&mut self) -> ExecResult<()> {

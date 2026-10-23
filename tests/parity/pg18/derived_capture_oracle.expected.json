@@ -1,0 +1,403 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "alias_collision"
+    },
+    {
+      "sql": "SELECT a.z,b.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) a CROSS JOIN (SELECT x AS k,12/x AS z FROM (VALUES(0),(3)) v(x)) b WHERE a.k+b.k=5",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z",
+            "z"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "5",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "id": "two_producers"
+    },
+    {
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) s(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "shared_outer_alias"
+    },
+    {
+      "sql": "SELECT s.z FROM (SELECT a.x AS k,10/a.x+b.x AS z FROM (VALUES(0),(2)) a(x) CROSS JOIN (VALUES(3)) b(x)) s CROSS JOIN (VALUES(0)) a(y) WHERE s.k+a.y>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ],
+      "id": "duplicate_input_names"
+    },
+    {
+      "sql": "SELECT s.z FROM (SELECT k,10/k AS z FROM (SELECT x AS k FROM (VALUES(0),(2)) v(x)) v) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "nested_inputs"
+    },
+    {
+      "sql": "SELECT \"s\".\"Z\" FROM (SELECT \"X\" AS \"K\",10/\"X\" AS \"Z\" FROM (VALUES(0),(2)) \"v\"(\"X\")) \"s\" CROSS JOIN (VALUES(0)) \"v\"(\"Y\") WHERE \"s\".\"K\"+\"v\".\"Y\">0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "Z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "quoted_aliases"
+    },
+    {
+      "sql": "SELECT s.z,s.n FROM (SELECT a.x AS k,10/a.x AS z,b.y AS n FROM (VALUES(0),(2)) a(x) LEFT JOIN (VALUES(1)) b(y) ON a.x=b.y) s CROSS JOIN (VALUES(0)) a(y) WHERE s.k+a.y>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "5",
+              null
+            ]
+          ]
+        }
+      ],
+      "id": "nullable_input"
+    },
+    {
+      "sql": "SELECT s.z,(s.r).f1,(s.r).f2 FROM (SELECT x AS k,10/x AS z,ROW(x::smallint,NULL::text) AS r FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z",
+            "f1",
+            "f2"
+          ],
+          "type_oids": [
+            23,
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "5",
+              "2",
+              null
+            ]
+          ]
+        }
+      ],
+      "id": "record_input"
+    },
+    {
+      "sql": "SELECT s.z,pg_typeof(s.t),s.t COLLATE \"C\" FROM (SELECT x AS k,10/x AS z,'text'::text COLLATE \"C\" AS t FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z",
+            "pg_typeof",
+            "t"
+          ],
+          "type_oids": [
+            23,
+            2206,
+            25
+          ],
+          "rows": [
+            [
+              "5",
+              "text",
+              "text"
+            ]
+          ]
+        }
+      ],
+      "id": "text_collation"
+    },
+    {
+      "sql": "SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (SELECT 1 AS y WHERE false) v WHERE s.k+v.y>0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "id": "empty_join"
+    },
+    {
+      "sql": "CREATE VIEW capture_scope_view AS SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>0",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_view"
+    },
+    {
+      "sql": "SELECT * FROM capture_scope_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "stored_view"
+    },
+    {
+      "sql": "PREPARE capture_scope_query(integer) AS SELECT s.z FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s CROSS JOIN (VALUES(0)) v(y) WHERE s.k+v.y>$1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "prepare"
+    },
+    {
+      "sql": "EXECUTE capture_scope_query(0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "z"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "id": "prepared"
+    },
+    {
+      "sql": "WITH \"Q.CTE\"(n) AS MATERIALIZED (VALUES(1),(2)) SELECT sum(a.n+b.n)::text AS result FROM \"Q.CTE\" a CROSS JOIN \"Q.CTE\" b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "12"
+            ]
+          ]
+        }
+      ],
+      "id": "quoted_materialized_cte"
+    },
+    {
+      "sql": "WITH RECURSIVE \"Q.\"\"CTE\"(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM \"Q.\"\"CTE\" WHERE n<3) SELECT sum(n)::text AS result FROM \"Q.\"\"CTE\"",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "id": "quoted_recursive_cte"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "44718812ed829b54a1de85fcc48c66d9f606c6ce1e363f2c0a717b6deecbc918",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}

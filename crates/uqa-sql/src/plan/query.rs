@@ -7,7 +7,7 @@
 //! SELECT, source, projection, order, CTE, and mutation-child lowering.
 
 use super::rewrite::rewrite_query_scalars;
-use super::scalar::{is_builtin_aggregate, lower_scalar_expression};
+use super::scalar::lower_scalar_expression;
 use super::{
     AccessPathPlan, AggregateClassifier, AssignmentPlan, ComputePlan, CteCyclePlan, CtePlan,
     CteSearchPlan, Expr, ExpressionPlan, FromClause, JoinExecutionStrategy, MergeWhenPlan,
@@ -16,6 +16,36 @@ use super::{
 };
 
 impl QueryBlockPlan {
+    /// Select the computation from resolved calls before output-demand rewrites remove unobserved aggregate values.
+    pub fn compute_kind(&self, aggregates: &dyn AggregateClassifier) -> ComputePlan {
+        let contains_aggregate = |expression: &ScalarExpr| {
+            crate::semantics::aggregates::contains_aggregate(aggregates, expression)
+        };
+        let has_aggregate = !self.group_by.is_empty()
+            || !self.grouping_sets.is_empty()
+            || self.having.is_some()
+            || self
+                .projections
+                .iter()
+                .any(|projection| contains_aggregate(&projection.expr))
+            || self
+                .windows
+                .iter()
+                .flat_map(|window| window.spec.expressions())
+                .any(contains_aggregate);
+        let has_window = self
+            .projections
+            .iter()
+            .any(|projection| projection.expr.contains_window());
+        if has_aggregate {
+            ComputePlan::Aggregate
+        } else if has_window {
+            ComputePlan::Window
+        } else {
+            ComputePlan::Project
+        }
+    }
+
     /// One scalar SELECT with no relational clauses or subplans. The caller must also reject set-returning routines using its selected catalog.
     pub fn is_single_expression(&self) -> bool {
         matches!(self.compute, ComputePlan::Project)
@@ -66,6 +96,8 @@ impl QueryPlan {
         statement.with.clear();
         let root = lower_relational_root(statement, aggregates);
         let mut plan = Self {
+            analyzed_output: None,
+            analyzed_source: None,
             relations_bound: false,
             ctes,
             root,
@@ -238,6 +270,8 @@ pub(super) fn lower_relational_root(
         QueryPlan::lower_with(*left, aggregates)
     } else {
         QueryPlan {
+            analyzed_output: None,
+            analyzed_source: None,
             relations_bound: false,
             ctes: Vec::new(),
             root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan::lower_with(
@@ -291,29 +325,7 @@ impl QueryBlockPlan {
                 ),
             })
             .collect();
-        let is_aggregate =
-            |name: &str| is_builtin_aggregate(name) || aggregates.is_registered_aggregate(name);
-        let has_aggregate = !statement.group_by.is_empty()
-            || !statement.grouping_sets.is_empty()
-            || statement.having.is_some()
-            || projections
-                .iter()
-                .any(|projection| projection.expr.contains_aggregate(&is_aggregate))
-            || windows
-                .iter()
-                .flat_map(|window| window.spec.expressions())
-                .any(|expression| expression.contains_aggregate(&is_aggregate));
-        let has_window = projections
-            .iter()
-            .any(|projection| projection.expr.contains_window());
-        let compute = if has_aggregate {
-            ComputePlan::Aggregate
-        } else if has_window {
-            ComputePlan::Window
-        } else {
-            ComputePlan::Project
-        };
-        Self {
+        let mut block = Self {
             windows,
             projections,
             privilege_columns: std::collections::BTreeSet::default(),
@@ -323,7 +335,7 @@ impl QueryBlockPlan {
             r#where: statement
                 .r#where
                 .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries)),
-            compute,
+            compute: ComputePlan::Project,
             group_by: statement
                 .group_by
                 .into_iter()
@@ -363,7 +375,9 @@ impl QueryBlockPlan {
             subqueries,
             access: AccessPathPlan::Row,
             locking: statement.locking,
-        }
+        };
+        block.compute = block.compute_kind(aggregates);
+        block
     }
 
     /// Expression nodes evaluated while executing this query block. Query
@@ -375,6 +389,18 @@ impl QueryBlockPlan {
         if let Some(source) = &self.from {
             source.push_expressions(&mut expressions);
         }
+        self.push_query_expressions(&mut expressions);
+        expressions
+    }
+
+    /// Expressions at this query level, excluding FROM-item inputs and join conditions, which have their own namespaces.
+    pub fn query_expressions(&self) -> Vec<&ScalarExpr> {
+        let mut expressions = Vec::new();
+        self.push_query_expressions(&mut expressions);
+        expressions
+    }
+
+    fn push_query_expressions<'a>(&'a self, expressions: &mut Vec<&'a ScalarExpr>) {
         // Scan projections initialize before scan qualifications; aggregate and window outputs initialize after their input scan.
         if matches!(self.compute, ComputePlan::Project) {
             expressions.extend(self.projections.iter().map(|projection| &projection.expr));
@@ -405,7 +431,6 @@ impl QueryBlockPlan {
                 .iter()
                 .flat_map(|window| window.spec.expressions()),
         );
-        expressions
     }
 }
 
@@ -572,6 +597,7 @@ impl SourcePlan {
                 alias,
                 column_aliases,
             } => Self::Subquery {
+                captured_output: None,
                 lateral,
                 body: Box::new(QueryPlan::lower_with(*body, aggregates)),
                 alias,

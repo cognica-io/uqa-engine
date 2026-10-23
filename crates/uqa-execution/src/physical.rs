@@ -8,6 +8,8 @@
 
 use thiserror::Error;
 
+pub(crate) mod demand;
+
 use crate::batch::{Batch, RowSchema};
 
 /// A leading physical row-order property carried between operators.
@@ -127,6 +129,10 @@ pub trait PhysicalOperator: Send {
 
     fn open(&mut self) -> ExecResult<()>;
     fn next(&mut self) -> ExecResult<Option<Batch>>;
+    /// Pull at most `rows` newly evaluated output rows. Pipelined expression producers must propagate demand before evaluating their inputs. A semantic materialization boundary may return a larger already-evaluated batch; its consumer retains that remainder without evaluating it again. The default preserves that materialized-batch contract, so an effectful streaming adapter must override this method.
+    fn next_with_demand(&mut self, _rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.next()
+    }
     /// Pull one directional batch. Native backwards-capable pipelines keep batches to one row so a consumer can reverse direction between adjacent fetches.
     fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
         match direction {

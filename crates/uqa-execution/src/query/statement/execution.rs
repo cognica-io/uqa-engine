@@ -15,7 +15,7 @@ use super::{
 use crate::query::{
     binding::{analyze_query_plan_schema, bind_query_plan_schema},
     block::execute_query_block_output,
-    cte::{finish_statement_ctes, materialize_statement_ctes, strategy::schedule_plan_ctes},
+    cte::{finish_statement_ctes, install_statement_ctes, strategy::schedule_plan_ctes},
     ordering::identity_order_columns,
     output::{QueryOutput, QueryRows},
     projection::{physical_exec_error, physical_work_mem_bytes},
@@ -78,18 +78,11 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
     let ctes = &mut *visible_ctes;
     if !plan.ctes.is_empty() {
         let scheduled = schedule_plan_ctes(context.source.volatility, plan)?;
-        for cte in scheduled.iter().filter(|cte| cte.deferred) {
-            ctes.insert_deferred(cte.plan.clone());
-        }
         let filters = context.cte_filters.output_filters(plan, ctes)?;
-        materialize_statement_ctes(
+        install_statement_ctes(
             context.source.ctes,
             &plan.ctes,
-            scheduled
-                .into_iter()
-                .filter(|cte| !cte.deferred)
-                .map(|cte| cte.plan)
-                .collect(),
+            scheduled,
             || primary_query_cte_references(plan),
             params,
             ctes,

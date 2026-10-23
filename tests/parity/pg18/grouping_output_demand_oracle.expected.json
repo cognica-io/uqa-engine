@@ -1,0 +1,302 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY x) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "alias"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY 1) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "ordinal"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY v+1) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "expression"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY GROUPING SETS ((x),())) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "sets"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY ROLLUP(x)) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "rollup"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY CUBE(x)) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "id": "cube"
+    },
+    {
+      "sql": "WITH s AS (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY x) SELECT count(*) AS n FROM s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "cte"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY x) s CROSS JOIN (VALUES(1),(2)) q(a)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "id": "joined"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT 1/0 AS x FROM (VALUES(1),(2),(2)) t(x) GROUP BY x) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "input_precedence"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT 1/0 AS unused,v AS x FROM (VALUES(1),(2),(2)) t(v) GROUP BY x) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "unused_output"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT 10/v AS x FROM (VALUES(2),(0)) t(v) GROUP BY x) s",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "alias_error"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v+1 AS x FROM (SELECT 1 AS v WHERE false) t GROUP BY x) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "empty"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "2754ff56a8e6e1ee3f2f67337314c0e4e442dc70aba2413bd1cb39a5d0de139d",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}

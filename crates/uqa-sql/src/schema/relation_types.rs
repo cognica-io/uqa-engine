@@ -4,25 +4,38 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Named whole-row identities belong to a relation scope, including empty rows.
+//! Whole-row namespaces survive empty rows independently of named type identity.
 
 use super::{Arc, ColumnIdentity, ColumnType, HashMap, RowSchema};
 use crate::SQLError;
 
-/// Empty scopes allocate no map; copies of a retained scope share its identities.
+/// Absent namespaces allocate no map; copies of a retained scope share its identities.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(super) struct RelationRowTypes(Option<Arc<NamedRows>>);
+pub(super) struct RelationRowTypes(Option<Arc<RelationRows>>);
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct NamedRows {
-    types: HashMap<Box<str>, ColumnType>,
+struct RelationRows {
+    types: HashMap<Box<str>, Option<ColumnType>>,
     /// The complete local row denotes this one source. A join or an outer-only namespace has no such identity.
     source: Option<Box<str>>,
 }
 
 impl RelationRowTypes {
     pub(super) fn get(&self, qualifier: &str) -> Option<&ColumnType> {
-        self.0.as_ref()?.types.get(qualifier)
+        self.0.as_ref()?.types.get(qualifier)?.as_ref()
+    }
+
+    pub(super) fn contains(&self, qualifier: &str) -> bool {
+        self.0
+            .as_ref()
+            .is_some_and(|rows| rows.types.contains_key(qualifier))
+    }
+
+    pub(super) fn anonymous(qualifier: &str) -> Self {
+        let mut result = Self::default();
+        result.insert(qualifier, None);
+        Arc::make_mut(result.0.as_mut().unwrap()).source = Some(qualifier.into());
+        result
     }
 
     pub(super) fn qualifiers(&self) -> impl Iterator<Item = &str> {
@@ -31,18 +44,27 @@ impl RelationRowTypes {
             .flat_map(|rows| rows.types.keys().map(std::convert::AsRef::as_ref))
     }
 
-    fn insert(&mut self, qualifier: &str, ty: ColumnType) {
-        let rows = self.0.get_or_insert_with(|| Arc::new(NamedRows::default()));
+    fn insert(&mut self, qualifier: &str, ty: Option<ColumnType>) {
+        let rows = self
+            .0
+            .get_or_insert_with(|| Arc::new(RelationRows::default()));
         Arc::make_mut(rows).types.insert(qualifier.into(), ty);
     }
 
     /// An alias of one retained relation keeps that relation's named type. A boundary over several relations produces an anonymous row.
     pub(super) fn requalified(&self, input: &RowSchema, qualifier: &str) -> Self {
+        let anonymous = || {
+            if input.is_empty() {
+                Self::anonymous(qualifier)
+            } else {
+                Self::default()
+            }
+        };
         let Some(rows) = self.0.as_ref() else {
-            return Self::default();
+            return anonymous();
         };
         let Some(source) = rows.source.as_deref() else {
-            return Self::default();
+            return anonymous();
         };
         if input
             .identities()
@@ -52,7 +74,7 @@ impl RelationRowTypes {
                 input.wildcard_position_visible(position) && column.qualifier() != Some(source)
             })
         {
-            return Self::default();
+            return anonymous();
         }
         let mut result = Self::default();
         result.insert(qualifier, rows.types[source].clone());
@@ -98,6 +120,7 @@ impl RowSchema {
             .chain(self.index.aliases.keys())
             .filter_map(ColumnIdentity::qualifier)
             .chain(self.index.cold.row_types.qualifiers())
+            .chain(self.whole_row_presences().map(|(qualifier, _)| qualifier))
     }
 
     /// Retain a relation's actual named composite identity without adding an ordinary column or a physical value slot. The existing source namespace must belong to that relation; a zero-column relation acquires its namespace here.
@@ -114,7 +137,7 @@ impl RowSchema {
             ));
         }
         let rows = &mut Arc::make_mut(&mut self.index).cold.row_types;
-        rows.insert(qualifier, ty);
+        rows.insert(qualifier, Some(ty));
         let rows = Arc::make_mut(rows.0.as_mut().unwrap());
         rows.source = (rows.types.len() == 1).then(|| qualifier.into());
         Ok(self)

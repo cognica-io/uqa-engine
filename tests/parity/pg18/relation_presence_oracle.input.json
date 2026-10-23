@@ -1,0 +1,136 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "left_absent",
+      "sql": "SELECT ROW(l)::text AS l,ROW(r)::text AS r,count(r) OVER() AS n FROM (VALUES(1))l(k) LEFT JOIN (VALUES(2,NULL::int))r(k,z) ON FALSE"
+    },
+    {
+      "id": "left_present_null",
+      "sql": "SELECT ROW(l)::text AS l,ROW(r)::text AS r,count(r) OVER() AS n FROM (VALUES(1))l(k) LEFT JOIN (VALUES(NULL::int,NULL::int))r(k,z) ON TRUE"
+    },
+    {
+      "id": "right_absent",
+      "sql": "SELECT ROW(l)::text AS l,ROW(r)::text AS r,count(l) OVER() AS n FROM (VALUES(1,NULL::int))l(k,z) RIGHT JOIN (VALUES(2))r(k) ON FALSE"
+    },
+    {
+      "id": "right_present_null",
+      "sql": "SELECT ROW(l)::text AS l,ROW(r)::text AS r,count(l) OVER() AS n FROM (VALUES(NULL::int,NULL::int))l(k,z) RIGHT JOIN (VALUES(2))r(k) ON TRUE"
+    },
+    {
+      "id": "full",
+      "sql": "SELECT ROW(l)::text AS l,ROW(r)::text AS r,count(l) OVER() AS ln,count(r) OVER() AS rn FROM (VALUES(1),(2))l(k) FULL JOIN (VALUES(2),(3))r(k) USING(k) ORDER BY k"
+    },
+    {
+      "id": "left_using",
+      "sql": "SELECT k,ROW(l)::text AS l,ROW(r)::text AS r FROM (VALUES(1),(2))l(k) LEFT JOIN (VALUES(2))r(k) USING(k) ORDER BY k"
+    },
+    {
+      "id": "right_using",
+      "sql": "SELECT k,ROW(l)::text AS l,ROW(r)::text AS r FROM (VALUES(1))l(k) RIGHT JOIN (VALUES(1),(2))r(k) USING(k) ORDER BY k"
+    },
+    {
+      "id": "lateral_absent",
+      "sql": "SELECT k,ROW(r)::text AS r,count(r) OVER() AS n FROM (VALUES(1),(2))l(k) LEFT JOIN LATERAL(SELECT k AS z WHERE k=2)r ON TRUE ORDER BY k"
+    },
+    {
+      "id": "lateral_present_null",
+      "sql": "SELECT k,ROW(r)::text AS r,count(r) OVER() AS n FROM (VALUES(1),(2))l(k) LEFT JOIN LATERAL(SELECT NULL::int AS z WHERE k=2)r ON TRUE ORDER BY k"
+    },
+    {
+      "id": "lateral_on_rejection",
+      "sql": "SELECT k,ROW(r)::text AS r FROM (VALUES(1),(2))l(k) LEFT JOIN LATERAL(SELECT k AS z)r ON FALSE ORDER BY k"
+    },
+    {
+      "id": "correlated_absent",
+      "sql": "SELECT ROW(r)::text AS direct,(SELECT ROW(r)::text) AS nested FROM (VALUES(1))l(k) LEFT JOIN (VALUES(2))r(z) ON FALSE"
+    },
+    {
+      "id": "correlated_present_null",
+      "sql": "SELECT ROW(r)::text AS direct,(SELECT ROW(r)::text) AS nested FROM (VALUES(1))l(k) LEFT JOIN (VALUES(NULL::int))r(z) ON TRUE"
+    },
+    {
+      "id": "nested_join_absent",
+      "sql": "SELECT ROW(a)::text AS a,ROW(b)::text AS b,ROW(c)::text AS c FROM (VALUES(1))a(k) LEFT JOIN ((VALUES(2))b(z) LEFT JOIN (VALUES(3))c(w) ON FALSE) ON FALSE"
+    },
+    {
+      "id": "nested_join_present",
+      "sql": "SELECT ROW(a)::text AS a,ROW(b)::text AS b,ROW(c)::text AS c FROM (VALUES(1))a(k) LEFT JOIN ((VALUES(NULL::int))b(z) LEFT JOIN (VALUES(3))c(w) ON FALSE) ON TRUE"
+    },
+    {
+      "id": "join_alias_present",
+      "sql": "SELECT ROW(j)::text AS j,count(j) OVER() AS n FROM ((VALUES(NULL::int))l(k) LEFT JOIN (VALUES(2))r(z) ON FALSE)j"
+    },
+    {
+      "id": "join_alias_absent",
+      "sql": "SELECT ROW(j)::text AS j,count(j) OVER() AS n FROM (VALUES(1))x(a) LEFT JOIN ((VALUES(NULL::int))l(k) LEFT JOIN (VALUES(2))r(z) ON FALSE)j ON FALSE"
+    },
+    {
+      "id": "derived_present",
+      "sql": "SELECT ROW(s)::text AS s,count(s) OVER() AS n FROM (SELECT r.z FROM (VALUES(1))l(k) LEFT JOIN (VALUES(2))r(z) ON FALSE)s"
+    },
+    {
+      "id": "derived_absent",
+      "sql": "SELECT ROW(s)::text AS s,count(s) OVER() AS n FROM (VALUES(1))t(k) LEFT JOIN (SELECT r.z FROM (VALUES(1))l(k) LEFT JOIN (VALUES(2))r(z) ON FALSE)s ON FALSE"
+    },
+    {
+      "id": "expanded_and_nested",
+      "sql": "SELECT ROW(r.*)::text AS expanded,ROW(r)::text AS nested FROM (VALUES(1))l(k) LEFT JOIN (VALUES(2,NULL::int))r(k,z) ON FALSE"
+    },
+    {
+      "id": "null_predicates",
+      "sql": "SELECT l.k,r IS NULL AS all_null,r IS NOT NULL AS all_nonnull,ROW(r) IS NULL AS datum_null,ROW(r) IS NOT NULL AS datum_present FROM (VALUES(1),(2))l(k) LEFT JOIN (VALUES(2,NULL::int))r(k,z) ON l.k=r.k ORDER BY l.k"
+    },
+    {
+      "id": "coalesced_record",
+      "sql": "SELECT l.k,coalesce(r,ROW(8,9))::text AS r FROM (VALUES(1),(2))l(k) LEFT JOIN (VALUES(2,NULL::int))r(k,z) ON l.k=r.k ORDER BY l.k"
+    },
+    {
+      "id": "aggregate_records",
+      "sql": "SELECT count(r) AS n,count(r.*) AS star_n,count(DISTINCT r) AS distinct_n FROM (VALUES(1),(2))l(k) LEFT JOIN (VALUES(2,NULL::int))r(k,z) ON l.k=r.k"
+    },
+    {
+      "id": "materialized",
+      "sql": "WITH q AS MATERIALIZED(SELECT l.k,r AS r FROM (VALUES(1),(2))l(k) LEFT JOIN (VALUES(2,NULL::int))r(k,z) ON l.k=r.k) SELECT k,r::text AS r,count(r) OVER() AS n FROM q ORDER BY k"
+    },
+    {
+      "id": "create_empty",
+      "sql": "CREATE TABLE presence_empty()"
+    },
+    {
+      "id": "insert_empty",
+      "sql": "INSERT INTO presence_empty DEFAULT VALUES"
+    },
+    {
+      "id": "empty_relation_present",
+      "sql": "SELECT ROW(e)::text AS e,count(e) OVER() AS n FROM (VALUES(1))l(k) LEFT JOIN presence_empty e ON TRUE"
+    },
+    {
+      "id": "empty_relation_absent",
+      "sql": "SELECT ROW(e)::text AS e,count(e) OVER() AS n FROM (VALUES(1))l(k) LEFT JOIN presence_empty e ON FALSE"
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW relation_presence_view AS SELECT l.k,ROW(r)::text AS r,count(r) OVER() AS n FROM (VALUES(1),(2))l(k) LEFT JOIN (VALUES(2,NULL::int))r(k,z) ON l.k=r.k"
+    },
+    {
+      "id": "read_view",
+      "sql": "SELECT * FROM relation_presence_view ORDER BY k"
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE relation_presence_plan(int) AS SELECT l.k,ROW(r)::text AS r,count(r) OVER() AS n FROM (VALUES(1),(2))l(k) LEFT JOIN (VALUES($1,NULL::int))r(k,z) ON l.k=r.k ORDER BY l.k"
+    },
+    {
+      "id": "execute",
+      "sql": "EXECUTE relation_presence_plan(2)"
+    },
+    {
+      "id": "deallocate",
+      "sql": "DEALLOCATE relation_presence_plan"
+    }
+  ]
+}

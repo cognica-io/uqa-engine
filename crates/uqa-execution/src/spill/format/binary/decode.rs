@@ -133,7 +133,12 @@ pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
     })
     .map_err(|error| spill_error(format!("invalid spill schema: {error}")))?;
     let row_metadata = reader.read_u64("row metadata flags")?;
-    if row_metadata & !(ROW_METADATA_LOCK_ORIGINS | u64::from(super::collations::FLAG)) != 0 {
+    if row_metadata
+        & !(ROW_METADATA_LOCK_ORIGINS
+            | u64::from(super::collations::FLAG)
+            | u64::from(super::presence::FLAG))
+        != 0
+    {
         return Err(spill_error(format!(
             "unsupported row metadata flags {row_metadata:#x}"
         )));
@@ -144,6 +149,9 @@ pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
             .saturating_add(alias_count)
             .saturating_add(internal_count);
         schema = super::collations::decode(&mut reader, schema, binding_count)?;
+    }
+    if row_metadata & u64::from(super::presence::FLAG) != 0 {
+        schema = super::presence::decode(&mut reader, schema)?;
     }
 
     let row_count = reader.read_count("batch row count", 8)?;
@@ -254,7 +262,7 @@ impl<'a> BinaryReader<'a> {
         Ok(value)
     }
 
-    fn read_string(&mut self, description: &str) -> ExecResult<String> {
+    pub(super) fn read_string(&mut self, description: &str) -> ExecResult<String> {
         let bytes = self.read_bytes(description)?;
         String::from_utf8(bytes.to_vec())
             .map_err(|error| spill_error(format!("invalid UTF-8 in {description}: {error}")))

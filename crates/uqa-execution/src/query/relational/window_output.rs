@@ -65,11 +65,7 @@ pub(super) fn attach_window_output<'a, S: Clone + 'static>(
     }
     let window = WindowOutput {
         work_mem_bytes: physical_work_mem_bytes(execution.runtime)?,
-        schema: plan.output_schema(
-            execution.context.catalog,
-            operator.row_schema(),
-            execution.params,
-        )?,
+        schema: plan.output_schema(type_resolver, operator.row_schema(), execution.params)?,
         plan,
         keys,
     };

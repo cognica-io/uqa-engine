@@ -6,7 +6,7 @@
 //! Physical assembly for tables, CTEs, views, catalogs, and foreign tables.
 
 use super::{
-    apply_propagated_view_lock, attach_qualifier_filter, combine_filters,
+    apply_propagated_view_lock, attach_qualifier_filter,
     execute_view_plan_output_with_parent_cache, qualifier_filter, qualifier_for,
     qualify_source_operator_with_columns, query_cte_names, query_output_shared,
     try_build_streaming_subquery_operator, ColumnPrune, CteScope, PhysicalOperator,
@@ -83,8 +83,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
         } => {
             let qualifier = qualifier_for(qualifier, alias.as_deref());
             if let Some(materialized) = ctes.materialized_for_scan(name) {
-                let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(crate::SharedSpillScan::new(materialized));
+                let scan: Box<dyn PhysicalOperator + 'a> = materialized.into_operator();
                 if let Some(visible) = uqa_sql::semantics::cte_reference_name(name)
                     .and_then(|name| ctes.recursive_control_width(&name))
                 {
@@ -120,7 +119,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 ));
             }
 
-            if let Some(mut plan) = ctes.deferred_for_scan(name) {
+            if let Some((mut plan, mut definition_scope)) = ctes.take_deferred_input(name) {
                 if let (Some(query), Some(prepared)) =
                     (plan.body.query_mut(), executable_query.as_deref())
                 {
@@ -136,12 +135,32 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         &aliases,
                         projection,
                         params,
-                        ctes,
-                        ctes.row_lock_outer_row().map(|row| &row.schema),
+                        &definition_scope,
+                        definition_scope.row_lock_outer_row().map(|row| &row.schema),
                     )?;
                 }
+                let specialized = plan
+                    .body
+                    .query()
+                    .map(|query| {
+                        super::output_filter::specialize_source_filter(
+                            context,
+                            query,
+                            &qualifier,
+                            &output_aliases(&plan.columns, column_aliases),
+                            filters,
+                        )
+                    })
+                    .transpose()?
+                    .flatten();
+                let filters = if let Some(specialized) = specialized {
+                    *plan.body.query_mut().expect("query specialization") = specialized;
+                    None
+                } else {
+                    filters
+                };
                 let streamed = {
-                    let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
+                    let mut scoped_ctes = definition_scope.enter_lock_identity_emission(false);
                     match plan.body.query() {
                         Some(query)
                             if scoped_ctes.streams_command_progress()
@@ -150,12 +169,10 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                                     query,
                                 )? =>
                         {
-                            try_build_streaming_subquery_operator(
-                                context,
-                                query,
-                                params,
-                                &mut scoped_ctes,
-                            )?
+                            match try_build_streaming_subquery_operator(context, query, params, &mut scoped_ctes)? {
+                                Some(operator) => Some(operator),
+                                None => context.ctes.queries.retained_query(query, params, &scoped_ctes)?,
+                            }
                         }
                         _ => None,
                     }
@@ -181,7 +198,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     && !plan.body.modifies_data()
                 {
                     let output = {
-                        let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
+                        let mut scoped_ctes = definition_scope.enter_lock_identity_emission(false);
                         context.ctes.queries.execute_query(
                             plan.body.query().ok_or_else(|| {
                                 SQLError::Internal(
@@ -196,22 +213,26 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         context.ctes,
                         output,
                         &plan.columns,
-                    )?
+                    )
+                    .map(crate::query::cte::rows::CteRows::Complete)?
                 } else {
                     crate::query::cte::materialize_plan_ctes(
                         context.ctes,
                         std::slice::from_ref(&plan),
                         params,
-                        ctes,
+                        &mut definition_scope,
                     )?;
-                    ctes.materialized_for_scan(name).ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "deferred CTE `{name}` did not produce a materialized input"
-                        ))
-                    })?
+                    let rows = definition_scope
+                        .materialized_for_scan(name)
+                        .ok_or_else(|| {
+                            SQLError::Internal(format!(
+                                "deferred CTE `{name}` did not produce a materialized input"
+                            ))
+                        })?;
+                    ctes.insert_rows(plan.name.clone(), rows.clone());
+                    rows
                 };
-                let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(crate::SharedSpillScan::new(materialized));
+                let scan: Box<dyn PhysicalOperator + 'a> = materialized.into_operator();
                 let source_columns = scan.schema().to_vec();
                 let aliases = table_source_aliases(&source_columns, &[], column_aliases);
                 let operator = qualify_source_operator_with_columns(
@@ -296,23 +317,13 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 // During a tuple-local recheck, a view named as the lock target pins every base scan of its storage inside this subtree to the candidate's tuples.
                 let mut recheck_scope = ctes.enter_recheck_storage_pins(&qualifier);
                 let ctes: &mut CteScope<S> = &mut recheck_scope;
-                let specialized_plan = column_aliases
-                    .is_empty()
-                    .then_some(filters)
-                    .flatten()
-                    .and_then(|filters| filters.get(&qualifier))
-                    .filter(|filters| !filters.is_empty())
-                    .and_then(|filters| combine_filters(filters.iter().cloned()))
-                    .map(|filter| {
-                        context.ctes.rewrites.push_output_filter(
-                            plan,
-                            &qualifier,
-                            &filter,
-                            (!output_columns.is_empty()).then_some(output_columns),
-                        )
-                    })
-                    .transpose()?
-                    .flatten();
+                let specialized_plan = super::output_filter::specialize_source_filter(
+                    context,
+                    plan,
+                    &qualifier,
+                    &output_aliases(output_columns, column_aliases),
+                    filters,
+                )?;
                 // Successful specialization applies this complete predicate inside the view; retrieval leaves cannot be evaluated again as scalar functions.
                 let filters = if specialized_plan.is_some() {
                     None
@@ -329,6 +340,15 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .or(specialized_plan.as_ref())
                     .unwrap_or(plan);
                 let mut execution_plan = execution_plan.clone();
+                if executable_query.is_none() {
+                    crate::query::binding::restore_query_layouts(
+                        context.ctes.routines,
+                        &mut execution_plan,
+                        params,
+                        ctes,
+                        ctes.row_lock_outer_row().map(|row| &row.schema),
+                    )?;
+                }
                 if let Some(projection) = prune
                     .and_then(|prune| prune.get(&qualifier))
                     .filter(|_| executable_query.is_none())
@@ -353,9 +373,19 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         .optimize_retained_query(&execution_plan)?
                 };
                 let execution_plan = &optimized;
-                if let Some(operator) =
-                    try_build_streaming_subquery_operator(context, execution_plan, params, ctes)?
-                {
+                let streamed = match try_build_streaming_subquery_operator(
+                    context,
+                    execution_plan,
+                    params,
+                    ctes,
+                )? {
+                    Some(operator) => Some(operator),
+                    None => context
+                        .ctes
+                        .queries
+                        .retained_query(execution_plan, params, ctes)?,
+                };
+                if let Some(operator) = streamed {
                     let source_columns = operator.schema().to_vec();
                     let aliases =
                         table_source_aliases(&source_columns, output_columns, column_aliases);

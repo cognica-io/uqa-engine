@@ -267,7 +267,7 @@ fn expand_qualified_source_stars(
             continue;
         };
         let layout = source.qualified_star_position_layout(qualifier);
-        if layout.is_empty() {
+        if layout.is_empty() && !source.has_qualifier(qualifier) {
             return Err(SQLError::UnknownTable(qualifier.to_string()));
         }
         for (column, logical, _, _) in layout {
@@ -454,5 +454,24 @@ pub(super) fn preserve_view_rule_returning(
             aliases: aliases.clone(),
             subqueries: subqueries.to_vec(),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_returning_source_stars_keep_relation_scope() {
+        let source = RowSchema::with_qualified_types("q", Vec::new(), Vec::new());
+        let star = |qualifier: &str| ProjectionPlan {
+            expr: ScalarExpr::QualifiedStar(qualifier.into()),
+            alias: None,
+        };
+        assert!(expand_qualified_source_stars(vec![star("q")], &source, 2)
+            .unwrap()
+            .is_empty());
+        let error = expand_qualified_source_stars(vec![star("missing")], &source, 2).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42P01"));
     }
 }

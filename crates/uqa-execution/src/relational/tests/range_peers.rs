@@ -146,13 +146,22 @@ fn with_ties_close_releases_boundary_and_types_even_when_child_close_fails() {
                         limit.next()
                     }
                 };
-                if has_boundary {
-                    assert_eq!(
-                        next(&mut limit).unwrap().unwrap().rows.len(),
-                        if directional { 1 } else { 2 }
-                    );
+                let mut returned = 0;
+                while let Some(batch) = next(&mut limit).unwrap() {
+                    returned += batch.len();
                 }
-                assert!(next(&mut limit).unwrap().is_none());
+                assert_eq!(
+                    returned,
+                    if has_boundary {
+                        if directional {
+                            1
+                        } else {
+                            2
+                        }
+                    } else {
+                        0
+                    }
+                );
                 assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), opened);
                 let allocations = allocation_counter::measure(|| {
                     assert_eq!(limit.close().is_err(), fail_close);

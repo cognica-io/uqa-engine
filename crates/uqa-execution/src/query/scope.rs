@@ -18,6 +18,7 @@ use uqa_sql::plan::{CtePlan, QueryPlan};
 use uqa_sql::SQLError;
 
 mod cte;
+mod definitions;
 #[cfg(test)]
 mod retained_plans;
 mod row_locks;
@@ -30,8 +31,10 @@ use subqueries::ScalarSubqueryCacheEntry;
 
 #[derive(Clone)]
 pub struct CteScope<S: Clone = ()> {
-    pub rows: BTreeMap<String, crate::SharedSpill>,
+    pub rows: BTreeMap<String, crate::query::cte::rows::CteRows>,
     deferred_ctes: BTreeMap<String, Arc<CtePlan>>,
+    definition_scopes: BTreeMap<String, Arc<definitions::DefinitionBindings>>,
+    folded_ctes: BTreeSet<String>,
     pub non_returning_ctes: BTreeSet<String>,
     pub scalar_subqueries: Arc<[QueryPlan]>,
     pub lock_identities: LockIdentityOptions,
@@ -59,6 +62,8 @@ impl<S: Clone> Default for CteScope<S> {
         Self {
             rows: BTreeMap::new(),
             deferred_ctes: BTreeMap::new(),
+            definition_scopes: BTreeMap::new(),
+            folded_ctes: BTreeSet::new(),
             non_returning_ctes: BTreeSet::new(),
             scalar_subqueries: Arc::default(),
             lock_identities: LockIdentityOptions::default(),
