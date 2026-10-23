@@ -6,6 +6,7 @@
 
 //! Positional, column-oriented batches for public result transfer.
 
+#[cfg(test)]
 use crate::RowSchemaExecution;
 use std::collections::BTreeMap;
 
@@ -13,6 +14,9 @@ use uqa_core::Value;
 use uqa_sql::ResultRow;
 
 use crate::{Batch, RowSchema};
+
+#[cfg(test)]
+mod ownership_tests;
 
 /// Resolve repeated public labels to their distinct logical positions in order.
 pub(crate) fn result_column_positions(
@@ -63,10 +67,26 @@ impl ColumnarBatch {
     /// logical schema positions in order, so differently-valued duplicate
     /// columns remain distinct for wire and cursor consumers.
     pub fn from_batch(schema: &[String], batch: Batch) -> Self {
-        Self::from_borrowed_batch(schema, &batch)
+        let row_count = batch.rows.len();
+        let positions = result_column_positions(&batch.schema, schema);
+        let materializer = crate::batch::SelectedRowMaterializer::new(&batch.schema, &positions);
+        let mut columns = schema
+            .iter()
+            .map(|name| ColumnVector {
+                name: name.clone(),
+                values: vec![Value::Null; row_count],
+            })
+            .collect::<Vec<_>>();
+        for (index, row) in batch.rows.into_iter().enumerate() {
+            materializer.materialize(row, |output, value| {
+                columns[output].values[index] = value;
+            });
+        }
+        Self { columns, row_count }
     }
 
-    pub(crate) fn from_borrowed_batch(schema: &[String], batch: &Batch) -> Self {
+    #[cfg(test)]
+    fn from_borrowed_batch(schema: &[String], batch: &Batch) -> Self {
         let row_count = batch.rows.len();
         let positions = result_column_positions(&batch.schema, schema);
         let mut columns = schema

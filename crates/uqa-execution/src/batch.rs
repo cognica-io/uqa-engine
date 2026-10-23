@@ -29,8 +29,8 @@ mod row_lock_origins;
 mod schema_runtime;
 
 pub use batches::Batch;
-pub(crate) use materialization::ResultRowMaterializer;
 use materialization::RowMaterializer;
+pub(crate) use materialization::{ResultRowMaterializer, SelectedRowMaterializer};
 pub use owned_row::OwnedPhysicalRow;
 use physical_row::RowFragment;
 pub use physical_row::{PhysicalRow, RowProjectionValue};
