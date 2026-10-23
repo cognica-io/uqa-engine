@@ -7,7 +7,7 @@
 //! Selected document fields retain positional values without field-name maps.
 
 use uqa_core::{
-    memory::{Budgeted, BudgetedVec},
+    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation},
     Value,
 };
 
@@ -27,6 +27,12 @@ impl ProjectedDocumentFields {
     /// A missing field or position returns None; a stored NULL returns Some.
     pub fn get(&self, position: usize) -> Option<&Value> {
         self.values.get(*self.slots.get(position)?)
+    }
+
+    /// Mutate a present value through one position; every alias observes it.
+    /// The caller retains the producer allowance for any replacement payload.
+    pub fn get_mut(&mut self, position: usize) -> Option<&mut Value> {
+        self.values.get_mut(*self.slots.get(position)?)
     }
 
     pub fn len(&self) -> usize {
@@ -61,44 +67,93 @@ pub fn decode_legacy_document_text_slots_budgeted(
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<ProjectedDocumentFields>> {
     control.check()?;
-    let mut values = BudgetedVec::new(control.memory());
-    let mut slots = BudgetedVec::new(control.memory());
-    slots.reserve(fields.len())?;
-    for _ in fields {
-        slots.push(ABSENT)?;
+    let mut builder = ProjectedFieldsBuilder::new(fields, control.memory())?;
+    visit_legacy_fields(input, fields, control, &mut |name, value| {
+        builder.push(name, value).map_err(Into::into)
+    })?;
+    control.check()?;
+    Ok(builder.finish())
+}
+
+pub(crate) fn visit_legacy_fields(
+    input: &str,
+    fields: &[&str],
+    control: &StorageReadControl,
+    visitor: &mut dyn FnMut(&str, Budgeted<Value>) -> StorageBackendResult<()>,
+) -> StorageBackendResult<()> {
+    if !projected::visit(input, fields, control, visitor)? {
+        legacy::visit_fields(input, control, visitor)?;
     }
-    let mut payload = control.memory().empty_reservation();
-    let mut collect = |name: &str, value: Budgeted<Value>| {
-        let mut selected = fields
+    control.check()
+}
+
+/// Staging keeps per-value reservations so a duplicate stored name replaces
+/// its earlier payload without accumulating values or retaining unused keys.
+pub(crate) struct ProjectedFieldsBuilder<'a> {
+    fields: &'a [&'a str],
+    values: BudgetedVec<Value>,
+    slots: BudgetedVec<usize>,
+    payload_bytes: BudgetedVec<usize>,
+    payload: MemoryReservation,
+}
+
+impl<'a> ProjectedFieldsBuilder<'a> {
+    pub(crate) fn new(fields: &'a [&'a str], memory: &MemoryBudget) -> Result<Self, MemoryError> {
+        let mut slots = BudgetedVec::new(memory);
+        slots.reserve(fields.len())?;
+        for _ in fields {
+            slots.push(ABSENT)?;
+        }
+        Ok(Self {
+            fields,
+            values: BudgetedVec::new(memory),
+            slots,
+            payload_bytes: BudgetedVec::new(memory),
+            payload: memory.empty_reservation(),
+        })
+    }
+
+    pub(crate) fn push(&mut self, name: &str, value: Budgeted<Value>) -> Result<(), MemoryError> {
+        let mut selected = self
+            .fields
             .iter()
             .enumerate()
             .filter(|(_, field)| **field == name);
         let Some((first, _)) = selected.next() else {
             return Ok(());
         };
-        values.reserve(1)?;
-        let slot = values.len();
+        let previous = self.slots[first];
+        if previous != ABSENT {
+            let bytes = value.reserved_bytes();
+            let (value, memory) = value.into_parts();
+            self.values[previous] = value;
+            drop(self.payload.split(self.payload_bytes[previous]));
+            self.payload_bytes[previous] = bytes;
+            self.payload.absorb(memory);
+            return Ok(());
+        }
+        self.values.reserve(1)?;
+        self.payload_bytes.reserve(1)?;
+        let slot = self.values.len();
+        let bytes = value.reserved_bytes();
         let (value, memory) = value.into_parts();
-        payload.absorb(memory);
-        values.push(value)?;
-        slots[first] = slot;
+        self.payload.absorb(memory);
+        self.values.push(value)?;
+        self.payload_bytes.push(bytes)?;
+        self.slots[first] = slot;
         for (position, _) in selected {
-            slots[position] = slot;
+            self.slots[position] = slot;
         }
         Ok(())
-    };
-    if !projected::visit(input, fields, control, &mut collect)? {
-        legacy::visit_fields(input, control, &mut collect)?;
     }
-    control.check()?;
-    let (values, value_memory) = values.into_parts();
-    let (slots, slot_memory) = slots.into_parts();
-    payload.absorb(value_memory);
-    payload.absorb(slot_memory);
-    Ok(Budgeted::new(
-        ProjectedDocumentFields { values, slots },
-        payload,
-    ))
+
+    pub(crate) fn finish(mut self) -> Budgeted<ProjectedDocumentFields> {
+        let (values, value_memory) = self.values.into_parts();
+        let (slots, slot_memory) = self.slots.into_parts();
+        self.payload.absorb(value_memory);
+        self.payload.absorb(slot_memory);
+        Budgeted::new(ProjectedDocumentFields { values, slots }, self.payload)
+    }
 }
 
 #[cfg(test)]

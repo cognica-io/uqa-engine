@@ -7,16 +7,16 @@
 //! Borrowed callbacks keep decoded payload leases after leaving the provider's fixed read scope.
 
 use super::{DocId, KeyValueDocumentStore, StorageBackendResult, Value};
+use crate::document_store::decoding::ProjectedDocumentFields;
 use crate::key_value::codec::{
-    decode_retained_stored_document_value, document_key_prefix_controlled, other_error,
+    decode_stored_document_slots, document_key_prefix_controlled, other_error,
 };
-use crate::RetainedStoredDocument;
-use uqa_core::memory::BudgetedVec;
+use uqa_core::memory::{Budgeted, BudgetedVec};
 
 struct Row {
     id: DocId,
     present: bool,
-    document: Option<RetainedStoredDocument>,
+    document: Option<Budgeted<ProjectedDocumentFields>>,
 }
 
 impl KeyValueDocumentStore {
@@ -68,7 +68,7 @@ impl KeyValueDocumentStore {
                     }
                     rows.reserve(1)?;
                     let document = value
-                        .map(|value| decode_retained_stored_document_value(value, control))
+                        .map(|value| decode_stored_document_slots(value, fields, control))
                         .transpose()?;
                     rows.push(Row {
                         id,
@@ -111,11 +111,11 @@ impl KeyValueDocumentStore {
                 .expect("captured id");
             let row = &rows[position];
             projected.clear();
-            for field in fields {
+            for position in 0..fields.len() {
                 projected.push(
                     row.document
                         .as_ref()
-                        .and_then(|document| document.fields().get(*field))
+                        .and_then(|document| document.get(position))
                         .unwrap_or(&Value::Null),
                 )?;
             }

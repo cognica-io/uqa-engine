@@ -17,6 +17,7 @@ pub use positional::{
     decode_legacy_document_slots_budgeted, decode_legacy_document_text_slots_budgeted,
     ProjectedDocumentFields,
 };
+pub(crate) use positional::{visit_legacy_fields, ProjectedFieldsBuilder};
 pub(crate) mod spans;
 
 /// Decode historical JSON document fields without migrating tuple metadata. Root keys remain ordinary field names; nested values preserve historical tagged values, byte-array preference and JSON normalization. The returned lease covers decoded payloads and live field entries under the supplied allowance.

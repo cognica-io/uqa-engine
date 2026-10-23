@@ -2,6 +2,71 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "visited_root_fields_borrow_names_and_release_discarded_payloads",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/decoding/root/tests.rs",
+      "capability": "Borrowed JSON root field names",
+      "workload": "Visit a 40KB ordinary field name and repeated escaped and plain names under 2KB.",
+      "invariant": "Names borrow validated input when unescaped, every occurrence is visited in input order, total allocation stays below 2KB and leases release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "visited_root_fields_keep_conversion_order_and_duplicate_semantics",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/decoding/root/tests.rs",
+      "capability": "JSON root visitor observations",
+      "workload": "Decode nested tagged values, reserved names, duplicate keys, early malformed values and later syntax errors.",
+      "invariant": "Collected fields and exact diagnostic order equal complete field decoding; nested values retain normal tagged semantics and all leases release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "visited_root_cancellation_and_quota_preserve_unrelated_leases",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/decoding/root/tests.rs",
+      "capability": "JSON visitor cancellation and accounting",
+      "workload": "Cancel from the last callback and exhaust quota before a large value can be delivered.",
+      "invariant": "Cancellation is checked after the final visit; unadmitted values are never delivered and unrelated leases remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "positional_durable_formats_preserve_values_metadata_and_error_order",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/codec/positional/tests.rs",
+      "capability": "Durable positional document observations",
+      "workload": "Compare legacy, V1 and V2 envelopes with duplicates, tags, metadata, missing fields and malformed input.",
+      "invariant": "Each positional observation and exact error matches complete retained decoding; duplicate requested names share one value and all leases release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "positional_modern_fields_do_not_retain_names_or_overwritten_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/codec/positional/tests.rs",
+      "capability": "Bounded modern positional decoding",
+      "workload": "Select a 32KB name in V1 and V2 and replace the same 2KB payload 32 times.",
+      "invariant": "Name projection allocates less than 4KB; duplicate stored names retain only the last value, release old payload leases and preserve missing versus NULL.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "positional_decoding_shares_duplicate_fields_and_omits_field_name_allocations",
