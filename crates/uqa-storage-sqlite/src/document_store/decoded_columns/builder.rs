@@ -8,7 +8,7 @@
 
 use uqa_core::memory::{BudgetedVec, MemoryReservation};
 use uqa_core::Value;
-use uqa_storage::document_store::Document;
+use uqa_storage::document_store::decoding::ProjectedDocumentFields;
 
 use super::{grow, scalar_bytes, DecodedColumns};
 use crate::mvcc::native::NativeRecordOwner;
@@ -18,6 +18,7 @@ pub(crate) struct ColumnBuilder {
     pub(super) owner: NativeRecordOwner,
     pub(super) generation: i64,
     pub(super) fields: Vec<String>,
+    source_positions: BudgetedVec<usize>,
     /// The last document collected, where the scan's next page must continue.
     last: Option<i64>,
     pub(super) ids: BudgetedVec<i64>,
@@ -33,11 +34,13 @@ impl ColumnBuilder {
         owner: NativeRecordOwner,
         generation: i64,
         fields: &[&str],
-    ) -> Self {
+    ) -> Option<Self> {
         cache.retire_stale(table, owner, generation);
         let mut distinct: Vec<String> = Vec::with_capacity(fields.len());
-        for field in fields {
+        let mut source_positions = BudgetedVec::new(cache.budget());
+        for (position, field) in fields.iter().enumerate() {
             if !distinct.iter().any(|name| name == field) {
+                source_positions.push(position).ok()?;
                 distinct.push((*field).to_owned());
             }
         }
@@ -45,15 +48,26 @@ impl ColumnBuilder {
             .iter()
             .map(|_| BudgetedVec::new(cache.budget()))
             .collect();
-        Self {
+        Some(Self {
             table: table.to_owned(),
             owner,
             generation,
             fields: distinct,
+            source_positions,
             last: None,
             ids: BudgetedVec::new(cache.budget()),
             columns,
             strings: cache.budget().empty_reservation(),
+        })
+    }
+
+    /// A resumed page may request the same fields in a different order.
+    pub(super) fn bind_projection(&mut self, fields: &[&str]) {
+        for (name, position) in self.fields.iter().zip(self.source_positions.iter_mut()) {
+            *position = fields
+                .iter()
+                .position(|field| *field == name)
+                .expect("resumed projection contains every cached field");
         }
     }
 
@@ -81,12 +95,19 @@ impl ColumnBuilder {
     }
 
     /// Move the selected values out of one decoded row after its visitor returned. Returns false, abandoning the build, when a value is not a cacheable scalar or the allowance cannot hold the row even after evicting other tables.
-    pub(crate) fn push(&mut self, cache: &DecodedColumns, id: i64, row: &mut Document) -> bool {
+    pub(crate) fn push(
+        &mut self,
+        cache: &DecodedColumns,
+        id: i64,
+        row: &mut ProjectedDocumentFields,
+    ) -> bool {
         if !self.reserve_row(cache) {
             return false;
         }
-        for (field, column) in self.fields.iter().zip(&mut self.columns) {
-            let value = row.remove(field).unwrap_or(Value::Null);
+        for (position, column) in self.source_positions.iter().zip(&mut self.columns) {
+            let value = row
+                .get_mut(*position)
+                .map_or(Value::Null, |value| std::mem::replace(value, Value::Null));
             let Some(bytes) = scalar_bytes(&value) else {
                 return false;
             };

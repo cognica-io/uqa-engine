@@ -10,13 +10,15 @@ use rusqlite::types::ValueRef;
 use uqa_core::{memory::BudgetedSmallVec, DocId, Value};
 use uqa_storage::mvcc::VersionError;
 
-use super::{controlled, sqlite_doc_id, Decoded, Family, NativeDocumentRead, SQLiteResult};
+use super::positional::{has_external_values, Projected};
+use super::{sqlite_doc_id, Family, NativeDocumentRead, SQLiteResult};
 use crate::document_store::decoded_columns::{CachedColumns, ColumnBuilder};
 use crate::document_store::document_id_from_sqlite;
 use crate::mvcc::native::{decode_record, NativeRecordIdentity, PrivateRows};
+use uqa_storage::document_store::decoding::ProjectedDocumentFields;
 
 /// The rows one latest-commit read visited, and the row that ended it to hydrate fields stored outside its body.
-type LatestSegment = (usize, Option<(DocId, Decoded)>);
+type LatestSegment = (usize, Option<(DocId, Projected)>);
 
 impl NativeDocumentRead<'_> {
     pub(in crate::document_store) fn visit_borrowed_fields(
@@ -49,8 +51,8 @@ impl NativeDocumentRead<'_> {
                 return Ok(visited);
             };
             // Compound reads and the callback run outside the physical read; the scan resumes in a new one.
-            let row = self.hydrate_decoded(id, row, Some(fields))?;
-            let more = self.visit_decoded_fields(id, row.fields(), fields, visitor)?;
+            let row = self.hydrate_positional(id, row, fields)?;
+            let more = self.visit_decoded_fields(id, &row, visitor)?;
             visited += 1;
             self.snapshot.control.check()?;
             self.control.check()?;
@@ -66,7 +68,7 @@ impl NativeDocumentRead<'_> {
             .transpose()?;
         let mut more = true;
         while more && visited < limit {
-            let mut pending: Option<(DocId, Decoded)> = None;
+            let mut pending: Option<(DocId, Projected)> = None;
             self.snapshot.view.visit_prefix(
                 &prefix,
                 after_key.as_deref(),
@@ -85,18 +87,14 @@ impl NativeDocumentRead<'_> {
                     let id = document_id_from_sqlite(id)
                         .map_err(|error| VersionError::Storage(error.into()))?;
                     let row = self
-                        .decode_body_with_projection(id, &row, Some(fields))
+                        .decode_positional_body(id, &row, fields)
                         .map_err(|error| VersionError::Storage(error.into()))?;
-                    if fields.iter().any(|field| {
-                        row.fields
-                            .get(*field)
-                            .is_some_and(|value| controlled::marker(value).is_some())
-                    }) {
+                    if has_external_values(&row) {
                         pending = Some((id, row));
                         return Ok(false);
                     }
                     more = self
-                        .visit_decoded_fields(id, &row.fields, fields, visitor)
+                        .visit_decoded_fields(id, &row, visitor)
                         .map_err(|error| VersionError::Storage(error.into()))?;
                     visited += 1;
                     self.snapshot.control.cancellation().check()?;
@@ -108,8 +106,8 @@ impl NativeDocumentRead<'_> {
                 break;
             };
             // Compound reads and the callback now run outside the physical cursor. The immutable record boundary remains unchanged.
-            let row = self.hydrate_decoded(id, row, Some(fields))?;
-            more = self.visit_decoded_fields(id, row.fields(), fields, visitor)?;
+            let row = self.hydrate_positional(id, row, fields)?;
+            more = self.visit_decoded_fields(id, &row, visitor)?;
             visited += 1;
             self.snapshot.control.check()?;
             self.control.check()?;
@@ -149,16 +147,12 @@ impl NativeDocumentRead<'_> {
                         VersionError::InvalidEncoding("native document key must be integer")
                     })?;
                     let id = document_id_from_sqlite(stored_id)?;
-                    let row = self.decode_body_with_projection(id, row, Some(fields))?;
-                    if fields.iter().any(|field| {
-                        row.fields
-                            .get(*field)
-                            .is_some_and(|value| controlled::marker(value).is_some())
-                    }) {
+                    let row = self.decode_positional_body(id, row, fields)?;
+                    if has_external_values(&row) {
                         pending = Some((id, row));
                         return Ok(false);
                     }
-                    let more = self.visit_decoded_fields(id, &row.fields, fields, visitor)?;
+                    let more = self.visit_decoded_fields(id, &row, visitor)?;
                     visited += 1;
                     self.snapshot.control.check()?;
                     self.control.check()?;
@@ -207,9 +201,7 @@ impl NativeDocumentRead<'_> {
                 let cache = self.columns.filter(|_| private.is_none());
                 drop(private);
                 let mut builder = cache.and_then(|cache| match after {
-                    None => Some(ColumnBuilder::start(
-                        cache, self.table, owner, generation, fields,
-                    )),
+                    None => ColumnBuilder::start(cache, self.table, owner, generation, fields),
                     Some(_) => cache.resume(self.table, owner, generation, fields, after),
                 });
                 let mut exhausted = true;
@@ -221,20 +213,17 @@ impl NativeDocumentRead<'_> {
                         VersionError::InvalidEncoding("native document key must be integer")
                     })?;
                     let id = document_id_from_sqlite(stored_id)?;
-                    let mut row = self.decode_body_with_projection(id, row, Some(fields))?;
-                    if fields.iter().any(|field| {
-                        row.fields
-                            .get(*field)
-                            .is_some_and(|value| controlled::marker(value).is_some())
-                    }) {
+                    let row = self.decode_positional_body(id, row, fields)?;
+                    if has_external_values(&row) {
                         pending = Some((id, row));
                         exhausted = false;
                         return Ok(false);
                     }
-                    let more = self.visit_decoded_fields(id, &row.fields, fields, visitor)?;
+                    let (mut row, _memory) = row.into_parts();
+                    let more = self.visit_decoded_fields(id, &row, visitor)?;
                     visited += 1;
                     if let (Some(cache), Some(build)) = (self.columns, builder.as_mut()) {
-                        if !build.push(cache, stored_id, &mut row.fields) {
+                        if !build.push(cache, stored_id, &mut row) {
                             builder = None;
                         }
                     }
@@ -337,7 +326,7 @@ impl NativeDocumentRead<'_> {
             let id = document_id_from_sqlite(private_id)?;
             let mut decoded = None;
             private.visit(&mut |values| {
-                decoded = Some(self.decode_body_with_projection(id, values, Some(fields))?);
+                decoded = Some(self.decode_positional_body(id, values, fields)?);
                 Ok(true)
             })?;
             private.advance()?;
@@ -345,16 +334,11 @@ impl NativeDocumentRead<'_> {
             let Some(decoded) = decoded else {
                 continue;
             };
-            if fields.iter().any(|field| {
-                decoded
-                    .fields
-                    .get(*field)
-                    .is_some_and(|value| controlled::marker(value).is_some())
-            }) {
+            if has_external_values(&decoded) {
                 return Ok((visited, Some((id, decoded))));
             }
             visited += 1;
-            if !self.visit_decoded_fields(id, &decoded.fields, fields, visitor)? {
+            if !self.visit_decoded_fields(id, &decoded, visitor)? {
                 break;
             }
         }
@@ -366,17 +350,16 @@ impl NativeDocumentRead<'_> {
     fn visit_decoded_fields(
         &self,
         id: DocId,
-        row: &uqa_storage::document_store::Document,
-        fields: &[&str],
+        row: &ProjectedDocumentFields,
         visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
     ) -> SQLiteResult<bool> {
         self.snapshot.control.check()?;
         self.control.check()?;
         // Ordinary projections keep their value references inline.
         let mut projected = BudgetedSmallVec::<[&Value; 8]>::new(self.control.memory());
-        projected.reserve(fields.len())?;
-        for field in fields {
-            projected.push(row.get(*field).unwrap_or(&Value::Null))?;
+        projected.reserve(row.len())?;
+        for position in 0..row.len() {
+            projected.push(row.get(position).unwrap_or(&Value::Null))?;
         }
         let more = visitor(id, &projected);
         self.snapshot.control.check()?;

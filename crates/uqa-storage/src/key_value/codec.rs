@@ -16,6 +16,8 @@ use crate::document_store::{DocumentMetadata, StoredDocument};
 
 mod retained;
 pub(super) use retained::decode_retained_stored_document_value;
+mod positional;
+pub(super) use positional::decode_stored_document_slots;
 
 const LEGACY_SYSTEM_XMIN: &str = "\0uqa.system.xmin";
 const LEGACY_USER_XMIN_MARKER: &str = "\0uqa.user.xmin";
@@ -109,15 +111,7 @@ fn migrate_legacy_stored_document(
     let user_xmin = fields
         .remove(LEGACY_USER_XMIN_MARKER)
         .is_some_and(|value| value == Value::Bool(true));
-    let tuple_xmin = match legacy_xmin.as_ref() {
-        Some(Value::Int(value)) => Some(u32::try_from(*value).map_err(|_| {
-            other_error(format!(
-                "legacy tuple xmin {value} is outside the u32 range"
-            ))
-        })?),
-        Some(_) => return Err(other_error("legacy tuple xmin is not an integer")),
-        None => None,
-    };
+    let tuple_xmin = legacy_tuple_xmin(legacy_xmin.as_ref())?;
     if !user_xmin
         && !preserve_public_xmin
         && legacy_xmin
@@ -129,6 +123,18 @@ fn migrate_legacy_stored_document(
     let metadata =
         tuple_xmin.map_or_else(DocumentMetadata::default, DocumentMetadata::with_tuple_xmin);
     Ok(StoredDocument::with_metadata(fields, metadata))
+}
+
+fn legacy_tuple_xmin(value: Option<&Value>) -> StorageBackendResult<Option<u32>> {
+    Ok(match value {
+        Some(Value::Int(value)) => Some(u32::try_from(*value).map_err(|_| {
+            other_error(format!(
+                "legacy tuple xmin {value} is outside the u32 range"
+            ))
+        })?),
+        Some(_) => return Err(other_error("legacy tuple xmin is not an integer")),
+        None => None,
+    })
 }
 
 /// Decode the unversioned representation written before `Value::Bytes` gained

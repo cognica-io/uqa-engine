@@ -16,6 +16,23 @@ use uqa_storage::{
 };
 
 #[test]
+fn positional_document_projections_keep_snapshots_and_reopen_on_redb() {
+    use uqa_storage::key_value::conformance::{
+        verify_document_projections, verify_document_projections_reopen,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("projections.redb");
+    {
+        let storage = RedbStorage::open(&path).unwrap();
+        let store: std::sync::Arc<dyn KeyValueStore> = std::sync::Arc::new(storage.store());
+        verify_document_projections(&store).unwrap();
+    }
+    let reopened = RedbStorage::open(&path).unwrap();
+    let store: std::sync::Arc<dyn KeyValueStore> = std::sync::Arc::new(reopened.store());
+    verify_document_projections_reopen(&store).unwrap();
+}
+
+#[test]
 fn document_owners_coordinate_and_reopen_after_all_handles_close() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("documents.redb");

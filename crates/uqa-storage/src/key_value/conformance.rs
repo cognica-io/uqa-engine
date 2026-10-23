@@ -24,6 +24,8 @@ mod fixed_catalog_reads;
 pub use fixed_catalog_reads::verify_catalog_read_boundaries;
 mod documents;
 pub use documents::{verify_document_ownership, verify_document_reopen};
+mod projections;
+pub use projections::{verify_document_projections, verify_document_projections_reopen};
 mod commands;
 pub use commands::{verify_command_refresh, verify_command_refresh_reopen};
 mod sequences;

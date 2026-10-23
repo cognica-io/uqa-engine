@@ -17,7 +17,11 @@ use crate::{
 use super::{tagged::value_from_tagged_map_budgeted, Value};
 
 mod buffers;
+mod root;
 use buffers::{ArrayBuffer, FieldBuffer};
+use root::FieldName;
+
+type FieldVisitor<'a> = dyn FnMut(&str, Budgeted<Value>) -> Result<(), JsonReadError> + 'a;
 
 /// Decode canonical values while reserving owned containers, strings and tagged payloads before allocation. Returned values retain their payload allowance; parser and conversion scratch is released before returning.
 pub struct JsonValueDecoder<'a> {
@@ -29,6 +33,7 @@ pub struct JsonValueDecoder<'a> {
 enum Container {
     Array(ArrayBuffer),
     Object(FieldBuffer),
+    VisitedFields,
 }
 
 impl Value {
@@ -60,16 +65,29 @@ impl<'a> JsonValueDecoder<'a> {
     }
 
     pub fn value(&self, text: &str) -> Result<Budgeted<Value>, JsonReadError> {
-        self.read(text, false)
+        self.read(text, false, None)
     }
 
     /// Decode an object whose root keys are ordinary fields, including reserved tagged-value names. Nested field values keep normal tagged-value recognition.
     pub fn fields(&self, text: &str) -> Result<Budgeted<BTreeMap<String, Value>>, JsonReadError> {
-        let (value, memory) = self.read(text, true)?.into_parts();
+        let (value, memory) = self.read(text, true, None)?.into_parts();
         let Value::Map(fields) = value else {
             unreachable!("field root is an object");
         };
         Ok(Budgeted::new(fields, memory))
+    }
+
+    /// Visit every root field occurrence in input order without constructing a
+    /// root field map. Unescaped names borrow the input; nested values use the
+    /// ordinary decoder, including conversion of overwritten or unselected
+    /// fields. A collecting visitor must replace duplicate names and discard
+    /// its staged output if decoding fails. Each value carries its own lease.
+    pub fn visit_fields(
+        &self,
+        text: &str,
+        visitor: &mut FieldVisitor<'_>,
+    ) -> Result<(), JsonReadError> {
+        self.read(text, true, Some(visitor)).map(|_| ())
     }
 
     fn scalar(&self, value: Value) -> Budgeted<Value> {
@@ -99,12 +117,18 @@ impl<'a> JsonValueDecoder<'a> {
         value_from_tagged_map_budgeted(fields, self.cancellation).map_err(Into::into)
     }
 
-    fn read(&self, text: &str, field_root: bool) -> Result<Budgeted<Value>, JsonReadError> {
+    fn read(
+        &self,
+        text: &str,
+        field_root: bool,
+        mut visitor: Option<&mut FieldVisitor<'_>>,
+    ) -> Result<Budgeted<Value>, JsonReadError> {
         self.cancellation.check()?;
         let mut reader = JsonReader::new(text, self.memory, self.cancellation)
             .with_depth_limit(self.depth_limit);
         let mut stack = BudgetedVec::new(self.memory);
         let mut root = None;
+        let mut root_key = None;
         let mut first = true;
         while let Some(event) = reader.next_event()? {
             if first && field_root && event.token != JsonToken::StartObject {
@@ -130,10 +154,15 @@ impl<'a> JsonValueDecoder<'a> {
                     Budgeted::new(Value::Str(text), memory)
                 }
                 JsonToken::Key(text) => {
-                    let Some(Container::Object(fields)) = stack.last_mut() else {
-                        unreachable!("object key event");
-                    };
-                    fields.key(decode_json_string(text, self.memory, self.cancellation)?);
+                    match stack.last_mut() {
+                        Some(Container::VisitedFields) => {
+                            root_key = Some(FieldName::read(text, self)?);
+                        }
+                        Some(Container::Object(fields)) => {
+                            fields.key(decode_json_string(text, self.memory, self.cancellation)?);
+                        }
+                        _ => unreachable!("object key event"),
+                    }
                     continue;
                 }
                 JsonToken::StartArray => {
@@ -141,7 +170,11 @@ impl<'a> JsonValueDecoder<'a> {
                     continue;
                 }
                 JsonToken::StartObject => {
-                    stack.push(Container::Object(FieldBuffer::new(self.memory)))?;
+                    stack.push(if stack.is_empty() && visitor.is_some() {
+                        Container::VisitedFields
+                    } else {
+                        Container::Object(FieldBuffer::new(self.memory))
+                    })?;
                     continue;
                 }
                 JsonToken::EndArray => {
@@ -150,22 +183,27 @@ impl<'a> JsonValueDecoder<'a> {
                     };
                     values.finish()
                 }
-                JsonToken::EndObject => {
-                    let Some(Container::Object(fields)) = stack.pop() else {
-                        unreachable!("object end event");
-                    };
-                    let fields = fields.finish(self.cancellation)?;
-                    if field_root && stack.is_empty() {
-                        let (fields, memory) = fields.into_parts();
-                        Budgeted::new(Value::Map(fields), memory)
-                    } else {
-                        self.object(fields)?
+                JsonToken::EndObject => match stack.pop() {
+                    Some(Container::VisitedFields) => self.scalar(Value::Null),
+                    Some(Container::Object(fields)) => {
+                        let fields = fields.finish(self.cancellation)?;
+                        if field_root && stack.is_empty() {
+                            let (fields, memory) = fields.into_parts();
+                            Budgeted::new(Value::Map(fields), memory)
+                        } else {
+                            self.object(fields)?
+                        }
                     }
-                }
+                    _ => unreachable!("object end event"),
+                },
             };
             match stack.last_mut() {
                 Some(Container::Array(values)) => values.push(value)?,
                 Some(Container::Object(fields)) => fields.push(value)?,
+                Some(Container::VisitedFields) => {
+                    let name = root_key.take().expect("root value follows its key");
+                    visitor.as_mut().expect("field visitor")(name.as_str(), value)?;
+                }
                 None => root = Some(value),
             }
         }

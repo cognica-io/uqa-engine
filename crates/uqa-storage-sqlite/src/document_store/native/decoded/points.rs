@@ -8,9 +8,10 @@
 
 use rusqlite::types::ValueRef;
 use uqa_core::{memory::BudgetedVec, DocId, Value};
-use uqa_storage::{document_store::Document, mvcc::VersionError};
+use uqa_storage::{document_store::decoding::ProjectedDocumentFields, mvcc::VersionError};
 
-use super::{controlled, sqlite_doc_id, Decoded, Family, NativeDocumentRead, SQLiteResult};
+use super::positional::{has_external_values, Projected};
+use super::{sqlite_doc_id, Family, NativeDocumentRead, SQLiteResult};
 use crate::mvcc::native::{decode_record, NativeRecordIdentity, NativeRecordOwner};
 
 impl NativeDocumentRead<'_> {
@@ -41,7 +42,7 @@ impl NativeDocumentRead<'_> {
         });
         let mut selected = self.snapshot.view.selected(self.control);
         while visited < ids.len() {
-            let mut pending: Option<Decoded> = None;
+            let mut pending: Option<Projected> = None;
             selected.visit_values(&mut keys, self.control, &mut |key, record| {
                 self.snapshot.control.check()?;
                 self.control.check()?;
@@ -49,24 +50,18 @@ impl NativeDocumentRead<'_> {
                 let row = if let Some(bytes) = record.and_then(|record| record.value) {
                     let (_, row) = decode_record(key, bytes, self.control)?;
                     Some(
-                        self.decode_body_with_projection(id, &row, Some(fields))
+                        self.decode_positional_body(id, &row, fields)
                             .map_err(|error| VersionError::Storage(error.into()))?,
                     )
                 } else {
                     None
                 };
-                if row.as_ref().is_some_and(|row| {
-                    fields.iter().any(|field| {
-                        row.fields
-                            .get(*field)
-                            .is_some_and(|value| controlled::marker(value).is_some())
-                    })
-                }) {
+                if row.as_ref().is_some_and(|row| has_external_values(row)) {
                     pending = row;
                     return Ok(false);
                 }
                 let more = self
-                    .visit_point_fields(id, row.as_ref().map(|row| &row.fields), fields, visitor)
+                    .visit_point_fields(id, row.as_deref(), fields, visitor)
                     .map_err(|error| VersionError::Storage(error.into()))?;
                 visited += 1;
                 Ok(more)
@@ -76,8 +71,8 @@ impl NativeDocumentRead<'_> {
             };
             // Release the physical read window before resolving compound BLOB records on the same immutable view.
             let id = ids[visited];
-            let row = self.hydrate_decoded(id, row, Some(fields))?;
-            let more = self.visit_point_fields(id, Some(row.fields()), fields, visitor)?;
+            let row = self.hydrate_positional(id, row, fields)?;
+            let more = self.visit_point_fields(id, Some(&row), fields, visitor)?;
             visited += 1;
             if !more {
                 break;
@@ -120,24 +115,14 @@ impl NativeDocumentRead<'_> {
                             self.control.check()?;
                             let id = id as DocId;
                             let row = row
-                                .map(|row| self.decode_body_with_projection(id, row, Some(fields)))
+                                .map(|row| self.decode_positional_body(id, row, fields))
                                 .transpose()?;
-                            if row.as_ref().is_some_and(|row| {
-                                fields.iter().any(|field| {
-                                    row.fields
-                                        .get(*field)
-                                        .is_some_and(|value| controlled::marker(value).is_some())
-                                })
-                            }) {
+                            if row.as_ref().is_some_and(|row| has_external_values(row)) {
                                 pending = row;
                                 return Ok(false);
                             }
-                            let more = self.visit_point_fields(
-                                id,
-                                row.as_ref().map(|row| &row.fields),
-                                fields,
-                                visitor,
-                            )?;
+                            let more =
+                                self.visit_point_fields(id, row.as_deref(), fields, visitor)?;
                             visited += 1;
                             Ok(more)
                         },
@@ -152,8 +137,8 @@ impl NativeDocumentRead<'_> {
             };
             // BLOB hydration releases the physical cursor. Recheck the snapshot boundary before the next segment.
             let id = ids[visited];
-            let row = self.hydrate_decoded(id, row, Some(fields))?;
-            let more = self.visit_point_fields(id, Some(row.fields()), fields, visitor)?;
+            let row = self.hydrate_positional(id, row, fields)?;
+            let more = self.visit_point_fields(id, Some(&row), fields, visitor)?;
             visited += 1;
             if !more {
                 break;
@@ -165,7 +150,7 @@ impl NativeDocumentRead<'_> {
     fn visit_point_fields(
         &self,
         id: DocId,
-        row: Option<&Document>,
+        row: Option<&ProjectedDocumentFields>,
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> SQLiteResult<bool> {
@@ -173,8 +158,11 @@ impl NativeDocumentRead<'_> {
         self.control.check()?;
         let mut projected = BudgetedVec::new(self.control.memory());
         projected.reserve(fields.len())?;
-        for field in fields {
-            projected.push(row.and_then(|row| row.get(*field)).unwrap_or(&Value::Null))?;
+        for position in 0..fields.len() {
+            projected.push(
+                row.and_then(|row| row.get(position))
+                    .unwrap_or(&Value::Null),
+            )?;
         }
         let more = visitor(id, row.is_some(), &projected);
         self.snapshot.control.check()?;

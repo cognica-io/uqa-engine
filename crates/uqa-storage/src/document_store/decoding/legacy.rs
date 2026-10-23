@@ -56,6 +56,32 @@ pub(super) fn single_value(
 }
 
 fn document(input: &str, control: &StorageReadControl) -> StorageBackendResult<Budgeted<Document>> {
+    with_document_members(input, control, &mut |members| {
+        object_fields(members, Mode::Legacy, control)
+    })
+}
+
+pub(super) fn visit_fields(
+    input: &str,
+    control: &StorageReadControl,
+    visitor: &mut dyn FnMut(&str, Budgeted<Value>) -> StorageBackendResult<()>,
+) -> StorageBackendResult<()> {
+    normalized::validate(input, control)?;
+    with_document_members(input, control, &mut |members| {
+        for member in members {
+            control.check()?;
+            let value = value(text(member.value)?, Mode::Legacy, control)?;
+            visitor(&member.name, value)?;
+        }
+        Ok(())
+    })
+}
+
+fn with_document_members<R>(
+    input: &str,
+    control: &StorageReadControl,
+    visit: &mut impl FnMut(&[Member<'_>]) -> StorageBackendResult<R>,
+) -> StorageBackendResult<R> {
     let mut reader = JsonReader::new(input, control.memory(), control.cancellation());
     if !matches!(
         reader
@@ -77,14 +103,14 @@ fn document(input: &str, control: &StorageReadControl) -> StorageBackendResult<B
     };
     if let Some((kind, text)) = private_text(&members, control)? {
         return match kind {
-            PrivateKind::Raw => document(&text, control),
+            PrivateKind::Raw => with_document_members(&text, control, visit),
             PrivateKind::Number => Err(other_error(
                 "persisted KeyValue document is not a JSON object",
             )),
         };
     }
     deduplicate(&mut members, control)?;
-    object_fields(&members, Mode::Legacy, control)
+    visit(&members)
 }
 
 fn value(

@@ -50,6 +50,18 @@ fn current_fields(
     input: &[u8],
     control: &StorageReadControl,
 ) -> StorageBackendResult<(Budgeted<Document>, DocumentMetadata)> {
+    let (fields, metadata) = current_field_input(input, control)?;
+    let fields = decoder(control)
+        .with_depth_limit(126)
+        .fields(text(fields)?)
+        .map_err(read_error)?;
+    Ok((fields, metadata))
+}
+
+pub(super) fn current_field_input<'a>(
+    input: &'a [u8],
+    control: &StorageReadControl,
+) -> StorageBackendResult<(&'a [u8], DocumentMetadata)> {
     let spans = ContainerSpans::read_envelope(input, control)?;
     let (fields, xmin) = match &spans {
         ContainerSpans::Object(members) => {
@@ -82,10 +94,6 @@ fn current_fields(
         .map(|value| decode_xmin(value, control))
         .transpose()?
         .flatten();
-    let fields = decoder(control)
-        .with_depth_limit(126)
-        .fields(text(fields)?)
-        .map_err(read_error)?;
     let metadata =
         tuple_xmin.map_or_else(DocumentMetadata::default, DocumentMetadata::with_tuple_xmin);
     Ok((fields, metadata))
