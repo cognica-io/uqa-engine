@@ -161,10 +161,7 @@ pub fn shape_trigger_outcome(
 ) -> Result<Value, SQLError> {
     let values = match outcome.value {
         Value::Null => return Ok(Value::Null),
-        Value::Record(fields) => fields
-            .into_iter()
-            .map(|(_, value)| value)
-            .collect::<Vec<_>>(),
+        Value::Record(fields) => fields.into_values(),
         Value::Row(values) => values.into_values(),
         _ => return Err(trigger_shape_error()),
     };

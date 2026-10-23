@@ -162,7 +162,7 @@ fn eval_field_select(args: &[Value], control: &ProductionControl<'_>) -> Result<
         Value::Null => None,
         Value::Record(fields) => fields
             .iter()
-            .find(|(name, _)| name == field)
+            .find(|(name, _)| name.as_str() == field)
             .map(|(_, value)| value),
         Value::Row(values) => {
             crate::type_resolution::field_selection::anonymous_field_position(field, values.len())

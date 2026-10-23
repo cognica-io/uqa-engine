@@ -195,7 +195,7 @@ fn format_array(
 }
 
 fn format_record(
-    fields: &[(String, Value)],
+    fields: &uqa_core::RecordValue,
     type_oid: u32,
     catalog: Option<&dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,

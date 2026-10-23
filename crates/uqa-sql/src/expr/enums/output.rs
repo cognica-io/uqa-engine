@@ -59,12 +59,8 @@ pub(crate) fn render_with_control(
         }
         Value::Row(row) => {
             let elements = values(catalog, row.values(), control)?;
-            let row = if let Some(types) = row.field_types() {
-                let mut metadata = ProductionVec::new(*control);
-                for ty in types {
-                    metadata.push_copy(*ty)?;
-                }
-                RowValue::typed_with_control(elements, metadata.finish()?, control)?
+            let row = if let Some(descriptor) = row.descriptor() {
+                RowValue::typed_shared_with_control(elements, descriptor.clone(), control)?
             } else {
                 RowValue::new_with_control(elements, control)?
             };
@@ -72,18 +68,9 @@ pub(crate) fn render_with_control(
             Ok(control.finish(Value::Row(row), memory)?)
         }
         Value::Record(record) => {
-            let mut fields = ProductionVec::new(*control);
-            for (name, value) in record {
-                let name = control.copy_text(name)?;
-                let value = render_with_control(catalog, value, control)?;
-                let (name, name_memory) = name.into_parts();
-                let (value, value_memory) = value.into_parts();
-                fields.push_produced(
-                    control.finish((name, value), control.combine(name_memory, value_memory))?,
-                )?;
-            }
+            let elements = values(catalog, record.values(), control)?;
             let (record, memory) =
-                RecordValue::with_control(fields.finish()?, record.type_oid(), control)?
+                RecordValue::with_shared_control(elements, record.descriptor().clone(), control)?
                     .into_parts();
             Ok(control.finish(Value::Record(record), memory)?)
         }

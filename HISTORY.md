@@ -6,7 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Share immutable named and anonymous composite metadata through SQL construction, controlled copies and result conversion. Rust `RecordValue` callers now use explicit positional values and borrowed field iteration instead of a mutable pair-vector dereference; see the [Rust API migration](docs/manual/reference/02-rust-engine-api.md#composite-value-metadata). SQL observations and persistent formats are preserved.
+
 ### Fixed
+
+- Read externally shared scan rows directly into columnar output, avoiding per-row projection sorting and failed ownership transfers while retaining payload donation from the final exclusive owner.
 
 - Index exact in-memory document layouts and reuse selected-field mappings across pages of the same read handle. Compile only encountered layouts while preserving duplicate/missing fields, COW snapshots, clear/replacement and retained row lifetimes.
 

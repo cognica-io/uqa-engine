@@ -16,11 +16,25 @@ use uqa_core::{
     Value,
 };
 
+mod state;
+pub use state::CompositeConstructorState;
+
 pub fn evaluate_with_control(
     binding: &CompositeRowBinding,
     arguments: usize,
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
+    evaluate: impl FnMut(usize) -> Result<Produced<Value>, SQLError>,
+) -> Result<Produced<Value>, SQLError> {
+    evaluate_with_state(binding, arguments, engine, control, None, evaluate)
+}
+
+pub fn evaluate_with_state(
+    binding: &CompositeRowBinding,
+    arguments: usize,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+    state: Option<&CompositeConstructorState>,
     evaluate: impl FnMut(usize) -> Result<Produced<Value>, SQLError>,
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
@@ -38,7 +52,7 @@ pub fn evaluate_with_control(
         ));
     };
     let descriptor = super::descriptor(engine.composite_types(), reference.oid)?;
-    construct_with_control(binding, arguments, &descriptor, control, evaluate)
+    construct_with_state(binding, arguments, &descriptor, control, state, evaluate)
 }
 
 /// Form a row using a resolved descriptor, after checking all surviving argument types and before evaluating any argument.
@@ -47,6 +61,17 @@ pub fn construct_with_control(
     arguments: usize,
     descriptor: &super::CompositeTypeDescriptor,
     control: &ProductionControl<'_>,
+    evaluate: impl FnMut(usize) -> Result<Produced<Value>, SQLError>,
+) -> Result<Produced<Value>, SQLError> {
+    construct_with_state(binding, arguments, descriptor, control, None, evaluate)
+}
+
+pub fn construct_with_state(
+    binding: &CompositeRowBinding,
+    arguments: usize,
+    descriptor: &super::CompositeTypeDescriptor,
+    control: &ProductionControl<'_>,
+    state: Option<&CompositeConstructorState>,
     mut evaluate: impl FnMut(usize) -> Result<Produced<Value>, SQLError>,
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
@@ -83,25 +108,39 @@ pub fn construct_with_control(
             }
         }
     }
-    let mut fields = ProductionVec::new(*control);
-    fields.reserve(descriptor.attributes.len())?;
+    let shared = state.and_then(|state| state.shared(descriptor));
+    let mut names = ProductionVec::new(*control);
+    let mut values = ProductionVec::new(*control);
+    values.reserve(descriptor.attributes.len())?;
+    if shared.is_none() {
+        names.reserve(descriptor.attributes.len())?;
+    }
     for attribute in &descriptor.attributes {
         let value = match binding.attributes.binary_search(&attribute.number) {
             Ok(index) => evaluate(index)?,
             Err(_) => control.finish(Value::Null, control.empty_reservation())?,
         };
-        let name = control.copy_text(&attribute.name)?;
-        let (value, value_memory) = value.into_parts();
-        let (name, name_memory) = name.into_parts();
-        fields.push_produced(
-            control.finish((name, value), control.combine(name_memory, value_memory))?,
-        )?;
+        if shared.is_none() {
+            names.push_produced(control.copy_text(&attribute.name)?)?;
+        }
+        values.push_produced(value)?;
     }
-    let (fields, memory) =
-        uqa_core::RecordValue::with_control(fields.finish()?, Some(descriptor.type_oid), control)?
-            .into_parts();
+    let record = if let Some(shared) = shared {
+        uqa_core::RecordValue::with_shared_control(values.finish()?, shared, control)?
+    } else {
+        let descriptor = uqa_core::RecordDescriptor::with_control(
+            names.finish()?,
+            Some(descriptor.type_oid),
+            control,
+        )?;
+        uqa_core::RecordValue::with_descriptor_control(values.finish()?, descriptor, control)?
+    };
+    if let Some(state) = state {
+        state.remember(record.descriptor(), control)?;
+    }
+    let (record, memory) = record.into_parts();
     control
-        .finish(Value::Record(fields), memory)
+        .finish(Value::Record(record), memory)
         .map_err(Into::into)
 }
 
@@ -298,5 +337,116 @@ mod tests {
             crate::expr::eval(&expression, &context).unwrap(),
             Value::Bool(true)
         );
+    }
+    #[test]
+    fn repeated_composite_constructors_share_names_with_live_descriptor_validation() {
+        let budget = MemoryBudget::new(8 << 20);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &token, &token);
+        let state = CompositeConstructorState::default();
+        let mut descriptor = (*Catalog.composite_type(20_001).unwrap().unwrap()).clone();
+        for attribute in &mut descriptor.attributes {
+            attribute.name = format!("{}{}", attribute.number, "n".repeat(8192));
+        }
+        let binding = CompositeRowBinding {
+            layout: None,
+            ty: "composite#20001".into(),
+            attributes: vec![1, 3, 4],
+            argument_types: Some(vec![ColumnType::Integer; 3]),
+        };
+        let make = |descriptor: &CompositeTypeDescriptor| {
+            construct_with_state(&binding, 3, descriptor, &control, Some(&state), |index| {
+                Ok(control.finish(Value::Int(index as i64), control.empty_reservation())?)
+            })
+        };
+        let first = make(&descriptor).unwrap();
+        let Value::Record(first_record) = &*first else {
+            panic!("record")
+        };
+        let mut last = None;
+        let allocations = allocation_counter::measure(|| {
+            last = Some(make(&descriptor).unwrap());
+        });
+        let last = last.unwrap();
+        let Value::Record(last_record) = &*last else {
+            panic!("record")
+        };
+        assert!(first_record
+            .descriptor()
+            .shares_storage_with(last_record.descriptor()));
+        assert!(
+            allocations.bytes_total < 4096,
+            "warm construction must not copy long names: {allocations:?}"
+        );
+        assert_eq!(*first, *last);
+        descriptor.attributes[0].name = "renamed".into();
+        let renamed = make(&descriptor).unwrap();
+        let Value::Record(renamed_record) = &*renamed else {
+            panic!("record")
+        };
+        assert!(!first_record
+            .descriptor()
+            .shares_storage_with(renamed_record.descriptor()));
+        assert_eq!(renamed_record.descriptor().field_names()[0], "renamed");
+        descriptor.attributes[0].ty = ColumnType::Text;
+        let error = construct_with_state(&binding, 3, &descriptor, &control, Some(&state), |_| {
+            panic!("live validation precedes argument evaluation")
+        })
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42804"));
+        drop((first, renamed, state));
+        assert_eq!(budget.used(), last.reserved_bytes());
+        drop(last);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn composite_descriptor_reuse_preserves_drop_add_type_identity_and_cancellation() {
+        let control = ProductionControl::uncontrolled();
+        let state = CompositeConstructorState::default();
+        let binding = CompositeRowBinding {
+            layout: None,
+            ty: "composite#20001".into(),
+            attributes: vec![1, 2, 3],
+            argument_types: Some(vec![ColumnType::Integer; 3]),
+        };
+        let mut descriptor = (*Catalog.composite_type(20_001).unwrap().unwrap()).clone();
+        let evaluate = |_: usize| Ok(control.finish(Value::Int(1), control.empty_reservation())?);
+        let first =
+            construct_with_state(&binding, 3, &descriptor, &control, Some(&state), evaluate)
+                .unwrap();
+        descriptor.type_oid = 20_009;
+        let mut calls = Vec::new();
+        let output =
+            construct_with_state(&binding, 3, &descriptor, &control, Some(&state), |index| {
+                calls.push(index);
+                evaluate(index)
+            })
+            .unwrap();
+        assert_eq!(calls, [0, 2]);
+        let Value::Record(record) = &*output else {
+            panic!("record")
+        };
+        assert_eq!(record.type_oid(), Some(20_009));
+        assert_eq!(record.values()[2], Value::Null);
+        assert!(!first.has_same_representation(&output));
+        let budget = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let controlled = ProductionControl::new(&budget, &token, &token);
+        token.cancel();
+        assert_eq!(
+            construct_with_state(
+                &binding,
+                3,
+                &descriptor,
+                &controlled,
+                Some(&state),
+                |_| panic!("cancelled")
+            )
+            .unwrap_err()
+            .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(budget.used(), 0);
     }
 }

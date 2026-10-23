@@ -345,13 +345,14 @@ fn map_enum_values(
                     .collect::<Result<_>>()?,
             )?,
         ),
-        Value::Record(fields) => Value::Record(uqa_core::RecordValue::from_parts(
+        Value::Record(fields) => Value::Record(uqa_core::RecordValue::from_shared_parts(
             fields
+                .values()
                 .iter()
-                .map(|(name, element)| Ok((name.clone(), map_enum_values(element, convert)?)))
+                .map(|value| map_enum_values(value, convert))
                 .collect::<Result<_>>()?,
-            fields.type_oid(),
-        )),
+            fields.descriptor().clone(),
+        )?),
         Value::Map(fields) => Value::Map(
             fields
                 .iter()

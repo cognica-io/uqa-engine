@@ -102,7 +102,7 @@ impl Interpreter<'_> {
                     Value::Record(fields) => {
                         let field_value = fields
                             .iter_mut()
-                            .find(|(name, _)| name == field)
+                            .find(|(name, _)| name.as_str() == field)
                             .map(|(_, value)| value)
                             .ok_or_else(|| SQLError::Routine {
                                 sqlstate: "42703".into(),
@@ -140,10 +140,7 @@ impl Interpreter<'_> {
             return self.assign_datum(idx, value);
         };
         let values = match value {
-            Value::Record(fields) => fields
-                .into_iter()
-                .map(|(_, field_value)| field_value)
-                .collect::<Vec<_>>(),
+            Value::Record(fields) => fields.into_values(),
             Value::Row(values) => values.into_values(),
             Value::Null => Vec::new(),
             _ => {

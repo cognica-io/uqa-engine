@@ -60,3 +60,6 @@ fn composite_types_match_postgresql_sqlite() {
     let directory = tempfile::tempdir().unwrap();
     verify_composite_types(&Engine::open(&directory.path().join("composites.db")).unwrap());
 }
+
+#[path = "sql_composites/descriptor_sharing.rs"]
+mod descriptor_sharing;

@@ -26,7 +26,7 @@ pub enum ValueRetentionError {
 
 enum Children<'a> {
     Values(std::slice::Iter<'a, Value>),
-    Record(std::slice::Iter<'a, (String, Value)>),
+    Record(crate::RecordIter<'a>),
     Map(std::collections::btree_map::Iter<'a, String, Value>),
 }
 

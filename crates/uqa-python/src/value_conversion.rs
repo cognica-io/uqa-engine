@@ -100,7 +100,7 @@ fn values_to_py_list(py: Python<'_>, values: &[Value]) -> PyResult<Py<PyAny>> {
     Ok(list.into_any().unbind())
 }
 
-fn record_to_py(py: Python<'_>, values: &[(String, Value)]) -> PyResult<Py<PyAny>> {
+fn record_to_py(py: Python<'_>, values: &uqa_core::RecordValue) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     for (key, value) in values {
         dict.set_item(key, value_to_py(py, value)?)?;

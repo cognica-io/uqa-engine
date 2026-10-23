@@ -15,7 +15,7 @@ mod encoding;
 pub(crate) use encoding::{array_payload, array_payload_with_control};
 
 pub(crate) fn record_bytes_with_control(
-    fields: &[(String, Value)],
+    fields: &uqa_core::RecordValue,
     descriptor: &CompositeTypeDescriptor,
     catalog: Option<&dyn super::super::CompositeTypeCatalog>,
     control: &uqa_core::memory::ProductionControl<'_>,
@@ -24,7 +24,7 @@ pub(crate) fn record_bytes_with_control(
 }
 
 pub(crate) fn record_bytes(
-    fields: &[(String, Value)],
+    fields: &uqa_core::RecordValue,
     type_oid: u32,
     descriptors: &super::Descriptors,
 ) -> Option<Vec<u8>> {
@@ -32,7 +32,7 @@ pub(crate) fn record_bytes(
 }
 
 pub(super) fn project(
-    fields: &[(String, Value)],
+    fields: &uqa_core::RecordValue,
     before: &CompositeTypeDescriptor,
     after: &CompositeTypeDescriptor,
     descriptors: &super::Descriptors,
@@ -50,7 +50,9 @@ pub(super) fn project(
         let Some(position) = position else {
             continue;
         };
-        let (_, value) = fields.iter().find(|(name, _)| *name == original.name)?;
+        let (_, value) = fields
+            .iter()
+            .find(|(name, _)| name.as_str() == original.name.as_str())?;
         let current = after
             .attributes
             .iter()
@@ -223,7 +225,12 @@ mod tests {
             Value::Int(87_398),
         ];
         assert_eq!(
-            project(&fields, &before, &after, &super::super::Descriptors::new()),
+            project(
+                &fields.clone().into(),
+                &before,
+                &after,
+                &super::super::Descriptors::new()
+            ),
             Some(Value::Record(
                 before
                     .attributes
@@ -234,7 +241,12 @@ mod tests {
             ))
         );
         assert_eq!(
-            project(&fields, &before, &before, &super::super::Descriptors::new()),
+            project(
+                &fields.clone().into(),
+                &before,
+                &before,
+                &super::super::Descriptors::new()
+            ),
             Some(Value::Record(fields.into()))
         );
     }
@@ -255,7 +267,7 @@ mod tests {
         let mut after = before.clone();
         after.attributes[0].ty = ColumnType::BigInteger;
         let Value::Record(fields) = project(
-            &[("a".into(), Value::Int(4))],
+            &vec![("a".into(), Value::Int(4))].into(),
             &before,
             &after,
             &super::super::Descriptors::new(),
@@ -263,7 +275,7 @@ mod tests {
         .unwrap() else {
             panic!("retained record")
         };
-        let Value::Datum(field) = &fields[0].1 else {
+        let Value::Datum(field) = &fields.values()[0] else {
             panic!("unread fixed field")
         };
         assert_eq!(field.bytes().len(), 28);

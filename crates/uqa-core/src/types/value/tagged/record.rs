@@ -29,7 +29,8 @@ pub(super) fn decoded(
             return Ok(None);
         }
     }
-    let mut fields = workspace.vector(encoded_fields.len())?;
+    let mut names = workspace.vector(encoded_fields.len())?;
+    let mut values = workspace.vector(encoded_fields.len())?;
     for encoded in take_list(map, "fields") {
         workspace.check()?;
         let Value::List(mut pair) = encoded else {
@@ -39,8 +40,13 @@ pub(super) fn decoded(
         let Some(Value::Str(name)) = pair.pop() else {
             unreachable!("record name was validated");
         };
-        fields.push((name, value));
+        names.push(name);
+        values.push(value);
     }
     workspace.reserve(crate::RecordValue::retained_header_bytes())?;
-    Ok(Some(crate::RecordValue::from_parts(fields, type_oid)))
+    workspace.reserve(crate::RecordDescriptor::buffer_bytes(names.len())?)?;
+    let descriptor = crate::RecordDescriptor::new(names, type_oid);
+    Ok(Some(crate::RecordValue::from_validated_parts(
+        values, descriptor,
+    )))
 }

@@ -198,12 +198,12 @@ fn record_assignment_moves_existing_payloads_and_drops_the_source_buffer() {
     let Value::Record(fields) = &*result else {
         unreachable!();
     };
-    let Value::Str(text) = &fields[0].1 else {
+    let Value::Str(text) = &fields.values()[0] else {
         unreachable!();
     };
     assert_eq!(text.as_ptr(), pointer);
-    assert_eq!(fields[0].0, "f1");
-    assert_eq!(fields[1], ("f2".into(), Value::Int(7)));
+    assert_eq!(fields.descriptor().field_names()[0], "f1");
+    assert_eq!(fields.get(1), Some((&"f2".into(), &Value::Int(7))));
     let exact = fields.retained_buffer_bytes().unwrap()
         + fields
             .iter()

@@ -2,6 +2,204 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "legacy_record_decoding_admits_shared_descriptor_conversion_and_releases_scratch",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/document_store/controlled/tests.rs",
+      "capability": "Persistent composite descriptor admission",
+      "workload": "Decode a legacy typed record with long duplicate names and payload, then repeat below its exact retention size and with cancellation.",
+      "invariant": "Name/value separation reserves its conversion buffers before allocation; final admission equals exact Core retention and scratch, rejected reservations and cancelled reads release fully.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "named_record_clones_share_names_and_keep_mutable_values_independent",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/record/tests.rs",
+      "capability": "Shared named record metadata",
+      "workload": "Clone 128 fields with 4KB names, mutate values, and drop the original owners.",
+      "invariant": "Only the mutable value buffer is copied; allocation stays below that buffer plus 256 bytes and names remain live through the retained descriptor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "controlled_record_copies_share_names_and_charge_all_logical_metadata",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/record/tests.rs",
+      "capability": "Named descriptor admission",
+      "workload": "Copy eight long-named fields under an allowance, then reject an undersized and a cancelled copy.",
+      "invariant": "Shared metadata still contributes all logical headers and name payloads; retained byte traversal agrees and all failed reservations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "shared_record_names_preserve_duplicate_order_identity_and_owned_conversion",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/record/tests.rs",
+      "capability": "Named descriptor observations",
+      "workload": "Reuse duplicate-name records, change owned names and opaque identity, and test empty and wrong-width constructors.",
+      "invariant": "Exact tagged JSON, field order, duplicates and comparison/representation identity stay unchanged; invalid width rejects and shared names remain immutable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "controlled_record_construction_moves_payloads_and_releases_temporary_pairs",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/record/tests.rs",
+      "capability": "Named descriptor production",
+      "workload": "Convert admitted pair buffers to positional values and shared names, then construct with a retained descriptor.",
+      "invariant": "Name and value allocations transfer; temporary pair buffers release, logical output charges remain exact, and descriptor reuse does not copy names.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "exclusive_record_owned_conversion_moves_names_without_copying_payloads",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/record/tests.rs",
+      "capability": "Exclusive record conversion",
+      "workload": "Consume a record with one 32KB field name into the owned-pair API.",
+      "invariant": "The unique descriptor donates its name allocation; conversion allocates less than 1KB instead of copying the string payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "repeated_composite_constructors_share_names_with_live_descriptor_validation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/composites/constructor.rs",
+      "capability": "SQL composite producer reuse",
+      "workload": "Construct repeated records with 8KB names and then rename and change a field type.",
+      "invariant": "Warm metadata shares one allocation with less than 4KB total allocation; changed names use fresh metadata, type errors precede callbacks and retained leases outlive the cache.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_descriptor_reuse_preserves_drop_add_type_identity_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/composites/constructor.rs",
+      "capability": "SQL composite lifecycle",
+      "workload": "Reuse constructor state across dropped and added attributes, changed opaque type OIDs and cancellation.",
+      "invariant": "Only surviving arguments execute, added fields are NULL, OIDs cannot reuse the wrong descriptor and cancellation releases admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_row_constructors_share_descriptors_without_reusing_dynamic_types",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/row_descriptors.rs",
+      "capability": "Prepared row producer reuse",
+      "workload": "Evaluate one prepared ROW across integer, text and restored integer parameters.",
+      "invariant": "Matching metadata shares allocation, changed runtime types rebuild, mutable values differ and each returned row retains its own logical admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_row_descriptor_state_is_independent_after_clone_and_obeys_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/row_descriptors.rs",
+      "capability": "Prepared descriptor ownership",
+      "workload": "Clone a prepared ROW producer and cancel another invocation.",
+      "invariant": "Cloned prepared expressions start independent state, type metadata remains equal and cancellation fails without leaked quota.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "composite_result_descriptors_survive_output_catalog_rollback_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/sql_composites/descriptor_sharing.rs",
+      "capability": "Public composite result ownership",
+      "workload": "Run anonymous and named row producers through output conversion, rename and rollback a composite attribute, then reopen persistent providers.",
+      "invariant": "Repeated output rows share metadata, retained names survive catalog edits, NULL positions and type identity persist, and reopening preserves exact representations.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "anonymous_row_clones_share_descriptor_allocations_and_keep_values_independent",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/row/descriptor/tests.rs",
+      "capability": "Shared anonymous row descriptors",
+      "workload": "Clone a 4,096-field typed row, mutate its copied values, then drop the original owners.",
+      "invariant": "Type metadata retains one allocation while values remain independent; clone allocation is bounded by the value buffer plus 256 bytes, and descriptor lifetime follows surviving rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "controlled_anonymous_row_copies_share_metadata_without_weakening_quotas",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/row/descriptor/tests.rs",
+      "capability": "Shared descriptor admission",
+      "workload": "Copy a typed row under a retained allowance, repeat below its logical size, then cancel.",
+      "invariant": "Metadata allocation is shared but logical retention still charges its bytes; rejected copies and cancellation release all temporary leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "shared_anonymous_descriptors_preserve_owned_conversion_and_zero_field_identity",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/row/descriptor/tests.rs",
+      "capability": "Shared descriptor observations",
+      "workload": "Convert a shared row to independent owned fields, mutate the returned types and reconstruct through the shared interface.",
+      "invariant": "Original metadata and exact JSON stay unchanged; width mismatch rejects, and typed zero-field rows remain distinct from absent descriptors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "controlled_shared_row_construction_moves_values_and_retains_descriptor_identity",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/row/descriptor/tests.rs",
+      "capability": "Controlled shared row construction",
+      "workload": "Move admitted value and string buffers into a row using an existing descriptor.",
+      "invariant": "Value allocation identity and shared descriptor identity are retained, final admission covers the logical row plus payload, and dropping the row releases its own lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "paged_memory_projection_compiles_only_encountered_layouts_once",
@@ -192,7 +390,9 @@
       "capability": "Direct positional document decoding",
       "workload": "Select a field with a 32KB name, a stored NULL, an absent field and a duplicate selection beside an unused 64KB string.",
       "invariant": "Total decoding allocations remain below 2KB; names and unused strings are not copied, duplicates share one value, missing and NULL differ, and the retained lease releases completely.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -203,7 +403,9 @@
       "capability": "Positional legacy document observations",
       "workload": "Empty, unordered, duplicate/escaped-name, typed, nested, private raw, compound-marker and numeric legacy objects across empty and repeated projections.",
       "invariant": "Every position equals the historical field decoder, repeated names share one retained value, and all leases release.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -214,7 +416,9 @@
       "capability": "Positional decoding validation and ownership",
       "workload": "Invalid roots, unselected numeric/Unicode/private-value failures, duplicate invalid members, malformed delimiters, exhausted allowance and cancellation with an unrelated retained lease.",
       "invariant": "Error observations match historical full decoding even for empty projections; failures release only their own allocations and callbacks cannot observe a partial row.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -225,7 +429,9 @@
       "capability": "Indexed document layout discovery",
       "workload": "Create 2,048 distinct one-field layouts, then replace each in reverse order.",
       "invariant": "Replacement uses 2,048 exact candidate comparisons instead of scanning the entire layout registry; layout identities and every value remain correct.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -236,7 +442,9 @@
       "capability": "Document layout collision correctness",
       "workload": "Inject a differently named layout into the selected hash bucket before its matching candidate.",
       "invariant": "Exact ordered field identity rejects the collision and retains the correct layout ID and values.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -247,7 +455,35 @@
       "capability": "Immutable document layout ownership",
       "workload": "Clone a populated layout registry and independently add named and zero-column document layouts.",
       "invariant": "Existing field-name allocations remain shared; hash lookup and subsequent additions stay independent and preserve empty layout identity.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_scan_transfer_reuses_projection_without_row_routing_or_ownership_attempts",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",
+      "capability": "Shared scan columnar transfer work",
+      "workload": "Transfer 1,024 externally shared scalar rows through reversed two- and forty-column projections.",
+      "invariant": "Output and source lifetimes remain exact, atomic ownership attempts stay at zero, and allocation count is bounded by output width rather than row count.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_scan_transfer_releases_consumed_rows_before_the_last_donation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",
+      "capability": "Last shared scan value ownership",
+      "workload": "Eight rows share one projected string/integer fragment only within a consumed batch, with an absent requested column.",
+      "invariant": "Earlier rows copy their selected values, only the final exclusive row attempts donation and retains the original payload address, and every missing position remains NULL.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",
@@ -258,7 +494,9 @@
       "capability": "Joined fragment transfer ownership",
       "workload": "Two joined fragments retain disjoint and duplicate selections of one underlying value vector, including an entirely unselected alias fragment.",
       "invariant": "Row-local shared handles are released before donation; every distinct selected value retains its allocation, only the earlier duplicate copies, and outputs remain exact.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",
@@ -269,7 +507,9 @@
       "capability": "Owned columnar value transfer",
       "workload": "Thirty-two rows with 16KB strings and nested arrays transferred from exclusive physical fragments.",
       "invariant": "Every string and array keeps its original allocation, output values and row counts remain exact, and transfer allocates less than 16KB total.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",
@@ -280,7 +520,9 @@
       "capability": "Projected columnar value transfer",
       "workload": "A retained scan row contains a 768KB unused string and one selected string behind a remapped schema.",
       "invariant": "Only the selected value is copied, source values remain unchanged, transfer allocates less than 4KB, and the consumed row releases its source handle.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",
@@ -291,7 +533,9 @@
       "capability": "Positional output ownership",
       "workload": "Two exclusive fragments with remapped names, duplicate labels and physical slots, absent names and an extra label occurrence.",
       "invariant": "Distinct output positions and NULLs remain exact; the last occurrence retains each original payload allocation and only repeated output values copy.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",
@@ -302,7 +546,9 @@
       "capability": "Projected fragment ownership",
       "workload": "A reordered fragment projection with two physical aliases for the same string and an absent slot.",
       "invariant": "Alias values remain equal, distinct strings retain their original allocations, only the earlier duplicate copies, and absent slots remain NULL.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",
@@ -313,7 +559,9 @@
       "capability": "Zero-column transfer cardinality",
       "workload": "Zero and three input rows with empty output schemas and missing requested positions.",
       "invariant": "Empty and zero-column results retain exact row counts and missing values remain NULL.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",
@@ -324,7 +572,9 @@
       "capability": "Shared fragment transfer observations",
       "workload": "Joined rows sharing repeated/reordered projections over zero, one, eight and thirty-one stored values, with duplicate labels and absent slots.",
       "invariant": "Consuming transfer equals the existing borrowed observations for every row and output position, including wide projections.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-engine",
@@ -10136,7 +10386,7 @@
       "source": "crates/uqa-core/src/types/value/cloning/tests.rs",
       "capability": "Owned value copy representation",
       "workload": "Every owned payload variant, nested values, array lower bounds and element OID, row descriptors, record/enum identities and packed bit strings.",
-      "invariant": "Clone and clone_from preserve representation and independent owned buffers, including nested type metadata.",
+      "invariant": "Clone and clone_from preserve representation and independent mutable payload buffers; immutable anonymous row descriptors share their owned allocation.",
       "case_names": [
         ""
       ]

@@ -27,9 +27,7 @@ pub(super) fn singleton_record_rows(
         .collect::<Vec<_>>();
     let values = match value {
         Value::Null => vec![Value::Null; columns.len()],
-        Value::Record(fields) if fields.len() == columns.len() => {
-            fields.into_iter().map(|(_, value)| value).collect()
-        }
+        Value::Record(fields) if fields.len() == columns.len() => fields.into_values(),
         Value::Record(fields) => {
             return Err(SQLError::Internal(format!(
                 "sequence introspection returned {} fields for {} columns",

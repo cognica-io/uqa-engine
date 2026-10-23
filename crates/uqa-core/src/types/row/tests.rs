@@ -219,7 +219,7 @@ fn row_copies_charge_descriptors_and_headers_without_adopting_spare_capacity() {
     types.push(field(23));
     let retained = RowValue::decoded_header_bytes()
         + values.capacity() * size_of::<Value>()
-        + types.capacity() * size_of::<RecordFieldType>();
+        + types.len() * size_of::<RecordFieldType>();
     let source = Value::Row(RowValue::typed(values, types).unwrap());
     let budget = MemoryBudget::new(1 << 20);
     let cancellation = CancellationToken::new();
@@ -259,10 +259,9 @@ fn controlled_row_construction_transfers_buffers_and_releases_rejected_inputs() 
     let mut types = ProductionVec::new(control);
     types.push_copy(field(25)).unwrap();
     let types = types.finish().unwrap();
-    let type_pointer = types.as_ptr();
     let row = RowValue::typed_with_control(values, types, &control).unwrap();
     assert_eq!(row.values().as_ptr(), pointer);
-    assert_eq!(row.field_types().unwrap().as_ptr(), type_pointer);
+    assert_eq!(row.field_types().unwrap(), &[field(25)]);
     assert_eq!(
         row.reserved_bytes(),
         row.retained_buffer_bytes().unwrap() + "kept".len()

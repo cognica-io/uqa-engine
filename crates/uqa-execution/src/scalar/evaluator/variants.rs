@@ -74,7 +74,18 @@ pub(super) fn row(
     }
     let values = evaluate_items(items, context, control)?;
     let row = if complete {
-        uqa_core::RowValue::typed_with_control(values, fields.finish()?, control)?
+        let fields = fields.finish()?;
+        let state = context.row_constructor(items);
+        let row = if let Some(descriptor) = state.and_then(|state| state.shared(&fields)) {
+            drop(fields);
+            uqa_core::RowValue::typed_shared_with_control(values, descriptor, control)?
+        } else {
+            uqa_core::RowValue::typed_with_control(values, fields, control)?
+        };
+        if let (Some(state), Some(descriptor)) = (state, row.descriptor()) {
+            state.remember(descriptor, control)?;
+        }
+        row
     } else {
         uqa_core::RowValue::new_with_control(values, control)?
     };

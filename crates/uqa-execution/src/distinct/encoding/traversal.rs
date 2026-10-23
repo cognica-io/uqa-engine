@@ -12,7 +12,7 @@ use uqa_core::memory::MemoryBudget;
 pub(super) enum Children<'a> {
     Values(std::slice::Iter<'a, Value>),
     Array(std::slice::Iter<'a, Value>, Option<u32>),
-    Record(std::slice::Iter<'a, (String, Value)>),
+    Record(uqa_core::RecordIter<'a>),
     SQLRecord(uqa_sql::expr::SQLRecordFields<'a>, usize),
     Map(std::collections::btree_map::Iter<'a, String, Value>),
 }

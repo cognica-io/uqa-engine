@@ -7,6 +7,9 @@
 //! Function state belongs to immutable expressions prepared for one execution.
 
 use std::sync::OnceLock;
+mod rows;
+pub(crate) use rows::RowConstructorState;
+use uqa_sql::expr::composites::constructor::CompositeConstructorState;
 
 use crate::RowSchema;
 
@@ -81,7 +84,7 @@ pub(crate) struct ColumnSlot {
 }
 
 /// Read-only lookup into the function state owned by a prepared expression set.
-/// The state has one fixed-size entry per logical ordering comparison, numeric operator, literal/row cast or column reference, never per input row.
+/// The state has one fixed-size entry per logical ordering comparison, numeric operator, literal/row cast, column reference or composite constructor, never per input row.
 #[derive(Debug, Default)]
 pub struct FunctionCallStates {
     enums: Vec<((usize, u8), EnumComparisonState)>,
@@ -89,6 +92,8 @@ pub struct FunctionCallStates {
     columns: Vec<(usize, OnceLock<ColumnSlot>)>,
     row_casts: Vec<(usize, OnceLock<RowCast>)>,
     numeric_operators: Vec<(usize, OnceLock<NumericCall>)>,
+    row_constructors: Vec<(usize, RowConstructorState)>,
+    composite_constructors: Vec<(usize, CompositeConstructorState)>,
 }
 
 impl FunctionCallStates {
@@ -121,6 +126,8 @@ impl FunctionCallStates {
             ScalarExpr::Cast { expr, .. } => {
                 self.row_casts.push((std::ptr::from_ref(expr.as_ref()) as usize, OnceLock::new()));
             }
+            ScalarExpr::Row(items) => self.row_constructors.push((items.as_ptr() as usize, RowConstructorState::default())),
+            ScalarExpr::CompositeRow { items, .. } => self.composite_constructors.push((items.as_ptr() as usize, CompositeConstructorState::default())),
             ScalarExpr::Param(_) => parameter_dependent = true,
             ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => {
                 self.columns
@@ -141,6 +148,8 @@ impl FunctionCallStates {
             && self.columns.is_empty()
             && self.row_casts.is_empty()
             && self.numeric_operators.is_empty()
+            && self.row_constructors.is_empty()
+            && self.composite_constructors.is_empty()
     }
 
     /// The retained key of the column reference `expression`.
@@ -178,6 +187,22 @@ impl FunctionCallStates {
             .binary_search_by_key(&address, |(key, _)| *key)
             .ok()
             .map(|index| &self.numeric_operators[index].1)
+    }
+
+    pub(crate) fn row_constructor(&self, items: &[ScalarExpr]) -> Option<&RowConstructorState> {
+        self.row_constructors
+            .binary_search_by_key(&(items.as_ptr() as usize), |(key, _)| *key)
+            .ok()
+            .map(|index| &self.row_constructors[index].1)
+    }
+    pub(crate) fn composite_constructor(
+        &self,
+        items: &[ScalarExpr],
+    ) -> Option<&CompositeConstructorState> {
+        self.composite_constructors
+            .binary_search_by_key(&(items.as_ptr() as usize), |(key, _)| *key)
+            .ok()
+            .map(|index| &self.composite_constructors[index].1)
     }
 
     fn add(&mut self, address: usize, slots: u8) {
@@ -261,6 +286,8 @@ static EMPTY_CALL_STATES: FunctionCallStates = FunctionCallStates {
     columns: Vec::new(),
     row_casts: Vec::new(),
     numeric_operators: Vec::new(),
+    row_constructors: Vec::new(),
+    composite_constructors: Vec::new(),
 };
 
 impl<T> PreparedExpressions<T> {
@@ -284,6 +311,16 @@ impl<T> PreparedExpressions<T> {
             .sort_unstable_by_key(|(address, _)| *address);
         calls
             .numeric_operators
+            .dedup_by_key(|(address, _)| *address);
+        calls
+            .row_constructors
+            .sort_unstable_by_key(|(address, _)| *address);
+        calls.row_constructors.dedup_by_key(|(address, _)| *address);
+        calls
+            .composite_constructors
+            .sort_unstable_by_key(|(address, _)| *address);
+        calls
+            .composite_constructors
             .dedup_by_key(|(address, _)| *address);
         Self {
             expressions,
