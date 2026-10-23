@@ -100,7 +100,6 @@ impl RecordValue {
     pub fn values_mut(&mut self) -> &mut [Value] {
         &mut self.storage.values
     }
-    #[must_use]
     pub fn iter(&self) -> RecordIter<'_> {
         self.descriptor().field_names().iter().zip(self.values())
     }
@@ -171,7 +170,7 @@ impl RecordValue {
             .ok_or(MemoryError::SizeOverflow)?;
         let name_bytes = RecordDescriptor::field_bytes(width)?;
         let value_memory = control.reserve(value_bytes)?;
-        let name_memory = control.reserve(name_bytes)?;
+        let name_buffer_memory = control.reserve(name_bytes)?;
         let source_bytes = fields
             .capacity()
             .checked_mul(size_of::<(String, Value)>())
@@ -191,8 +190,11 @@ impl RecordValue {
         if let Some(memory) = &mut payload {
             drop(memory.split(source_bytes));
         }
-        let names_memory = payload.as_mut().map(|memory| memory.split(names_payload));
-        let names = control.finish(names, control.combine(name_memory, names_memory))?;
+        let name_payload_memory = payload.as_mut().map(|memory| memory.split(names_payload));
+        let names = control.finish(
+            names,
+            control.combine(name_buffer_memory, name_payload_memory),
+        )?;
         let descriptor = RecordDescriptor::with_control(names, type_oid, control)?;
         let values = control.finish(values, control.combine(value_memory, payload))?;
         Self::with_descriptor_control(values, descriptor, control)
