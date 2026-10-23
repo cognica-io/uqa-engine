@@ -84,7 +84,7 @@ fn nested_projection_and_binary_output_keep_the_original_inner_tuple() {
     else {
         panic!("outer record")
     };
-    let Value::Datum(datum) = &fields[1].1 else {
+    let Value::Datum(datum) = &fields.values()[1] else {
         panic!("physical inner tuple")
     };
     // Independently captured PostgreSQL tuple payload; substitute only the fixture's type OID.
@@ -97,7 +97,7 @@ fn nested_projection_and_binary_output_keep_the_original_inner_tuple() {
         crate::expr::datums::read(datum).unwrap(),
         Value::Bytes(bytes)
     );
-    assert_eq!(fields[2].1, Value::Int(23));
+    assert_eq!(fields.values()[2], Value::Int(23));
     assert_eq!(source, record(Value::Int(1_065_353_216)));
 }
 
@@ -128,9 +128,9 @@ fn widening_keeps_in_bounds_fields_when_a_later_field_exceeds_the_original_tuple
         panic!("retained record")
     };
     // PostgreSQL 18.4 and 18.6 both read the first eight bytes as a and the next four as b, even when c is not read.
-    assert_eq!(fields[0].1, Value::Int(361_984_551_007_945_476));
-    assert_eq!(fields[1].1, Value::Int(287_454_020));
-    let Value::Datum(tail) = &fields[2].1 else {
+    assert_eq!(fields.values()[0], Value::Int(361_984_551_007_945_476));
+    assert_eq!(fields.values()[1], Value::Int(287_454_020));
+    let Value::Datum(tail) = &fields.values()[2] else {
         panic!("an unread tail must retain its physical position")
     };
     assert_eq!(tail.offset(), 36);

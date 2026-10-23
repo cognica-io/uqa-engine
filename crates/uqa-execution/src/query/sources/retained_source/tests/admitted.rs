@@ -114,7 +114,7 @@ fn retained_admitted_fields_read_current_types_only_when_the_source_is_built() {
         };
         assert_eq!(fields.len(), if added { 2 } else { 1 });
         if added {
-            assert_eq!(fields.get(1).unwrap(), &("b".into(), Value::Null));
+            assert_eq!(fields.get(1).unwrap(), (&"b".into(), &Value::Null));
         }
         assert_eq!(batch.rows[0].value(1), Some(&value));
         assert_eq!(catalog.reads.get(), before + 1);

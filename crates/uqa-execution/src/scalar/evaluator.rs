@@ -94,11 +94,12 @@ pub(super) fn eval_scalar_inner(
         ScalarExpr::Func { .. } => function::evaluate_expression(expression, context, control),
         ScalarExpr::Array(items) => array(items, context, control),
         ScalarExpr::CompositeRow { items, binding, .. } => {
-            uqa_sql::expr::composites::constructor::evaluate_with_control(
+            uqa_sql::expr::composites::constructor::evaluate_with_state(
                 binding,
                 items.len(),
                 context.function_hook(),
                 control,
+                context.composite_constructor(items),
                 |index| eval_scalar_inner(&items[index], context, control),
             )
         }

@@ -86,7 +86,7 @@ fn admitted_xid_fields_are_not_reinterpreted_as_integer_inputs() {
             panic!("assigned composite")
         };
         assert_eq!(fields.type_oid(), Some(42_001));
-        assert_eq!(fields[0].1, Value::Int(value));
+        assert_eq!(fields.values()[0], Value::Int(value));
     }
 }
 
@@ -105,7 +105,7 @@ fn admitted_bpchar_fields_keep_padding_in_composite_assignment() {
     let Value::Record(fields) = &assigned else {
         panic!("assigned composite")
     };
-    assert_eq!(fields[0].1, field);
+    assert_eq!(fields.values()[0], field);
     assert_eq!(
         crate::result::format_postgres_text(&assigned, &target(), Some(&catalog)).unwrap(),
         r#"("a   ")"#
@@ -125,7 +125,7 @@ fn unknown_field_input_is_converted_while_a_declared_integer_remains_incompatibl
     let Value::Record(fields) = assigned else {
         panic!("assigned composite")
     };
-    assert_eq!(fields[0].1, Value::Int(42));
+    assert_eq!(fields.values()[0], Value::Int(42));
     let error = cast_to_composite(
         &Catalog(ColumnType::Xid),
         &row(Value::Int(42), 23),
@@ -156,7 +156,7 @@ fn builtin_array_field_identities_resolve_without_a_user_catalog_oid_lookup() {
         let Value::Record(fields) = assigned else {
             panic!("assigned composite")
         };
-        let Value::Array(array) = &fields[0].1 else {
+        let Value::Array(array) = &fields.values()[0] else {
             panic!("assigned array")
         };
         assert_eq!(array.elements(), &[element]);

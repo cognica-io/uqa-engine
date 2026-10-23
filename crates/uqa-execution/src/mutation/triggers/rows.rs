@@ -27,7 +27,7 @@ impl TriggerVariableResolver<'_> {
             Value::Null => Value::Null,
             Value::Record(fields) => fields
                 .iter()
-                .find(|(name, _)| name == column)
+                .find(|(name, _)| name.as_str() == column)
                 .map(|(_, value)| value.clone())
                 .ok_or_else(|| SQLError::UnknownColumn(column.to_string()))?,
             _ => {

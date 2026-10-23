@@ -113,6 +113,21 @@ impl<'a> ScalarEvalContext<'a> {
             .and_then(|states| states.numeric_operator(arguments))
     }
 
+    pub(super) fn row_constructor(
+        &self,
+        items: &[super::ScalarExpr],
+    ) -> Option<&super::state::RowConstructorState> {
+        self.function_states
+            .and_then(|states| states.row_constructor(items))
+    }
+    pub(super) fn composite_constructor(
+        &self,
+        items: &[super::ScalarExpr],
+    ) -> Option<&uqa_sql::expr::composites::constructor::CompositeConstructorState> {
+        self.function_states
+            .and_then(|states| states.composite_constructor(items))
+    }
+
     pub(super) fn column_slot(
         &self,
         expression: &super::ScalarExpr,

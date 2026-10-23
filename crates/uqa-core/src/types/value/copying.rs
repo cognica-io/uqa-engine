@@ -87,19 +87,18 @@ fn copy(
 
 enum Input<'a> {
     Values(std::slice::Iter<'a, Value>),
-    Record(std::slice::Iter<'a, (String, Value)>),
     Map(std::collections::btree_map::Iter<'a, String, Value>),
 }
 
 enum Sequence<'a> {
     List,
     Row(&'a RowValue),
+    Record(&'a crate::RecordValue),
     Array(&'a ArrayValue, Option<LegacyVectorKind>),
 }
 
 enum Output<'a> {
     Values(BudgetedVec<Value>, Sequence<'a>),
-    Record(BudgetedVec<(String, Value)>, Option<u32>),
     Map(BTreeMap<String, Value>),
 }
 
@@ -155,8 +154,8 @@ impl<'a> Frame<'a> {
                 let mut output = BudgetedVec::new(copier.budget);
                 output.reserve(fields.len())?;
                 (
-                    Input::Record(fields.iter()),
-                    Output::Record(output, fields.type_oid()),
+                    Input::Values(fields.values().iter()),
+                    Output::Values(output, Sequence::Record(fields)),
                 )
             }
             Value::Map(fields) => (Input::Map(fields.iter()), Output::Map(BTreeMap::new())),
@@ -174,7 +173,6 @@ impl<'a> Frame<'a> {
         (copier.check)()?;
         let (name, value) = match &mut self.input {
             Input::Values(values) => return Ok(values.next()),
-            Input::Record(fields) => fields.next().map(|(name, value)| (name.as_str(), value)),
             Input::Map(fields) => fields.next().map(|(name, value)| (name.as_str(), value)),
         }
         .unzip();
@@ -193,14 +191,6 @@ impl<'a> Frame<'a> {
                 values.reserve(1)?;
                 let (value, memory) = value.into_parts();
                 values.push(value)?;
-                self.memory.absorb(memory);
-            }
-            Output::Record(fields, _) => {
-                fields.reserve(1)?;
-                let (name, name_memory) = self.key.take().expect("copied record name").into_parts();
-                let (value, memory) = value.into_parts();
-                fields.push((name, value))?;
-                self.memory.absorb(name_memory);
                 self.memory.absorb(memory);
             }
             Output::Map(fields) => {
@@ -222,6 +212,14 @@ impl<'a> Frame<'a> {
                 self.memory.absorb(memory);
                 match kind {
                     Sequence::List => Value::List(values),
+                    Sequence::Record(source) => {
+                        let descriptor = source.descriptor().clone();
+                        self.memory.grow(descriptor.retained_payload_bytes()?)?;
+                        self.memory
+                            .grow(crate::RecordValue::retained_header_bytes())?;
+                        (copier.check)()?;
+                        Value::Record(crate::RecordValue::from_validated_parts(values, descriptor))
+                    }
                     Sequence::Row(source) => {
                         let descriptor = source.descriptor().cloned();
                         if let Some(descriptor) = &descriptor {
@@ -250,14 +248,6 @@ impl<'a> Frame<'a> {
                         }
                     }
                 }
-            }
-            Output::Record(fields, type_oid) => {
-                let (fields, memory) = fields.into_parts();
-                self.memory.absorb(memory);
-                self.memory
-                    .grow(crate::RecordValue::retained_header_bytes())?;
-                (copier.check)()?;
-                Value::Record(crate::RecordValue::from_parts(fields, type_oid))
             }
             Output::Map(fields) => Value::Map(fields),
         };

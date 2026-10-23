@@ -84,17 +84,17 @@ fn records_preserve_field_order_duplicate_names_and_payload_ownership() {
         panic!("expected a record");
     };
     assert_eq!(fields.len(), 2);
-    assert_eq!(fields[0].0, "same");
-    assert_eq!(fields[1].0, "same");
-    assert_eq!(fields[0].0.as_ptr(), name_pointer);
-    let Value::List(values) = &fields[0].1 else {
+    assert_eq!(fields.get(0).unwrap().0, "same");
+    assert_eq!(fields.get(1).unwrap().0, "same");
+    assert_eq!(fields.get(0).unwrap().0.as_ptr(), name_pointer);
+    let Value::List(values) = fields.get(0).unwrap().1 else {
         panic!("expected nested values")
     };
     let Value::Str(text) = &values[0] else {
         panic!("expected text")
     };
     assert_eq!(text.as_ptr(), text_pointer);
-    let Value::Bytes(bytes) = &fields[1].1 else {
+    let Value::Bytes(bytes) = fields.get(1).unwrap().1 else {
         panic!("expected bytes")
     };
     assert_eq!(bytes.as_ptr(), bytes_pointer);

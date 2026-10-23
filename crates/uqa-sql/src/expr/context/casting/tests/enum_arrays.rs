@@ -91,10 +91,10 @@ fn retained_enum_oids_fill_legacy_carriers_and_preserve_unread_values() {
     let Value::Record(fields) = &source.value else {
         panic!("retained record")
     };
-    assert!(fields[0].1.has_same_representation(&fresh));
+    assert!(fields.values()[0].has_same_representation(&fresh));
     let ty = EnumCatalog.resolve_type_name("color").unwrap().unwrap();
     assert_eq!(
-        crate::expr::composites::datum::encode_bits(&fields[0].1, &ty),
+        crate::expr::composites::datum::encode_bits(&fields.values()[0], &ty),
         Some(16_386)
     );
     let retained = source.clone();

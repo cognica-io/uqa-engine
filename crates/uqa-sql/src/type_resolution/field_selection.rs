@@ -210,7 +210,7 @@ pub fn literal_field_type(
         uqa_core::Value::Record(fields) => Some(
             fields
                 .iter()
-                .find(|(name, _)| name == field)
+                .find(|(name, _)| name.as_str() == field)
                 .map(|(_, value)| super::common::value_type(value))
                 .ok_or_else(|| undefined_record_field(field)),
         ),

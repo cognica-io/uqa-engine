@@ -817,7 +817,8 @@ mod tests {
             oid: 23,
             type_modifier: -1,
         });
-        let descriptor_bytes = fields.capacity() * std::mem::size_of::<uqa_core::RecordFieldType>();
+        // Immutable descriptors discard the temporary vector's spare slots.
+        let descriptor_bytes = fields.len() * std::mem::size_of::<uqa_core::RecordFieldType>();
         let row = Value::Row(uqa_core::RowValue::typed(vec![Value::Null], fields).unwrap());
         let untyped = Value::Row(vec![Value::Null].into());
         assert_eq!(

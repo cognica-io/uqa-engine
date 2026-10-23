@@ -468,7 +468,7 @@ fn composite_constant_field(
                     return Some(Err(error));
                 }
                 match uqa_sql::expr::datums::copy_constant_field(
-                    &fields.iter().find(|(key, _)| key == name)?.1,
+                    fields.iter().find(|(key, _)| key.as_str() == name)?.1,
                     &field.result_type,
                 ) {
                     Ok(value) => value,

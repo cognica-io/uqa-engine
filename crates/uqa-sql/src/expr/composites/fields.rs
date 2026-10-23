@@ -63,7 +63,7 @@ pub(in crate::expr) fn select_with_control(
     };
     let selected = record
         .iter()
-        .find(|(key, _)| key == name)
+        .find(|(key, _)| key.as_str() == name)
         .map_or(&Value::Null, |(_, value)| value);
     Ok(control.copy_value(selected)?)
 }

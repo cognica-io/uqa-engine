@@ -529,8 +529,8 @@ fn discriminant(v: &Value) -> u8 {
 }
 
 fn compare_postgres_record_values(
-    left: &[(String, Value)],
-    right: &[(String, Value)],
+    left: &crate::RecordValue,
+    right: &crate::RecordValue,
 ) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     for ((_, left), (_, right)) in left.iter().zip(right) {

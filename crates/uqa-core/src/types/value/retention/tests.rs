@@ -81,8 +81,10 @@ fn nested_collections_count_spare_slots_once_and_keep_field_names() {
             .into(),
         ),
     ));
-    let expected = fields.capacity() * size_of::<(String, Value)>()
+    // Record construction compacts the separate name and value buffers.
+    let expected = fields.len() * (size_of::<String>() + size_of::<Value>())
         + crate::RecordValue::retained_header_bytes()
+        + size_of::<Box<[String]>>()
         + 512
         + crate::RowValue::decoded_header_bytes()
         + size_of::<Value>()

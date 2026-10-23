@@ -169,9 +169,9 @@ fn controlled_records_and_arrays_move_names_values_and_normalized_element_buffer
     let Value::Record(fields) = &*decoded else {
         panic!("expected a record")
     };
-    assert_eq!(fields[0].0.as_ptr(), name_pointer);
-    assert_eq!(fields[0].0, fields[1].0);
-    let Value::Str(text) = &fields[0].1 else {
+    assert_eq!(fields.get(0).unwrap().0.as_ptr(), name_pointer);
+    assert_eq!(fields.get(0).unwrap().0, fields.get(1).unwrap().0);
+    let Value::Str(text) = fields.get(0).unwrap().1 else {
         panic!("expected record text")
     };
     assert_eq!(text.as_ptr(), text_pointer);

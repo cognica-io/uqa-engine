@@ -29,7 +29,7 @@ pub(super) struct EncodedTuple {
 }
 
 pub(super) fn encode(
-    fields: &[(String, Value)],
+    fields: &uqa_core::RecordValue,
     descriptor: &CompositeTypeDescriptor,
     descriptors: &Descriptors,
 ) -> Option<(Vec<u8>, Vec<Option<usize>>, usize)> {
@@ -54,7 +54,7 @@ pub(super) fn encode(
 }
 
 pub(super) fn encode_with_control(
-    fields: &[(String, Value)],
+    fields: &uqa_core::RecordValue,
     descriptor: &CompositeTypeDescriptor,
     catalog: Option<&dyn CompositeTypeCatalog>,
     control: &ProductionControl<'_>,
@@ -80,7 +80,7 @@ pub(super) fn encode_with_control(
         control.check()?;
         let (_, value) = fields
             .iter()
-            .find(|(name, _)| *name == attribute.name)
+            .find(|(name, _)| name.as_str() == attribute.name.as_str())
             .ok_or_else(invalid)?;
         if matches!(value, Value::Null) {
             positions.push_copy(None)?;

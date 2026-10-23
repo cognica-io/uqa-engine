@@ -398,3 +398,35 @@ fn typed_and_binary_quota_failures_preserve_previous_readers_and_release_workspa
     drop(first);
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn legacy_record_decoding_admits_shared_descriptor_conversion_and_releases_scratch() {
+    let input = encoded(Value::Record(
+        vec![
+            ("name".repeat(256), Value::Str("value".repeat(256))),
+            ("name".repeat(256), Value::Null),
+        ]
+        .into(),
+    ));
+    let control = StorageReadControl::with_limit(1 << 20);
+    let decoded = typed::decode(&input, &control, 127, false).unwrap();
+    let exact = decoded
+        .retained_payload_bytes(control.memory(), control.cancellation())
+        .unwrap();
+    assert_eq!(decoded.reserved_bytes(), exact);
+    assert_eq!(control.memory().used(), exact);
+    assert!(control.memory().peak() > exact);
+    let small = StorageReadControl::with_limit(exact - 1);
+    assert!(matches!(
+        typed::decode(&input, &small, 127, false),
+        Err(JsonReadError::Memory(_))
+    ));
+    assert_eq!(small.memory().used(), 0);
+    drop(decoded);
+    assert_eq!(control.memory().used(), 0);
+    control.cancellation().cancel();
+    assert!(matches!(
+        typed::decode(&input, &control, 127, false),
+        Err(JsonReadError::Cancelled(_))
+    ));
+}

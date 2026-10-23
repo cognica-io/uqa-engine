@@ -78,8 +78,12 @@ fn materialize(
             for (index, attribute) in descriptor.attributes.iter().enumerate() {
                 let value = fields
                     .get(index)
-                    .filter(|(name, _)| *name == attribute.name)
-                    .or_else(|| fields.iter().find(|(name, _)| *name == attribute.name))
+                    .filter(|(name, _)| name.as_str() == attribute.name.as_str())
+                    .or_else(|| {
+                        fields
+                            .iter()
+                            .find(|(name, _)| name.as_str() == attribute.name.as_str())
+                    })
                     .map_or(&Value::Null, |(_, value)| value);
                 let value = materialize(value, &attribute.ty, engine, control)?;
                 let name = control.copy_text(&attribute.name)?;

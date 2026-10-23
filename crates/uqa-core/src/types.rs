@@ -77,7 +77,7 @@ pub use jsonb::{
 pub use legacy_vector::{LegacyVectorKind, LegacyVectorValue};
 pub use occurrence::{TokenOccurrence, TokenOccurrenceError, TokenOffsets};
 pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingEntry};
-pub use record::RecordValue;
+pub use record::{RecordDescriptor, RecordIter, RecordIterMut, RecordValue};
 pub use row::{RecordFieldType, RowDescriptor, RowValue};
 pub use temporal::{
     TemporalDateOrder, TemporalDateStyle, TemporalInfinity, TemporalInputError,

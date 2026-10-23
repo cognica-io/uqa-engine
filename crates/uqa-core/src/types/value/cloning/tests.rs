@@ -113,7 +113,10 @@ fn payload_clones_preserve_owned_buffers_and_nested_type_metadata() {
                     .unwrap()
                     .shares_storage_with(b.descriptor().unwrap()));
             }
-            (Value::Record(a), Value::Record(b)) => assert_ne!(a.as_ptr(), b.as_ptr()),
+            (Value::Record(a), Value::Record(b)) => {
+                assert_ne!(a.values().as_ptr(), b.values().as_ptr());
+                assert!(a.descriptor().shares_storage_with(b.descriptor()));
+            }
             (Value::Map(a), Value::Map(b)) => {
                 assert!(!std::ptr::eq(&raw const a["key"], &raw const b["key"]));
             }

@@ -183,7 +183,7 @@ pub(crate) fn project_value(
                         .and_then(|old| {
                             fields
                                 .iter()
-                                .find(|(name, _)| *name == old.name)
+                                .find(|(name, _)| name.as_str() == old.name.as_str())
                                 .map(|(_, value)| (old, value))
                         });
                     let value = retained.map_or(Ok(Value::Null), |(old, value)| {

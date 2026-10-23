@@ -313,7 +313,7 @@ mod tests {
             panic!("composite value");
         };
         assert_eq!(
-            fields[0].1,
+            fields.values()[0],
             Value::Record(vec![("y".into(), Value::Str("a".into()))].into())
         );
         let added = apply_attribute_change(

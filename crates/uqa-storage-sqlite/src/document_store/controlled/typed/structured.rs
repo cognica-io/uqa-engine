@@ -64,8 +64,21 @@ pub(super) fn record(
     }
     let (fields, retained) = fields.into_parts();
     memory.absorb(retained);
-    memory.grow(uqa_core::RecordValue::retained_header_bytes())?;
-    Ok(Budgeted::new(Value::Record(fields.into()), memory))
+    let production = uqa_core::memory::ProductionControl::new(
+        control.memory(),
+        control.cancellation(),
+        control.cancellation(),
+    );
+    let fields = production
+        .finish(fields, Some(memory))
+        .map_err(super::retention_error)?;
+    let (record, memory) = uqa_core::RecordValue::with_control(fields, None, &production)
+        .map_err(super::retention_error)?
+        .into_parts();
+    Ok(Budgeted::new(
+        Value::Record(record),
+        memory.expect("controlled record payload"),
+    ))
 }
 
 pub(super) fn sql_array(

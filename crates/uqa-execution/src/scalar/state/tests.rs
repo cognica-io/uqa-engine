@@ -499,3 +499,5 @@ mod catalog_casts;
 mod numeric_casts;
 mod numeric_operators;
 mod scalar_casts;
+
+mod row_descriptors;

@@ -307,10 +307,7 @@ fn output_values(
 
 pub(super) fn row_fields(value: Value, expected: usize) -> Result<Vec<Value>, SQLError> {
     let fields = match value {
-        Value::Record(fields) => fields
-            .into_iter()
-            .map(|(_, value)| value)
-            .collect::<Vec<_>>(),
+        Value::Record(fields) => fields.into_values(),
         Value::Row(fields) => fields.into_values(),
         Value::Null => return Ok(vec![Value::Null; expected]),
         _ => {
