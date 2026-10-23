@@ -8,6 +8,10 @@
 
 use std::collections::HashMap;
 
+mod selected;
+
+pub(crate) use selected::SelectedRowMaterializer;
+
 use super::{
     Arc, PhysicalRow, ResultRow, RowFragment, RowSchema, SmallVec, Value, INLINE_ROW_FRAGMENTS,
     NULL_SLOT,

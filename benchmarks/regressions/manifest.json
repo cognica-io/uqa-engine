@@ -2,6 +2,83 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "owned_columnar_transfer_moves_values_shared_only_between_input_fragments",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",
+      "capability": "Joined fragment transfer ownership",
+      "workload": "Two joined fragments retain disjoint and duplicate selections of one underlying value vector, including an entirely unselected alias fragment.",
+      "invariant": "Row-local shared handles are released before donation; every distinct selected value retains its allocation, only the earlier duplicate copies, and outputs remain exact.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "owned_columnar_transfer_moves_selected_payloads_without_payload_allocations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",
+      "capability": "Owned columnar value transfer",
+      "workload": "Thirty-two rows with 16KB strings and nested arrays transferred from exclusive physical fragments.",
+      "invariant": "Every string and array keeps its original allocation, output values and row counts remain exact, and transfer allocates less than 16KB total.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_columnar_transfer_clones_only_selected_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",
+      "capability": "Projected columnar value transfer",
+      "workload": "A retained scan row contains a 768KB unused string and one selected string behind a remapped schema.",
+      "invariant": "Only the selected value is copied, source values remain unchanged, transfer allocates less than 4KB, and the consumed row releases its source handle.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "owned_columnar_transfer_preserves_remapped_fragments_and_duplicate_positions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",
+      "capability": "Positional output ownership",
+      "workload": "Two exclusive fragments with remapped names, duplicate labels and physical slots, absent names and an extra label occurrence.",
+      "invariant": "Distinct output positions and NULLs remain exact; the last occurrence retains each original payload allocation and only repeated output values copy.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "owned_columnar_transfer_counts_aliases_after_fragment_projection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",
+      "capability": "Projected fragment ownership",
+      "workload": "A reordered fragment projection with two physical aliases for the same string and an absent slot.",
+      "invariant": "Alias values remain equal, distinct strings retain their original allocations, only the earlier duplicate copies, and absent slots remain NULL.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "owned_columnar_transfer_preserves_empty_and_zero_column_cardinality",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",
+      "capability": "Zero-column transfer cardinality",
+      "workload": "Zero and three input rows with empty output schemas and missing requested positions.",
+      "invariant": "Empty and zero-column results retain exact row counts and missing values remain NULL.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "owned_columnar_transfer_matches_borrowed_across_joined_projection_layouts",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/columnar_batch/ownership_tests.rs",
+      "capability": "Shared fragment transfer observations",
+      "workload": "Joined rows sharing repeated/reordered projections over zero, one, eight and thirty-one stored values, with duplicate labels and absent slots.",
+      "invariant": "Consuming transfer equals the existing borrowed observations for every row and output position, including wide projections.",
+      "case_names": [""]
+    },
+    {
       "package": "uqa-engine",
       "kind": "lib",
       "test": "prepared_document_writes_check_presence_without_copying_payloads",

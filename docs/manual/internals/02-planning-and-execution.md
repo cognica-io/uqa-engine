@@ -519,6 +519,8 @@ Correlated subqueries use a positional `ScopeOverlay`: current-query columns rem
 
 Duplicate projected labels remain separate slots through execution and the columnar boundary. `SQLResult` retains its named `BTreeMap<String, Value>` rows for existing callers and, only when labels repeat, also preserves the final positional row values; `SQLResult::value_at`, cursors, columnar batches, the CLI, and wire consumers distinguish those values without materializing maps between operators.
 
+Owned columnar transfer resolves output positions once per batch and moves exclusive selected values into their result columns. Fragment projections and repeated slots are resolved before donation; row-local aliases share one materialization owner, while independent retained readers keep their original values. Only shared or repeated selected values are copied, unselected payloads are not materialized, and zero-column batches retain their row count. Borrowed batch transfer preserves its non-consuming contract.
+
 ## Pull execution and blocking operators
 
 Physical relational operators are pull-based and exchange batches of dynamic `Value` instances. Filters can compile projected predicates once and evaluate positions directly. Aggregates use streaming state and adaptive grouping where possible. Finalized expressions read their aggregate/group slots through a borrowed output lookup, including expressions simplified to constants before slot binding; an external group row is built only when the expression still needs one.
