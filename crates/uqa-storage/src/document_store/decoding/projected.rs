@@ -20,11 +20,28 @@ pub(super) fn fields(
     selected: &[&str],
     control: &StorageReadControl,
 ) -> StorageBackendResult<Option<Budgeted<Document>>> {
-    let Some(members) = ordered_primitives(input, control)? else {
-        return Ok(None);
-    };
     let mut memory = control.memory().empty_reservation();
     let mut result = Document::new();
+    let supported = visit(input, selected, control, &mut |name, value| {
+        memory.grow(size_of::<(String, Value)>())?;
+        memory.grow(name.len())?;
+        let (value, retained) = value.into_parts();
+        memory.absorb(retained);
+        result.insert(name.to_owned(), value);
+        Ok(())
+    })?;
+    Ok(supported.then(|| Budgeted::new(result, memory)))
+}
+
+pub(super) fn visit(
+    input: &str,
+    selected: &[&str],
+    control: &StorageReadControl,
+    visitor: &mut dyn FnMut(&str, Budgeted<Value>) -> StorageBackendResult<()>,
+) -> StorageBackendResult<bool> {
+    let Some(members) = ordered_primitives(input, control)? else {
+        return Ok(false);
+    };
     for (name, encoded) in members.iter().copied() {
         control.check()?;
         let keep = selected.contains(&name);
@@ -35,27 +52,24 @@ pub(super) fn fields(
                     decode_json_string(encoded, control.memory(), control.cancellation())
                         .map_err(read_error)?
                         .into_parts();
-                memory.absorb(retained);
-                Value::Str(value)
+                Budgeted::new(Value::Str(value), retained)
             }
-            Some(b'n') => Value::Null,
-            Some(b't' | b'f') => Value::Bool(encoded[0] == b't'),
+            Some(b'n') => Budgeted::new(Value::Null, control.memory().empty_reservation()),
+            Some(b't' | b'f') => Budgeted::new(
+                Value::Bool(encoded[0] == b't'),
+                control.memory().empty_reservation(),
+            ),
             _ => {
                 // Unselected numeric values still undergo their historical range conversion in field-name order.
-                let (value, retained) =
-                    legacy::number(text(encoded)?, legacy::Mode::Legacy, control)?.into_parts();
-                memory.absorb(retained);
-                value
+                legacy::number(text(encoded)?, legacy::Mode::Legacy, control)?
             }
         };
         if keep {
-            memory.grow(size_of::<(String, Value)>())?;
-            memory.grow(name.len())?;
-            result.insert(name.to_owned(), value);
+            visitor(name, value)?;
         }
     }
     control.check()?;
-    Ok(Some(Budgeted::new(result, memory)))
+    Ok(true)
 }
 
 /// Ordinary documents keep their members inline; wider ones charge a heap buffer.

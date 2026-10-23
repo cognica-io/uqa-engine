@@ -4,6 +4,39 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "positional_decoding_shares_duplicate_fields_and_omits_field_name_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/decoding/positional/tests.rs",
+      "capability": "Direct positional document decoding",
+      "workload": "Select a field with a 32KB name, a stored NULL, an absent field and a duplicate selection beside an unused 64KB string.",
+      "invariant": "Total decoding allocations remain below 2KB; names and unused strings are not copied, duplicates share one value, missing and NULL differ, and the retained lease releases completely.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "positional_decoding_preserves_legacy_values_duplicates_and_normalization",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/decoding/positional/tests.rs",
+      "capability": "Positional legacy document observations",
+      "workload": "Empty, unordered, duplicate/escaped-name, typed, nested, private raw, compound-marker and numeric legacy objects across empty and repeated projections.",
+      "invariant": "Every position equals the historical field decoder, repeated names share one retained value, and all leases release.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "positional_decoding_preserves_unselected_errors_and_releases_resources",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/decoding/positional/tests.rs",
+      "capability": "Positional decoding validation and ownership",
+      "workload": "Invalid roots, unselected numeric/Unicode/private-value failures, duplicate invalid members, malformed delimiters, exhausted allowance and cancellation with an unrelated retained lease.",
+      "invariant": "Error observations match historical full decoding even for empty projections; failures release only their own allocations and callbacks cannot observe a partial row.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "layout_discovery_checks_only_the_indexed_candidates",
       "cases": 1,
       "source": "crates/uqa-storage/src/document_store/memory/layouts.rs",
