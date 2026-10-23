@@ -12,7 +12,7 @@ use super::*;
 fn legacy_document_index_does_not_block_catalog_reads_or_unrelated_table_deletion() {
     for provider in 0..3 {
         let (_directory, first, second) = sessions(provider);
-        sql(&first, "CREATE TABLE documents ()");
+        first.create_default_table("documents", Vec::new()).unwrap();
         first
             .register_catalog_index(
                 "document_owner_idx",
@@ -61,7 +61,11 @@ fn legacy_document_index_does_not_block_catalog_reads_or_unrelated_table_deletio
 fn document_index_included_fields_follow_sql_binding_catalog_types() {
     for provider in 0..3 {
         let (_directory, first, second) = sessions(provider);
-        sql(&first, "CREATE TABLE documents (); CREATE INDEX owner_idx ON documents(owner_id) INCLUDE(extra)");
+        first.create_default_table("documents", Vec::new()).unwrap();
+        sql(
+            &first,
+            "CREATE INDEX owner_idx ON documents(owner_id) INCLUDE(extra)",
+        );
         let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
         drop((first, second));
         let reopened = Engine::from_persistent_provider(factory).unwrap();

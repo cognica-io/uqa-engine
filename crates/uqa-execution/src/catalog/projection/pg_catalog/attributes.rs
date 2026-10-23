@@ -466,7 +466,11 @@ fn index_attributes(
         let table = catalog
             .table(resolution, &index.table_name)?
             .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
-        for (position, column) in index.attributes(&table.columns)?.iter().enumerate() {
+        for (position, column) in index
+            .attributes(&table.columns, table.columns_declared)?
+            .iter()
+            .enumerate()
+        {
             rows.push(pg_attribute_row(
                 index.oid(),
                 catalog_ordinal(position, "index attribute")?,

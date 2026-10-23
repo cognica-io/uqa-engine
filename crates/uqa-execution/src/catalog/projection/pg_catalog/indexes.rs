@@ -46,6 +46,7 @@ impl CatalogIndexRelation {
     pub(crate) fn attributes(
         &self,
         table_columns: &[uqa_sql::ast::ColumnDef],
+        columns_declared: bool,
     ) -> Result<Vec<uqa_sql::ast::ColumnDef>, SQLError> {
         let mut columns =
             Vec::with_capacity(self.columns.len() + self.definition.included_columns.len());
@@ -69,7 +70,7 @@ impl CatalogIndexRelation {
                 // use the same text catalog type as SQL index binding; predecessor
                 // and direct-API declarations need not store key_types.
                 .or_else(|| {
-                    (table_columns.is_empty() && key.column().is_some())
+                    (!columns_declared && table_columns.is_empty() && key.column().is_some())
                         .then_some(&uqa_sql::ast::ColumnType::Text)
                 })
                 .cloned()
@@ -84,8 +85,7 @@ impl CatalogIndexRelation {
                 .find(|column| column.name == *name)
                 .map(|column| &column.ty)
                 .or_else(|| {
-                    table_columns
-                        .is_empty()
+                    (!columns_declared && table_columns.is_empty())
                         .then_some(&uqa_sql::ast::ColumnType::Text)
                 })
                 .ok_or_else(|| SQLError::UnknownColumn(name.clone()))?;

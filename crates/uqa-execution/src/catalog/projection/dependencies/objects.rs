@@ -302,7 +302,7 @@ impl CatalogObjects {
             let table = catalog
                 .table(resolution, &index.table_name)?
                 .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
-            let columns = index.attributes(&table.columns)?;
+            let columns = index.attributes(&table.columns, table.columns_declared)?;
             let oid = catalog_oid(index.oid())?;
             self.add_relation(oid, index.relation.clone(), RelationKind::Index, columns);
             if let Some(relation) = self.relations.get_mut(&oid) {
