@@ -756,7 +756,12 @@ impl SchemaScope {
                         captured_output: Some(relation),
                         ..
                     } => RowSchema::capture_output(&schema, *relation),
-                    _ => rename_schema(&schema, column_aliases, alias.as_deref()),
+                    _ => match alias {
+                        Some(alias) if !schema.columns_are_open(None) => {
+                            alias_table_schema(&schema, alias, column_aliases)?
+                        }
+                        alias => rename_schema(&schema, column_aliases, alias.as_deref()),
+                    },
                 })
             }
             SourcePlan::Join {

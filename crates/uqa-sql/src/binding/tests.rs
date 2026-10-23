@@ -20,6 +20,7 @@ use crate::routines::RoutineResolution;
 use crate::RelationIdentity;
 
 mod collations;
+mod empty_relations;
 mod retained_sources;
 
 struct EmptyRoutineResolution;

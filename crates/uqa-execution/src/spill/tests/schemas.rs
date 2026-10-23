@@ -96,6 +96,37 @@ fn empty_relation_identity_survives_spill_without_a_value_slot() {
 }
 
 #[test]
+fn anonymous_empty_namespace_survives_spill_without_a_named_type() {
+    let schema = RowSchema::with_qualified_types("q", Vec::new(), Vec::new());
+    for shared in [false, true] {
+        let mut buffer = SpillBuffer::new(0);
+        buffer
+            .push(Batch::from_physical_rows(
+                schema.clone(),
+                vec![PhysicalRow::from_values(Vec::new())],
+            ))
+            .unwrap();
+        let batches = if shared {
+            buffer
+                .into_shared(schema.clone())
+                .unwrap()
+                .reader()
+                .unwrap()
+                .collect::<ExecResult<Vec<_>>>()
+                .unwrap()
+        } else {
+            buffer.drain_all().unwrap()
+        };
+        assert_eq!(batches.len(), 1);
+        assert!(batches[0].schema.shares_index(&schema));
+        assert!(batches[0].schema.has_qualifier("q"));
+        assert_eq!(batches[0].schema.whole_row_type("q"), None);
+        assert_eq!(batches[0].rows.len(), 1);
+        assert_eq!(batches[0].rows[0].value(0), None);
+    }
+}
+
+#[test]
 fn restored_schema_rejects_different_physical_types_aliases_and_collations() {
     let schema = RowSchema::with_types(vec!["value".into()], vec![Some(ColumnType::Text)])
         .with_column_collations([Some(950)]);

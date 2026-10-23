@@ -365,6 +365,13 @@ impl<'a> ColumnSelection<'a> {
         })
     }
 
+    /// Establish a source namespace even when the selected row has no named columns.
+    #[must_use]
+    pub(crate) fn with_relation_qualifier(mut self, qualifier: &str) -> Self {
+        self.schema = RowSchema::with_relation_qualifier(&self.schema, qualifier);
+        self
+    }
+
     /// Attribute inner lock origins to this source qualifier so `FOR UPDATE OF` a view, CTE, or subquery does not lock sibling join inputs.
     #[must_use]
     pub fn rebinding_lock_origins(mut self, qualifier: impl Into<String>) -> Self {

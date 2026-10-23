@@ -274,7 +274,7 @@ fn projection_star_columns_inner(
                     (column, ty, collation)
                 })
                 .collect::<Vec<_>>();
-            if columns.is_empty() {
+            if columns.is_empty() && !schema.has_qualifier(qualifier) {
                 if let Some(error) = schema.unavailable_qualifier_error(qualifier) {
                     return Err(error);
                 }

@@ -1,0 +1,710 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT ROW(q)::text AS r,count(q) OVER() AS n FROM (SELECT)q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "(\"()\")",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "present"
+    },
+    {
+      "sql": "SELECT q.* FROM (SELECT)q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [
+            []
+          ]
+        }
+      ],
+      "id": "star_projection"
+    },
+    {
+      "sql": "SELECT q.* FROM (VALUES(1))l(k) LEFT JOIN (SELECT)q ON FALSE",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [
+            []
+          ]
+        }
+      ],
+      "id": "star_absent_projection"
+    },
+    {
+      "sql": "SELECT q.* FROM (SELECT WHERE FALSE)q",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "star_no_rows"
+    },
+    {
+      "sql": "SELECT ROW(q.*)::text AS expanded,ROW(q)::text AS nested,count(q) OVER() AS n FROM (SELECT)q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "expanded",
+            "nested",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "()",
+              "(\"()\")",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "expanded"
+    },
+    {
+      "sql": "SELECT k,ROW(q)::text AS r,count(q) OVER() AS n FROM (VALUES(1))l(k) LEFT JOIN (SELECT)q ON TRUE",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "(\"()\")",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "left_present"
+    },
+    {
+      "sql": "SELECT k,ROW(q)::text AS r,count(q) OVER() AS n FROM (VALUES(1))l(k) LEFT JOIN (SELECT)q ON FALSE",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "()",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "left_absent"
+    },
+    {
+      "sql": "SELECT k,ROW(q)::text AS r,count(q) OVER() AS n FROM (SELECT)q RIGHT JOIN (VALUES(1))r(k) ON FALSE",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "()",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "right_absent"
+    },
+    {
+      "sql": "SELECT ROW(l)::text AS l,ROW(r)::text AS r,count(l) OVER() AS ln,count(r) OVER() AS rn FROM (SELECT)l FULL JOIN (SELECT)r ON FALSE ORDER BY 1,2",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r",
+            "ln",
+            "rn"
+          ],
+          "type_oids": [
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "(\"()\")",
+              "()",
+              "1",
+              "1"
+            ],
+            [
+              "()",
+              "(\"()\")",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "full_empty"
+    },
+    {
+      "sql": "SELECT k,ROW(q)::text AS r,count(q) OVER() AS n FROM (VALUES(1),(2))l(k) LEFT JOIN LATERAL(SELECT WHERE k=2)q ON TRUE ORDER BY k",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "()",
+              "1"
+            ],
+            [
+              "2",
+              "(\"()\")",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "lateral"
+    },
+    {
+      "sql": "SELECT ROW(q)::text AS direct,(SELECT ROW(q)::text) AS nested FROM (SELECT)q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "direct",
+            "nested"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "(\"()\")",
+              "(\"()\")"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated_present"
+    },
+    {
+      "sql": "SELECT ROW(q)::text AS direct,(SELECT ROW(q)::text) AS nested FROM (VALUES(1))l(k) LEFT JOIN (SELECT)q ON FALSE",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "direct",
+            "nested"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "()",
+              "()"
+            ]
+          ]
+        }
+      ],
+      "id": "correlated_absent"
+    },
+    {
+      "sql": "SELECT ROW(j)::text AS r,count(j) OVER() AS n FROM ((SELECT)l LEFT JOIN (SELECT)r ON FALSE)j",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "(\"()\")",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "join_alias"
+    },
+    {
+      "sql": "SELECT ROW(j)::text AS r,count(j) OVER() AS n FROM (VALUES(1))x(k) LEFT JOIN ((SELECT)l LEFT JOIN (SELECT)r ON FALSE)j ON FALSE",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "()",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "join_alias_absent"
+    },
+    {
+      "sql": "WITH q AS (SELECT) SELECT ROW(q)::text AS r,count(q) OVER() AS n FROM q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "(\"()\")",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "cte"
+    },
+    {
+      "sql": "WITH q AS MATERIALIZED(SELECT) SELECT ROW(q)::text AS r,count(q) OVER() AS n FROM q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "(\"()\")",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "materialized"
+    },
+    {
+      "sql": "SELECT ROW(q)::text AS r,count(q) OVER() AS n FROM (SELECT UNION ALL SELECT)q",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "(\"()\")",
+              "2"
+            ],
+            [
+              "(\"()\")",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "union"
+    },
+    {
+      "sql": "SELECT ROW(q)::text AS r FROM (SELECT WHERE FALSE)q",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "id": "no_rows"
+    },
+    {
+      "sql": "SELECT q IS NULL AS row_null,q IS NOT NULL AS row_not_null,ROW(q) IS NULL AS datum_null,ROW(q) IS NOT NULL AS datum_present FROM (SELECT)q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "row_null",
+            "row_not_null",
+            "datum_null",
+            "datum_present"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "null_predicates"
+    },
+    {
+      "sql": "SELECT q,ROW(e)::text AS empty FROM (SELECT)e,(SELECT 7 AS q)s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "q",
+            "empty"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "7",
+              "(\"()\")"
+            ]
+          ]
+        }
+      ],
+      "id": "shadow"
+    },
+    {
+      "sql": "SELECT q.missing FROM (SELECT)q",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column q.missing does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "unknown_field"
+    },
+    {
+      "sql": "SELECT * FROM (SELECT)q(a)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"q\" has 0 columns available but 1 columns specified",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "too_many_aliases"
+    },
+    {
+      "sql": "CREATE VIEW empty_derived_scope_view AS SELECT ROW(q)::text AS body,count(q) OVER() AS n FROM (SELECT)q",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "create_view"
+    },
+    {
+      "sql": "SELECT * FROM empty_derived_scope_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "(\"()\")",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "view"
+    },
+    {
+      "sql": "PREPARE empty_derived_scope(bool) AS SELECT ROW(q)::text AS r,count(q) OVER() AS n FROM (VALUES(1))l(k) LEFT JOIN (SELECT)q ON $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "prepare"
+    },
+    {
+      "sql": "EXECUTE empty_derived_scope(TRUE)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "(\"()\")",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "execute_present"
+    },
+    {
+      "sql": "EXECUTE empty_derived_scope(FALSE)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "()",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "id": "execute_absent"
+    },
+    {
+      "sql": "DEALLOCATE empty_derived_scope",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "deallocate"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "353e4bbfe4ea16f13f7f15859e09050a5a7933816797a31c8776d6cb066ce659",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}

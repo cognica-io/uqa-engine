@@ -135,3 +135,52 @@ fn joins_keep_independent_relation_types_without_inventing_a_combined_named_row(
         assert_eq!(alias.whole_row_type("joined"), None);
     }
 }
+
+#[test]
+fn anonymous_empty_sources_keep_names_without_claiming_a_named_type() {
+    for schema in [
+        RowSchema::with_qualified_types("q", Vec::new(), Vec::new()),
+        RowSchema::with_column_metadata(Some("q"), std::iter::empty()),
+        RowSchema::with_relation_qualifier(&RowSchema::default(), "q"),
+    ] {
+        assert!(schema.has_sql_bindings());
+        assert!(schema.has_qualifier("q"));
+        assert_eq!(schema.len(), 0);
+        assert_eq!(schema.physical_width(), 0);
+        assert_eq!(schema.whole_row_type("q"), None);
+        assert_eq!(
+            crate::scalar_type(&ScalarExpr::Column("q".into()), &schema, &[]).unwrap(),
+            Some(ColumnType::Record)
+        );
+        let copied = schema.clone();
+        assert!(schema.shares_index(&copied));
+        let alias = RowSchema::with_relation_qualifier(&schema, "renamed");
+        assert!(alias.has_qualifier("renamed"));
+        assert!(!alias.has_qualifier("q"));
+        assert_eq!(alias.whole_row_type("renamed"), None);
+        let joined = RowSchema::join(&schema, &alias, []);
+        assert!(joined.has_qualifier("q"));
+        assert!(joined.has_qualifier("renamed"));
+        let joined_alias = RowSchema::with_relation_qualifier(&joined, "j");
+        assert!(joined_alias.has_qualifier("j"));
+        assert!(!joined_alias.has_qualifier("q"));
+        assert_eq!(joined_alias.whole_row_type("j"), None);
+        let (canonical, _) = schema.canonical_projection();
+        assert!(canonical.has_qualifier("q"));
+        assert!(!RowSchema::select(&schema, &[]).has_qualifier("q"));
+    }
+    assert!(RowSchema::default().index.cold.row_types.0.is_none());
+    let ordinary = RowSchema::with_qualified_types("q", vec!["k".into()], vec![None]);
+    assert!(ordinary.index.cold.row_types.0.is_none());
+}
+
+#[test]
+fn anonymous_empty_namespaces_shadow_named_outer_rows() {
+    let outer = source("q", 20_000, &["k"]);
+    let local = RowSchema::with_qualified_types("q", Vec::new(), Vec::new());
+    let scope = RowSchema::with_outer_schema(&local, &outer);
+    assert!(scope.has_qualifier("q"));
+    assert_eq!(scope.whole_row_type("q"), None);
+    assert!(!scope.has_qualified_column("q", "k"));
+    assert!(scope.qualified_star_position_layout("q").is_empty());
+}

@@ -22211,6 +22211,100 @@
       "capability": "Whole-row join identity",
       "workload": "33 independent PostgreSQL observations on four providers; 29 after each persistent reopen.",
       "invariant": "LEFT/RIGHT/FULL/LATERAL joins, USING, aliases, correlation, COUNT, materialization, named zero-column relations, stored views and prepared inputs retain record NULL identity."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "anonymous_empty_sources_keep_names_without_claiming_a_named_type",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_types/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Empty anonymous sources, aliases, joins, canonical layouts and discarded projections.",
+      "invariant": "Namespace existence is independent of named composite identity; nonempty anonymous sources allocate no namespace map."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "anonymous_empty_namespaces_shadow_named_outer_rows",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_types/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "A zero-column local alias shadows a named outer relation.",
+      "invariant": "Whole-row and qualified-field resolution obey the same lexical scope."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "empty_derived_rows_bind_and_reject_excess_aliases_without_execution",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/tests/empty_relations.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Empty derived rows, joins, CTEs and scalar correlation.",
+      "invariant": "Analysis retains anonymous record types and rejects unknown fields and excess aliases before execution."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "anonymous_empty_namespace_survives_spill_without_a_named_type",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/tests/schemas.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Zero-budget draining and shared spill readers with an empty anonymous row.",
+      "invariant": "Spill keeps the original namespace without inventing a named type or value slot."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "empty_derived_scope_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Whole-row join identity",
+      "workload": "29 independent PostgreSQL observations on four providers; 27 after each persistent reopen.",
+      "invariant": "Empty derived relations preserve aliases, outer-join presence, correlation, CTEs, zero-width sets, views, prepared inputs and PostgreSQL diagnostics."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_qualification_and_join_aliases_retain_empty_namespaces",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/source_projection/tests.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Source and join-alias selections over a produced row with no columns.",
+      "invariant": "Physical qualification retains the empty relation namespace and hides the previous alias without adding a value slot."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "empty_returning_source_stars_keep_relation_scope",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/returning.rs",
+      "capability": "Whole-row join identity",
+      "workload": "Qualified RETURNING stars over an anonymous zero-column source.",
+      "invariant": "A present namespace expands to no columns while an absent namespace retains 42P01."
     }
   ]
 }

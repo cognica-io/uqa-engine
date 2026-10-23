@@ -80,7 +80,7 @@ impl RowSchema {
                 .chain(self.index.cold.binding_only.keys())
                 .any(|identity| identity.qualifier() == Some(qualifier))
             || self.columns_are_open(Some(qualifier))
-            || self.index.cold.row_types.get(qualifier).is_some()
+            || self.index.cold.row_types.contains(qualifier)
             || self.whole_row_presence(qualifier).is_some()
     }
 

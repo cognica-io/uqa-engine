@@ -78,7 +78,12 @@ impl RowSchema {
             .cloned()
             .map(|column| ColumnIdentity::qualified(qualifier, column))
             .collect();
-        Self::with_identities(columns, identities, types)
+        let mut schema = Self::with_identities(columns, identities, types);
+        if schema.is_empty() {
+            Arc::make_mut(&mut schema.index).cold.row_types =
+                super::relation_types::RelationRowTypes::anonymous(qualifier);
+        }
+        schema
     }
 
     /// Build a positional source from its catalog declarations without discarding selected column collations. Attribute numbers remain a catalog identity, independent of these query positions.
@@ -126,6 +131,9 @@ impl RowSchema {
             types.push(ty);
         }
         let width = names.len();
+        if let Some(qualifier) = qualifier.filter(|_| width == 0) {
+            metadata.row_types = super::relation_types::RelationRowTypes::anonymous(qualifier);
+        }
         Self::from_typed_parts_with_aliases_and_exact_precedence(
             names,
             identities,

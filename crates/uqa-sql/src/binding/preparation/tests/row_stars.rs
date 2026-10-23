@@ -9,6 +9,8 @@ use super::*;
 #[test]
 fn row_stars_expand_before_retained_analysis_without_flattening_whole_rows() {
     for (sql, widths) in [
+        ("SELECT ROW(s.*) FROM (SELECT)s", vec![0]),
+        ("SELECT ROW(1,s.*,s) FROM (SELECT)s", vec![2]),
         ("SELECT ROW(s.*) FROM (VALUES(2,5))s(k,z)", vec![2]),
         ("SELECT ROW(s) FROM (VALUES(2,5))s(k,z)", vec![1]),
         (
