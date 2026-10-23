@@ -13,6 +13,58 @@ use uqa_engine::Engine;
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn shadowed_column_diagnostics_match_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shadowed-column.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/shadowed_column_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    restored["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| !matches!(case["id"].as_str().unwrap(), "version"));
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 13);
+    crate::pg18_oracle::verify(&engine, &restored.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn correlated_input_capture_matches_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("correlated-capture.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/correlated_capture_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    restored["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| !matches!(case["id"].as_str().unwrap(), "version" | "create_view"));
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 24);
+    crate::pg18_oracle::verify(&engine, &restored.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn derived_input_capture_matches_postgresql_and_reopen(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("derived-capture.db");
@@ -137,11 +189,33 @@ fn function_star_identity_matches_postgresql(#[case] provider: usize) {
 #[case::redb(3)]
 fn union_output_demand_matches_postgresql(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
-    let engine = open(provider, &directory.path().join("union-demand.db"));
-    crate::pg18_oracle::verify(
-        &engine,
-        include_str!("../../../../tests/parity/pg18/union_output_demand_oracle.expected.json"),
-    );
+    let path = directory.path().join("union-demand.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/union_output_demand_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider == 0 {
+        return;
+    }
+    drop(engine);
+    let engine = open(provider, &path);
+    engine
+        .sql("SELECT setval('union_demand_probe.effects',1,false)", &[])
+        .unwrap();
+    let mut restored: serde_json::Value = serde_json::from_str(transcript).unwrap();
+    restored["cases"].as_array_mut().unwrap().retain(|case| {
+        !matches!(
+            case["id"].as_str().unwrap(),
+            "version"
+                | "schema"
+                | "sequence"
+                | "effect_schema"
+                | "effect_stable_function"
+                | "effect_volatile_function"
+        )
+    });
+    assert_eq!(restored["cases"].as_array().unwrap().len(), 50);
+    crate::pg18_oracle::verify(&engine, &restored.to_string());
 }
 
 #[rstest::rstest]

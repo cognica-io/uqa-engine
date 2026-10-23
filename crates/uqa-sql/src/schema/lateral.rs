@@ -10,6 +10,8 @@ use super::{RowSchema, SchemaMap, SchemaSet};
 use crate::SQLError;
 use std::sync::Arc;
 
+mod columns;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Denial {
     Join,
@@ -28,6 +30,7 @@ pub(super) struct LateralRestrictions {
     columns: SchemaMap<Box<str>, (Box<str>, Denial)>,
     ambiguous_qualifiers: SchemaSet<Box<str>>,
     namespaces: Vec<Arc<DiagnosticNamespace>>,
+    column_namespaces: Vec<Arc<DiagnosticNamespace>>,
     unavailable_ambiguous_columns: SchemaSet<Box<str>>,
     unavailable_qualifiers: SchemaMap<Box<str>, bool>,
     unavailable_columns: SchemaMap<Box<str>, Vec<(Box<str>, bool)>>,
@@ -52,9 +55,35 @@ impl RowSchema {
                 restrictions
                     .namespaces
                     .extend(input.namespaces.iter().cloned());
+                restrictions
+                    .column_namespaces
+                    .extend(input.column_namespaces.iter().cloned());
             }
         }
-        (!restrictions.namespaces.is_empty()).then(|| Arc::new(restrictions))
+        (!restrictions.namespaces.is_empty() || !restrictions.column_namespaces.is_empty())
+            .then(|| Arc::new(restrictions))
+    }
+
+    pub(super) fn requalified_column_names(input: &Self) -> Option<Arc<LateralRestrictions>> {
+        let column_namespaces = input
+            .index
+            .cold
+            .lateral_restrictions
+            .as_ref()?
+            .column_namespaces
+            .clone();
+        (!column_namespaces.is_empty()).then(|| {
+            Arc::new(LateralRestrictions {
+                column_namespaces,
+                ..LateralRestrictions::default()
+            })
+        })
+    }
+
+    pub(crate) fn with_column_diagnostic_names_from(mut self, input: &Self) -> Self {
+        Arc::make_mut(&mut self.index).cold.lateral_restrictions =
+            Self::requalified_column_names(input);
+        self
     }
 
     /// Retain the left namespace while rejecting its use by the right input of a RIGHT or FULL join. The namespace must remain present so even an unknown qualified column reports the forbidden relation first.
@@ -96,6 +125,14 @@ impl RowSchema {
     }
 
     pub(crate) fn with_source_diagnostic_namespace(input: &Self, namespace: &str) -> Self {
+        Self::with_named_diagnostic_namespace(input, namespace, false)
+    }
+
+    pub(crate) fn with_join_diagnostic_namespace(input: &Self, namespace: &str) -> Self {
+        Self::with_named_diagnostic_namespace(input, namespace, true)
+    }
+
+    fn with_named_diagnostic_namespace(input: &Self, namespace: &str, joined: bool) -> Self {
         let mut restrictions = input.restrictions();
         restrictions.namespaces = vec![Arc::new(DiagnosticNamespace {
             name: namespace.into(),
@@ -105,6 +142,12 @@ impl RowSchema {
                 .map(|identity| identity.column().into())
                 .collect(),
         })];
+        // Missing-column hints search range entries, excluding the synthetic join entry. A derived relation starts its own range entry instead of exposing its body's namespaces.
+        if !joined {
+            restrictions
+                .column_namespaces
+                .clone_from(&restrictions.namespaces);
+        }
         input.with_restrictions(restrictions)
     }
 
@@ -248,6 +291,18 @@ impl RowSchema {
 
     fn merged_restrictions(input: &Self, outer: &Self, shadows: bool) -> LateralRestrictions {
         let mut restrictions = input.restrictions();
+        if restrictions.column_namespaces.is_empty() {
+            restrictions.column_namespaces = columns::namespaces(input);
+        }
+        for namespace in columns::namespaces(outer) {
+            if !restrictions
+                .column_namespaces
+                .iter()
+                .any(|current| Arc::ptr_eq(current, &namespace))
+            {
+                restrictions.column_namespaces.push(namespace);
+            }
+        }
         if let Some(outer) = outer.index.cold.lateral_restrictions.as_deref() {
             restrictions.qualifiers.extend(
                 outer
@@ -303,7 +358,9 @@ impl RowSchema {
         input: &Self,
         outer: &Self,
     ) -> Option<Arc<LateralRestrictions>> {
-        if outer.index.cold.lateral_restrictions.is_none() {
+        if outer.index.cold.lateral_restrictions.is_none()
+            && outer.relation_qualifiers().next().is_none()
+        {
             return input.index.cold.lateral_restrictions.clone();
         }
         let restrictions = Self::merged_restrictions(input, outer, true);

@@ -150,3 +150,134 @@ fn restored_query_layouts_preserve_syntax_scopes_and_parameter_types() {
         }
     }
 }
+
+#[test]
+fn enclosing_column_substitution_preserves_nested_and_preceding_namespaces() {
+    let target =
+        RowSchema::with_qualified_types("s", vec!["k".into()], vec![Some(ColumnType::Integer)]);
+    let relation = crate::ast::InternalRelationId::allocate();
+    let inputs = BTreeMap::from([(
+        crate::ColumnIdentity::qualified("s", "k"),
+        ScalarExpr::InternalColumn(relation.column(0)),
+    )]);
+    for (sql, expected) in [
+        ("SELECT s.k WHERE k>0", 2),
+        ("SELECT (SELECT s.k) WHERE k>0", 2),
+        ("SELECT (SELECT s.k) FROM (VALUES(2)) s(k)", 0),
+        ("SELECT (SELECT k) FROM (VALUES(2)) t(k)", 0),
+        (
+            "SELECT t.n FROM (VALUES(2)) q(n) CROSS JOIN LATERAL (SELECT q.n WHERE s.k>0) t",
+            1,
+        ),
+        (
+            "SELECT t.n FROM (VALUES(2)) s(n) CROSS JOIN LATERAL (SELECT s.n) t",
+            0,
+        ),
+        (
+            "WITH q AS (SELECT s.k WHERE s.k>0) SELECT q.k FROM q CROSS JOIN (VALUES(9)) s(k)",
+            2,
+        ),
+        ("SELECT s.k WHERE s.k>0 UNION ALL SELECT 4 WHERE FALSE", 2),
+    ] {
+        let UnifiedPlan::Query(mut query) =
+            UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query");
+        };
+        restore_query_layouts(
+            &NoRoutines,
+            &mut query,
+            &[],
+            &crate::binding::fixture::empty_binding_context(),
+            Some(&target),
+        )
+        .unwrap();
+        assert!(
+            crate::binding::scoped_references::substitute_outer_columns(
+                &mut query, &target, &inputs
+            ),
+            "{sql}"
+        );
+        query.visit_queries_mut(&mut |query| {
+            if let crate::plan::RelationalPlan::QueryBlock(block) = &query.root {
+                for projection in &block.projections {
+                    if matches!(&projection.expr, ScalarExpr::InternalColumn(_)) {
+                        assert_eq!(projection.alias.as_deref(), Some("k"), "{sql}");
+                    }
+                }
+            }
+        });
+        let mut found = 0;
+        query.visit_scalar_expressions(&mut |expr| expr.visit(&mut |node| {
+            found += usize::from(matches!(node, ScalarExpr::InternalColumn(column) if *column == relation.column(0)));
+        }));
+        assert_eq!(found, expected, "{sql}");
+    }
+}
+
+#[test]
+fn enclosing_column_substitution_declines_incomplete_layouts_and_whole_rows_atomically() {
+    let target =
+        RowSchema::with_qualified_types("s", vec!["k".into()], vec![Some(ColumnType::Integer)]);
+    let relation = crate::ast::InternalRelationId::allocate();
+    let inputs = BTreeMap::from([(
+        crate::ColumnIdentity::qualified("s", "k"),
+        ScalarExpr::InternalColumn(relation.column(0)),
+    )]);
+    for sql in ["SELECT s.k,s", "SELECT s.k FROM (VALUES(1)) t(n)"] {
+        let UnifiedPlan::Query(mut query) =
+            UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query");
+        };
+        let before = serde_json::to_value(&query).unwrap();
+        assert!(
+            !crate::binding::scoped_references::substitute_outer_columns(
+                &mut query, &target, &inputs
+            ),
+            "{sql}"
+        );
+        assert_eq!(serde_json::to_value(&query).unwrap(), before, "{sql}");
+    }
+}
+
+#[test]
+fn missing_qualified_columns_preserve_hidden_namespace_diagnostics() {
+    let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/shadowed_column_oracle.expected.json"
+    )))
+    .unwrap();
+    for case in reference["cases"].as_array().unwrap().iter().skip(1) {
+        let sql = case["sql"].as_str().unwrap();
+        let UnifiedPlan::Query(mut query) =
+            UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query");
+        };
+        let result = restore_query_layouts(
+            &NoRoutines,
+            &mut query,
+            &[],
+            &crate::binding::fixture::empty_binding_context(),
+            None,
+        );
+        if case["error"].is_null() {
+            result.unwrap();
+        } else {
+            let error = result.unwrap_err();
+            assert_eq!(
+                error.sqlstate(),
+                case["error"]["sqlstate"].as_str(),
+                "{sql}"
+            );
+            assert_eq!(
+                error.to_string(),
+                case["error"]["message"].as_str().unwrap(),
+                "{sql}"
+            );
+            assert_eq!(error.detail(), case["error"]["detail"].as_str(), "{sql}");
+            assert_eq!(error.hint(), case["error"]["hint"].as_str(), "{sql}");
+        }
+    }
+}

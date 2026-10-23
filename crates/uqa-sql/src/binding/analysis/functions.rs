@@ -88,7 +88,7 @@ pub(super) fn validate_qualified_column(
         {
             return Ok(());
         }
-        return Err(SQLError::unknown_qualified_column(qualifier, column));
+        return Err(candidate.missing_qualified_column(qualifier, column));
     }
     for candidate in std::iter::once(schema).chain(fallback) {
         if let Some(error) = candidate.unavailable_qualifier_error(qualifier) {

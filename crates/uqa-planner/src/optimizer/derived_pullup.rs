@@ -81,7 +81,6 @@ fn query_block(query: &mut QueryPlan, context: &Context<'_>) -> Result<(), SQLEr
             .from
             .as_ref()
             .is_some_and(|source| contains_derived_source(source) && ordinary_inner_source(source))
-        || block.subqueries.iter().any(subquery_has_column_reference)
     {
         return Ok(());
     }
@@ -122,6 +121,15 @@ fn query_block(query: &mut QueryPlan, context: &Context<'_>) -> Result<(), SQLEr
     }
     changed.r#where = crate::filter_pushdown::combine_filter_parts(predicates);
     for candidate in lifted {
+        for subquery in &mut changed.subqueries {
+            if !uqa_sql::binding::scoped_references::substitute_outer_columns(
+                subquery,
+                &input.schema,
+                &candidate.outputs,
+            ) {
+                return Ok(());
+            }
+        }
         rewrite_expressions(&mut changed, &mut |node| {
             let identity = column_identity(node);
             if let Some(expression) = identity.and_then(|identity| candidate.outputs.get(&identity))
@@ -404,23 +412,6 @@ fn ordinary_inner_source(source: &SourcePlan) -> bool {
         | SourcePlan::Subquery { lateral: false, .. } => true,
         _ => false,
     }
-}
-
-fn subquery_has_column_reference(query: &QueryPlan) -> bool {
-    let mut found = false;
-    query.visit_scalar_expressions(&mut |expression| {
-        expression.visit(&mut |node| {
-            found |= matches!(
-                node,
-                ScalarExpr::Column(_)
-                    | ScalarExpr::QualifiedColumn { .. }
-                    | ScalarExpr::QualifiedStar(_)
-                    | ScalarExpr::Star
-                    | ScalarExpr::InternalColumn(_)
-            );
-        });
-    });
-    found
 }
 
 fn qualify_block(block: &mut QueryBlockPlan, schema: &RowSchema) -> bool {

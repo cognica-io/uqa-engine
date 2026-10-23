@@ -21273,7 +21273,7 @@
       ],
       "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
       "capability": "Projection and consumer demand",
-      "workload": "Fifty-six independent PostgreSQL observations across four storage providers.",
+      "workload": "Fifty-six independent PostgreSQL observations across four storage providers. Fifty observations are replayed after each persistent reopen, including retained SQL and PL/pgSQL routines.",
       "invariant": "Typed results, errors, aggregate cardinality, ordering, type coercion, SRF multiplicity and sequence effects match the independent PostgreSQL reference."
     },
     {
@@ -21709,6 +21709,77 @@
       "capability": "CTE declaration identity",
       "workload": "Decoded declaration names containing dots and embedded quotes, with quoted and schema-qualified references.",
       "invariant": "Declarations resolve by exact owned names, quoted references resolve through SQL syntax, and schema-qualified references do not select CTE declarations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enclosing_column_substitution_preserves_nested_and_preceding_namespaces",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/stored_inputs.rs",
+      "capability": "Correlated derived input identity",
+      "workload": "Nested scalar, CTE, set, JOIN and LATERAL inputs with local/ancestor aliases and unqualified columns.",
+      "invariant": "Only references to the selected enclosing row become opaque attributes; local and preceding sources keep their original identity."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enclosing_column_substitution_declines_incomplete_layouts_and_whole_rows_atomically",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/stored_inputs.rs",
+      "capability": "Correlated derived input identity",
+      "workload": "A partial input layout and a whole-row reference alongside a substitutable scalar column.",
+      "invariant": "An unsupported substitution leaves all serialized query syntax unchanged."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "correlated_input_capture_matches_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Correlated derived input identity",
+      "workload": "Twenty-six independent PostgreSQL observations on four providers, with twenty-four after persistent reopen.",
+      "invariant": "Correlated qualifications, local shadows, nested and lateral inputs, CTEs, sets, null/empty results, stored views and prepared inputs preserve exact rows, types and diagnostics."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "missing_qualified_columns_preserve_hidden_namespace_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/stored_inputs.rs",
+      "capability": "Scoped missing-column diagnostics",
+      "workload": "Thirteen independent PostgreSQL diagnostics and successful local/outer lookup controls, including joined aliases and tied hint candidates.",
+      "invariant": "Hidden outer relation names remain diagnostic-only; exact matches, duplicate fields, quoted names and alternate qualifier hints match PostgreSQL."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "shadowed_column_diagnostics_match_postgresql_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Scoped missing-column diagnostics",
+      "workload": "Fourteen PostgreSQL observations on four providers, with thirteen after persistent reopen.",
+      "invariant": "Exact SQLSTATE, primary, DETAIL/HINT and successful shadowing controls agree with PostgreSQL."
     }
   ]
 }

@@ -52,6 +52,7 @@ impl RowSchema {
                 collations: input.index.cold.collations.clone(),
                 row_types: input.index.cold.row_types.requalified(input, qualifier),
                 record_fields: input.index.cold.record_fields.clone(),
+                lateral_restrictions: Self::requalified_column_names(input),
                 internal: input.index.executor_attributes.clone(),
                 internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources,

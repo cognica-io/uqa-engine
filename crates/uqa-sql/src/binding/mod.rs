@@ -32,6 +32,7 @@ mod record_fields;
 mod routine_binding;
 mod routine_parameters;
 mod scope;
+pub mod scoped_references;
 mod source_schemas;
 mod sources;
 pub use sources::bind_source_plan_schema_in_scope;

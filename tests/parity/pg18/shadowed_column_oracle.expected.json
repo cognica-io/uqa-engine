@@ -1,0 +1,215 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(2)) s(k)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column s.k does not exist",
+        "detail": "There is a column named \"k\" in table \"s\", but it cannot be referenced from this part of the query.",
+        "hint": null
+      },
+      "results": [],
+      "id": "same_alias"
+    },
+    {
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(2)) q(k)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column s.k does not exist",
+        "detail": null,
+        "hint": "Perhaps you meant to reference the column \"q.k\"."
+      },
+      "results": [],
+      "id": "different_alias"
+    },
+    {
+      "sql": "SELECT (SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(3)) s(k)) FROM (VALUES(2)) s(k)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column s.k does not exist",
+        "detail": "There are columns named \"k\", but they are in tables that cannot be referenced from this part of the query.",
+        "hint": null
+      },
+      "results": [],
+      "id": "two_ancestors"
+    },
+    {
+      "sql": "SELECT (SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(3)) s(m)) FROM (VALUES(2)) s(k)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column s.k does not exist",
+        "detail": "There is a column named \"k\" in table \"s\", but it cannot be referenced from this part of the query.",
+        "hint": null
+      },
+      "results": [],
+      "id": "ancestor_missing"
+    },
+    {
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(2,3)) s(k,k)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42702",
+        "message": "column reference \"k\" is ambiguous",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "duplicate_outer"
+    },
+    {
+      "sql": "SELECT (SELECT k FROM (VALUES(1)) s(j)) FROM (VALUES(2)) s(k)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "available_unqualified"
+    },
+    {
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(k)) FROM (VALUES(2)) s(k)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "local_wins"
+    },
+    {
+      "sql": "SELECT (SELECT \"S\".\"K\" FROM (VALUES(1)) \"S\"(j)) FROM (VALUES(2)) \"S\"(\"K\")",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column S.K does not exist",
+        "detail": "There is a column named \"K\" in table \"S\", but it cannot be referenced from this part of the query.",
+        "hint": null
+      },
+      "results": [],
+      "id": "quoted"
+    },
+    {
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(2)) \"S\"(k)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column s.k does not exist",
+        "detail": null,
+        "hint": "Perhaps you meant to reference the column \"S.k\"."
+      },
+      "results": [],
+      "id": "different_case"
+    },
+    {
+      "sql": "SELECT (SELECT s.k FROM (VALUES(1)) s(j)) FROM (VALUES(2,3)) s(k,m)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column s.k does not exist",
+        "detail": "There is a column named \"k\" in table \"s\", but it cannot be referenced from this part of the query.",
+        "hint": null
+      },
+      "results": [],
+      "id": "multiple_outer_columns"
+    },
+    {
+      "sql": "SELECT s.ka FROM ((VALUES(1))a(k) CROSS JOIN (VALUES(2))b(j)) s",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column s.ka does not exist",
+        "detail": null,
+        "hint": "Perhaps you meant to reference the column \"a.k\"."
+      },
+      "results": [],
+      "id": "missing_from_join_alias"
+    },
+    {
+      "sql": "SELECT s.k FROM (VALUES(1))s(j) CROSS JOIN (VALUES(2))q(k) CROSS JOIN (VALUES(3))r(k)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column s.k does not exist",
+        "detail": null,
+        "hint": "Perhaps you meant to reference the column \"q.k\" or the column \"r.k\"."
+      },
+      "results": [],
+      "id": "two_hint_candidates"
+    },
+    {
+      "sql": "SELECT s.k FROM (VALUES(1))s(j) CROSS JOIN (VALUES(2))q(k) CROSS JOIN (VALUES(3))r(k) CROSS JOIN (VALUES(4))t(k)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column s.k does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "three_hint_candidates"
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 disposable Docker database",
+    "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "eede825c9147b5a39199fbf65ff5814a6185413816920fecb518cb8ff19e60e1",
+    "options": [
+      "--rows",
+      "--details"
+    ]
+  }
+}

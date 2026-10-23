@@ -112,7 +112,7 @@ fn subquery_id(expression: &mut ScalarExpr) -> Option<&mut usize> {
     }
 }
 
-fn visit_root(root: &mut RelationalPlan, visitor: &mut dyn FnMut(&mut ScalarExpr)) {
+pub(crate) fn visit_root(root: &mut RelationalPlan, visitor: &mut dyn FnMut(&mut ScalarExpr)) {
     match root {
         RelationalPlan::QueryBlock(block) => {
             if let Some(source) = &mut block.from {
