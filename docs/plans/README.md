@@ -1,6 +1,6 @@
 # Implementation plans
 
-The active maintainer request is the [shared row layout and owned value transfer plan](0026-shaped-row-sharing.md), covering all four shaped-row follow-ups #1254–#1257. Execution result transfer, Storage projection/layout reuse and Core composite descriptor sharing are separate coherent deliveries. Implementation and final-source qualification remain pending; the original task ledger is retained in that plan.
+The active maintainer request is the [shared row layout and owned value transfer plan](0026-shaped-row-sharing.md), covering all four shaped-row follow-ups #1254–#1257. Execution [PR #1258](https://github.com/cognica-io/uqa-engine/pull/1258) passes 1,736 library tests, six public cursor tests, 61 Engine join/provider tests and local review/lint checks; final-source platform qualification and merge remain. Storage implementation continues in [draft PR #1259](https://github.com/cognica-io/uqa-engine/pull/1259); Core descriptor sharing follows separately. The original task ledger remains live in the plan.
 
 Current implementation follows the [open issue delivery groups](0024-open-issue-delivery.md): all 112 original issues are preserved in 37 ownership groups; the PR #1244/#1247 deliveries resolve six and 106 remain outside those groups, with logical commits and one PR per coherent group. Draft progress is collected into ready-for-review CI batches. The current delivery and its qualification evidence are recorded below; earlier checkpoints remain historical evidence, not completion of unfinished requirements.
 

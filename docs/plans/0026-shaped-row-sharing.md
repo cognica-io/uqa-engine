@@ -6,7 +6,7 @@ The maintainer requested all four follow-ups from the comparison of `jaepil/rapi
 
 | Task | Owner and delivery group | Current evidence and remaining work |
 | --- | --- | --- |
-| [#1254](https://github.com/cognica-io/uqa-engine/issues/1254): move owned physical values into columnar cursor batches | Execution; [PR #1258](https://github.com/cognica-io/uqa-engine/pull/1258) | Consuming transfer moves exclusive selected values, resolves fragment/schema aliases and groups row-local shared owners. All 1,736 non-ignored Execution library tests pass, including seven registered allocation/ownership/output regressions; seven pre-existing ignored tests are not claimed. Public cursor acceptance, final review, platform qualification and merge remain. |
+| [#1254](https://github.com/cognica-io/uqa-engine/issues/1254): move owned physical values into columnar cursor batches | Execution; [PR #1258](https://github.com/cognica-io/uqa-engine/pull/1258) | Implementation and local review complete: 1,736 non-ignored Execution library tests, six public cursor tests and 61 Engine join/provider tests pass. Seven pre-existing ignored tests are not claimed. Clippy with warnings denied, formatting and ownership/inventory checks pass. Seven registered allocation/ownership/output regressions await final-source Linux/macOS qualification; merge and closure remain. |
 | [#1255](https://github.com/cognica-io/uqa-engine/issues/1255): decode persistent projections directly into positional values | Storage/provider adapters; shared storage PR with #1256 | Selected primitive fields still allocate names and a Document map. Native SQLite cache hits already avoid decoding. Direct decoding, SQLite/KeyValue integration, validation/resource/lifecycle tests and qualification remain. |
 | [#1256](https://github.com/cognica-io/uqa-engine/issues/1256): reuse indexed layouts and cursor projection mappings | Storage; shared storage PR with #1255 | Layout search and projection construction repeat metadata work. Owner-scoped indexing/reuse, heterogeneous-layout and paged-read tests and qualification remain. |
 | [#1257](https://github.com/cognica-io/uqa-engine/issues/1257): share immutable composite descriptors | Core with SQL/Execution construction adapters; independent PR | Record field names and anonymous Row descriptors can repeat per value. Shared representation, construction reuse, type/lazy-read/serialization/persistence acceptance and qualification remain. |
@@ -17,6 +17,8 @@ The maintainer requested all four follow-ups from the comparison of `jaepil/rapi
 - [ ] Deliver #1257 with final-source qualification and issue closure.
 
 The first PR has no implementation dependency. Later groups preserve this ledger without treating the first delivery as completion of all four tasks. General string interning and a C++ dependency are outside these four findings. The unrelated open-issue delivery ledger remains separate.
+
+Storage work continues in [draft PR #1259](https://github.com/cognica-io/uqa-engine/pull/1259) while #1258 qualifies. Its base is #1258 until that PR merges; its diff retains only the storage group. Core descriptor work remains a separate subsequent delivery.
 
 ## Ownership and preservation
 

@@ -6,6 +6,7 @@
 
 //! Positional, column-oriented batches for public result transfer.
 
+#[cfg(test)]
 use crate::RowSchemaExecution;
 use std::collections::BTreeMap;
 
@@ -84,7 +85,8 @@ impl ColumnarBatch {
         Self { columns, row_count }
     }
 
-    pub(crate) fn from_borrowed_batch(schema: &[String], batch: &Batch) -> Self {
+    #[cfg(test)]
+    fn from_borrowed_batch(schema: &[String], batch: &Batch) -> Self {
         let row_count = batch.rows.len();
         let positions = result_column_positions(&batch.schema, schema);
         let mut columns = schema
