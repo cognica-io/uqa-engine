@@ -48,6 +48,8 @@ The binding transaction tests also exercise an independent session's commit whil
 
 The embedded C binding is under implementation and has no released package yet. Its [source headers](../../../crates/uqa-ffi/include/uqa/uqa.h) and [implementation ledger](../../plans/0028-c-bindings.md) distinguish the implemented source API from remaining design and qualification work.
 
+The five [public C examples](../../../examples/c/README.md) cover unified search, vector indexes, graph/Cypher, persistent transactions and scalar/table/aggregate callbacks. Each is executable as C11 or C++17. Their shared-library runner verifies 38 combinations across Memory, native SQLite, SQLite Key/Value and redb; the storage scenario requires a durable backend. The examples check results and release all owned handles on success. Consumer ASan/UBSan checks instrument the C/C++ programs; full-library instrumentation and platform qualification remain separate ledger items.
+
 Use `uqa_engine_open(path, flags, config, &engine)` for every backend. The fixed-width `uqa_open_flags` mask requires exactly one storage selector; `UQA_OPEN_SQLITE_AUTO` may be combined with either SQLite selector.
 
 | Flags | Storage | Path |

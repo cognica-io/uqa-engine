@@ -1,0 +1,74 @@
+name: C bindings
+
+on:
+  pull_request:
+    types: [ready_for_review]
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - "crates/**"
+      - "examples/c/**"
+      - scripts/verify-c-examples.py
+      - .github/workflows/c-bindings.yml
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c-bindings-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  consumers:
+    name: C and C++ (${{ matrix.os }}, ${{ matrix.features }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+        features: [minimal, default]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Free Linux runner disk
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: c-${{ matrix.features }}
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Execute C ABI clients on all four storage providers
+        shell: bash
+        run: |
+          args=()
+          if [[ '${{ matrix.features }}' == minimal ]]; then
+            args+=(--no-default-features)
+          fi
+          cargo test -p uqa-ffi --locked --test integration "${args[@]}"
+      - name: Execute five public examples as C11 and C++17
+        shell: bash
+        run: |
+          suffix=so
+          if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
+          python3 scripts/verify-c-examples.py --library "target/debug/deps/libuqa_ffi.$suffix"
+      - name: Instrument the example consumers with ASan and UBSan
+        shell: bash
+        run: |
+          suffix=so
+          if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
+          python3 scripts/verify-c-examples.py --sanitize --library "target/debug/deps/libuqa_ffi.$suffix"

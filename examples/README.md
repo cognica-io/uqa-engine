@@ -2,13 +2,13 @@
 
 The example suite is organized by language binding and platform. Every public binding provides the same five scenarios so that users can compare equivalent SQL, data, assertions, and lifecycle behavior without translating from Rust first.
 
-| Scenario | Rust | Python | Node.js | Browser WASM |
-| --- | --- | --- | --- | --- |
-| Unified search | [`rust/unified-search`](rust/unified-search) | [`python/unified_search.py`](python/unified_search.py) | [`node/unified-search.mjs`](node/unified-search.mjs) | [`browser/unified-search.mjs`](browser/unified-search.mjs) |
-| Vector KNN | [`rust/vector-knn`](rust/vector-knn) | [`python/vector_knn.py`](python/vector_knn.py) | [`node/vector-knn.mjs`](node/vector-knn.mjs) | [`browser/vector-knn.mjs`](browser/vector-knn.mjs) |
-| Graph and Cypher | [`rust/graph-cypher`](rust/graph-cypher) | [`python/graph_cypher.py`](python/graph_cypher.py) | [`node/graph-cypher.mjs`](node/graph-cypher.mjs) | [`browser/graph-cypher.mjs`](browser/graph-cypher.mjs) |
-| Storage and transactions | [`rust/storage-transactions`](rust/storage-transactions) | [`python/storage_transactions.py`](python/storage_transactions.py) | [`node/storage-transactions.mjs`](node/storage-transactions.mjs) | [`browser/storage-transactions.mjs`](browser/storage-transactions.mjs) |
-| Extensibility | [`rust/extensibility`](rust/extensibility) | [`python/extensibility.py`](python/extensibility.py) | [`node/extensibility.mjs`](node/extensibility.mjs) | [`browser/extensibility.mjs`](browser/extensibility.mjs) |
+| Scenario | Rust | Python | Node.js | Browser WASM | C / C++ |
+| --- | --- | --- | --- | --- | --- |
+| Unified search | [`rust/unified-search`](rust/unified-search) | [`python/unified_search.py`](python/unified_search.py) | [`node/unified-search.mjs`](node/unified-search.mjs) | [`browser/unified-search.mjs`](browser/unified-search.mjs) | [`c/unified_search.c`](c/unified_search.c) |
+| Vector KNN | [`rust/vector-knn`](rust/vector-knn) | [`python/vector_knn.py`](python/vector_knn.py) | [`node/vector-knn.mjs`](node/vector-knn.mjs) | [`browser/vector-knn.mjs`](browser/vector-knn.mjs) | [`c/vector_knn.c`](c/vector_knn.c) |
+| Graph and Cypher | [`rust/graph-cypher`](rust/graph-cypher) | [`python/graph_cypher.py`](python/graph_cypher.py) | [`node/graph-cypher.mjs`](node/graph-cypher.mjs) | [`browser/graph-cypher.mjs`](browser/graph-cypher.mjs) | [`c/graph_cypher.c`](c/graph_cypher.c) |
+| Storage and transactions | [`rust/storage-transactions`](rust/storage-transactions) | [`python/storage_transactions.py`](python/storage_transactions.py) | [`node/storage-transactions.mjs`](node/storage-transactions.mjs) | [`browser/storage-transactions.mjs`](browser/storage-transactions.mjs) | [`c/storage_transactions.c`](c/storage_transactions.c) |
+| Extensibility | [`rust/extensibility`](rust/extensibility) | [`python/extensibility.py`](python/extensibility.py) | [`node/extensibility.mjs`](node/extensibility.mjs) | [`browser/extensibility.mjs`](browser/extensibility.mjs) | [`c/extensibility.c`](c/extensibility.c) |
 
 Start with unified search for the complete relational, full-text, vector, graph, fusion, and host-language UDF story. Use the focused scenarios when learning or verifying one subsystem.
 
@@ -20,11 +20,12 @@ The vector scenario compares exact, HNSW, IVF and DiskANN access using one six-r
 - Python: install a built `uqa` wheel, then run `python3 examples/python/unified_search.py`.
 - Node.js: build `crates/uqa-node`, then run `node examples/node/unified-search.mjs`.
 - Browser WASM: run `bash scripts/build-wasm.sh`, serve the repository root over HTTP, then open `examples/browser/`.
+- C / C++: build `uqa-ffi` and compile the programs as C11 or C++17 using the commands in [`c/README.md`](c/README.md). Its runner executes the actual shared artifact on Memory, native SQLite, SQLite Key/Value and redb; persistence scenarios require a durable provider. Native C release packaging remains in progress.
 
 The Node.js and Browser WASM entry points share the binding-neutral JavaScript scenarios in [`javascript/`](javascript). Platform-specific files still own engine construction, persistence, callback registration, and resource cleanup.
 
 The [persistent Nori binding contract](../tests/parity/nori/BINDINGS.md) supplements this example matrix with identical analyzer, phrase, highlighting, rollback, and retained-revision assertions in all four bindings. It covers actual packages with and without Nori, including [real Chrome IndexedDB reloads and memory observations](../benchmarks/nori/BROWSER.md). The five examples above remain the general API scenario matrix.
 
-All four environments also expose the local and Cloud HTTP SQL path: Rust uses `uqa_client::HttpEngine`, while Python, Node.js, and Browser WASM export `HttpEngine` from their existing packages. Rust, Python, and Node.js can resolve a project through the installed `uqa` CLI; browsers require explicit connection material. The binding test suites execute materialized SQL, atomic batch, and streaming requests against controlled HTTP servers; the [HTTP Engine reference](../docs/manual/reference/09-http-engine.md) contains user-facing examples.
+Rust, Python, Node.js and Browser WASM also expose the local and Cloud HTTP SQL path: Rust uses `uqa_client::HttpEngine`, while Python, Node.js, and Browser WASM export `HttpEngine` from their existing packages. Rust, Python, and Node.js can resolve a project through the installed `uqa` CLI; browsers require explicit connection material. The binding test suites execute materialized SQL, atomic batch, and streaming requests against controlled HTTP servers; the [HTTP Engine reference](../docs/manual/reference/09-http-engine.md) contains user-facing examples.
 
 The engine also ships smaller single-file Rust examples under [`crates/uqa-engine/examples/`](../crates/uqa-engine/examples), including encrypted-storage variants and the `doomql` demo.
