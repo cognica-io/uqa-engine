@@ -159,7 +159,7 @@ impl Engine {
         )
     }
 
-    /// Run a single SQL statement against the engine.
+    /// Execute a complete SQL message and return its final result. Multiple statements retain their native implicit transaction segments and explicit transaction boundaries; an empty message returns an empty result without a command tag.
     pub fn sql(&self, query: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
         let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
