@@ -1,0 +1,1366 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "0",
+      "sql": "SELECT (7)::smallint & (3)::smallint AS value",
+      "expression": "(7)::smallint & (3)::smallint"
+    },
+    {
+      "id": "1",
+      "sql": "SELECT (-7)::smallint & (3)::smallint AS value",
+      "expression": "(-7)::smallint & (3)::smallint"
+    },
+    {
+      "id": "2",
+      "sql": "SELECT (-1)::smallint & (0)::smallint AS value",
+      "expression": "(-1)::smallint & (0)::smallint"
+    },
+    {
+      "id": "3",
+      "sql": "SELECT (0)::smallint & (-1)::smallint AS value",
+      "expression": "(0)::smallint & (-1)::smallint"
+    },
+    {
+      "id": "4",
+      "sql": "SELECT (-32768)::smallint & (32767)::smallint AS value",
+      "expression": "(-32768)::smallint & (32767)::smallint"
+    },
+    {
+      "id": "5",
+      "sql": "SELECT (7)::smallint | (3)::smallint AS value",
+      "expression": "(7)::smallint | (3)::smallint"
+    },
+    {
+      "id": "6",
+      "sql": "SELECT (-7)::smallint | (3)::smallint AS value",
+      "expression": "(-7)::smallint | (3)::smallint"
+    },
+    {
+      "id": "7",
+      "sql": "SELECT (-1)::smallint | (0)::smallint AS value",
+      "expression": "(-1)::smallint | (0)::smallint"
+    },
+    {
+      "id": "8",
+      "sql": "SELECT (0)::smallint | (-1)::smallint AS value",
+      "expression": "(0)::smallint | (-1)::smallint"
+    },
+    {
+      "id": "9",
+      "sql": "SELECT (-32768)::smallint | (32767)::smallint AS value",
+      "expression": "(-32768)::smallint | (32767)::smallint"
+    },
+    {
+      "id": "10",
+      "sql": "SELECT (7)::smallint # (3)::smallint AS value",
+      "expression": "(7)::smallint # (3)::smallint"
+    },
+    {
+      "id": "11",
+      "sql": "SELECT (-7)::smallint # (3)::smallint AS value",
+      "expression": "(-7)::smallint # (3)::smallint"
+    },
+    {
+      "id": "12",
+      "sql": "SELECT (-1)::smallint # (0)::smallint AS value",
+      "expression": "(-1)::smallint # (0)::smallint"
+    },
+    {
+      "id": "13",
+      "sql": "SELECT (0)::smallint # (-1)::smallint AS value",
+      "expression": "(0)::smallint # (-1)::smallint"
+    },
+    {
+      "id": "14",
+      "sql": "SELECT (-32768)::smallint # (32767)::smallint AS value",
+      "expression": "(-32768)::smallint # (32767)::smallint"
+    },
+    {
+      "id": "15",
+      "sql": "SELECT ~(0)::smallint AS value",
+      "expression": "~(0)::smallint"
+    },
+    {
+      "id": "16",
+      "sql": "SELECT ~(-1)::smallint AS value",
+      "expression": "~(-1)::smallint"
+    },
+    {
+      "id": "17",
+      "sql": "SELECT ~(7)::smallint AS value",
+      "expression": "~(7)::smallint"
+    },
+    {
+      "id": "18",
+      "sql": "SELECT ~(-32768)::smallint AS value",
+      "expression": "~(-32768)::smallint"
+    },
+    {
+      "id": "19",
+      "sql": "SELECT ~(32767)::smallint AS value",
+      "expression": "~(32767)::smallint"
+    },
+    {
+      "id": "20",
+      "sql": "SELECT (1)::smallint << (0)::integer AS value",
+      "expression": "(1)::smallint << (0)::integer"
+    },
+    {
+      "id": "21",
+      "sql": "SELECT (-7)::smallint << (0)::integer AS value",
+      "expression": "(-7)::smallint << (0)::integer"
+    },
+    {
+      "id": "22",
+      "sql": "SELECT (1)::smallint << (1)::integer AS value",
+      "expression": "(1)::smallint << (1)::integer"
+    },
+    {
+      "id": "23",
+      "sql": "SELECT (-7)::smallint << (1)::integer AS value",
+      "expression": "(-7)::smallint << (1)::integer"
+    },
+    {
+      "id": "24",
+      "sql": "SELECT (1)::smallint << (15)::integer AS value",
+      "expression": "(1)::smallint << (15)::integer"
+    },
+    {
+      "id": "25",
+      "sql": "SELECT (-7)::smallint << (15)::integer AS value",
+      "expression": "(-7)::smallint << (15)::integer"
+    },
+    {
+      "id": "26",
+      "sql": "SELECT (1)::smallint << (16)::integer AS value",
+      "expression": "(1)::smallint << (16)::integer"
+    },
+    {
+      "id": "27",
+      "sql": "SELECT (-7)::smallint << (16)::integer AS value",
+      "expression": "(-7)::smallint << (16)::integer"
+    },
+    {
+      "id": "28",
+      "sql": "SELECT (1)::smallint << (31)::integer AS value",
+      "expression": "(1)::smallint << (31)::integer"
+    },
+    {
+      "id": "29",
+      "sql": "SELECT (-7)::smallint << (31)::integer AS value",
+      "expression": "(-7)::smallint << (31)::integer"
+    },
+    {
+      "id": "30",
+      "sql": "SELECT (1)::smallint << (32)::integer AS value",
+      "expression": "(1)::smallint << (32)::integer"
+    },
+    {
+      "id": "31",
+      "sql": "SELECT (-7)::smallint << (32)::integer AS value",
+      "expression": "(-7)::smallint << (32)::integer"
+    },
+    {
+      "id": "32",
+      "sql": "SELECT (1)::smallint << (63)::integer AS value",
+      "expression": "(1)::smallint << (63)::integer"
+    },
+    {
+      "id": "33",
+      "sql": "SELECT (-7)::smallint << (63)::integer AS value",
+      "expression": "(-7)::smallint << (63)::integer"
+    },
+    {
+      "id": "34",
+      "sql": "SELECT (1)::smallint << (64)::integer AS value",
+      "expression": "(1)::smallint << (64)::integer"
+    },
+    {
+      "id": "35",
+      "sql": "SELECT (-7)::smallint << (64)::integer AS value",
+      "expression": "(-7)::smallint << (64)::integer"
+    },
+    {
+      "id": "36",
+      "sql": "SELECT (1)::smallint << (-1)::integer AS value",
+      "expression": "(1)::smallint << (-1)::integer"
+    },
+    {
+      "id": "37",
+      "sql": "SELECT (-7)::smallint << (-1)::integer AS value",
+      "expression": "(-7)::smallint << (-1)::integer"
+    },
+    {
+      "id": "38",
+      "sql": "SELECT (1)::smallint << (-32)::integer AS value",
+      "expression": "(1)::smallint << (-32)::integer"
+    },
+    {
+      "id": "39",
+      "sql": "SELECT (-7)::smallint << (-32)::integer AS value",
+      "expression": "(-7)::smallint << (-32)::integer"
+    },
+    {
+      "id": "40",
+      "sql": "SELECT (1)::smallint << (2147483647)::integer AS value",
+      "expression": "(1)::smallint << (2147483647)::integer"
+    },
+    {
+      "id": "41",
+      "sql": "SELECT (-7)::smallint << (2147483647)::integer AS value",
+      "expression": "(-7)::smallint << (2147483647)::integer"
+    },
+    {
+      "id": "42",
+      "sql": "SELECT (1)::smallint << (-2147483648)::integer AS value",
+      "expression": "(1)::smallint << (-2147483648)::integer"
+    },
+    {
+      "id": "43",
+      "sql": "SELECT (-7)::smallint << (-2147483648)::integer AS value",
+      "expression": "(-7)::smallint << (-2147483648)::integer"
+    },
+    {
+      "id": "44",
+      "sql": "SELECT (1)::smallint >> (0)::integer AS value",
+      "expression": "(1)::smallint >> (0)::integer"
+    },
+    {
+      "id": "45",
+      "sql": "SELECT (-7)::smallint >> (0)::integer AS value",
+      "expression": "(-7)::smallint >> (0)::integer"
+    },
+    {
+      "id": "46",
+      "sql": "SELECT (1)::smallint >> (1)::integer AS value",
+      "expression": "(1)::smallint >> (1)::integer"
+    },
+    {
+      "id": "47",
+      "sql": "SELECT (-7)::smallint >> (1)::integer AS value",
+      "expression": "(-7)::smallint >> (1)::integer"
+    },
+    {
+      "id": "48",
+      "sql": "SELECT (1)::smallint >> (15)::integer AS value",
+      "expression": "(1)::smallint >> (15)::integer"
+    },
+    {
+      "id": "49",
+      "sql": "SELECT (-7)::smallint >> (15)::integer AS value",
+      "expression": "(-7)::smallint >> (15)::integer"
+    },
+    {
+      "id": "50",
+      "sql": "SELECT (1)::smallint >> (16)::integer AS value",
+      "expression": "(1)::smallint >> (16)::integer"
+    },
+    {
+      "id": "51",
+      "sql": "SELECT (-7)::smallint >> (16)::integer AS value",
+      "expression": "(-7)::smallint >> (16)::integer"
+    },
+    {
+      "id": "52",
+      "sql": "SELECT (1)::smallint >> (31)::integer AS value",
+      "expression": "(1)::smallint >> (31)::integer"
+    },
+    {
+      "id": "53",
+      "sql": "SELECT (-7)::smallint >> (31)::integer AS value",
+      "expression": "(-7)::smallint >> (31)::integer"
+    },
+    {
+      "id": "54",
+      "sql": "SELECT (1)::smallint >> (32)::integer AS value",
+      "expression": "(1)::smallint >> (32)::integer"
+    },
+    {
+      "id": "55",
+      "sql": "SELECT (-7)::smallint >> (32)::integer AS value",
+      "expression": "(-7)::smallint >> (32)::integer"
+    },
+    {
+      "id": "56",
+      "sql": "SELECT (1)::smallint >> (63)::integer AS value",
+      "expression": "(1)::smallint >> (63)::integer"
+    },
+    {
+      "id": "57",
+      "sql": "SELECT (-7)::smallint >> (63)::integer AS value",
+      "expression": "(-7)::smallint >> (63)::integer"
+    },
+    {
+      "id": "58",
+      "sql": "SELECT (1)::smallint >> (64)::integer AS value",
+      "expression": "(1)::smallint >> (64)::integer"
+    },
+    {
+      "id": "59",
+      "sql": "SELECT (-7)::smallint >> (64)::integer AS value",
+      "expression": "(-7)::smallint >> (64)::integer"
+    },
+    {
+      "id": "60",
+      "sql": "SELECT (1)::smallint >> (-1)::integer AS value",
+      "expression": "(1)::smallint >> (-1)::integer"
+    },
+    {
+      "id": "61",
+      "sql": "SELECT (-7)::smallint >> (-1)::integer AS value",
+      "expression": "(-7)::smallint >> (-1)::integer"
+    },
+    {
+      "id": "62",
+      "sql": "SELECT (1)::smallint >> (-32)::integer AS value",
+      "expression": "(1)::smallint >> (-32)::integer"
+    },
+    {
+      "id": "63",
+      "sql": "SELECT (-7)::smallint >> (-32)::integer AS value",
+      "expression": "(-7)::smallint >> (-32)::integer"
+    },
+    {
+      "id": "64",
+      "sql": "SELECT (1)::smallint >> (2147483647)::integer AS value",
+      "expression": "(1)::smallint >> (2147483647)::integer"
+    },
+    {
+      "id": "65",
+      "sql": "SELECT (-7)::smallint >> (2147483647)::integer AS value",
+      "expression": "(-7)::smallint >> (2147483647)::integer"
+    },
+    {
+      "id": "66",
+      "sql": "SELECT (1)::smallint >> (-2147483648)::integer AS value",
+      "expression": "(1)::smallint >> (-2147483648)::integer"
+    },
+    {
+      "id": "67",
+      "sql": "SELECT (-7)::smallint >> (-2147483648)::integer AS value",
+      "expression": "(-7)::smallint >> (-2147483648)::integer"
+    },
+    {
+      "id": "68",
+      "sql": "SELECT NULL::smallint & 1 AS value",
+      "expression": "NULL::smallint & 1"
+    },
+    {
+      "id": "69",
+      "sql": "SELECT NULL::smallint | 1 AS value",
+      "expression": "NULL::smallint | 1"
+    },
+    {
+      "id": "70",
+      "sql": "SELECT NULL::smallint # 1 AS value",
+      "expression": "NULL::smallint # 1"
+    },
+    {
+      "id": "71",
+      "sql": "SELECT NULL::smallint << 1 AS value",
+      "expression": "NULL::smallint << 1"
+    },
+    {
+      "id": "72",
+      "sql": "SELECT NULL::smallint >> 1 AS value",
+      "expression": "NULL::smallint >> 1"
+    },
+    {
+      "id": "73",
+      "sql": "SELECT ~NULL::smallint AS value",
+      "expression": "~NULL::smallint"
+    },
+    {
+      "id": "74",
+      "sql": "SELECT (7)::integer & (3)::integer AS value",
+      "expression": "(7)::integer & (3)::integer"
+    },
+    {
+      "id": "75",
+      "sql": "SELECT (-7)::integer & (3)::integer AS value",
+      "expression": "(-7)::integer & (3)::integer"
+    },
+    {
+      "id": "76",
+      "sql": "SELECT (-1)::integer & (0)::integer AS value",
+      "expression": "(-1)::integer & (0)::integer"
+    },
+    {
+      "id": "77",
+      "sql": "SELECT (0)::integer & (-1)::integer AS value",
+      "expression": "(0)::integer & (-1)::integer"
+    },
+    {
+      "id": "78",
+      "sql": "SELECT (-2147483648)::integer & (2147483647)::integer AS value",
+      "expression": "(-2147483648)::integer & (2147483647)::integer"
+    },
+    {
+      "id": "79",
+      "sql": "SELECT (7)::integer | (3)::integer AS value",
+      "expression": "(7)::integer | (3)::integer"
+    },
+    {
+      "id": "80",
+      "sql": "SELECT (-7)::integer | (3)::integer AS value",
+      "expression": "(-7)::integer | (3)::integer"
+    },
+    {
+      "id": "81",
+      "sql": "SELECT (-1)::integer | (0)::integer AS value",
+      "expression": "(-1)::integer | (0)::integer"
+    },
+    {
+      "id": "82",
+      "sql": "SELECT (0)::integer | (-1)::integer AS value",
+      "expression": "(0)::integer | (-1)::integer"
+    },
+    {
+      "id": "83",
+      "sql": "SELECT (-2147483648)::integer | (2147483647)::integer AS value",
+      "expression": "(-2147483648)::integer | (2147483647)::integer"
+    },
+    {
+      "id": "84",
+      "sql": "SELECT (7)::integer # (3)::integer AS value",
+      "expression": "(7)::integer # (3)::integer"
+    },
+    {
+      "id": "85",
+      "sql": "SELECT (-7)::integer # (3)::integer AS value",
+      "expression": "(-7)::integer # (3)::integer"
+    },
+    {
+      "id": "86",
+      "sql": "SELECT (-1)::integer # (0)::integer AS value",
+      "expression": "(-1)::integer # (0)::integer"
+    },
+    {
+      "id": "87",
+      "sql": "SELECT (0)::integer # (-1)::integer AS value",
+      "expression": "(0)::integer # (-1)::integer"
+    },
+    {
+      "id": "88",
+      "sql": "SELECT (-2147483648)::integer # (2147483647)::integer AS value",
+      "expression": "(-2147483648)::integer # (2147483647)::integer"
+    },
+    {
+      "id": "89",
+      "sql": "SELECT ~(0)::integer AS value",
+      "expression": "~(0)::integer"
+    },
+    {
+      "id": "90",
+      "sql": "SELECT ~(-1)::integer AS value",
+      "expression": "~(-1)::integer"
+    },
+    {
+      "id": "91",
+      "sql": "SELECT ~(7)::integer AS value",
+      "expression": "~(7)::integer"
+    },
+    {
+      "id": "92",
+      "sql": "SELECT ~(-2147483648)::integer AS value",
+      "expression": "~(-2147483648)::integer"
+    },
+    {
+      "id": "93",
+      "sql": "SELECT ~(2147483647)::integer AS value",
+      "expression": "~(2147483647)::integer"
+    },
+    {
+      "id": "94",
+      "sql": "SELECT (1)::integer << (0)::integer AS value",
+      "expression": "(1)::integer << (0)::integer"
+    },
+    {
+      "id": "95",
+      "sql": "SELECT (-7)::integer << (0)::integer AS value",
+      "expression": "(-7)::integer << (0)::integer"
+    },
+    {
+      "id": "96",
+      "sql": "SELECT (1)::integer << (1)::integer AS value",
+      "expression": "(1)::integer << (1)::integer"
+    },
+    {
+      "id": "97",
+      "sql": "SELECT (-7)::integer << (1)::integer AS value",
+      "expression": "(-7)::integer << (1)::integer"
+    },
+    {
+      "id": "98",
+      "sql": "SELECT (1)::integer << (15)::integer AS value",
+      "expression": "(1)::integer << (15)::integer"
+    },
+    {
+      "id": "99",
+      "sql": "SELECT (-7)::integer << (15)::integer AS value",
+      "expression": "(-7)::integer << (15)::integer"
+    },
+    {
+      "id": "100",
+      "sql": "SELECT (1)::integer << (16)::integer AS value",
+      "expression": "(1)::integer << (16)::integer"
+    },
+    {
+      "id": "101",
+      "sql": "SELECT (-7)::integer << (16)::integer AS value",
+      "expression": "(-7)::integer << (16)::integer"
+    },
+    {
+      "id": "102",
+      "sql": "SELECT (1)::integer << (31)::integer AS value",
+      "expression": "(1)::integer << (31)::integer"
+    },
+    {
+      "id": "103",
+      "sql": "SELECT (-7)::integer << (31)::integer AS value",
+      "expression": "(-7)::integer << (31)::integer"
+    },
+    {
+      "id": "104",
+      "sql": "SELECT (1)::integer << (32)::integer AS value",
+      "expression": "(1)::integer << (32)::integer"
+    },
+    {
+      "id": "105",
+      "sql": "SELECT (-7)::integer << (32)::integer AS value",
+      "expression": "(-7)::integer << (32)::integer"
+    },
+    {
+      "id": "106",
+      "sql": "SELECT (1)::integer << (63)::integer AS value",
+      "expression": "(1)::integer << (63)::integer"
+    },
+    {
+      "id": "107",
+      "sql": "SELECT (-7)::integer << (63)::integer AS value",
+      "expression": "(-7)::integer << (63)::integer"
+    },
+    {
+      "id": "108",
+      "sql": "SELECT (1)::integer << (64)::integer AS value",
+      "expression": "(1)::integer << (64)::integer"
+    },
+    {
+      "id": "109",
+      "sql": "SELECT (-7)::integer << (64)::integer AS value",
+      "expression": "(-7)::integer << (64)::integer"
+    },
+    {
+      "id": "110",
+      "sql": "SELECT (1)::integer << (-1)::integer AS value",
+      "expression": "(1)::integer << (-1)::integer"
+    },
+    {
+      "id": "111",
+      "sql": "SELECT (-7)::integer << (-1)::integer AS value",
+      "expression": "(-7)::integer << (-1)::integer"
+    },
+    {
+      "id": "112",
+      "sql": "SELECT (1)::integer << (-32)::integer AS value",
+      "expression": "(1)::integer << (-32)::integer"
+    },
+    {
+      "id": "113",
+      "sql": "SELECT (-7)::integer << (-32)::integer AS value",
+      "expression": "(-7)::integer << (-32)::integer"
+    },
+    {
+      "id": "114",
+      "sql": "SELECT (1)::integer << (2147483647)::integer AS value",
+      "expression": "(1)::integer << (2147483647)::integer"
+    },
+    {
+      "id": "115",
+      "sql": "SELECT (-7)::integer << (2147483647)::integer AS value",
+      "expression": "(-7)::integer << (2147483647)::integer"
+    },
+    {
+      "id": "116",
+      "sql": "SELECT (1)::integer << (-2147483648)::integer AS value",
+      "expression": "(1)::integer << (-2147483648)::integer"
+    },
+    {
+      "id": "117",
+      "sql": "SELECT (-7)::integer << (-2147483648)::integer AS value",
+      "expression": "(-7)::integer << (-2147483648)::integer"
+    },
+    {
+      "id": "118",
+      "sql": "SELECT (1)::integer >> (0)::integer AS value",
+      "expression": "(1)::integer >> (0)::integer"
+    },
+    {
+      "id": "119",
+      "sql": "SELECT (-7)::integer >> (0)::integer AS value",
+      "expression": "(-7)::integer >> (0)::integer"
+    },
+    {
+      "id": "120",
+      "sql": "SELECT (1)::integer >> (1)::integer AS value",
+      "expression": "(1)::integer >> (1)::integer"
+    },
+    {
+      "id": "121",
+      "sql": "SELECT (-7)::integer >> (1)::integer AS value",
+      "expression": "(-7)::integer >> (1)::integer"
+    },
+    {
+      "id": "122",
+      "sql": "SELECT (1)::integer >> (15)::integer AS value",
+      "expression": "(1)::integer >> (15)::integer"
+    },
+    {
+      "id": "123",
+      "sql": "SELECT (-7)::integer >> (15)::integer AS value",
+      "expression": "(-7)::integer >> (15)::integer"
+    },
+    {
+      "id": "124",
+      "sql": "SELECT (1)::integer >> (16)::integer AS value",
+      "expression": "(1)::integer >> (16)::integer"
+    },
+    {
+      "id": "125",
+      "sql": "SELECT (-7)::integer >> (16)::integer AS value",
+      "expression": "(-7)::integer >> (16)::integer"
+    },
+    {
+      "id": "126",
+      "sql": "SELECT (1)::integer >> (31)::integer AS value",
+      "expression": "(1)::integer >> (31)::integer"
+    },
+    {
+      "id": "127",
+      "sql": "SELECT (-7)::integer >> (31)::integer AS value",
+      "expression": "(-7)::integer >> (31)::integer"
+    },
+    {
+      "id": "128",
+      "sql": "SELECT (1)::integer >> (32)::integer AS value",
+      "expression": "(1)::integer >> (32)::integer"
+    },
+    {
+      "id": "129",
+      "sql": "SELECT (-7)::integer >> (32)::integer AS value",
+      "expression": "(-7)::integer >> (32)::integer"
+    },
+    {
+      "id": "130",
+      "sql": "SELECT (1)::integer >> (63)::integer AS value",
+      "expression": "(1)::integer >> (63)::integer"
+    },
+    {
+      "id": "131",
+      "sql": "SELECT (-7)::integer >> (63)::integer AS value",
+      "expression": "(-7)::integer >> (63)::integer"
+    },
+    {
+      "id": "132",
+      "sql": "SELECT (1)::integer >> (64)::integer AS value",
+      "expression": "(1)::integer >> (64)::integer"
+    },
+    {
+      "id": "133",
+      "sql": "SELECT (-7)::integer >> (64)::integer AS value",
+      "expression": "(-7)::integer >> (64)::integer"
+    },
+    {
+      "id": "134",
+      "sql": "SELECT (1)::integer >> (-1)::integer AS value",
+      "expression": "(1)::integer >> (-1)::integer"
+    },
+    {
+      "id": "135",
+      "sql": "SELECT (-7)::integer >> (-1)::integer AS value",
+      "expression": "(-7)::integer >> (-1)::integer"
+    },
+    {
+      "id": "136",
+      "sql": "SELECT (1)::integer >> (-32)::integer AS value",
+      "expression": "(1)::integer >> (-32)::integer"
+    },
+    {
+      "id": "137",
+      "sql": "SELECT (-7)::integer >> (-32)::integer AS value",
+      "expression": "(-7)::integer >> (-32)::integer"
+    },
+    {
+      "id": "138",
+      "sql": "SELECT (1)::integer >> (2147483647)::integer AS value",
+      "expression": "(1)::integer >> (2147483647)::integer"
+    },
+    {
+      "id": "139",
+      "sql": "SELECT (-7)::integer >> (2147483647)::integer AS value",
+      "expression": "(-7)::integer >> (2147483647)::integer"
+    },
+    {
+      "id": "140",
+      "sql": "SELECT (1)::integer >> (-2147483648)::integer AS value",
+      "expression": "(1)::integer >> (-2147483648)::integer"
+    },
+    {
+      "id": "141",
+      "sql": "SELECT (-7)::integer >> (-2147483648)::integer AS value",
+      "expression": "(-7)::integer >> (-2147483648)::integer"
+    },
+    {
+      "id": "142",
+      "sql": "SELECT NULL::integer & 1 AS value",
+      "expression": "NULL::integer & 1"
+    },
+    {
+      "id": "143",
+      "sql": "SELECT NULL::integer | 1 AS value",
+      "expression": "NULL::integer | 1"
+    },
+    {
+      "id": "144",
+      "sql": "SELECT NULL::integer # 1 AS value",
+      "expression": "NULL::integer # 1"
+    },
+    {
+      "id": "145",
+      "sql": "SELECT NULL::integer << 1 AS value",
+      "expression": "NULL::integer << 1"
+    },
+    {
+      "id": "146",
+      "sql": "SELECT NULL::integer >> 1 AS value",
+      "expression": "NULL::integer >> 1"
+    },
+    {
+      "id": "147",
+      "sql": "SELECT ~NULL::integer AS value",
+      "expression": "~NULL::integer"
+    },
+    {
+      "id": "148",
+      "sql": "SELECT (7)::bigint & (3)::bigint AS value",
+      "expression": "(7)::bigint & (3)::bigint"
+    },
+    {
+      "id": "149",
+      "sql": "SELECT (-7)::bigint & (3)::bigint AS value",
+      "expression": "(-7)::bigint & (3)::bigint"
+    },
+    {
+      "id": "150",
+      "sql": "SELECT (-1)::bigint & (0)::bigint AS value",
+      "expression": "(-1)::bigint & (0)::bigint"
+    },
+    {
+      "id": "151",
+      "sql": "SELECT (0)::bigint & (-1)::bigint AS value",
+      "expression": "(0)::bigint & (-1)::bigint"
+    },
+    {
+      "id": "152",
+      "sql": "SELECT (-9223372036854775808)::bigint & (9223372036854775807)::bigint AS value",
+      "expression": "(-9223372036854775808)::bigint & (9223372036854775807)::bigint"
+    },
+    {
+      "id": "153",
+      "sql": "SELECT (7)::bigint | (3)::bigint AS value",
+      "expression": "(7)::bigint | (3)::bigint"
+    },
+    {
+      "id": "154",
+      "sql": "SELECT (-7)::bigint | (3)::bigint AS value",
+      "expression": "(-7)::bigint | (3)::bigint"
+    },
+    {
+      "id": "155",
+      "sql": "SELECT (-1)::bigint | (0)::bigint AS value",
+      "expression": "(-1)::bigint | (0)::bigint"
+    },
+    {
+      "id": "156",
+      "sql": "SELECT (0)::bigint | (-1)::bigint AS value",
+      "expression": "(0)::bigint | (-1)::bigint"
+    },
+    {
+      "id": "157",
+      "sql": "SELECT (-9223372036854775808)::bigint | (9223372036854775807)::bigint AS value",
+      "expression": "(-9223372036854775808)::bigint | (9223372036854775807)::bigint"
+    },
+    {
+      "id": "158",
+      "sql": "SELECT (7)::bigint # (3)::bigint AS value",
+      "expression": "(7)::bigint # (3)::bigint"
+    },
+    {
+      "id": "159",
+      "sql": "SELECT (-7)::bigint # (3)::bigint AS value",
+      "expression": "(-7)::bigint # (3)::bigint"
+    },
+    {
+      "id": "160",
+      "sql": "SELECT (-1)::bigint # (0)::bigint AS value",
+      "expression": "(-1)::bigint # (0)::bigint"
+    },
+    {
+      "id": "161",
+      "sql": "SELECT (0)::bigint # (-1)::bigint AS value",
+      "expression": "(0)::bigint # (-1)::bigint"
+    },
+    {
+      "id": "162",
+      "sql": "SELECT (-9223372036854775808)::bigint # (9223372036854775807)::bigint AS value",
+      "expression": "(-9223372036854775808)::bigint # (9223372036854775807)::bigint"
+    },
+    {
+      "id": "163",
+      "sql": "SELECT ~(0)::bigint AS value",
+      "expression": "~(0)::bigint"
+    },
+    {
+      "id": "164",
+      "sql": "SELECT ~(-1)::bigint AS value",
+      "expression": "~(-1)::bigint"
+    },
+    {
+      "id": "165",
+      "sql": "SELECT ~(7)::bigint AS value",
+      "expression": "~(7)::bigint"
+    },
+    {
+      "id": "166",
+      "sql": "SELECT ~(-9223372036854775808)::bigint AS value",
+      "expression": "~(-9223372036854775808)::bigint"
+    },
+    {
+      "id": "167",
+      "sql": "SELECT ~(9223372036854775807)::bigint AS value",
+      "expression": "~(9223372036854775807)::bigint"
+    },
+    {
+      "id": "168",
+      "sql": "SELECT (1)::bigint << (0)::integer AS value",
+      "expression": "(1)::bigint << (0)::integer"
+    },
+    {
+      "id": "169",
+      "sql": "SELECT (-7)::bigint << (0)::integer AS value",
+      "expression": "(-7)::bigint << (0)::integer"
+    },
+    {
+      "id": "170",
+      "sql": "SELECT (1)::bigint << (1)::integer AS value",
+      "expression": "(1)::bigint << (1)::integer"
+    },
+    {
+      "id": "171",
+      "sql": "SELECT (-7)::bigint << (1)::integer AS value",
+      "expression": "(-7)::bigint << (1)::integer"
+    },
+    {
+      "id": "172",
+      "sql": "SELECT (1)::bigint << (15)::integer AS value",
+      "expression": "(1)::bigint << (15)::integer"
+    },
+    {
+      "id": "173",
+      "sql": "SELECT (-7)::bigint << (15)::integer AS value",
+      "expression": "(-7)::bigint << (15)::integer"
+    },
+    {
+      "id": "174",
+      "sql": "SELECT (1)::bigint << (16)::integer AS value",
+      "expression": "(1)::bigint << (16)::integer"
+    },
+    {
+      "id": "175",
+      "sql": "SELECT (-7)::bigint << (16)::integer AS value",
+      "expression": "(-7)::bigint << (16)::integer"
+    },
+    {
+      "id": "176",
+      "sql": "SELECT (1)::bigint << (31)::integer AS value",
+      "expression": "(1)::bigint << (31)::integer"
+    },
+    {
+      "id": "177",
+      "sql": "SELECT (-7)::bigint << (31)::integer AS value",
+      "expression": "(-7)::bigint << (31)::integer"
+    },
+    {
+      "id": "178",
+      "sql": "SELECT (1)::bigint << (32)::integer AS value",
+      "expression": "(1)::bigint << (32)::integer"
+    },
+    {
+      "id": "179",
+      "sql": "SELECT (-7)::bigint << (32)::integer AS value",
+      "expression": "(-7)::bigint << (32)::integer"
+    },
+    {
+      "id": "180",
+      "sql": "SELECT (1)::bigint << (63)::integer AS value",
+      "expression": "(1)::bigint << (63)::integer"
+    },
+    {
+      "id": "181",
+      "sql": "SELECT (-7)::bigint << (63)::integer AS value",
+      "expression": "(-7)::bigint << (63)::integer"
+    },
+    {
+      "id": "182",
+      "sql": "SELECT (1)::bigint << (64)::integer AS value",
+      "expression": "(1)::bigint << (64)::integer"
+    },
+    {
+      "id": "183",
+      "sql": "SELECT (-7)::bigint << (64)::integer AS value",
+      "expression": "(-7)::bigint << (64)::integer"
+    },
+    {
+      "id": "184",
+      "sql": "SELECT (1)::bigint << (-1)::integer AS value",
+      "expression": "(1)::bigint << (-1)::integer"
+    },
+    {
+      "id": "185",
+      "sql": "SELECT (-7)::bigint << (-1)::integer AS value",
+      "expression": "(-7)::bigint << (-1)::integer"
+    },
+    {
+      "id": "186",
+      "sql": "SELECT (1)::bigint << (-32)::integer AS value",
+      "expression": "(1)::bigint << (-32)::integer"
+    },
+    {
+      "id": "187",
+      "sql": "SELECT (-7)::bigint << (-32)::integer AS value",
+      "expression": "(-7)::bigint << (-32)::integer"
+    },
+    {
+      "id": "188",
+      "sql": "SELECT (1)::bigint << (2147483647)::integer AS value",
+      "expression": "(1)::bigint << (2147483647)::integer"
+    },
+    {
+      "id": "189",
+      "sql": "SELECT (-7)::bigint << (2147483647)::integer AS value",
+      "expression": "(-7)::bigint << (2147483647)::integer"
+    },
+    {
+      "id": "190",
+      "sql": "SELECT (1)::bigint << (-2147483648)::integer AS value",
+      "expression": "(1)::bigint << (-2147483648)::integer"
+    },
+    {
+      "id": "191",
+      "sql": "SELECT (-7)::bigint << (-2147483648)::integer AS value",
+      "expression": "(-7)::bigint << (-2147483648)::integer"
+    },
+    {
+      "id": "192",
+      "sql": "SELECT (1)::bigint >> (0)::integer AS value",
+      "expression": "(1)::bigint >> (0)::integer"
+    },
+    {
+      "id": "193",
+      "sql": "SELECT (-7)::bigint >> (0)::integer AS value",
+      "expression": "(-7)::bigint >> (0)::integer"
+    },
+    {
+      "id": "194",
+      "sql": "SELECT (1)::bigint >> (1)::integer AS value",
+      "expression": "(1)::bigint >> (1)::integer"
+    },
+    {
+      "id": "195",
+      "sql": "SELECT (-7)::bigint >> (1)::integer AS value",
+      "expression": "(-7)::bigint >> (1)::integer"
+    },
+    {
+      "id": "196",
+      "sql": "SELECT (1)::bigint >> (15)::integer AS value",
+      "expression": "(1)::bigint >> (15)::integer"
+    },
+    {
+      "id": "197",
+      "sql": "SELECT (-7)::bigint >> (15)::integer AS value",
+      "expression": "(-7)::bigint >> (15)::integer"
+    },
+    {
+      "id": "198",
+      "sql": "SELECT (1)::bigint >> (16)::integer AS value",
+      "expression": "(1)::bigint >> (16)::integer"
+    },
+    {
+      "id": "199",
+      "sql": "SELECT (-7)::bigint >> (16)::integer AS value",
+      "expression": "(-7)::bigint >> (16)::integer"
+    },
+    {
+      "id": "200",
+      "sql": "SELECT (1)::bigint >> (31)::integer AS value",
+      "expression": "(1)::bigint >> (31)::integer"
+    },
+    {
+      "id": "201",
+      "sql": "SELECT (-7)::bigint >> (31)::integer AS value",
+      "expression": "(-7)::bigint >> (31)::integer"
+    },
+    {
+      "id": "202",
+      "sql": "SELECT (1)::bigint >> (32)::integer AS value",
+      "expression": "(1)::bigint >> (32)::integer"
+    },
+    {
+      "id": "203",
+      "sql": "SELECT (-7)::bigint >> (32)::integer AS value",
+      "expression": "(-7)::bigint >> (32)::integer"
+    },
+    {
+      "id": "204",
+      "sql": "SELECT (1)::bigint >> (63)::integer AS value",
+      "expression": "(1)::bigint >> (63)::integer"
+    },
+    {
+      "id": "205",
+      "sql": "SELECT (-7)::bigint >> (63)::integer AS value",
+      "expression": "(-7)::bigint >> (63)::integer"
+    },
+    {
+      "id": "206",
+      "sql": "SELECT (1)::bigint >> (64)::integer AS value",
+      "expression": "(1)::bigint >> (64)::integer"
+    },
+    {
+      "id": "207",
+      "sql": "SELECT (-7)::bigint >> (64)::integer AS value",
+      "expression": "(-7)::bigint >> (64)::integer"
+    },
+    {
+      "id": "208",
+      "sql": "SELECT (1)::bigint >> (-1)::integer AS value",
+      "expression": "(1)::bigint >> (-1)::integer"
+    },
+    {
+      "id": "209",
+      "sql": "SELECT (-7)::bigint >> (-1)::integer AS value",
+      "expression": "(-7)::bigint >> (-1)::integer"
+    },
+    {
+      "id": "210",
+      "sql": "SELECT (1)::bigint >> (-32)::integer AS value",
+      "expression": "(1)::bigint >> (-32)::integer"
+    },
+    {
+      "id": "211",
+      "sql": "SELECT (-7)::bigint >> (-32)::integer AS value",
+      "expression": "(-7)::bigint >> (-32)::integer"
+    },
+    {
+      "id": "212",
+      "sql": "SELECT (1)::bigint >> (2147483647)::integer AS value",
+      "expression": "(1)::bigint >> (2147483647)::integer"
+    },
+    {
+      "id": "213",
+      "sql": "SELECT (-7)::bigint >> (2147483647)::integer AS value",
+      "expression": "(-7)::bigint >> (2147483647)::integer"
+    },
+    {
+      "id": "214",
+      "sql": "SELECT (1)::bigint >> (-2147483648)::integer AS value",
+      "expression": "(1)::bigint >> (-2147483648)::integer"
+    },
+    {
+      "id": "215",
+      "sql": "SELECT (-7)::bigint >> (-2147483648)::integer AS value",
+      "expression": "(-7)::bigint >> (-2147483648)::integer"
+    },
+    {
+      "id": "216",
+      "sql": "SELECT NULL::bigint & 1 AS value",
+      "expression": "NULL::bigint & 1"
+    },
+    {
+      "id": "217",
+      "sql": "SELECT NULL::bigint | 1 AS value",
+      "expression": "NULL::bigint | 1"
+    },
+    {
+      "id": "218",
+      "sql": "SELECT NULL::bigint # 1 AS value",
+      "expression": "NULL::bigint # 1"
+    },
+    {
+      "id": "219",
+      "sql": "SELECT NULL::bigint << 1 AS value",
+      "expression": "NULL::bigint << 1"
+    },
+    {
+      "id": "220",
+      "sql": "SELECT NULL::bigint >> 1 AS value",
+      "expression": "NULL::bigint >> 1"
+    },
+    {
+      "id": "221",
+      "sql": "SELECT ~NULL::bigint AS value",
+      "expression": "~NULL::bigint"
+    },
+    {
+      "id": "222",
+      "sql": "SELECT 7::smallint & 3::smallint AS value",
+      "expression": "7::smallint & 3::smallint"
+    },
+    {
+      "id": "223",
+      "sql": "SELECT 7::smallint | 3::smallint AS value",
+      "expression": "7::smallint | 3::smallint"
+    },
+    {
+      "id": "224",
+      "sql": "SELECT 7::smallint # 3::smallint AS value",
+      "expression": "7::smallint # 3::smallint"
+    },
+    {
+      "id": "225",
+      "sql": "SELECT 7::smallint & 3::integer AS value",
+      "expression": "7::smallint & 3::integer"
+    },
+    {
+      "id": "226",
+      "sql": "SELECT 7::smallint | 3::integer AS value",
+      "expression": "7::smallint | 3::integer"
+    },
+    {
+      "id": "227",
+      "sql": "SELECT 7::smallint # 3::integer AS value",
+      "expression": "7::smallint # 3::integer"
+    },
+    {
+      "id": "228",
+      "sql": "SELECT 7::smallint & 3::bigint AS value",
+      "expression": "7::smallint & 3::bigint"
+    },
+    {
+      "id": "229",
+      "sql": "SELECT 7::smallint | 3::bigint AS value",
+      "expression": "7::smallint | 3::bigint"
+    },
+    {
+      "id": "230",
+      "sql": "SELECT 7::smallint # 3::bigint AS value",
+      "expression": "7::smallint # 3::bigint"
+    },
+    {
+      "id": "231",
+      "sql": "SELECT 7::integer & 3::smallint AS value",
+      "expression": "7::integer & 3::smallint"
+    },
+    {
+      "id": "232",
+      "sql": "SELECT 7::integer | 3::smallint AS value",
+      "expression": "7::integer | 3::smallint"
+    },
+    {
+      "id": "233",
+      "sql": "SELECT 7::integer # 3::smallint AS value",
+      "expression": "7::integer # 3::smallint"
+    },
+    {
+      "id": "234",
+      "sql": "SELECT 7::integer & 3::integer AS value",
+      "expression": "7::integer & 3::integer"
+    },
+    {
+      "id": "235",
+      "sql": "SELECT 7::integer | 3::integer AS value",
+      "expression": "7::integer | 3::integer"
+    },
+    {
+      "id": "236",
+      "sql": "SELECT 7::integer # 3::integer AS value",
+      "expression": "7::integer # 3::integer"
+    },
+    {
+      "id": "237",
+      "sql": "SELECT 7::integer & 3::bigint AS value",
+      "expression": "7::integer & 3::bigint"
+    },
+    {
+      "id": "238",
+      "sql": "SELECT 7::integer | 3::bigint AS value",
+      "expression": "7::integer | 3::bigint"
+    },
+    {
+      "id": "239",
+      "sql": "SELECT 7::integer # 3::bigint AS value",
+      "expression": "7::integer # 3::bigint"
+    },
+    {
+      "id": "240",
+      "sql": "SELECT 7::bigint & 3::smallint AS value",
+      "expression": "7::bigint & 3::smallint"
+    },
+    {
+      "id": "241",
+      "sql": "SELECT 7::bigint | 3::smallint AS value",
+      "expression": "7::bigint | 3::smallint"
+    },
+    {
+      "id": "242",
+      "sql": "SELECT 7::bigint # 3::smallint AS value",
+      "expression": "7::bigint # 3::smallint"
+    },
+    {
+      "id": "243",
+      "sql": "SELECT 7::bigint & 3::integer AS value",
+      "expression": "7::bigint & 3::integer"
+    },
+    {
+      "id": "244",
+      "sql": "SELECT 7::bigint | 3::integer AS value",
+      "expression": "7::bigint | 3::integer"
+    },
+    {
+      "id": "245",
+      "sql": "SELECT 7::bigint # 3::integer AS value",
+      "expression": "7::bigint # 3::integer"
+    },
+    {
+      "id": "246",
+      "sql": "SELECT 7::bigint & 3::bigint AS value",
+      "expression": "7::bigint & 3::bigint"
+    },
+    {
+      "id": "247",
+      "sql": "SELECT 7::bigint | 3::bigint AS value",
+      "expression": "7::bigint | 3::bigint"
+    },
+    {
+      "id": "248",
+      "sql": "SELECT 7::bigint # 3::bigint AS value",
+      "expression": "7::bigint # 3::bigint"
+    },
+    {
+      "id": "249",
+      "sql": "SELECT '7' & 3 AS value",
+      "expression": "'7' & 3"
+    },
+    {
+      "id": "250",
+      "sql": "SELECT 7 & '3' AS value",
+      "expression": "7 & '3'"
+    },
+    {
+      "id": "251",
+      "sql": "SELECT '7' & '3' AS value",
+      "expression": "'7' & '3'"
+    },
+    {
+      "id": "252",
+      "sql": "SELECT ~'7' AS value",
+      "expression": "~'7'"
+    },
+    {
+      "id": "253",
+      "sql": "SELECT '7' << 2 AS value",
+      "expression": "'7' << 2"
+    },
+    {
+      "id": "254",
+      "sql": "SELECT 7 << '2' AS value",
+      "expression": "7 << '2'"
+    },
+    {
+      "id": "255",
+      "sql": "SELECT NULL & NULL AS value",
+      "expression": "NULL & NULL"
+    },
+    {
+      "id": "256",
+      "sql": "SELECT ~NULL AS value",
+      "expression": "~NULL"
+    },
+    {
+      "id": "257",
+      "sql": "SELECT 7::numeric & 3 AS value",
+      "expression": "7::numeric & 3"
+    },
+    {
+      "id": "258",
+      "sql": "SELECT 7 & 3::numeric AS value",
+      "expression": "7 & 3::numeric"
+    },
+    {
+      "id": "259",
+      "sql": "SELECT 7::real | 3 AS value",
+      "expression": "7::real | 3"
+    },
+    {
+      "id": "260",
+      "sql": "SELECT 7 # 3::double precision AS value",
+      "expression": "7 # 3::double precision"
+    },
+    {
+      "id": "261",
+      "sql": "SELECT 1 << 2::bigint AS value",
+      "expression": "1 << 2::bigint"
+    },
+    {
+      "id": "262",
+      "sql": "SELECT 1 << 2::smallint AS value",
+      "expression": "1 << 2::smallint"
+    },
+    {
+      "id": "263",
+      "sql": "SELECT 1 << 'bad' AS value",
+      "expression": "1 << 'bad'"
+    },
+    {
+      "id": "264",
+      "sql": "SELECT ~7::numeric AS value",
+      "expression": "~7::numeric"
+    },
+    {
+      "id": "265",
+      "sql": "SELECT ~7::real AS value",
+      "expression": "~7::real"
+    },
+    {
+      "id": "266",
+      "sql": "SELECT 1 << 2147483648 AS value",
+      "expression": "1 << 2147483648"
+    },
+    {
+      "id": "267",
+      "sql": "SELECT 1 OPERATOR(pg_catalog.&) 3 AS value",
+      "expression": "1 OPERATOR(pg_catalog.&) 3"
+    },
+    {
+      "id": "268",
+      "sql": "SELECT OPERATOR(pg_catalog.~) 7 AS value",
+      "expression": "OPERATOR(pg_catalog.~) 7"
+    },
+    {
+      "id": "269",
+      "sql": "SELECT 1 & (1 / 0) AS value",
+      "expression": "1 & (1 / 0)"
+    },
+    {
+      "id": "270",
+      "sql": "SELECT NULL::integer & (1 / 0) AS value",
+      "expression": "NULL::integer & (1 / 0)"
+    },
+    {
+      "id": "integer operator catalog",
+      "sql": "SELECT o.oprname, COALESCE(l.typname, ''), r.typname, t.typname, o.oid::text, o.oprcode::oid::text, p.proname, p.proisstrict FROM pg_operator o LEFT JOIN pg_type l ON l.oid=o.oprleft JOIN pg_type r ON r.oid=o.oprright JOIN pg_type t ON t.oid=o.oprresult JOIN pg_proc p ON p.oid=o.oprcode WHERE o.oprname IN ('&','|','#','~','<<','>>') AND o.oprleft IN (0,20,21,23) AND o.oprright IN (20,21,23) ORDER BY o.oprname,o.oprleft,o.oprright"
+    }
+  ]
+}

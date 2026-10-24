@@ -24876,6 +24876,32 @@
       "capability": "Empty append initialization",
       "workload": "Relation-backed UNION ALL, other set operators and differing analyzed output types.",
       "invariant": "Only a flattened noncoercing append of dummy relations can lose scan initialization; distinct/intersection/difference and coercing boundaries survive."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "integer_bitwise_values_types_and_diagnostics_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/numeric_operator/tests/bitwise.rs",
+      "capability": "Integer bitwise operators",
+      "workload": "271 independent PostgreSQL integer bitwise expressions across 16/32/64-bit, mixed, unknown, NULL and shift-boundary operands.",
+      "invariant": "Exact selected result OID, value and SQLSTATE/message match PostgreSQL; declared widths and shift promotion are preserved."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "integer_bitwise_catalog_identities_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/numeric_operator/tests/bitwise.rs",
+      "capability": "Integer bitwise operators",
+      "workload": "All eighteen PostgreSQL smallint/integer/bigint bitwise operator declarations.",
+      "invariant": "Operator and implementation OIDs, operand/result types and unary/binary identities match the independent catalog capture."
     }
   ]
 }
