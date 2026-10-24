@@ -23,6 +23,10 @@ impl RoutineNameCatalog for Engine {
     fn search_path(&self) -> Vec<String> {
         crate::session::effective_search_path(&self.session.state.read())
     }
+    fn temporary_schema(&self) -> Option<String> {
+        self.temporary_namespace_allocated()
+            .then(|| self.temporary_schema_name())
+    }
     fn require_schema_usage(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError> {
         self.require_schema_privilege(schema, role, SchemaAclPrivilege::Usage)
     }

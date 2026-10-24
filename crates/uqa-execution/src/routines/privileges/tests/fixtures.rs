@@ -218,6 +218,9 @@ impl RoutineNameCatalog for Fixture {
     fn search_path(&self) -> Vec<String> {
         vec!["app".into()]
     }
+    fn temporary_schema(&self) -> Option<String> {
+        None
+    }
     fn require_schema_usage(&self, name: &str, _: &RoleReference) -> Result<(), SQLError> {
         if self.denied_schema.get() && name == "app" {
             Err(SQLError::Routine {

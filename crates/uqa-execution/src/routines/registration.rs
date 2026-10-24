@@ -246,7 +246,7 @@ pub fn register_sql_function(
     let owner = locks.bind(&requested_owner)?;
     def.owner = Some(owner.identity());
     let requested_name = def.name.clone();
-    def.name = context.namespace.persistent_name(&requested_name)?;
+    def.name = context.namespace.object_name(&requested_name)?;
     validate_routine_creation(context, &mut def, &current_user)?;
     let checks_bodies = checks_function_bodies(context.configuration)?;
     let bound = compile_catalog_bound_routine(

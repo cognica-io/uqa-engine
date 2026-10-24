@@ -131,7 +131,10 @@ pub fn install_sql_function_restore_placeholders(
             (name.clone(), overloads)
         })
         .collect();
-    let previous = std::mem::replace(&mut **context.registry.routines_write(), placeholders);
+    let mut registry = context.registry.routines_write();
+    let temporary = super::catalog::temporary_snapshot(&registry);
+    let previous = std::mem::replace(&mut **registry, placeholders);
+    registry.extend(temporary);
     Ok(Some(PendingSQLFunctionRestore {
         definitions: canonical_defs,
         migrated,
@@ -150,7 +153,7 @@ pub fn finalize_sql_function_restore(
         previous,
     } = pending;
     let compiled = (|| {
-        let mut restored: BTreeMap<String, Vec<Arc<SQLUserFunction>>> = BTreeMap::new();
+        let mut restored = super::catalog::temporary_snapshot(&previous);
         for (name, definitions) in definitions {
             let mut overloads = Vec::with_capacity(definitions.len());
             for mut def in definitions {

@@ -316,6 +316,10 @@ impl Engine {
 
     fn discard_temporary_relations(&self) {
         let schema = self.temporary_schema_name();
+        uqa_execution::routines::catalog::discard_temporary(
+            &mut self.durable.sql_user_functions.write(),
+            &schema,
+        );
         uqa_execution::schema::foreign_removal::discard_temporary_foreign_tables(self, &schema);
         let temporary_tables = self
             .storage

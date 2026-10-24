@@ -22,6 +22,8 @@ pub trait RoutineNameCatalog {
     fn schema_security(&self, schema: &str) -> Option<BoundSchemaSecurity>;
     fn current_role(&self) -> RoleReference;
     fn search_path(&self) -> Vec<String>;
+    /// The canonical name of this session's temporary namespace after its allocation.
+    fn temporary_schema(&self) -> Option<String>;
     fn require_schema_usage(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError>;
     fn schema_has_usage(&self, schema: &str, role: &RoleReference) -> bool;
     /// `format_type_be` of a routine argument type: a user-defined type, recorded by identity, is spelled by its current name.
@@ -40,6 +42,11 @@ pub fn routine_lookup_keys(
             message: format!("invalid routine name `{name}`: {error}"),
         })?;
     if let Some(schema) = schema {
+        let schema = if schema == "pg_temp" {
+            catalog.temporary_schema().unwrap_or(schema)
+        } else {
+            schema
+        };
         if catalog.schema_security(&schema).is_none() {
             return Err(SQLError::Routine {
                 sqlstate: "3F000".into(),
@@ -59,7 +66,9 @@ pub fn routine_lookup_keys(
     Ok(search_path
         .into_iter()
         .filter(|schema| {
-            catalog.schema_security(schema).is_some()
+            schema != "pg_temp"
+                && !crate::catalog::temporary_namespace::is_temporary_schema_name(schema)
+                && catalog.schema_security(schema).is_some()
                 && catalog.schema_has_usage(schema, &current_user)
         })
         .map(|schema| RelationIdentity::new(schema, &local_name).qualified_name())
