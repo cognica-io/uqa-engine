@@ -48,6 +48,8 @@ impl RowFragment {
     }
 
     pub(super) fn len(&self) -> usize {
+        #[cfg(test)]
+        FRAGMENT_WIDTH_READS.with(|reads| reads.set(reads.get() + 1));
         self.projection
             .as_ref()
             .map_or(self.values.len(), |projection| projection.len())
@@ -108,6 +110,13 @@ pub enum RowProjectionValue {
 }
 
 impl PhysicalRow {
+    #[cfg(test)]
+    pub(crate) fn count_fragment_width_reads<T>(visit: impl FnOnce() -> T) -> (T, usize) {
+        FRAGMENT_WIDTH_READS.with(|reads| reads.set(0));
+        let output = visit();
+        (output, FRAGMENT_WIDTH_READS.with(std::cell::Cell::get))
+    }
+
     pub fn from_values(values: Vec<Value>) -> Self {
         let mut fragments = RowFragments::new();
         if !values.is_empty() {
@@ -331,4 +340,9 @@ impl PhysicalRow {
             lock_origins: self.lock_origins,
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static FRAGMENT_WIDTH_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
