@@ -581,6 +581,21 @@ UQA_API uqa_status UQA_CALL uqa_value_get_vector_f32(
     uqa_value_view value, uqa_vector_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_tensor_f32(
     uqa_value_view value, uqa_tensor_view *out);
+typedef struct uqa_array_dimension {
+    uint64_t length;
+    int32_t lower_bound;
+} uqa_array_dimension;
+
+typedef struct uqa_array_shape {
+    const uqa_array_dimension *dimensions;
+    uint32_t rank;
+    uint64_t element_count;
+} uqa_array_shape;
+
+UQA_API uqa_status UQA_CALL uqa_value_get_array_shape(
+    uqa_value_view value, uqa_array_shape *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_element(
+    uqa_value_view value, uint64_t index, uqa_value_view *out);
 UQA_API uqa_status UQA_CALL uqa_buffer_create(uqa_buffer *out);
 UQA_API uqa_status UQA_CALL uqa_value_format_sql(
     uqa_value_view value, uqa_buffer buffer);
@@ -594,6 +609,10 @@ Owned values and borrowed value views are immutable after construction. Scalar c
 `uqa_value_create_tensor_f32` copies `row_count * dimensions` finite floats in row-major order. The dimension is positive even for an empty tensor; zero rows permit a NULL data pointer. Checked shape arithmetic rejects an unaddressable span before reading it. SQL's packed `SQLTensor` parameter retains the declared dimension independently of the row count, including through copies, preparation and cursor binding. `uqa_type_get_dimensions` returns VECTOR/TENSOR dimensions, or `UQA_DONE` with zero for other types; a domain exposes this through its base descriptor.
 
 `uqa_value_get_vector_f32` and `uqa_value_get_tensor_f32` return borrowed packed float32 storage with the source value's lifetime. An empty tensor has NULL data, zero rows and its positive declared dimension. SQL arrays are distinct types and cannot use these getters. Domain values use their underlying dense type. Typed NULL returns `UQA_ERROR_NULL` and clears the output. Observation uses the native finite-value and dimension conversion under the source's FFI allowance, publishes a stable cache only after success and preserves the source on failure; releasing other retained values permits another attempt. Explicit SQL casts and assignment share the same native conversion.
+
+`uqa_value_get_array_shape` returns immutable dimensions, signed SQL lower bounds, rank and total element count. `uqa_value_get_element` uses a zero-based row-major position independently of those lower bounds and returns a borrowed scalar child with its declared element type, including NULL. Core owns positional traversal; observing one child does not flatten or copy the array or interpret that child's retained payload. A multidimensional SQL array has one scalar element descriptor; a domain element keeps its domain identity. Both getters also accept the native `int2vector` and `oidvector` array carriers, preserving their distinct type identity and zero-based bounds. Dense VECTOR/TENSOR values use their separate getters.
+
+A dimensionless empty array has NULL dimensions, rank zero and count zero. An explicitly shaped empty catalog vector retains its one zero-length dimension. A NULL array returns `UQA_ERROR_NULL`; a position outside the array returns `UQA_ERROR_RANGE`. Failure clears the output. Shape metadata and requested child wrappers are admitted under the parent's FFI allowance, cached only after successful construction and remain stable until the parent or its containing result is released or refilled. Releasing other retained handles permits another attempt after an admission failure. `uqa_value_create_copy` creates an independent child owner. Array observation participates in the source session's operation gate and cancellation scope; concurrent admission can return `UQA_ERROR_BUSY` without publishing a partial view.
 
 `uqa_value_create_typed_null` resolves a native SQL type declaration, including modifiers, and validates NULL against that type. `uqa_value_create_from_text` reads UTF-8 text using the same explicit conversion as an unknown SQL input cast to that declaration. Both have `_n` variants; a NULL text pointer is invalid and does not represent SQL NULL. The SQL owner resolves catalog identities and applies input conversion, array bounds, enum labels, composite input, range canonicalization and inherited domain constraints. Type USAGE applies to object declarations and does not add an authorization requirement to these value casts. Session settings and the native input functions' own privileges still apply.
 

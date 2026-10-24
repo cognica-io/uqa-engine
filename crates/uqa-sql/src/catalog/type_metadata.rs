@@ -493,7 +493,7 @@ pub fn pg_type_element_oid(ty: &ColumnType) -> i64 {
         ColumnType::Name => 18,
         ColumnType::Int2Vector => 21,
         ColumnType::OidVector => 26,
-        ColumnType::Array(element) => pg_type_oid(element),
+        ColumnType::Array(_) => pg_type_oid(ty.array_element_type().expect("array element")),
         _ => 0,
     }
 }

@@ -66,6 +66,17 @@ typedef struct uqa_tensor_view {
     uint32_t dimensions;
 } uqa_tensor_view;
 
+typedef struct uqa_array_dimension {
+    uint64_t length;
+    int32_t lower_bound;
+} uqa_array_dimension;
+
+typedef struct uqa_array_shape {
+    const uqa_array_dimension *dimensions;
+    uint32_t rank;
+    uint64_t element_count;
+} uqa_array_shape;
+
 /* Native encrypted compressed SQLite container identity and exact state.
  * Persist the fields in an external trusted store; this struct is not a wire
  * format. A copied anchor owns no allocation and needs no destruction. */
@@ -424,6 +435,10 @@ UQA_API uqa_status UQA_CALL uqa_value_get_vector_f32(
     uqa_value_view value, uqa_vector_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_tensor_f32(
     uqa_value_view value, uqa_tensor_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_array_shape(
+    uqa_value_view value, uqa_array_shape *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_element(
+    uqa_value_view value, uint64_t index, uqa_value_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_copy(
     uqa_value_view value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_is_null(

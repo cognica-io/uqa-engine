@@ -96,6 +96,42 @@ impl<'v> ControlledArrayElements<'v, '_> {
 }
 
 impl ArrayValue {
+    /// Borrow one scalar element by zero-based row-major position without flattening the array or reading a retained element's payload. The traversal uses no allocation and checks the original and invoking cancellation scopes.
+    pub fn element_at_row_major_with_control(
+        &self,
+        mut index: usize,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&Value>, ValueRetentionError> {
+        control.check()?;
+        let mut remaining = usize::from(!self.dimensions().is_empty());
+        for length in self.dimensions() {
+            control.check()?;
+            remaining = remaining
+                .checked_mul(*length)
+                .ok_or(MemoryError::SizeOverflow)?;
+        }
+        if index >= remaining {
+            return Ok(None);
+        }
+        let mut level = self.elements();
+        for (dimension, length) in self.dimensions().iter().enumerate() {
+            control.check()?;
+            remaining /= length;
+            let Some(value) = level.get(index / remaining) else {
+                return Ok(None);
+            };
+            index %= remaining;
+            if dimension + 1 == self.dimensions().len() {
+                return Ok(Some(value));
+            }
+            let Value::List(children) = value else {
+                return Ok(None);
+            };
+            level = children;
+        }
+        Ok(None)
+    }
+
     pub fn elements_with_control<'v, 'c>(
         &'v self,
         control: &ProductionControl<'c>,
@@ -167,5 +203,68 @@ mod tests {
         ));
         drop(reader);
         assert_eq!(budget.used(), 0);
+    }
+}
+
+#[cfg(test)]
+mod positional_tests {
+    use super::*;
+
+    #[test]
+    fn row_major_borrows_match_subscripts_with_no_allocation_and_both_cancellations() {
+        let array = ArrayValue::with_lower_bounds(
+            vec![
+                Value::List(vec![Value::Int(11), Value::Null, Value::Int(13)]),
+                Value::List(vec![Value::Int(21), Value::Int(22), Value::Int(23)]),
+            ],
+            vec![-3, 7],
+        )
+        .unwrap();
+        let budget = MemoryBudget::new(0);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        for (index, subscripts) in [[-3, 7], [-3, 8], [-3, 9], [-2, 7], [-2, 8], [-2, 9]]
+            .iter()
+            .enumerate()
+        {
+            let actual = array
+                .element_at_row_major_with_control(index, &control)
+                .unwrap()
+                .unwrap();
+            assert!(std::ptr::eq(actual, array.element_at(subscripts).unwrap()));
+        }
+        assert_eq!(
+            array
+                .element_at_row_major_with_control(6, &control)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            array
+                .element_at_row_major_with_control(usize::MAX, &control)
+                .unwrap(),
+            None
+        );
+        assert_eq!(budget.used(), 0);
+        let empty = ArrayValue::with_lower_bounds(vec![], vec![0]).unwrap();
+        assert_eq!(
+            empty
+                .element_at_row_major_with_control(0, &control)
+                .unwrap(),
+            None
+        );
+        for token in [&original, &invoking] {
+            token.cancel();
+            assert!(matches!(
+                array.element_at_row_major_with_control(0, &control),
+                Err(ValueRetentionError::Cancelled(_))
+            ));
+            assert!(matches!(
+                empty.element_at_row_major_with_control(0, &control),
+                Err(ValueRetentionError::Cancelled(_))
+            ));
+            token.reset();
+        }
     }
 }

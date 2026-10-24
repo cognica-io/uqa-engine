@@ -6,6 +6,7 @@
 
 //! Immutable C values borrow native carriers or own admitted parameter copies.
 
+use parking_lot::Mutex;
 use std::ffi::c_char;
 use std::sync::{Arc, OnceLock};
 use uqa_core::{
@@ -33,6 +34,8 @@ mod packed;
 pub use packed::*;
 mod dense;
 pub use dense::*;
+mod arrays;
+pub use arrays::*;
 
 enum ValueSource {
     Owned(Produced<SQLParam>),
@@ -50,6 +53,8 @@ pub struct UQAValue {
     uuid_bytes: OnceLock<[u8; 16]>,
     vector_data: OnceLock<Produced<Vec<f32>>>,
     tensor_data: OnceLock<Produced<uqa_sql::params::SQLTensor>>,
+    array_shape: OnceLock<Produced<Vec<crate::abi::UQAArrayDimension>>>,
+    array_children: Mutex<arrays::Children>,
     parameter_type: Option<ColumnType>,
     pub(crate) session: Option<Arc<Session>>,
     _memory: Option<MemoryReservation>,
@@ -61,7 +66,19 @@ impl UQAValue {
         ty: Option<&ColumnType>,
         session: &Arc<Session>,
     ) -> boundary::Result<Box<Self>> {
-        let memory = session.memory.reserve(size_of::<Self>())?;
+        Self::borrowed_with_session(value, ty, Some(session))
+    }
+
+    fn borrowed_with_session(
+        value: &Value,
+        ty: Option<&ColumnType>,
+        session: Option<&Arc<Session>>,
+    ) -> boundary::Result<Box<Self>> {
+        let memory = session
+            .map(|session| session.memory.reserve(size_of::<Self>()))
+            .transpose()?;
+        let control =
+            session.map_or_else(ProductionControl::uncontrolled, |session| session.control());
         boundary::boxed(Self {
             source: ValueSource::Borrowed {
                 value,
@@ -72,9 +89,11 @@ impl UQAValue {
             uuid_bytes: OnceLock::new(),
             vector_data: OnceLock::new(),
             tensor_data: OnceLock::new(),
+            array_shape: OnceLock::new(),
+            array_children: Mutex::new(arrays::Children::new(&control)),
             parameter_type: None,
-            session: Some(Arc::clone(session)),
-            _memory: Some(memory),
+            session: session.cloned(),
+            _memory: memory,
         })
     }
 
@@ -102,6 +121,12 @@ impl UQAValue {
             uuid_bytes: OnceLock::new(),
             vector_data: OnceLock::new(),
             tensor_data: OnceLock::new(),
+            array_shape: OnceLock::new(),
+            array_children: Mutex::new(arrays::Children::new(
+                &session
+                    .as_ref()
+                    .map_or_else(ProductionControl::uncontrolled, |session| session.control()),
+            )),
             parameter_type,
             session,
             _memory: memory,
@@ -220,6 +245,13 @@ impl UQAValue {
             ScalarAccess::VarBit => matches!(ty, ColumnType::VarBit(_)),
             ScalarAccess::Vector => matches!(ty, ColumnType::Vector(_)),
             ScalarAccess::Tensor => matches!(ty, ColumnType::Tensor(_)),
+            ScalarAccess::Array => matches!(
+                ty,
+                ColumnType::Array(_)
+                    | ColumnType::Int2Vector
+                    | ColumnType::OidVector
+                    | ColumnType::AnyArray
+            ),
         };
         if accepted {
             Ok(())
@@ -431,6 +463,7 @@ enum ScalarAccess {
     VarBit,
     Vector,
     Tensor,
+    Array,
 }
 
 macro_rules! scalar_getter {

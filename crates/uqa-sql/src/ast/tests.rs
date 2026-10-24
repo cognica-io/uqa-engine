@@ -614,3 +614,26 @@ fn trigger_deferrability_defaults_for_legacy_catalogs_and_round_trips() {
         TriggerDeferrability::InitiallyDeferred
     );
 }
+
+#[test]
+fn multidimensional_arrays_expose_one_scalar_or_domain_element_identity() {
+    use crate::catalog::type_metadata::{pg_type_element_oid, pg_type_oid};
+    let array = ColumnType::from_sql_name("integer[][][]").unwrap();
+    assert_eq!(array.array_element_type(), Some(&ColumnType::Integer));
+    assert_eq!(
+        (pg_type_oid(&array), pg_type_element_oid(&array)),
+        (1007, 23)
+    );
+    let domain = ColumnType::Domain {
+        schema: "public".into(),
+        name: "numbers".into(),
+        oid: 19001,
+        array_oid: Some(19002),
+        collation_oid: None,
+        base: Box::new(array),
+    };
+    let outer = ColumnType::Array(Box::new(ColumnType::Array(Box::new(domain.clone()))));
+    assert_eq!(outer.array_element_type(), Some(&domain));
+    assert_eq!(pg_type_element_oid(&outer), 19001);
+    assert_eq!(domain.array_element_type(), None);
+}

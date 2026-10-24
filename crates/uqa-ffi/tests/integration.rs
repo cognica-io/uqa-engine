@@ -6,6 +6,9 @@
 
 //! One integration harness for Rust and native C ABI verification.
 
+#[path = "cases/array_values.rs"]
+mod array_values;
+
 #[path = "cases/config.rs"]
 mod config;
 

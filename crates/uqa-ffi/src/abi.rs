@@ -223,6 +223,31 @@ impl Default for UQATensorView {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct UQAArrayDimension {
+    pub length: u64,
+    pub lower_bound: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct UQAArrayShape {
+    pub dimensions: *const UQAArrayDimension,
+    pub rank: u32,
+    pub element_count: u64,
+}
+
+impl Default for UQAArrayShape {
+    fn default() -> Self {
+        Self {
+            dimensions: std::ptr::null(),
+            rank: 0,
+            element_count: 0,
+        }
+    }
+}
+
 impl Default for UQABitsView {
     fn default() -> Self {
         Self {

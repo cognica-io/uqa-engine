@@ -212,6 +212,19 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
 }
 
 impl ColumnType {
+    /// `PostgreSQL`'s array element identity is independent of its number of dimensions. A domain element remains a domain even when its own base type is an array.
+    #[must_use]
+    pub fn array_element_type(&self) -> Option<&Self> {
+        let Self::Array(element) = self else {
+            return None;
+        };
+        let mut element = element;
+        while let Self::Array(inner) = element.as_ref() {
+            element = inner;
+        }
+        Some(element)
+    }
+
     /// Whether modifier removal changes this type; a domain retains its declared base.
     pub(crate) fn has_type_modifiers(&self) -> bool {
         match self {

@@ -160,7 +160,9 @@ ffi_fn!(uqa_type_get_base_type(ty: *const UQAType, out: *mut *const UQAType) {
 ffi_fn!(uqa_type_get_element_type(ty: *const UQAType, out: *mut *const UQAType) {
     let out = boundary::output(out)?;
     match &boundary::input(ty)?.0 {
-        ColumnType::Array(element) => { *out = view(element); Ok(UQA_OK) },
+        ty @ ColumnType::Array(_) => { *out = view(ty.array_element_type().expect("array element")); Ok(UQA_OK) },
+        ColumnType::Int2Vector => { *out = view(&ColumnType::SmallInteger); Ok(UQA_OK) },
+        ColumnType::OidVector => { *out = view(&ColumnType::Oid); Ok(UQA_OK) },
         _ => Ok(UQA_DONE),
     }
 });
