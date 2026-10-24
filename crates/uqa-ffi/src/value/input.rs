@@ -26,9 +26,7 @@ unsafe fn create(
     let empty = control.finish(SQLParam::Scalar(Value::Null), control.empty_reservation())?;
     let mut value = UQAValue::owned(empty, Some(Arc::clone(session)))?;
     let parameter = session
-        .native
-        .create_typed_parameter_with_control(type_name, text, &control)
-        .map_err(|error| session.execution_error(error))?;
+        .execute(|native| native.create_typed_parameter_with_control(type_name, text, &control))?;
     value.source = ValueSource::Owned(parameter);
     *out = Box::into_raw(value);
     Ok(UQA_OK)

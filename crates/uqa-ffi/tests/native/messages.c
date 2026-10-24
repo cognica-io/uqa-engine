@@ -41,6 +41,14 @@ static int64_t integer(uqa_result result, uint32_t column) {
     return number;
 }
 
+static void completion(uint32_t expected) {
+    uqa_error error = NULL;
+    uint32_t actual = UQA_COMPLETION_UNKNOWN;
+    CHECK(uqa_error_get_last(&error));
+    CHECK(uqa_error_get_completion(error, &actual));
+    assert(actual == expected);
+}
+
 int main(void) {
     uqa_engine engine = NULL;
     uqa_result result = NULL;
@@ -103,7 +111,10 @@ int main(void) {
     assert(text.data == NULL && text.size == 0);
 
     CHECK(uqa_engine_execute(engine, "SELECT 900", result));
+    assert(uqa_engine_execute(engine, "SELECT )", result) == UQA_ERROR_SQL);
+    completion(UQA_COMPLETION_NONE);
     assert(uqa_engine_execute(engine, "INSERT INTO items VALUES (2); SELECT 1 / 0", result) == UQA_ERROR_SQL);
+    completion(UQA_COMPLETION_ROLLED_BACK);
     CHECK(uqa_error_get_last(&error));
     CHECK(uqa_error_get_sqlstate(error, &text));
     assert(equal(text, "22012"));
@@ -115,6 +126,7 @@ int main(void) {
     assert(uqa_engine_execute(engine,
         "INSERT INTO items VALUES (3); COMMIT; INSERT INTO items VALUES (4); SELECT 1 / 0",
         result) == UQA_ERROR_SQL);
+    completion(UQA_COMPLETION_UNKNOWN);
     CHECK(uqa_engine_execute(engine, "SELECT sum(n) FROM items", result));
     assert(integer(result, 0) == 4);
 
@@ -138,6 +150,7 @@ int main(void) {
             {"SELECT * FROM missing_relation", NULL, 0}
         };
         assert(uqa_engine_execute_batch(engine, requests, 2, batch) == UQA_ERROR_SQL);
+        completion(UQA_COMPLETION_ROLLED_BACK);
         CHECK(uqa_error_get_last(&error));
         CHECK(uqa_error_get_statement_index(error, &count));
         assert(count == 1);
@@ -151,13 +164,37 @@ int main(void) {
     {
         const uqa_value_view invalid[] = {NULL};
         assert(uqa_engine_execute_params(engine, "SELECT $1", invalid, 1, result) == UQA_ERROR_INVALID_ARGUMENT);
+        completion(UQA_COMPLETION_NONE);
         CHECK(uqa_transaction_get_state(engine, &state));
         assert(state == UQA_TRANSACTION_ACTIVE);
     }
+    CHECK(uqa_savepoint_create(engine, "keep"));
+    assert(uqa_engine_execute(engine, "SELECT 1 / 0", result) == UQA_ERROR_SQL);
+    completion(UQA_COMPLETION_IN_TRANSACTION);
+    CHECK(uqa_savepoint_rollback(engine, "keep"));
     CHECK(uqa_transaction_rollback(engine));
+    {
+        uqa_statement statement = NULL;
+        CHECK(uqa_statement_prepare(engine, "INSERT INTO items VALUES (1 / 0)", &statement));
+        assert(uqa_statement_execute(statement, result) == UQA_ERROR_SQL);
+        completion(UQA_COMPLETION_ROLLED_BACK);
+        CHECK(uqa_statement_finalize(&statement));
+        CHECK(uqa_engine_execute(engine,
+            "CREATE TABLE completion_parent (n integer PRIMARY KEY); "
+            "CREATE TABLE completion_deferred (n integer REFERENCES completion_parent(n) DEFERRABLE INITIALLY DEFERRED)", result));
+        CHECK(uqa_transaction_begin(engine));
+        CHECK(uqa_engine_execute(engine, "INSERT INTO completion_deferred VALUES (999)", result));
+        assert(uqa_transaction_commit(engine) == UQA_ERROR_SQL);
+        completion(UQA_COMPLETION_ROLLED_BACK);
+        CHECK(uqa_transaction_get_state(engine, &state));
+        assert(state == UQA_TRANSACTION_IDLE);
+        CHECK(uqa_engine_execute(engine, "SELECT count(*) FROM completion_deferred", result));
+        assert(integer(result, 0) == 0);
+    }
     CHECK(uqa_cancel_handle_create(engine, &cancel));
     CHECK(uqa_cancel_handle_request(cancel));
     assert(uqa_engine_execute(engine, "SELECT 1", result) == UQA_ERROR_SQL);
+    completion(UQA_COMPLETION_NONE);
     CHECK(uqa_error_get_last(&error));
     CHECK(uqa_error_get_sqlstate(error, &text));
     assert(equal(text, "57014"));

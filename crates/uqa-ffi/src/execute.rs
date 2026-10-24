@@ -86,12 +86,8 @@ unsafe fn execute(
     let _call = session.enter()?;
     let params = parameters(session, params, count)?;
     let mut replacement = ResultData::prepare(session)?;
-    replacement.native = NativeResult::Materialized(
-        session
-            .native
-            .sql(sql, &params)
-            .map_err(|error| session.execution_error(error))?,
-    );
+    replacement.native =
+        NativeResult::Materialized(session.execute(|native| native.sql(sql, &params))?);
     boundary::input_mut(result)?.data = Some(replacement);
     Ok(UQA_OK)
 }
@@ -123,14 +119,15 @@ fn batch(session: &Arc<Session>, requests: &[Request<'_>]) -> boundary::Result<B
         entries.push(Some(ResultData::prepare(session)?))?;
         native_requests.push((request.sql, request.params.as_slice()))?;
     }
-    let results = session
-        .native
-        .sql_batch_diagnosed(&native_requests)
-        .map_err(|error| {
-            let mut diagnostic = session.execution_error(error.error);
-            diagnostic.statement_index = error.statement_index.map(|index| index as u64);
-            diagnostic
-        })?;
+    let results = session.execute(|native| {
+        native
+            .sql_batch_diagnosed(&native_requests)
+            .map_err(|error| {
+                let mut diagnostic = crate::error::UQAError::from(error.error);
+                diagnostic.statement_index = error.statement_index.map(|index| index as u64);
+                diagnostic
+            })
+    })?;
     // All carriers are admitted before the native batch. Publication performs only ownership moves.
     for (entry, result) in entries.iter_mut().zip(results) {
         if let Some(entry) = entry {

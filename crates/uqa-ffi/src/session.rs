@@ -20,12 +20,12 @@ use uqa_engine::Engine;
 
 use crate::{
     abi::{
-        UQAOpenFlags, UQA_CAP_INDEPENDENT_SESSIONS, UQA_CAP_PERSISTENCE,
-        UQA_COMPLETION_IN_TRANSACTION, UQA_COMPLETION_PENDING, UQA_COMPLETION_UNKNOWN,
-        UQA_ERROR_BUSY, UQA_ERROR_IO, UQA_ERROR_UNSUPPORTED, UQA_OK, UQA_OPEN_MEMORY,
-        UQA_OPEN_REDB, UQA_OPEN_SQLITE_AUTO, UQA_OPEN_SQLITE_KV, UQA_OPEN_SQLITE_NATIVE,
-        UQA_TRANSACTION_ACTIVE, UQA_TRANSACTION_COMPLETION_PENDING, UQA_TRANSACTION_FAILED,
-        UQA_TRANSACTION_IDLE,
+        UQAOpenFlags, UQA_CAP_INDEPENDENT_SESSIONS, UQA_CAP_PERSISTENCE, UQA_COMPLETION_COMMITTED,
+        UQA_COMPLETION_IN_TRANSACTION, UQA_COMPLETION_NONE, UQA_COMPLETION_PENDING,
+        UQA_COMPLETION_ROLLED_BACK, UQA_COMPLETION_UNKNOWN, UQA_ERROR_BUSY, UQA_ERROR_IO,
+        UQA_ERROR_UNSUPPORTED, UQA_OK, UQA_OPEN_MEMORY, UQA_OPEN_REDB, UQA_OPEN_SQLITE_AUTO,
+        UQA_OPEN_SQLITE_KV, UQA_OPEN_SQLITE_NATIVE, UQA_TRANSACTION_ACTIVE,
+        UQA_TRANSACTION_COMPLETION_PENDING, UQA_TRANSACTION_FAILED, UQA_TRANSACTION_IDLE,
     },
     boundary, callback,
     config::UQAConfig,
@@ -130,15 +130,36 @@ impl Session {
         }
     }
 
-    pub(crate) fn execution_error(&self, error: impl Into<UQAError>) -> UQAError {
-        let mut error = error.into();
-        error.completion = match self.state() {
-            UQA_TRANSACTION_COMPLETION_PENDING => UQA_COMPLETION_PENDING,
-            UQA_TRANSACTION_ACTIVE | UQA_TRANSACTION_FAILED => UQA_COMPLETION_IN_TRANSACTION,
-            // An idle session alone does not establish which SQL segments committed.
-            _ => UQA_COMPLETION_UNKNOWN,
+    pub(crate) fn execute_with_completion<T, E: Into<UQAError>>(
+        &self,
+        operation: impl FnOnce(&Engine) -> Result<T, E>,
+    ) -> boundary::Result<(T, u32)> {
+        use uqa_engine::ExecutionCompletion;
+        let outcome = self.native.execute_with_completion(operation);
+        let completion = match outcome.completion {
+            ExecutionCompletion::None => UQA_COMPLETION_NONE,
+            ExecutionCompletion::Committed => UQA_COMPLETION_COMMITTED,
+            ExecutionCompletion::RolledBack => UQA_COMPLETION_ROLLED_BACK,
+            ExecutionCompletion::Pending => UQA_COMPLETION_PENDING,
+            ExecutionCompletion::InTransaction => UQA_COMPLETION_IN_TRANSACTION,
+            ExecutionCompletion::Unknown => UQA_COMPLETION_UNKNOWN,
         };
-        error
+        outcome
+            .result
+            .map(|value| (value, completion))
+            .map_err(|error| {
+                let mut error = error.into();
+                error.completion = completion;
+                error
+            })
+    }
+
+    pub(crate) fn execute<T, E: Into<UQAError>>(
+        &self,
+        operation: impl FnOnce(&Engine) -> Result<T, E>,
+    ) -> boundary::Result<T> {
+        self.execute_with_completion(operation)
+            .map(|(value, _)| value)
     }
 }
 
@@ -188,10 +209,7 @@ fn publish_engine(
     match handle {
         Ok(handle) => Ok(Box::into_raw(handle)),
         Err(error) => {
-            session
-                .native
-                .close()
-                .map_err(|cleanup| session.execution_error(cleanup))?;
+            session.execute(Engine::close)?;
             Err(error)
         }
     }
@@ -346,7 +364,7 @@ ffi_fn!(uqa_engine_close(engine: *mut *mut UQAEngine) {
         if Arc::strong_count(session) != 1 {
             return Err(UQAError::new(UQA_ERROR_BUSY, "session still has retained resources"));
         }
-        session.native.close().map_err(|error| session.execution_error(error))?;
+        session.execute(Engine::close)?;
     }
     boundary::release(engine)
 });
@@ -356,7 +374,7 @@ macro_rules! transaction_operation {
         ffi_fn!($name(engine: *mut UQAEngine) {
             let session = &boundary::input(engine)?.session;
             let _call = session.enter()?;
-            session.native.$operation().map_err(|error| session.execution_error(error))?;
+            session.execute(Engine::$operation)?;
             Ok(UQA_OK)
         });
     };
@@ -371,7 +389,7 @@ macro_rules! savepoint_operation {
             let name = boundary::text(name)?;
             let session = &boundary::input(engine)?.session;
             let _call = session.enter()?;
-            session.native.$operation(name).map_err(|error| session.execution_error(error))?;
+            session.execute(|native| native.$operation(name))?;
             Ok(UQA_OK)
         });
     };

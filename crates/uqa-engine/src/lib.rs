@@ -121,6 +121,7 @@ mod statement_cache;
 mod table_storage;
 mod tables;
 mod transactions;
+pub use transactions::{ExecutionCompletion, ExecutionOutcome};
 mod user_functions;
 mod value_index;
 

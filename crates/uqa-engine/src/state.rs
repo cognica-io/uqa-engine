@@ -335,6 +335,7 @@ pub(super) struct SessionContext {
     /// transaction or savepoint rollback leave every consumed draw in place.
     pub(super) random_state: Mutex<super::SessionRandomState>,
     pub(super) transactions: Mutex<Vec<TransactionFrame>>,
+    pub(super) completion_counters: Mutex<crate::transactions::CompletionCounters>,
     /// Memory and serialized providers retain query selections under one session allowance, shared by nested workers and surviving views.
     pub(super) query_retention: uqa_core::memory::MemoryBudget,
     pub(super) regex_cache: Mutex<Option<Arc<uqa_sql::expr::RegexCache>>>,
@@ -405,6 +406,7 @@ impl SessionContext {
             sequence_snapshot_reads: std::sync::atomic::AtomicU64::new(0),
             random_state: Mutex::new(random_state),
             transactions: Mutex::new(Vec::new()),
+            completion_counters: Mutex::new(crate::transactions::CompletionCounters::default()),
             regex_cache: Mutex::new(None),
             query_retention: uqa_core::memory::MemoryBudget::new(
                 uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,

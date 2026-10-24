@@ -17,8 +17,8 @@ use uqa_engine::{ColumnarBatch, SQLCursor};
 
 use crate::{
     abi::{
-        UQAStatus, UQAStringView, UQA_COMPLETION_COMMITTED, UQA_COMPLETION_IN_TRANSACTION,
-        UQA_DONE, UQA_ERROR_BUSY, UQA_ERROR_IO, UQA_ERROR_PANIC, UQA_ERROR_RANGE, UQA_OK,
+        UQAStatus, UQAStringView, UQA_COMPLETION_IN_TRANSACTION, UQA_DONE, UQA_ERROR_BUSY,
+        UQA_ERROR_IO, UQA_ERROR_PANIC, UQA_ERROR_RANGE, UQA_OK,
     },
     boundary,
     error::{self, RetainedError, UQAError},
@@ -191,15 +191,10 @@ unsafe fn open(
         state: RefCell::new(CursorState::default()),
         _memory: memory,
     })?;
-    let native = session
-        .native
-        .sql_cursor(sql, &params)
-        .map_err(|error| session.execution_error(error))?;
-    // The successful native cursor path completed evaluation and any implicit transaction.
-    // Record that fact now; unrelated subsequent session work must not rewrite it.
-    if session.native.transaction_depth() == 0 {
-        cursor.completion = UQA_COMPLETION_COMMITTED;
-    }
+    let (native, completion) =
+        session.execute_with_completion(|native| native.sql_cursor(sql, &params))?;
+    // Retain the owner's actual boundary; later session work cannot replace it.
+    cursor.completion = completion;
     cursor.columns = Some(cursor_columns(&native, session).map_err(|mut error| {
         error.completion = cursor.completion;
         error

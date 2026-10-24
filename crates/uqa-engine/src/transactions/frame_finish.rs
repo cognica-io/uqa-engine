@@ -119,6 +119,9 @@ impl Engine {
             .pop()
             .ok_or_else(|| SQLError::Internal("COMMIT lost its transaction frame".into()))?;
         if stack.is_empty() {
+            // Storage has confirmed publication. Later cache/notification cleanup
+            // may fail, but cannot change this commit into a rollback.
+            self.record_transaction_completion(super::ExecutionCompletion::Committed);
             self.session.uncommitted_enum_labels.lock().clear();
         }
         self.publish_committed_transaction_frame(
@@ -411,6 +414,13 @@ impl Engine {
             }
         }
         self.apply_nontransactional_sequence_values(&nontransactional_sequence_values);
+        if outer_notification_transaction {
+            self.record_transaction_completion(if cleanup_errors.is_empty() {
+                super::ExecutionCompletion::RolledBack
+            } else {
+                super::ExecutionCompletion::Unknown
+            });
+        }
         if cleanup_errors.is_empty() {
             finish_error
         } else {
@@ -618,8 +628,14 @@ impl Engine {
             }
         }
         if cleanup_errors.is_empty() {
+            if stack.is_empty() {
+                self.record_transaction_completion(super::ExecutionCompletion::RolledBack);
+            }
             Ok(())
         } else {
+            if stack.is_empty() {
+                self.record_transaction_completion(super::ExecutionCompletion::Unknown);
+            }
             Err(SQLError::Internal(format!(
                 "ROLLBACK completed but engine state restoration failed: {}",
                 cleanup_errors.join("; ")

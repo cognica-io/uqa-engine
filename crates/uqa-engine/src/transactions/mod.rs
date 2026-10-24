@@ -15,6 +15,9 @@ use super::{
 
 mod backend;
 mod characteristics;
+mod completion;
+pub(crate) use completion::CompletionCounters;
+pub use completion::{ExecutionCompletion, ExecutionOutcome};
 mod control;
 mod coordinator;
 mod failure;

@@ -163,13 +163,8 @@ fn copy_from(
         read,
     };
     session
-        .native
-        .copy_from(statement, &mut source)
-        .map_err(|error| {
-            session
-                .execution_error(error)
-                .with_cause(&source.stream.callbacks.failure)
-        })
+        .execute(|native| native.copy_from(statement, &mut source))
+        .map_err(|error| error.with_cause(&source.stream.callbacks.failure))
 }
 
 fn copy_to(
@@ -191,13 +186,8 @@ fn copy_to(
         flush,
     };
     session
-        .native
-        .copy_to(statement, &mut sink)
-        .map_err(|error| {
-            session
-                .execution_error(error)
-                .with_cause(&sink.stream.callbacks.failure)
-        })
+        .execute(|native| native.copy_to(statement, &mut sink))
+        .map_err(|error| error.with_cause(&sink.stream.callbacks.failure))
 }
 
 ffi_fn!(uqa_engine_copy_from(engine: *mut UQAEngine, statement: *const c_char, read: Option<UQACopyReadFn>, user_data: *mut c_void, rows: *mut u64) {

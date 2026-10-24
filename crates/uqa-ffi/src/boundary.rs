@@ -45,10 +45,9 @@ pub(crate) fn run(operation: impl FnOnce() -> Result<UQAStatus>) -> UQAStatus {
         Ok(Err(error)) => error::publish(error),
         Err(_) => {
             crate::callback::record_panic();
-            error::publish(UQAError::new(
-                UQA_ERROR_PANIC,
-                "panic at the C ABI boundary",
-            ))
+            let mut failure = UQAError::new(UQA_ERROR_PANIC, "panic at the C ABI boundary");
+            failure.completion = crate::abi::UQA_COMPLETION_UNKNOWN;
+            error::publish(failure)
         }
     }
 }

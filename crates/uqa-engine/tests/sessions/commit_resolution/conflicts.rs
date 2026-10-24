@@ -99,7 +99,9 @@ fn rejected_commit_preserves_typed_diagnostics_and_cleans_up_without_replay() {
             let evaluated = calls.load(Ordering::Acquire);
             *persistence.attempt.lock().unwrap() = None;
             persistence.fault.store(fault, Ordering::Release);
-            let error = root.sql("COMMIT", &[]).unwrap_err();
+            let outcome = root.execute_with_completion(|root| root.sql("COMMIT", &[]));
+            assert_eq!(outcome.completion, ExecutionCompletion::RolledBack);
+            let error = outcome.result.unwrap_err();
             assert_eq!(error.sqlstate(), Some(state), "{error}");
             if fault == REJECT_CANCELLED {
                 assert!(matches!(error, SQLError::Cancelled(_)));

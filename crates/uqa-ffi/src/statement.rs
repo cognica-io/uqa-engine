@@ -124,12 +124,7 @@ unsafe fn prepare(
         session: Arc::clone(session),
         _memory: memory,
     })?;
-    statement.native = Some(
-        session
-            .native
-            .prepare_statement(sql, &declared)
-            .map_err(|error| session.execution_error(error))?,
-    );
+    statement.native = Some(session.execute(|native| native.prepare_statement(sql, &declared))?);
     // The owner removes the definition if any subsequent descriptor/binding admission fails.
     let description = session
         .native
@@ -250,9 +245,8 @@ ffi_fn!(uqa_statement_execute(statement: *mut UQAStatement, result: *mut UQAResu
         return Err(UQAError::new(UQA_ERROR_STATE, "prepared statement has unbound parameters"));
     }
     let mut replacement = ResultData::prepare(&statement.session)?;
-    replacement.native = NativeResult::Materialized(statement.session.native
-        .execute_prepared_statement(statement.native(), &bindings.values)
-        .map_err(|error| statement.session.execution_error(error))?);
+    replacement.native = NativeResult::Materialized(statement.session.execute(|native|
+        native.execute_prepared_statement(statement.native(), &bindings.values))?);
     boundary::input_mut(result)?.data = Some(replacement);
     Ok(UQA_OK)
 });
