@@ -6,9 +6,11 @@
 
 //! Invoke scalar, table, and procedure routines and materialize their physical results.
 use super::{
-    context::RoutineInvocationContext,
+    context::{RoutineCallRetention, RoutineInvocationContext},
     execution::execute_routine,
-    resolution::{resolve_bound_routine, resolve_routine, ResolvedRoutine},
+    resolution::{
+        resolve_bound_routine, resolve_described_bound_routine, resolve_routine, ResolvedRoutine,
+    },
 };
 use crate::{
     functions::SQLTableFunctionResult, routines::transaction::nonatomic_routine_entry_allowed,
@@ -113,7 +115,25 @@ pub fn call_bound_user_scalar_function(
     binding: &FunctionBinding,
     args: &[(Option<String>, Value)],
 ) -> Option<Result<Value, SQLError>> {
-    let resolved = match resolve_bound_routine(context, binding, args) {
+    call_bound_scalar(context, binding, args, None)
+}
+
+pub fn call_bound_user_scalar_function_with_descriptions(
+    context: &RoutineInvocationContext<'_>,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+    retained: RoutineCallRetention<'_>,
+) -> Option<Result<Value, SQLError>> {
+    call_bound_scalar(context, binding, args, Some(retained))
+}
+
+fn call_bound_scalar(
+    context: &RoutineInvocationContext<'_>,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+    retained: Option<RoutineCallRetention<'_>>,
+) -> Option<Result<Value, SQLError>> {
+    let resolved = match resolve_described_bound_routine(context, binding, args, retained) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
@@ -130,7 +150,7 @@ fn execute_resolved_scalar_function(
     context: &RoutineInvocationContext<'_>,
     name: &str,
     args: &[(Option<String>, Value)],
-    resolved: ResolvedRoutine,
+    resolved: ResolvedRoutine<'_>,
 ) -> Result<Value, SQLError> {
     let ResolvedRoutine {
         function,
@@ -280,7 +300,7 @@ fn execute_resolved_table_function(
     context: &RoutineInvocationContext<'_>,
     name: &str,
     args: &[(Option<String>, Value)],
-    resolved: ResolvedRoutine,
+    resolved: ResolvedRoutine<'_>,
     record_definition: Option<AnonymousRecordDefinition<'_>>,
 ) -> Result<SQLTableFunctionResult, SQLError> {
     let ResolvedRoutine {

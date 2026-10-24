@@ -43,6 +43,15 @@ pub struct RoutineInvocationContext<'a> {
     pub types: &'a dyn RoutineTypeCatalog,
     pub authority: &'a dyn RoutineExecutionAuthority,
 }
+
+#[derive(Clone, Copy)]
+pub struct RoutineCallRetention<'a> {
+    pub descriptions: &'a uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions,
+    pub scope: &'a dyn Fn() -> Option<
+        uqa_sql::routines::invocation::descriptions::RoutineDescriptionScope,
+    >,
+    pub control: uqa_core::memory::ProductionControl<'a>,
+}
 pub struct AnonymousBlockContext<'a> {
     pub runtime: RoutineContext<'a>,
     pub session: &'a dyn RoutineInvocationSession,

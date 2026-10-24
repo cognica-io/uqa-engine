@@ -299,6 +299,17 @@ pub trait EngineHook {
     ) -> Option<Result<Value>> {
         None
     }
+
+    /// Optional metadata belongs to this prepared expression. Mutable/custom hooks preserve their ordinary invocation unless they explicitly support native scope validation.
+    fn call_bound_user_function_with_descriptions(
+        &self,
+        binding: &crate::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+        _descriptions: &crate::routines::invocation::descriptions::RoutineCallDescriptions,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Option<Result<Value>> {
+        self.call_bound_user_function(binding, args)
+    }
 }
 
 /// Read-only row interface used by the expression evaluator. Most callers

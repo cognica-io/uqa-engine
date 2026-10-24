@@ -81,6 +81,14 @@ impl<'a> ScalarEvalContext<'a> {
             .map_or([None; 4], |states| states.enum_comparisons(arguments))
     }
 
+    pub(super) fn routine_descriptions(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+    ) -> Option<&uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions> {
+        self.function_states
+            .and_then(|states| states.routine(binding))
+    }
+
     pub(super) fn enum_binary_comparison_state(
         &self,
         left: &super::ScalarExpr,
