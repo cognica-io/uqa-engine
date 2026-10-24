@@ -100,6 +100,8 @@ Use `uqa_udf_context_fail(context, message)` or `uqa_callback_fail(status, messa
 
 The [scalar C client](../../../crates/uqa-ffi/tests/native/udf.c) registers `c_scalar`, copies its one argument into the callback context and checks that `SELECT c_scalar(42)` returns 42. The [table client](../../../crates/uqa-ffi/tests/native/udf_table.c) emits `n` one row at a time, and the [aggregate client](../../../crates/uqa-ffi/tests/native/udf_aggregate.c) covers independent groups, empty input, DISTINCT/ORDER BY and window frames. All three run as C11 and C++17 clients on Memory, native SQLite, SQLite KV and redb; the implementation ledger records source-specific qualification.
 
+The C header `<uqa/uqa_arrow.h>` defines the standard Arrow C Data Interface. With the `arrow-export` Cargo feature, `uqa_result_export_arrow` exports an existing result and `uqa_cursor_fetch_arrow` consumes a bounded batch. `UQA_ARROW_LOSSLESS` preserves declared integer/float widths, text, bytes, UUID, JSON/JSONB identity and qualifying NUMERIC modifiers; unsupported types, unconstrained decimals and special decimal values return `UQA_ERROR_UNSUPPORTED`. `UQA_ARROW_SQL_TEXT` is the explicit alternative for SQL-formatted values. Column order, duplicate labels, NULL validity and empty descriptors are preserved. Schema and array releases are independent of the original handles and each other. Moved structs and detached children keep their required buffers and allowance leases. A failed cursor conversion is terminal. Builds without export retain unsupported stubs; enabling export alone does not enable Arrow or DuckDB FDW.
+
 ## Rust QueryBuilder
 
 `uqa_api::QueryBuilder` builds SQL-shaped plans fluently:
@@ -118,7 +120,7 @@ let result = QueryBuilder::new(&engine, "articles")
 
 The builder covers comparison predicates, text and KNN matching, multi-field and staged retrieval, aggregation, facets, graph traversal, RPQ, temporal traversal, highlighting, Bayesian and learned fusion, sparse thresholds, and model operators. `to_sql()` is useful for diagnostics. Raw fragments still require application-side trust validation.
 
-Columnar execution helpers support Arrow and Parquet consumers where those features are enabled.
+`uqa_api::arrow_export::export_arrow` accepts an `ArrowRows` positional result/batch view, an explicit `ArrowExportPolicy`, an optional native SQL output context and a `ProductionControl`. `Lossless` uses qualified declared mappings and rejects unsupported values without text fallback. `SQLText` explicitly formats through the native SQL owner. The returned `Produced<RecordBatch>` retains its output allowance and observes both cancellation tokens. It preserves duplicate column names and empty schemas and adds no synthetic columns. Existing `QueryBuilder::execute_arrow` keeps its separate compatibility metadata behavior.
 
 ## Python
 

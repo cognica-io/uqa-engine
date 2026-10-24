@@ -36,6 +36,7 @@
 //! projection and predicate fragments where appropriate, while complete SQL
 //! remains available through [`uqa_engine::Engine::sql`].
 
+pub mod arrow_export;
 pub mod query_builder;
 
 pub use query_builder::{Order, QueryBuilder};

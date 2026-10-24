@@ -8,8 +8,8 @@
 
 use crate::{
     abi::{
-        UQAStringView, UQA_CAP_ARROW_FDW, UQA_CAP_DUCKDB_FDW, UQA_CAP_KUROMOJI, UQA_CAP_NORI,
-        UQA_OK,
+        UQAStringView, UQA_CAP_ARROW_EXPORT, UQA_CAP_ARROW_FDW, UQA_CAP_DUCKDB_FDW,
+        UQA_CAP_KUROMOJI, UQA_CAP_NORI, UQA_OK,
     },
     boundary,
 };
@@ -29,6 +29,10 @@ pub(crate) const fn capabilities() -> u64 {
         0
     }) | (if cfg!(feature = "duckdb") {
         UQA_CAP_DUCKDB_FDW
+    } else {
+        0
+    }) | (if cfg!(feature = "arrow-export") {
+        UQA_CAP_ARROW_EXPORT
     } else {
         0
     })

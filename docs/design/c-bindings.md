@@ -1033,7 +1033,7 @@ Ship the standard Arrow C Data Interface definitions under their standard guards
 
 Require empty output structs with NULL release callbacks. On failure or EOF leave both outputs empty; never overwrite live Arrow objects. On success each top-level release callback frees its owned children/buffers and sets itself to NULL. Schema and array lifetimes are independent. Private owners must not refer back to the caller's original struct address because Arrow consumers may move the structs. The shared library must remain loaded until every exported release callback has run.
 
-Exported arrays keep buffers alive independently of result/cursor/Engine destruction. Allocate or retain appropriate immutable buffers; do not claim universal zero-copy conversion from `Value` rows. Fetch-and-export uses a bounded native batch and releases its intermediate wrapper. If conversion fails after consuming a cursor batch, retain a terminal failure rather than silently skipping that batch.
+Exported arrays keep buffers alive independently of result/cursor/Engine destruction. A consumer may also move a child out of its parent and clear the original child release callback before releasing the parent. Every produced node retains its tree’s allowance, so detached children remain admitted until their own release. Schema and array trees hold separate allowances; schema retention alone does not retain the array data allowance. Allocate or retain appropriate immutable buffers; do not claim universal zero-copy conversion from `Value` rows. Fetch-and-export uses a bounded native batch and releases its intermediate wrapper. If conversion fails after consuming a cursor batch, retain a terminal failure rather than silently skipping that batch.
 
 Provide two explicit policies:
 

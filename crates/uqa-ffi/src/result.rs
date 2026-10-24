@@ -30,35 +30,35 @@ pub(crate) enum NativeResult {
 }
 
 impl NativeResult {
-    fn row_count(&self) -> usize {
+    pub(crate) fn row_count(&self) -> usize {
         match self {
             Self::Materialized(result) => result.rows.len(),
             Self::Columnar(result) => result.rows.len(),
         }
     }
 
-    fn column_count(&self) -> usize {
+    pub(crate) fn column_count(&self) -> usize {
         match self {
             Self::Materialized(result) => result.columns.len(),
             Self::Columnar(result) => result.columns.len(),
         }
     }
 
-    fn column_name(&self, column: usize) -> &str {
+    pub(crate) fn column_name(&self, column: usize) -> &str {
         match self {
             Self::Materialized(result) => &result.columns[column],
             Self::Columnar(result) => &result.columns[column].name,
         }
     }
 
-    fn column_type(&self, column: usize) -> Option<&uqa_sql::ColumnType> {
+    pub(crate) fn column_type(&self, column: usize) -> Option<&uqa_sql::ColumnType> {
         match self {
             Self::Materialized(result) => result.column_types.get(column).and_then(Option::as_ref),
             Self::Columnar(result) => result.columns[column].ty.as_deref(),
         }
     }
 
-    fn value_at(&self, row: usize, column: usize) -> Option<&uqa_core::Value> {
+    pub(crate) fn value_at(&self, row: usize, column: usize) -> Option<&uqa_core::Value> {
         match self {
             Self::Materialized(result) => result.value_at(row, column),
             Self::Columnar(result) => result.value_at(row, column),

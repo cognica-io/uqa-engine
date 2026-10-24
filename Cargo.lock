@@ -3933,6 +3933,8 @@ dependencies = [
 name = "uqa-ffi"
 version = "0.6.1"
 dependencies = [
+ "arrow-array",
+ "arrow-schema",
  "parking_lot",
  "tempfile",
  "uqa-api",

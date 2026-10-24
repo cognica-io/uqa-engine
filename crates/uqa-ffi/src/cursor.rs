@@ -48,6 +48,41 @@ struct CursorState {
 }
 
 impl UQACursor {
+    #[cfg(feature = "arrow-export")]
+    pub(crate) fn fetch_arrow(
+        &self,
+        max_rows: u32,
+        policy: u32,
+        schema: &mut crate::arrow::UQAArrowSchema,
+        array: &mut crate::arrow::UQAArrowArray,
+    ) -> boundary::Result<UQAStatus> {
+        let _call = self.session.enter_cleanup()?;
+        if self.failure.get().is_some() {
+            return Ok(error::publish_retained(&self.failure));
+        }
+        self.session.check_poison()?;
+        let mut state = self
+            .state
+            .try_borrow_mut()
+            .map_err(|_| UQAError::new(UQA_ERROR_BUSY, "cursor already has an active fetch"))?;
+        match catch_unwind(AssertUnwindSafe(|| {
+            let Some(data) = self.fetch(&mut state, max_rows)? else {
+                return Ok(UQA_DONE);
+            };
+            crate::arrow::export::publish(&data, policy, schema, array)
+        })) {
+            Ok(Ok(status)) => Ok(status),
+            Ok(Err(error)) => Ok(self.fail(&mut state, error)),
+            Err(_) => {
+                self.session.poison();
+                Ok(self.fail(
+                    &mut state,
+                    UQAError::new(UQA_ERROR_PANIC, "panic while exporting a native cursor"),
+                ))
+            }
+        }
+    }
+
     fn columns(&self) -> &CursorColumns {
         self.columns
             .as_ref()

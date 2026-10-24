@@ -11,6 +11,7 @@ on:
       - "crates/**"
       - "examples/c/**"
       - scripts/verify-c-examples.py
+      - scripts/verify-c-clients.py
       - .github/workflows/c-bindings.yml
   workflow_call:
 
@@ -35,7 +36,16 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-14]
-        features: [minimal, default]
+        features:
+          - minimal
+          - default
+          - arrow
+          - duckdb
+          - arrow,duckdb
+          - arrow-export
+          - arrow-export,arrow
+          - arrow-export,duckdb
+          - arrow-export,arrow,duckdb
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,8 +66,11 @@ jobs:
         shell: bash
         run: |
           args=()
-          if [[ '${{ matrix.features }}' == minimal ]]; then
+          if [[ '${{ matrix.features }}' != default ]]; then
             args+=(--no-default-features)
+          fi
+          if [[ '${{ matrix.features }}' != minimal && '${{ matrix.features }}' != default ]]; then
+            args+=(--features '${{ matrix.features }}')
           fi
           cargo test -p uqa-ffi --locked --test integration "${args[@]}"
       - name: Execute five public examples as C11 and C++17
@@ -72,3 +85,4 @@ jobs:
           suffix=so
           if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
           python3 scripts/verify-c-examples.py --sanitize --library "target/debug/deps/libuqa_ffi.$suffix"
+          python3 scripts/verify-c-clients.py --sanitize --library "target/debug/deps/libuqa_ffi.$suffix"

@@ -12,6 +12,9 @@ use uqa_api::{Order, QueryBuilder};
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "query_builder/arrow_export.rs"]
+mod arrow_export;
+
 fn engine_with_corpus() -> Engine {
     let engine = Engine::new();
     engine

@@ -58,6 +58,8 @@ native_clients!(udf, "udf.c");
 native_clients!(udf_table, "udf_table.c");
 #[cfg(unix)]
 native_clients!(udf_aggregate, "udf_aggregate.c");
+#[cfg(unix)]
+native_clients!(arrow, "arrow.c");
 
 #[cfg(unix)]
 fn native_client(fixture: &str, backend: &str) {

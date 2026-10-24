@@ -24,7 +24,7 @@ nori = ["uqa-engine/nori"]
 kuromoji = ["uqa-engine/kuromoji"]
 arrow = ["uqa-engine/arrow"]
 duckdb = ["uqa-engine/duckdb"]
-arrow-export = ["dep:uqa-api"]
+arrow-export = ["dep:uqa-api", "dep:arrow-array", "dep:arrow-schema"]
 
 [dependencies]
 uqa-core.workspace = true
@@ -33,6 +33,8 @@ uqa-sql.workspace = true
 uqa-storage-redb.workspace = true
 uqa-storage-sqlite.workspace = true
 uqa-api = { workspace = true, optional = true }
+arrow-array = { workspace = true, optional = true, features = ["ffi"] }
+arrow-schema = { workspace = true, optional = true, features = ["ffi"] }
 zeroize.workspace = true
 parking_lot.workspace = true
 

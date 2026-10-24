@@ -9,6 +9,7 @@
 #[macro_use]
 mod boundary;
 pub mod abi;
+mod arrow;
 mod callback;
 mod config;
 mod copy;
@@ -27,6 +28,7 @@ mod udf;
 mod value;
 
 pub use abi::*;
+pub use arrow::*;
 pub use callback::{uqa_callback_fail, uqa_callback_fail_n};
 pub use config::*;
 pub use copy::*;
