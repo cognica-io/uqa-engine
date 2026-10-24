@@ -4,7 +4,7 @@ Status: implementation in progress on `feature/c-bindings`, with main `f7cf634b4
 
 ## Scope and accepted requirements
 
-Implement the full embedded C interface: configuration and sessions, SQL messages and atomic request batches, typed positional results and exact values, native prepared statements, bounded cursors, transactions, cancellation, COPY, independent notifications and SQL notices, scalar/table/aggregate UDFs, host logging, optional Arrow export, packaging, and the five public C examples. Preserve the documented native transaction, catalog, resource, callback, and error contracts.
+Implement the full embedded C interface: configuration and sessions, SQL messages and atomic request batches, typed positional results and exact values, native prepared statements, bounded cursors, transactions, cancellation, COPY, independent notifications and SQL notices, scalar/table/aggregate UDFs, host logging, optional Arrow export, packaging, and the five public C examples. Preserve the documented native transaction, catalog, resource, callback, and error contracts. Scope update on 2026-10-25: the maintainer deferred host logging implementation and requested removal of the work already added. Only its FFI declarations remain; logging implementation and qualification are excluded from this delivery until explicitly resumed.
 
 All functions return `uqa_status`; pointer typedefs represent opaque handles; ordinary string inputs are `const char *` with length-bearing alternatives. Diagnostics remain library-owned and require no caller destruction. Resource-first names, matching lifecycle operations, matching getter/setter properties, and explicit scalar/table/aggregate registration names are required. Every public declaration includes the actual `UQA_API` and `UQA_CALL` definitions. The design document contains no external product comparison. Preservation proofs are omitted at the maintainer's request.
 
@@ -18,7 +18,7 @@ The Cargo target is `uqa_ffi` because the workspace already contains the Rust fa
 
 ## Live delivery checklist
 
-Completed checks below cover the stated implementation and local evidence at the recorded product source. Remaining implementation, platform qualification and delivery stay explicit within the same fourteen original scopes.
+Completed checks below cover the stated implementation and local evidence at the recorded product source. Remaining implementation, platform qualification and delivery stay explicit within the same fourteen original scopes. Of thirteen unchecked items, twelve remain active and the logging item is explicitly deferred by the maintainer.
 
 **1. Public headers, fixed numeric codes, C layouts, export/import modes, panic boundary, borrowed diagnostics, and checked allocation**
 
@@ -29,7 +29,7 @@ Completed checks below cover the stated implementation and local evidence at the
 
 - [x] Implement configuration getters/setters, one `uqa_engine_open(path, flags, config, out)` for Memory/native SQLite/SQLite KV/redb, sibling sessions, close leases, native cleanup, transaction state and cancellation. The storage selectors are `UQA_OPEN_MEMORY`, `UQA_OPEN_SQLITE_NATIVE`, `UQA_OPEN_SQLITE_KV` and `UQA_OPEN_REDB`; `UQA_OPEN_SQLITE_AUTO` combines with either SQLite selector. The same fourteen C11/C++17 fixtures pass through each selection. Durable C ABI cases verify sibling isolation, savepoint recovery, retained subscriptions, busy close, committed reopen and rollback on close. Both SQLite selections pass plain/encrypted/LZ4/Zstandard/combined reopen and AUTO creation/detection. Invalid flags, paths and settings are rejected before file creation. Separate storage-specific C open functions are removed.
 - [x] Implement the COPY and UDF callback guard: reject Engine reentry on the invoking thread, including other sessions and constructors; permit same-scope value helpers and ordinary execution on unrelated threads. Rust/C/C++ callback tests pass.
-- [ ] Complete logging callback lifetimes, trusted-anchor opens and remaining constructor/cleanup failure paths; UDF callbacks now use the invoking session and independent cleanup diagnostics, including after creator close; complete encrypted/compressed platform and injected-failure qualification beyond the local C ABI combinations.
+- [ ] Complete trusted-anchor opens and remaining constructor/cleanup failure paths; logging callback lifetimes are deferred under scope 10; UDF callbacks now use the invoking session and independent cleanup diagnostics, including after creator close; complete encrypted/compressed platform and injected-failure qualification beyond the local C ABI combinations.
 
 **3. Native multi-statement SQL, empty messages, atomic request batches, completion facts, and transaction/savepoint operations**
 
@@ -86,7 +86,7 @@ Completed checks below cover the stated implementation and local evidence at the
 
 **10. Config/runtime log getters/setters, shared observer attribution, callback status, ownership, and retirement failures**
 
-- [ ] Implement config/runtime log getters/setters, shared observer attribution, callback status, ownership and retirement failures.
+- [ ] Implement config/runtime log getters/setters, shared observer attribution, callback status, ownership and retirement failures. **Deferred by the maintainer on 2026-10-25.** Preserve only the FFI declarations; remove native and C logging implementation, event sites, worker propagation and related tests. This item is excluded from current delivery requirements and is not marked implemented.
 
 **11. Optional Arrow conversion in its owner, explicit lossless/text policies, descriptors, independent releases, feature stubs, and feature combinations**
 
@@ -95,7 +95,7 @@ Completed checks below cover the stated implementation and local evidence at the
 **12. Native packaging metadata, CMake/pkg-config shared/static consumers, symbol inventory, platform CI, license inventory, and release workflow integration**
 
 - [x] Audit the Mach-O artifact against the headers at product source `9bb06c528e5fd15f6ce8009e9a50c6a2a2a80883`: 186 of 198 declared functions are exported, together with 17 internal regex callbacks. The four former storage-specific C open symbols are absent. No non-UQA, XML parser or private XML bridge symbols are exported.
-- [ ] Finish native packaging, CMake/pkg-config shared/static consumers, the complete declared-symbol inventory, export restriction, platform CI, license inventory and release workflow integration. Twelve declared functions (ten logging and two Arrow) and additional design-specified value APIs remain unimplemented; distribution linkage must remove the internal regex exports.
+- [ ] Finish native packaging, CMake/pkg-config shared/static consumers, the complete declared-symbol inventory, export restriction, platform CI, license inventory and release workflow integration. Two Arrow functions and additional design-specified value APIs remain required. Ten logging declarations are intentionally deferred and are excluded from the current callable/exported API inventory; distribution linkage must remove the internal regex exports and identify the declaration-only logging header.
 
 **13. Five C examples, example matrix and manual updates, actual shared/static C/C++ ABI tests, focused owner tests, sanitizers, and ownership/dependency checks**
 
@@ -113,7 +113,7 @@ Completed checks below cover the stated implementation and local evidence at the
 
 Each record below belongs to its named product source. Earlier records are historical evidence when superseded by later work; the live checklist above describes current scope and remaining requirements.
 
-The design's earlier extracted-declaration checks and minimal export probes do not verify this runtime. Record actual implementation commands, source identity, results, and unresolved failures here as work proceeds. Final completion requires every checklist item and final-source delivery evidence; partial implementation does not narrow the scope.
+The design's earlier extracted-declaration checks and minimal export probes do not verify this runtime. Record actual implementation commands, source identity, results, and unresolved failures here as work proceeds. Final completion requires every active checklist item and final-source delivery evidence; explicit maintainer deferrals remain recorded separately and are not completed implementation. Partial implementation does not narrow the scope.
 
 Foundation source `21653e9fc77207000ca93dfc229f072569d9250e`: `cargo check -p uqa-ffi --no-default-features` passed. `cargo test -p uqa-ffi --no-default-features --test integration` passed eight tests, including actual C11/C++17 shared-library clients, after correcting output-slot evaluation order. Those clients exercise native multi-statement and empty SQL, positional duplicate labels, empty descriptors, atomic batches, transaction segments, borrowed diagnostics, result replacement, close leases, cancellation, CHAR storage, strict range access and live interval formatting. Rust ABI scenarios verify persistent sibling lifetimes, private transaction state, inapplicable memory settings, pre-SQL result admission, bounded owned copies and rejection of catalog values from another database. All five installed headers independently compile in C11/C++17 under static, shared producer and shared consumer modes; conflicting shared modes are rejected.
 
@@ -576,3 +576,9 @@ The tested macOS arm64 shared artifact at `target/debug/deps/libuqa_ffi.dylib` h
 Formatting, whitespace, twenty-three project C/header copyright blocks, 6,692 Rust source headers, source licensing, local documentation links and the Rust file ceiling pass. Dependency policy covers 116 runtime edges across 35 crates; capability policy covers 3,248 files, 124 declared adapters and 3,124 engine-free leaves; harness coverage remains 231 sources in 24 targets across 24 crates. The reviewed 49-file product content matches the committed source and the recorded local gates. Completed task artifacts were pruned after verification and the target cache is below 100 GB. The listed gates were rerun after the final empty-descriptor, known-prefix-type, callback-diagnostic and source-helper review corrections. The callback correction followed an actual C reproduction where table-row cancellation incorrectly returned `38000`; scalar assignment, table emission and aggregate cancellation now assert `57014` on all four providers.
 
 The fourteen original scopes now contain thirty-three checked items and thirteen unchecked items. Remaining values and prepared/EXPLAIN behavior, logging, Arrow, packaging, five public C examples, platform/static/feature/fault qualification, independent review and final-source automatic Linux/macOS performance and affected FDW results remain required. The PR stays draft; this local source record does not establish runtime release, completed qualification or delivery.
+
+### Logging deferred; declarations retained
+
+On 2026-10-25 the maintainer requested FFI declarations only and removal of logging already added. The uncommitted native observer, runtime state, execution events, worker propagation, C sink ownership adapter and related tests were removed. The Rust API manual no longer advertises that discarded implementation. All product source files and the existing logging header match product source `9bb06c528e5fd15f6ce8009e9a50c6a2a2a80883`; this scope-record update adds no runtime behavior. Searches confirm that the removed observer types, log-context accessors and event-emission sites are absent. Temporary checks of the discarded implementation do not qualify the retained source.
+
+The live checklist preserves all fourteen original scopes and all thirty-three completed items. Twelve unchecked items remain active; host logging is the thirteenth unchecked item and is deferred rather than implemented. Its ten FFI declarations remain unavailable as library exports. The design and crate README identify that boundary. The current delivery excludes logging implementation and qualification; the other API, packaging, example, review and final-source CI requirements remain active.

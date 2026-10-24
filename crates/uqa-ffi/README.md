@@ -4,6 +4,8 @@ This crate implements the embedded C ABI described in the [C binding design](../
 
 The Cargo library target is `uqa_ffi`, avoiding a collision with the existing Rust `uqa` facade. Planned native distribution packages will install the library as `uqa` and include the headers under `include/uqa`.
 
+Host logging is deferred at the maintainer's request. `uqa_log.h` retains interface declarations only; their functions are not implemented or exported. This delivery adds no native logging or callback adapter.
+
 All public functions return `uqa_status`. Opaque handle typedefs include their pointers, strings use C strings or explicit-length variants, diagnostics are borrowed from the calling thread, and acquisition/release names stay paired. SQL execution accepts native multi-statement and empty messages.
 
 Open every backend with `uqa_engine_open(path, flags, config, &engine)` and close it with `uqa_engine_close(&engine)`. Choose exactly one storage selector: `UQA_OPEN_MEMORY` with a NULL path, `UQA_OPEN_SQLITE_NATIVE` for native SQLite, `UQA_OPEN_SQLITE_KV` for SQLite Key/Value, or `UQA_OPEN_REDB`. Either SQLite layout also accepts `UQA_OPEN_SQLITE_AUTO` to detect file encryption/compression. Memory and redb reject SQLite modifiers and encryption/compression settings. Persistent Engines support independent siblings through `uqa_engine_open_session`. See the [C source API reference](../../docs/manual/reference/08-bindings-and-extensions.md#c-source-api).

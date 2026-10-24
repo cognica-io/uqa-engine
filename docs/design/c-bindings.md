@@ -1048,6 +1048,8 @@ The existing QueryBuilder conversion belongs to `uqa-api` and has name-specific 
 
 ## 18. Host logging in uqa_log.h
 
+Implementation is deferred at the maintainer's request. Keep only the FFI declarations in `uqa_log.h`; the contract below remains a future design. This delivery includes no logging implementation, runtime observer, event emission, worker attribution or callback adapter. These declarations are not available as callable library exports.
+
 ```c
 typedef struct uqa_log_record {
     uint32_t struct_size;
@@ -1125,7 +1127,8 @@ The initial optional `uqa-api` dependency carries its currently declared Arrow/P
 | `arrow` | Off | Forward to `uqa-engine/arrow` for native Arrow FDW |
 | `duckdb` | Off | Forward to `uqa-engine/duckdb` |
 | `arrow-export` | Off | Enable C Data Interface export and shared conversion only |
-| Core SQL, COPY, UDF, notifications, logging adapter | Always | Part of the base C interface after implementation |
+| Core SQL, COPY, UDF, notifications | Always | Part of the base C interface after implementation |
+| Host logging | Deferred | FFI declarations only; no runtime implementation in this delivery |
 
 Dictionary defaults match existing distributed Python/Node.js bindings. `--no-default-features` produces a smaller build. Runtime capability checks report omitted components; requests fail explicitly instead of selecting a different analyzer, handler, or exporter. Keep optional entry-point symbols available as unsupported stubs so a feature variation does not silently change ABI-major symbol availability. Test negative feature combinations, particularly DuckDB without Arrow FDW and Arrow export without Arrow FDW.
 
@@ -1150,7 +1153,8 @@ Implement in dependency order. Every row below is proposed work, not a completed
 | Values, SQL and transactions | Native adapters and typed observation | Actual C ABI tests for exact values, duplicate labels, empty descriptors, rollback and indeterminate completion |
 | Cursors and COPY | Native cursor/COPY contracts | Bounded batch retention, spill cleanup, sink/source faults, cancellation and partial-output behavior |
 | Runtime functions | Registry retirement; fallible aggregate init and callback cleanup | Callback failure, concurrent siblings, create/release counts, late table errors, empty aggregate groups |
-| Notifications and logging | Native owners and observer attribution | Ready/close behavior, queue overflow, exact sequence, concurrent close, callback replacement/destruction |
+| Notifications | Native owners | Ready/close behavior, queue overflow, exact sequence and concurrent close |
+| Host logging | Deferred by the maintainer | Preserve FFI declarations only; implementation and runtime qualification are excluded from this delivery |
 | Optional Arrow | Shared conversion policy | Independent release order, moved structs, duplicate names, exact mapping or explicit rejection |
 | Packaging and parity | Completed implementation and focused checks | Actual target artifacts, five C scenarios, final-source CI results |
 
