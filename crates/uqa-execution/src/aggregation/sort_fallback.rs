@@ -242,9 +242,10 @@ pub(super) fn combine_execution_and_close(
     match (execution, close) {
         (Ok(()), Ok(())) => Ok(()),
         (Ok(()), Err(error)) | (Err(error), Ok(())) => Err(error),
-        (Err(execution_error), Err(close_error)) => Err(SQLError::Internal(format!(
-            "{execution_error}; closing {operator} after failure also failed: {close_error}"
-        ))),
+        (Err(execution_error), Err(close_error)) => {
+            Err(execution_error
+                .with_cleanup(close_error, format!("close {operator} after failure")))
+        }
     }
 }
 

@@ -65,6 +65,14 @@ pub enum SQLError {
     /// Routine traceback, independent of the primary diagnostic and its typed cause.
     #[error("{source}")]
     Context { source: Box<Self>, context: String },
+    /// A failed cleanup attached to the original, typed SQL error. The primary
+    /// message and SQLSTATE remain unchanged; DETAIL includes both diagnostics.
+    #[error("{source}")]
+    Cleanup {
+        source: Box<Self>,
+        failures: Vec<(String, Self)>,
+        detail: String,
+    },
     /// Source position independent of the primary diagnostic and its typed cause.
     #[error("{source}")]
     Position { source: Box<Self>, position: u32 },
@@ -85,6 +93,7 @@ impl SQLError {
         match self {
             Self::NotificationRequiresSubscription => Some("NOTIFICATION_REQUIRES_SUBSCRIPTION"),
             Self::Context { source, .. }
+            | Self::Cleanup { source, .. }
             | Self::Position { source, .. }
             | Self::InternalPosition { source, .. } => source.code(),
             _ => None,
@@ -94,6 +103,15 @@ impl SQLError {
     /// Append an enclosing routine frame after the innermost error context.
     pub fn with_context(self, frame: impl AsRef<str>) -> Self {
         match self {
+            Self::Cleanup {
+                source,
+                failures,
+                detail,
+            } => Self::Cleanup {
+                source: Box::new(source.with_context(frame)),
+                failures,
+                detail,
+            },
             Self::InternalPosition {
                 source,
                 position,
@@ -126,9 +144,9 @@ impl SQLError {
     pub fn context(&self) -> Option<&str> {
         match self {
             Self::Context { context, .. } => Some(context),
-            Self::Position { source, .. } | Self::InternalPosition { source, .. } => {
-                source.context()
-            }
+            Self::Cleanup { source, .. }
+            | Self::Position { source, .. }
+            | Self::InternalPosition { source, .. } => source.context(),
             _ => None,
         }
     }
@@ -137,6 +155,7 @@ impl SQLError {
     pub fn primary(&self) -> &Self {
         match self {
             Self::Context { source, .. }
+            | Self::Cleanup { source, .. }
             | Self::Position { source, .. }
             | Self::InternalPosition { source, .. } => source.primary(),
             _ => self,
@@ -160,9 +179,9 @@ impl SQLError {
     pub fn internal_position(&self) -> Option<u32> {
         match self {
             Self::InternalPosition { position, .. } => Some(*position),
-            Self::Context { source, .. } | Self::Position { source, .. } => {
-                source.internal_position()
-            }
+            Self::Context { source, .. }
+            | Self::Cleanup { source, .. }
+            | Self::Position { source, .. } => source.internal_position(),
             _ => None,
         }
     }
@@ -171,7 +190,9 @@ impl SQLError {
     pub fn internal_query(&self) -> Option<&str> {
         match self {
             Self::InternalPosition { query, .. } => Some(query),
-            Self::Context { source, .. } | Self::Position { source, .. } => source.internal_query(),
+            Self::Context { source, .. }
+            | Self::Cleanup { source, .. }
+            | Self::Position { source, .. } => source.internal_query(),
             _ => None,
         }
     }
@@ -201,6 +222,15 @@ impl SQLError {
             Self::Context { source, context } => Self::Context {
                 source: Box::new(source.without_position()),
                 context,
+            },
+            Self::Cleanup {
+                source,
+                failures,
+                detail,
+            } => Self::Cleanup {
+                source: Box::new(source.without_position()),
+                failures,
+                detail,
             },
             Self::ParseDiagnostic(mut diagnostic) => {
                 diagnostic.cursor_position = 0;
@@ -261,6 +291,7 @@ impl SQLError {
     pub fn sqlstate(&self) -> Option<&str> {
         match self {
             SQLError::Context { source, .. }
+            | SQLError::Cleanup { source, .. }
             | SQLError::Position { source, .. }
             | SQLError::InternalPosition { source, .. } => source.sqlstate(),
             SQLError::Cancelled(cancelled) => Some(cancelled.sqlstate()),
@@ -289,6 +320,7 @@ impl SQLError {
             | SQLError::Position { source, .. }
             | SQLError::InternalPosition { source, .. } => source.detail(),
             SQLError::Diagnostic { detail, .. } => detail.as_deref(),
+            SQLError::Cleanup { detail, .. } => Some(detail),
             SQLError::ParseDiagnostic(diagnostic) => diagnostic.detail.as_deref(),
             _ => None,
         }
@@ -298,6 +330,7 @@ impl SQLError {
     pub fn hint(&self) -> Option<&str> {
         match self {
             SQLError::Context { source, .. }
+            | SQLError::Cleanup { source, .. }
             | SQLError::Position { source, .. }
             | SQLError::InternalPosition { source, .. } => source.hint(),
             SQLError::Diagnostic { hint, .. } => hint.as_deref(),
@@ -309,7 +342,7 @@ impl SQLError {
     /// One-based character position in the original submitted SQL.
     pub fn position(&self) -> Option<u32> {
         match self {
-            Self::Context { source, .. } => source.position(),
+            Self::Context { source, .. } | Self::Cleanup { source, .. } => source.position(),
             Self::Position { position, .. } => Some(*position),
             Self::ParseDiagnostic(diagnostic) => u32::try_from(diagnostic.cursor_position)
                 .ok()
@@ -318,6 +351,8 @@ impl SQLError {
         }
     }
 }
+
+mod cleanup;
 
 pub type Result<T> = std::result::Result<T, SQLError>;
 

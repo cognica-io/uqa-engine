@@ -72,9 +72,9 @@ pub(crate) fn with_cleanup<T>(
         (Ok(value), Ok(())) => Ok(value),
         (Ok(_), Err(cleanup_error)) => Err(cleanup_error),
         (Err(primary_error), Ok(())) => Err(primary_error),
-        (Err(primary_error), Err(cleanup_error)) => Err(ExecError::Other(format!(
-            "{primary_error}; {cleanup_context}: {cleanup_error}"
-        ))),
+        (Err(primary_error), Err(cleanup_error)) => Err(physical_exec_error(primary_error)
+            .with_cleanup(physical_exec_error(cleanup_error), cleanup_context)
+            .into()),
     }
 }
 
@@ -195,12 +195,11 @@ pub struct OperatorBatchCursor<'operator> {
 impl<'operator> OperatorBatchCursor<'operator> {
     pub fn open(operator: &'operator mut dyn PhysicalOperator) -> ExecResult<Self> {
         if let Err(open_error) = operator.open() {
-            return match operator.close() {
-                Ok(()) => Err(open_error),
-                Err(close_error) => Err(ExecError::Other(format!(
-                    "{open_error}; operator close after open failure also failed: {close_error}"
-                ))),
-            };
+            return with_cleanup(
+                Err(open_error),
+                operator.close(),
+                "operator close after open failure",
+            );
         }
         Ok(Self {
             operator,
@@ -208,7 +207,7 @@ impl<'operator> OperatorBatchCursor<'operator> {
         })
     }
 
-    fn finish(&mut self) -> ExecResult<()> {
+    pub fn close(&mut self) -> ExecResult<()> {
         if self.finished {
             return Ok(());
         }
@@ -226,12 +225,12 @@ impl Iterator for OperatorBatchCursor<'_> {
         }
         match self.operator.next() {
             Ok(Some(batch)) => Some(Ok(batch)),
-            Ok(None) => match self.finish() {
+            Ok(None) => match self.close() {
                 Ok(()) => None,
                 Err(error) => Some(Err(error)),
             },
             Err(next_error) => {
-                let close = self.finish();
+                let close = self.close();
                 Some(with_cleanup(
                     Err(next_error),
                     close,
@@ -244,7 +243,7 @@ impl Iterator for OperatorBatchCursor<'_> {
 
 impl Drop for OperatorBatchCursor<'_> {
     fn drop(&mut self) {
-        let _ = self.finish();
+        let _ = self.close();
     }
 }
 
@@ -347,9 +346,12 @@ mod tests {
             fail_close: true,
             closed: false,
         };
-        let error = run_to_batches(&mut operator).unwrap_err().to_string();
-        assert!(error.contains("next failed"), "{error}");
-        assert!(error.contains("close failed"), "{error}");
+        let error = physical_exec_error(run_to_batches(&mut operator).unwrap_err());
+        assert!(error.to_string().contains("next failed"), "{error}");
+        assert!(
+            error.detail().unwrap().contains("close failed"),
+            "{error:?}"
+        );
         assert!(operator.closed);
     }
 
@@ -360,10 +362,10 @@ mod tests {
             Err(ExecError::Other("cleanup".into())),
             "cleanup failed",
         )
-        .unwrap_err()
-        .to_string();
-        assert!(error.contains("primary"), "{error}");
-        assert!(error.contains("cleanup"), "{error}");
+        .unwrap_err();
+        let error = physical_exec_error(error);
+        assert!(error.to_string().contains("primary"), "{error}");
+        assert!(error.detail().unwrap().contains("cleanup"), "{error:?}");
     }
 
     #[test]

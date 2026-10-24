@@ -44,9 +44,10 @@ pub fn close_after_physical_failure(
 ) -> SQLError {
     match operator.close() {
         Ok(()) => physical_exec_error(error),
-        Err(close_error) => SQLError::Internal(format!(
-            "{error}; operator close after {stage} failure also failed: {close_error}"
-        )),
+        Err(close_error) => physical_exec_error(error).with_cleanup(
+            physical_exec_error(close_error),
+            format!("operator close after {stage} failure"),
+        ),
     }
 }
 

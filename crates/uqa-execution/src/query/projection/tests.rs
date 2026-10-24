@@ -59,6 +59,6 @@ fn physical_failure_reports_both_execution_and_close_errors() {
     );
     let message = error.to_string();
     assert!(message.contains("primary"));
-    assert!(message.contains("spill buffering"));
-    assert!(message.contains("cleanup"));
+    assert!(error.detail().unwrap().contains("spill buffering"));
+    assert!(error.detail().unwrap().contains("cleanup"));
 }

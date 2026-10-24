@@ -483,9 +483,13 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
             &source.projections,
         )?;
         operator = align_recheck_schema(operator, &self.schema)?;
-        operator
-            .open()
-            .map_err(crate::physical::physical_exec_error)?;
+        if let Err(error) = operator.open() {
+            return Err(crate::query::projection::close_after_physical_failure(
+                operator.as_mut(),
+                error,
+                "open row-lock recheck",
+            ));
+        }
         let first_row = loop {
             match operator.next() {
                 Ok(Some(batch)) => {
@@ -507,8 +511,11 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                 }
                 Ok(None) => break None,
                 Err(error) => {
-                    let _ = operator.close();
-                    return Err(crate::physical::physical_exec_error(error));
+                    return Err(crate::query::projection::close_after_physical_failure(
+                        operator.as_mut(),
+                        error,
+                        "execute row-lock recheck",
+                    ));
                 }
             }
         };
