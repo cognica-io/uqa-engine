@@ -36,9 +36,14 @@ pub(crate) enum ConstantCast {
     PerEvaluation,
 }
 
-/// Catalog-free source inference is retained for the same immutable execution schema. Explicit builtin conversions can also retain their descriptor; other casts resolve their source and target names against the invoking catalog on every evaluation.
+/// Catalog-free source inference is retained for the same immutable execution schema. Explicit builtin conversions retain their descriptor. Bound catalog casts may retain type descriptions under an opt-in immutable catalog identity; unqualified names and live custom catalogs keep per-evaluation resolution.
 #[derive(Debug)]
 pub(crate) enum RowCast {
+    Catalog {
+        conversion: Box<uqa_sql::expr::RetainedCatalogCast>,
+        source: Option<Produced<String>>,
+        schema: Option<RowSchema>,
+    },
     Resolved {
         conversion: uqa_sql::expr::ResolvedCast,
         source: Produced<String>,

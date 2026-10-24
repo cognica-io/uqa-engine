@@ -17,8 +17,8 @@ use uqa_core::ArrayValue;
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::expr::{
-    cast_value_with_resolution_with_control, eval_binary_values_with_engine,
-    negate_value_with_control, truthy,
+    cast_value_with_resolution_with_control, cast_value_with_scoped_resolution,
+    eval_binary_values_with_engine, negate_value_with_control, truthy,
 };
 
 pub(super) fn array(
@@ -232,19 +232,19 @@ pub(super) fn cast(
         return row_cast(expr, ty, context, control, slot);
     }
     let Some(constant) = context.constant_cast(expr) else {
-        return convert(expr, ty, context, control).map(|converted| converted.value);
+        return convert(expr, ty, context, control, false).map(|converted| converted.value);
     };
     match constant.get() {
         Some(ConstantCast::Retained(value)) => control.copy_value(value).map_err(Into::into),
         Some(ConstantCast::PerEvaluation) => {
-            convert(expr, ty, context, control).map(|converted| converted.value)
+            convert(expr, ty, context, control, false).map(|converted| converted.value)
         }
         None => {
             let CastEvaluation {
                 source,
                 value: converted,
                 ..
-            } = convert(expr, ty, context, control)?;
+            } = convert(expr, ty, context, control, false)?;
             // A concurrent first evaluation sets the same conversion of the same literal.
             let _ = constant.set(
                 if immutable_constant_cast(expr, source.as_deref().map(String::as_str), ty) {
@@ -266,7 +266,9 @@ fn row_cast(
     slot: &OnceLock<RowCast>,
 ) -> Result<Produced<Value>, SQLError> {
     if let Some(state) = slot.get() {
-        let (RowCast::Resolved { schema, .. } | RowCast::Source { schema, .. }) = state;
+        let (RowCast::Resolved { schema, .. }
+        | RowCast::Source { schema, .. }
+        | RowCast::Catalog { schema, .. }) = state;
         let same_schema = match (schema, context.row_schema()) {
             (None, None) => true,
             (Some(retained), Some(current)) => current.shares_index(retained),
@@ -284,6 +286,26 @@ fn row_cast(
                     context.function_hook(),
                     control,
                 ),
+                RowCast::Catalog {
+                    conversion, source, ..
+                } => conversion
+                    .evaluate(
+                        &value,
+                        source.as_deref().map(String::as_str),
+                        ty,
+                        context.function_hook(),
+                        control,
+                    )
+                    .unwrap_or_else(|| {
+                        cast_value_with_resolution_with_control(
+                            &value,
+                            source.as_deref().map(String::as_str),
+                            ty,
+                            context.function_hook(),
+                            control,
+                        )
+                        .map(|(value, _)| value)
+                    }),
                 RowCast::Source { source, .. } => cast_value_with_resolution_with_control(
                     &value,
                     source.as_deref().map(String::as_str),
@@ -299,11 +321,12 @@ fn row_cast(
         source,
         value: converted,
         resolved,
-    } = convert(expr, ty, context, control)?;
+        catalog,
+    } = convert(expr, ty, context, control, slot.get().is_none())?;
     if slot.get().is_none() {
-        // The operand and shared schema determine source spelling without consulting a catalog or executing a callback. Parameter-dependent roots have no slot. Only explicit builtin identities may also retain the conversion descriptor.
-        let state = match (source, resolved) {
-            (Some(source), Some(conversion))
+        // The operand and shared schema determine source spelling without consulting a catalog or executing a callback. Parameter-dependent roots have no slot. Builtin selections and explicitly certified catalog scopes may retain descriptors; every row still performs conversion and live callbacks.
+        let state = match (source, resolved, catalog) {
+            (Some(source), Some(conversion), _)
                 if uqa_sql::type_resolution::pg_catalog_builtin_type(ty).is_some()
                     && uqa_sql::type_resolution::pg_catalog_builtin_type(&source).is_some() =>
             {
@@ -313,7 +336,12 @@ fn row_cast(
                     schema: context.row_schema().cloned(),
                 }
             }
-            (source, _) => RowCast::Source {
+            (source, _, Some(conversion)) => RowCast::Catalog {
+                conversion,
+                source,
+                schema: context.row_schema().cloned(),
+            },
+            (source, _, None) => RowCast::Source {
                 source,
                 schema: context.row_schema().cloned(),
             },
@@ -327,6 +355,7 @@ struct CastEvaluation {
     source: Option<Produced<String>>,
     value: Produced<Value>,
     resolved: Option<uqa_sql::expr::ResolvedCast>,
+    catalog: Option<Box<uqa_sql::expr::RetainedCatalogCast>>,
 }
 
 fn convert(
@@ -334,6 +363,7 @@ fn convert(
     ty: &str,
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
+    retain_catalog: bool,
 ) -> Result<CastEvaluation, SQLError> {
     #[cfg(test)]
     crate::scalar::state::CAST_TYPE_RESOLUTIONS.with(|count| count.set(count.get() + 1));
@@ -346,17 +376,33 @@ fn convert(
         )
     })?;
     let value = eval_scalar_inner(expr, context, control)?;
-    let (converted, resolved) = cast_value_with_resolution_with_control(
-        &value,
-        source_ty.as_deref().map(String::as_str),
-        ty,
-        context.function_hook(),
-        control,
-    )?;
+    let converted = if retain_catalog {
+        cast_value_with_scoped_resolution(
+            &value,
+            source_ty.as_deref().map(String::as_str),
+            ty,
+            context.function_hook(),
+            control,
+        )?
+    } else {
+        let (value, resolved) = cast_value_with_resolution_with_control(
+            &value,
+            source_ty.as_deref().map(String::as_str),
+            ty,
+            context.function_hook(),
+            control,
+        )?;
+        uqa_sql::expr::ScopedCastResult {
+            value,
+            resolved,
+            catalog: None,
+        }
+    };
     Ok(CastEvaluation {
         source: source_ty,
-        value: converted,
-        resolved,
+        value: converted.value,
+        resolved: converted.resolved,
+        catalog: converted.catalog,
     })
 }
 

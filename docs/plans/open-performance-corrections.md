@@ -254,3 +254,15 @@ All 578 selected local Execution/Engine cases pass, including all 22 exact TPC-H
 ## Controlled follow-up on 5c604afa3
 
 Automatic run 39510287036 includes merged public physical-batch release #1196. Independent verification checks all seven signatures, 160 resource hashes, 32 calibration pairs and eight comparison pairs per workload against their retained raw observations. Seventeen comparisons pass, none is inconclusive, and three remain regressions: Q1 1.106715 with interval [1.102664,1.110780] against 1.10; materialized scan 1.188798 [1.180711,1.196940] and cursor scan 1.163570 [1.153104,1.174131] against 1.15. Lifecycle errors are empty and the automatic reusable-instance stop succeeds. This source predates scalar-projection correction #1197; follow-up 39516654078 at `6e5de5fc9` is still running. Neither run establishes completion of the original historical throughput-variation diagnosis; no limit or noise bound was relaxed.
+
+
+## Scoped catalog cast descriptions
+
+The next #1108 correction follows the delivered source-inference work. SQL retains successful source/target descriptions only under an explicit immutable catalog capability and parser-proven qualified or bound names. Execution owns one entry per non-parameter-dependent prepared cast and checks its schema and catalog identity after evaluating each new operand. Native Engine hooks only supply their original CTE catalog identity; mutable custom catalogs decline by default. Domain/input callbacks, physical output and session setting reads remain live. The [preservation argument](../design/resolved-numeric-casts.md#scoped-catalog-descriptors) covers changed catalogs, side-effect order and optional memory retention.
+
+- [x] Inspect SQL/Execution/Engine manifests, existing features, dependency direction and cast ownership before implementation.
+- [x] Implement descriptor-only ownership, unchanged SQL conversion kernels, post-operand scope checks and optional budgeted metadata publication.
+- [x] Register owner regressions for 1,000-row name-resolution work, current callbacks, changed catalogs/schemas, operand changes, cancellation and the unchanged 4KiB allowance. Reuse the independent PostgreSQL catalog-cast oracle and live temporal setting fixture.
+- [ ] Complete SQL/Execution owner verification, native adapter and four-provider/reopen consumer checks, source review and strict Clippy.
+- [ ] Commit and push one coherent correction with a labeled draft PR and current original task records; qualify the completed source batch automatically on Linux/macOS before merge and branch removal.
+- [ ] Finish #1108's remaining routine identity work and original controlled historical comparison against 613251702. This correction alone does not close the issue or establish elapsed-time acceptance.

@@ -23830,6 +23830,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_catalog_names_are_resolved_once_with_live_values_and_constraints",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/metadata/tests.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "1,000 scalar conversions under a fixed catalog followed by a live constraint failure.",
+      "invariant": "Resolve the two names once while retaining every value conversion and all 1,001 domain callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "changed_scope_declines_before_conversion_and_rebinds_the_new_type",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/metadata/tests.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "A retained integer target changes to smallint under a new explicit catalog identity.",
+      "invariant": "Decline stale metadata before callbacks and preserve the new 22003 overflow.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "callback_scope_changes_and_unqualified_names_do_not_publish_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/metadata/tests.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "A domain callback changes catalog identity; unqualified names are resolved on separate evaluations.",
+      "invariant": "Do not publish stale or search-path-dependent metadata, and keep live callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "fixed_type_spelling_uses_the_sql_parser_and_bound_identity_contract",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/metadata/tests.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "Qualified, quoted, malformed and unqualified type spellings and distinct or cloned identities.",
+      "invariant": "Only parser-proven qualified spellings or bound identities may use the same retained catalog scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "insufficient_metadata_allowance_preserves_successful_scalar_conversion",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/metadata/tests.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "A successful builtin-valued catalog cast with zero optional metadata allowance.",
+      "invariant": "Return the converted value and decline metadata retention without leaking memory or repeating callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fixed_catalog_casts_resolve_names_once_and_keep_each_rows_constraints",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts/scoped.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "1,000 cast rows followed by a live domain failure and cancellation under the existing 4KiB allowance.",
+      "invariant": "Exactly two name resolutions and 1,000 conversions; retain each later callback/error, cancellation and zero outstanding memory after release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fixed_cast_descriptors_do_not_cross_catalogs_or_row_schemas",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts/scoped.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "Integer and floating source schemas and a separate narrowing catalog hook.",
+      "invariant": "Rebind on schema or catalog changes, preserving rounding and SQLSTATE 22003.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "operand_changes_catalog_before_retained_cast_validation_without_reexecution",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts/scoped.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "A bound routine changes catalog identity while producing its second operand.",
+      "invariant": "Validate the scope after the operand; resolve new names and convert without executing the routine twice.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_cast_descriptors_keep_qualified_identity_and_live_domain_checks",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/scoped_catalog.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "Native scoped catalogs with two same-named domains and changed search_path.",
+      "invariant": "Qualified identity remains fixed, domain checks stay live, unqualified names rebind, and different native hooks cannot share metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "catalog_temporal_casts_keep_live_settings_and_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/catalog_cast_qualification.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "A schema-qualified DATE domain across per-row DateStyle changes and prepared execution before/during/after SET LOCAL rollback.",
+      "invariant": "Every row reads current date order and preserves independently captured PostgreSQL days and transaction restoration.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -24,6 +24,7 @@ pub(crate) struct ScopedEngineHook<'a> {
     runtime: QueryRuntimeView<'a>,
     ctes: std::borrow::Cow<'a, CteScope>,
     catalog: catalog::ScopedCatalog,
+    cast_scope: std::sync::OnceLock<uqa_sql::expr::CatalogCastScope>,
 }
 
 impl<'a> ScopedEngineHook<'a> {
@@ -33,6 +34,7 @@ impl<'a> ScopedEngineHook<'a> {
             runtime: engine.query_runtime_view(),
             ctes: std::borrow::Cow::Borrowed(ctes),
             catalog: catalog::ScopedCatalog::new(engine, ctes),
+            cast_scope: std::sync::OnceLock::new(),
         }
     }
 }
@@ -56,6 +58,7 @@ impl<'a> ScopedEngineHook<'a> {
             engine,
             runtime: engine.query_runtime_view(),
             catalog: catalog::ScopedCatalog::new(engine, &ctes),
+            cast_scope: std::sync::OnceLock::new(),
             ctes: std::borrow::Cow::Owned(ctes),
         }
     }
@@ -104,6 +107,11 @@ impl EngineExpressionEvaluator {
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
+    fn catalog_cast_scope(&self) -> Option<&uqa_sql::expr::CatalogCastScope> {
+        // Cast names read this hook's immutable CTE catalog; SQL restricts retention to spellings independent of live namespace settings.
+        Some(self.cast_scope.get_or_init(Default::default))
+    }
+
     fn read_range_input(
         &self,
         oid: u32,
