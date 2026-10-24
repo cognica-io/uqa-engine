@@ -156,6 +156,12 @@ pub trait RoutineResolution: FunctionTypeResolver {
         false
     }
 
+    /// A registered function's stable output names, available without calling
+    /// it. `None` means its result supplies the descriptor at execution.
+    fn registered_table_function_columns(&self, _name: &str) -> Option<Vec<String>> {
+        None
+    }
+
     fn has_registered_aggregate_function(&self, _name: &str) -> bool {
         false
     }

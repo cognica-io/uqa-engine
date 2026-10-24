@@ -12,6 +12,54 @@ fn options() -> SQLFunctionOptions {
     SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile)
 }
 
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite_native(1)]
+#[case::sqlite_kv(2)]
+#[case::redb(3)]
+fn streaming_host_arguments_observe_current_enum_labels(#[case] provider: usize) {
+    struct Echo;
+    impl SQLTableFunction for Echo {
+        fn call_stream(&self, args: &[Value]) -> Result<SQLTableFunctionStream, SQLError> {
+            let [Value::Str(label)] = args else {
+                panic!("host argument must be a label: {args:?}")
+            };
+            Ok(SQLTableFunctionStream::new(
+                ["label"],
+                std::iter::once(Ok(vec![Value::Str(label.clone())])),
+            ))
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let engine = fallible::open(provider, &directory.path().join("labels.db"));
+    engine
+        .register_table_function_with_options("host_label", options(), Echo)
+        .unwrap();
+    engine.sql("CREATE TYPE host_mood AS ENUM ('ready'); CREATE TABLE host_values (m host_mood); INSERT INTO host_values VALUES ('ready')", &[]).unwrap();
+    for expected in ["ready", "renamed"] {
+        for query in [
+            "SELECT label FROM host_values, LATERAL host_label(m)",
+            "SELECT host_label(m) AS label FROM host_values",
+        ] {
+            let result = engine.sql(query, &[]).unwrap();
+            assert_eq!(
+                result.rows[0]["label"],
+                Value::Str(expected.into()),
+                "{query}: {:?}",
+                result.rows
+            );
+        }
+        if expected == "ready" {
+            engine
+                .sql(
+                    "ALTER TYPE host_mood RENAME VALUE 'ready' TO 'renamed'",
+                    &[],
+                )
+                .unwrap();
+        }
+    }
+}
+
 struct ContextFunction;
 
 fn context_value(context: &SQLFunctionContext) -> Value {

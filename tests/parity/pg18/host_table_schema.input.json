@@ -1,0 +1,95 @@
+{
+  "setup": "CREATE TEMP SEQUENCE host_schema_calls; CREATE FUNCTION pg_temp.host_pair(bigint) RETURNS TABLE(n bigint,label text) LANGUAGE plpgsql VOLATILE AS $$ BEGIN PERFORM nextval('pg_temp.host_schema_calls'); RETURN QUERY SELECT i::bigint, 'row-' || i::text FROM pg_catalog.generate_series(0,$1-1) i; END $$",
+  "cases": [
+    {
+      "name": "direct",
+      "query": "SELECT * FROM pg_temp.host_pair(2)",
+      "requires_declared": false
+    },
+    {
+      "name": "empty_scan",
+      "query": "SELECT * FROM pg_temp.host_pair(0)",
+      "requires_declared": false
+    },
+    {
+      "name": "limit_zero",
+      "query": "SELECT * FROM pg_temp.host_pair(2) LIMIT 0",
+      "requires_declared": true
+    },
+    {
+      "name": "empty_outer",
+      "query": "SELECT * FROM (SELECT 2 AS k WHERE FALSE) v, LATERAL pg_temp.host_pair(k)",
+      "requires_declared": true
+    },
+    {
+      "name": "bare_lateral",
+      "query": "SELECT n,label FROM (VALUES(1),(2)) v(k), LATERAL pg_temp.host_pair(k) ORDER BY n,label",
+      "requires_declared": false
+    },
+    {
+      "name": "qualified_star",
+      "query": "SELECT h.* FROM (VALUES(2)) v(k), LATERAL pg_temp.host_pair(k) h ORDER BY n",
+      "requires_declared": false
+    },
+    {
+      "name": "partial_alias",
+      "query": "SELECT h.* FROM (VALUES(2)) v(k), LATERAL pg_temp.host_pair(k) h(x) ORDER BY x",
+      "requires_declared": false
+    },
+    {
+      "name": "ordinality",
+      "query": "SELECT h.* FROM (VALUES(2)) v(k), LATERAL pg_temp.host_pair(k) WITH ORDINALITY h ORDER BY n",
+      "requires_declared": false
+    },
+    {
+      "name": "rows_from",
+      "query": "SELECT h.* FROM (VALUES(2)) v(k), LATERAL ROWS FROM(pg_temp.host_pair(k),pg_temp.host_pair(k-1)) WITH ORDINALITY h(a,b,c,d,ord) ORDER BY a",
+      "requires_declared": false
+    },
+    {
+      "name": "derived",
+      "query": "SELECT h.* FROM (VALUES(2)) v(k), LATERAL (SELECT * FROM pg_temp.host_pair(k)) h ORDER BY n",
+      "requires_declared": false
+    },
+    {
+      "name": "materialized_cte",
+      "query": "SELECT h.* FROM (VALUES(1),(2)) v(k), LATERAL (WITH c AS MATERIALIZED (SELECT * FROM pg_temp.host_pair(k)) SELECT * FROM c) h ORDER BY n,label",
+      "requires_declared": false
+    },
+    {
+      "name": "empty_left_join",
+      "query": "SELECT k,h.* FROM (VALUES(0),(1)) v(k) LEFT JOIN LATERAL pg_temp.host_pair(k) h ON true ORDER BY k",
+      "requires_declared": false
+    },
+    {
+      "name": "on_predicate",
+      "query": "SELECT k,h.* FROM (VALUES(1),(2)) v(k) JOIN LATERAL pg_temp.host_pair(k) h ON n=1",
+      "requires_declared": false
+    },
+    {
+      "name": "where_predicate",
+      "query": "SELECT n,label FROM (VALUES(2)) v(k), LATERAL pg_temp.host_pair(k) h WHERE n>0",
+      "requires_declared": false
+    },
+    {
+      "name": "aggregate",
+      "query": "SELECT sum(n) AS n FROM (VALUES(1),(2)) v(k), LATERAL pg_temp.host_pair(k)",
+      "requires_declared": false
+    },
+    {
+      "name": "bounded_first",
+      "query": "SELECT h.* FROM (VALUES(1000000),(2)) v(k), LATERAL pg_temp.host_pair(k) h LIMIT 1",
+      "requires_declared": false
+    },
+    {
+      "name": "nested_calls",
+      "query": "SELECT b.* FROM (VALUES(2)) v(k), LATERAL pg_temp.host_pair(k) a, LATERAL pg_temp.host_pair(a.n+1) b ORDER BY b.n,b.label",
+      "requires_declared": false
+    },
+    {
+      "name": "named_unknown",
+      "query": "SELECT missing FROM pg_temp.host_pair(2)",
+      "requires_declared": true
+    }
+  ]
+}

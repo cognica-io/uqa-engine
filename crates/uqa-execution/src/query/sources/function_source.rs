@@ -300,8 +300,19 @@ fn function_rows<'a, S: Clone + Send + Sync + 'static>(
             )?)
         }
         None => {
-            let columns = crate::query::table_functions::deferred_table_function_columns(&call)
-                .transpose()?;
+            let declared = context
+                .relational
+                .catalog
+                .registered_table_function_columns(call.name);
+            let columns = match declared {
+                Some(columns) => Some(uqa_sql::semantics::apply_table_function_aliases(
+                    columns,
+                    call.column_aliases,
+                    call.ordinality,
+                )),
+                None => crate::query::table_functions::deferred_table_function_columns(&call)
+                    .transpose()?,
+            };
             if let Some(binding) = call.binding.filter(|binding| binding.builtin) {
                 if columns.is_some() {
                     hook.require_builtin_execute(binding)?;

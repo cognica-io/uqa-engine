@@ -100,6 +100,14 @@ impl RoutineResolution for Engine {
         Engine::has_registered_table_function(self, name)
     }
 
+    fn registered_table_function_columns(&self, name: &str) -> Option<Vec<String>> {
+        self.query_runtime_view()
+            .lookup_table_function(&name.to_ascii_lowercase())?
+            .function
+            .output_columns()
+            .map(<[String]>::to_vec)
+    }
+
     fn has_registered_aggregate_function(&self, name: &str) -> bool {
         Engine::has_registered_aggregate_function(self, name)
     }

@@ -24,6 +24,7 @@ mod common;
 pub(crate) use common::{function_arguments_have_runtime_types, runtime_input};
 pub(crate) mod concatenation;
 pub(crate) use common::literal_input_type_with_control;
+pub use common::runtime_value_type_with_control;
 pub(crate) use common::select_common_input_type_in_with_control;
 pub(crate) use common::value_type;
 pub(crate) use common::value_type_with_control;

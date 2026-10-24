@@ -7,17 +7,13 @@
 
 /// Build the physical operator for a join source.
 use super::{
-    alias_join_operator, bind_join_on_schema, bind_source_plan_schema,
-    build_join_operator_with_ctes_at_path, combine_filters, join_using_predicate,
-    null_row_for_schema, physical_exec_error, physical_work_mem_bytes, qualifier_filter,
-    require_lateral_function_execute, resolve_join_using, shape_join_using_output,
-    unproduced_column, ColumnPrune, CteScope, JoinExecutionStrategy, PhysicalOperator,
-    QualifierFilters, QueryLateralSource, RowSchemaExecution, SQLError, SQLParam, SourceContext,
-    SourcePlan,
+    alias_join_operator, bind_join_on_schema, build_join_operator_with_ctes_at_path,
+    join_using_predicate, null_row_for_schema, physical_exec_error, physical_work_mem_bytes,
+    resolve_join_using, shape_join_using_output, ColumnPrune, CteScope, JoinExecutionStrategy,
+    PhysicalOperator, QualifierFilters, SQLError, SQLParam, SourceContext, SourcePlan,
 };
 use crate::physical::construction::OperatorBuild;
-use crate::{HashJoin, LateralJoin, NestedLoopJoin};
-use uqa_sql::semantics::from_qualifier_set;
+use crate::{HashJoin, NestedLoopJoin};
 
 #[expect(
     clippy::too_many_lines,
@@ -156,152 +152,21 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                             "optimizer selected a hash strategy for a lateral join".into(),
                         ));
                     }
-                    let left_schema = left_operator.row_schema().clone();
                     let input_schema = lateral_input.expect("dependent source has a calling scope");
-                    let left_nulls = null_row_for_schema(left_schema.columns());
-                    let right_schema = bind_source_plan_schema(
-                        context.ctes.routines,
-                        right,
-                        params,
-                        ctes,
-                        Some(&input_schema),
-                    )?;
-                    require_lateral_function_execute(context, right, &input_schema, params, ctes)?;
-                    let (on, evaluator) = bind_join_on_schema(
-                        context,
-                        on.as_ref(),
-                        &left_schema,
-                        &right_schema,
-                        params,
-                        ctes,
-                    )?;
-                    let right_nulls = null_row_for_schema(right_schema.columns());
-                    let resolved_using =
-                        resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
-                    let effective_on = resolved_using
-                        .as_ref()
-                        .and_then(|using| join_using_predicate(using, &left_schema, &right_schema))
-                        .or(on);
-                    if *kind == uqa_sql::ast::JoinKind::Full {
-                        super::join_keys::join_keys(
-                            *kind,
-                            effective_on.as_ref(),
-                            &left_schema,
-                            &right_schema,
-                            params,
-                            context.types,
-                            context.volatility,
-                        )?;
-                    }
-                    let pinned_right = right_recheck_path
-                        .as_deref()
-                        .and_then(|path| ctes.recheck_source_row(path))
-                        .map(|source| {
-                            source
-                                .schema
-                                .relayout_physical_row(source.row, &right_schema)
-                                .map(|row| crate::OwnedPhysicalRow::new(right_schema.clone(), row))
-                                .map_err(physical_exec_error)
-                        })
-                        .transpose()?;
-                    let specialized_right = if pinned_right.is_none() {
-                        super::output_filter::specialize_lateral_source(
+                    return left_operator.attach(|left| {
+                        super::lateral_binding::build_lateral_join(
                             context,
-                            right,
-                            right_filter_ref,
-                        )?
-                    } else {
-                        None
-                    };
-                    let right_filter_ref = if specialized_right.is_some() {
-                        None
-                    } else {
-                        right_filter_ref
-                    };
-                    // A predicate that cannot move inside the right query still applies to each produced row, including a tuple supplied by a lock recheck.
-                    let right_qualifiers = from_qualifier_set(right);
-                    let right_filter = combine_filters(
-                        right_qualifiers
-                            .iter()
-                            .filter_map(|qualifier| qualifier_filter(right_filter_ref, qualifier)),
-                    )
-                    .map(|predicate| {
-                        if let Some(column) = right_qualifiers.iter().find_map(|qualifier| {
-                            unproduced_column(&predicate, qualifier, &right_schema)
-                        }) {
-                            return Err(column);
-                        }
-                        let evaluator = context.relational.evaluator(params, ctes);
-                        let predicate = evaluator.bind_type_introspection(predicate, &right_schema);
-                        Ok((
-                            crate::scalar::PreparedExpressions::scalar(predicate),
-                            evaluator,
-                        ))
-                    });
-                    let source = QueryLateralSource {
-                        context: *context,
-                        right: specialized_right.unwrap_or_else(|| (**right).clone()),
-                        right_filter,
-                        on: effective_on.map(|expression| {
-                            let joined = crate::RowSchema::join(
-                                &left_schema,
-                                &right_schema,
-                                left_nulls.keys().chain(right_nulls.keys()).cloned(),
-                            );
-                            (
-                                crate::scalar::PreparedExpressions::scalar(
-                                    evaluator.bind_type_introspection(expression, &joined),
-                                ),
-                                evaluator.clone(),
-                            )
-                        }),
-                        function_arguments: match right.as_ref() {
-                            SourcePlan::Function { args, .. } => {
-                                Some(crate::scalar::PreparedExpressions::scalars(
-                                    args.iter()
-                                        .map(|argument| {
-                                            context
-                                                .relational
-                                                .evaluator(params, ctes)
-                                                .bind_type_introspection(
-                                                    argument.clone(),
-                                                    &input_schema,
-                                                )
-                                        })
-                                        .collect(),
-                                ))
-                            }
-                            _ => None,
-                        },
-                        params,
-                        ctes: ctes.clone(),
-                        input_schema,
-                        right_schema: right_schema.clone(),
-                        pinned_right,
-                    };
-                    left_operator.wrap(|input| {
-                        Box::new(LateralJoin::new_with_right_schema(
-                            input,
-                            Box::new(source),
-                            *kind,
-                            left_nulls,
-                            right_nulls,
-                            right_schema.clone(),
-                        ))
-                    });
-                    if let Some(using) = resolved_using.as_ref() {
-                        left_operator.attach(|input| {
-                            shape_join_using_output(
-                                input,
-                                *kind,
-                                &left_schema,
-                                &right_schema,
-                                using,
-                            )
-                        })?;
-                    }
-                    return left_operator.attach(|input| {
-                        alias_join_operator(input, alias.as_deref(), column_aliases)
+                            left,
+                            params,
+                            ctes,
+                            super::lateral_binding::LateralBinding {
+                                join: from,
+                                right,
+                                input_schema,
+                                filters: right_filter_ref,
+                                recheck_path: right_recheck_path.as_deref(),
+                            },
+                        )
                     });
                 }
 

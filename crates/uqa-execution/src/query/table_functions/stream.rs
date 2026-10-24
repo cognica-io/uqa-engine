@@ -225,7 +225,6 @@ fn build_table_function_value_row_stream_with_row(
         binding,
         alias,
         column_aliases,
-        args,
         ..
     } = call;
     let identity = name.to_ascii_lowercase();
@@ -233,17 +232,7 @@ fn build_table_function_value_row_stream_with_row(
     if binding.is_none_or(|binding| binding.builtin)
         && context.runtime.has_table_function(&identity)
     {
-        let subquery_arena =
-            PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
-        let scalar_context = match row {
-            Some(row) => ScalarEvalContext::from_row_lookup(row, context.params)
-                .with_physical_outer_row(&row.schema, &row.row),
-            None => ScalarEvalContext::new(None, context.params),
-        };
-        let scalar_context = scalar_context
-            .with_function_hook(context.eval_hook)
-            .with_subquery_runner(&subquery_arena);
-        let call_args = eval_call_arguments(args, &scalar_context)?;
+        let call_args = evaluate_arguments(context, &call, row)?;
         if call_args.iter().any(|(name, _)| name.is_some()) {
             return Err(uqa_sql::expr::unknown_function_error(&lower, &call_args));
         }
@@ -251,13 +240,25 @@ fn build_table_function_value_row_stream_with_row(
             .into_iter()
             .map(|(_, value)| value)
             .collect::<Vec<_>>();
+        let evaluated = uqa_sql::expr::enums::render_host_arguments(
+            context.eval_hook.enum_labels(),
+            &evaluated,
+        )?;
         let result = context
             .runtime
             .lookup_table_function(&identity)
             .map(|registration| {
-                registration
+                let mut result = registration
                     .function
-                    .call_stream_with_context(context.runtime.function_context, &evaluated)
+                    .call_stream_with_context(context.runtime.function_context, &evaluated)?;
+                if let Err(error) = super::validate_registered_columns(
+                    name,
+                    registration.function.output_columns(),
+                    &result.columns,
+                ) {
+                    return Err(result.rows.fail(error));
+                }
+                Ok(result)
             })
             .ok_or_else(|| {
                 SQLError::Internal(format!(

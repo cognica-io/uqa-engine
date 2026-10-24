@@ -44,6 +44,7 @@ mod function_source;
 mod join_keys;
 mod join_source;
 mod join_validation;
+mod lateral_binding;
 mod lateral_source;
 mod output_descriptor;
 mod output_filter;

@@ -27,6 +27,10 @@ impl<F: SQLTableFunction + 'static> Table<F> {
 }
 
 impl<F: SQLTableFunction + 'static> SQLTableFunction for Table<F> {
+    fn output_columns(&self) -> Option<&[String]> {
+        self.function.output_columns()
+    }
+
     fn call(&self, args: &[Value]) -> Result<SQLTableFunctionResult, SQLError> {
         self.function.call(args)
     }

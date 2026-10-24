@@ -646,6 +646,16 @@ impl SchemaScope {
                 if let Some(function) = &user_function {
                     self.record_routine_dependency(&function.binding);
                 }
+                let registered_columns = user_function
+                    .is_none()
+                    .then(|| routines.registered_table_function_columns(name))
+                    .flatten();
+                let declared_host_columns = registered_columns.is_some();
+                if registered_columns.as_ref().is_some_and(Vec::is_empty) {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "table function `{name}` declares no columns"
+                    )));
+                }
                 let catalog_columns = if !self.validate_references && user_function.is_none() {
                     user_function_output_columns(self.catalog.as_ref(), &self.resolution, name)?
                 } else {
@@ -662,7 +672,7 @@ impl SchemaScope {
                         *ordinality,
                     )?
                 } else {
-                    catalog_columns.map_or_else(
+                    registered_columns.or(catalog_columns).map_or_else(
                         || {
                             table_function_empty_schema(
                                 name,
@@ -707,6 +717,7 @@ impl SchemaScope {
                 let schema = RowSchema::with_qualified_types(qualifier, columns, types);
                 Ok(
                     if user_function.is_none()
+                        && !declared_host_columns
                         && column_types.is_empty()
                         && routines.has_registered_table_function(name)
                     {
@@ -735,18 +746,29 @@ impl SchemaScope {
                     columns.extend(schema.iter().enumerate().map(|(position, column)| {
                         schema.public_name(position).unwrap_or(column).to_string()
                     }));
-                    types.extend(schema.column_types().iter().cloned());
+                    types.extend(schema.column_types().iter().map(|ty| {
+                        if open {
+                            None
+                        } else {
+                            ty.clone()
+                        }
+                    }));
                 }
                 if *ordinality {
                     columns.push("ordinality".into());
-                    types.push(Some(ColumnType::BigInteger));
+                    types.push((!open).then_some(ColumnType::BigInteger));
                 }
                 let qualifier = alias.as_deref().unwrap_or(&first.output_name);
-                validate_table_function_alias_count(
-                    qualifier,
-                    columns.len(),
-                    column_aliases.len(),
-                )?;
+                // A runtime member can shift every later output position,
+                // including ordinality. Its complete descriptor validates
+                // the aliases and supplies those types at execution.
+                if !open {
+                    validate_table_function_alias_count(
+                        qualifier,
+                        columns.len(),
+                        column_aliases.len(),
+                    )?;
+                }
                 for (column, alias) in columns.iter_mut().zip(column_aliases) {
                     column.clone_from(alias);
                 }

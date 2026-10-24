@@ -48,6 +48,10 @@ pub enum SQLError {
     },
     #[error("{0}")]
     Cancelled(#[from] uqa_core::QueryCancelled),
+    /// An owned host callback diagnostic. Its typed cause survives workers,
+    /// routine context, cleanup and cloning without a thread-local side channel.
+    #[error("{0}")]
+    Host(#[source] std::sync::Arc<dyn std::error::Error + Send + Sync>),
     /// Error raised by (or on behalf of) a user-defined SQL /
     /// `PL/pgSQL` routine. Carries an explicit `SQLSTATE` so
     /// `EXCEPTION WHEN <condition>` handlers and `SQLSTATE` /
@@ -295,6 +299,7 @@ impl SQLError {
             | SQLError::Position { source, .. }
             | SQLError::InternalPosition { source, .. } => source.sqlstate(),
             SQLError::Cancelled(cancelled) => Some(cancelled.sqlstate()),
+            SQLError::Host(_) => Some("38000"), // external_routine_exception
             SQLError::Parse(_) => Some("42601"), // syntax_error
             SQLError::ParseDiagnostic(diagnostic) => Some(&diagnostic.sqlstate),
             SQLError::Unsupported(_) | SQLError::NotificationRequiresSubscription => Some("0A000"), // feature_not_supported
@@ -390,6 +395,41 @@ impl From<uqa_core::ValueRetentionError> for SQLError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn host_cause_survives_clone_context_position_and_cleanup() {
+        #[derive(Debug, thiserror::Error)]
+        #[error("host diagnostic")]
+        struct Failure(u32);
+        let error = super::SQLError::Host(std::sync::Arc::new(Failure(73)))
+            .with_context("routine frame")
+            .at_position(Some(11))
+            .with_cleanup(
+                super::SQLError::Internal("cleanup failed".into()),
+                "close host state",
+            );
+        let cloned = error.clone();
+        drop(error);
+        let super::SQLError::Host(source) = cloned.primary() else {
+            panic!("typed host cause lost")
+        };
+        assert_eq!(source.downcast_ref::<Failure>().unwrap().0, 73);
+        assert_eq!(
+            std::error::Error::source(cloned.primary())
+                .unwrap()
+                .downcast_ref::<std::sync::Arc<dyn std::error::Error + Send + Sync>>()
+                .unwrap()
+                .downcast_ref::<Failure>()
+                .unwrap()
+                .0,
+            73
+        );
+        assert_eq!(cloned.sqlstate(), Some("38000"));
+        assert_eq!(cloned.to_string(), "host diagnostic");
+        assert_eq!(cloned.context(), Some("routine frame"));
+        assert_eq!(cloned.position(), Some(11));
+        assert!(cloned.detail().unwrap().contains("cleanup failed"));
+    }
+
     #[test]
     fn source_positions_preserve_typed_errors_and_nested_context() {
         let error = super::SQLError::Diagnostic {

@@ -180,6 +180,14 @@ where
 
 /// Rust implementation of a SQL table function used in `FROM`.
 pub trait SQLTableFunction: Send + Sync {
+    /// Stable, nonempty output names, independent of argument values and scan creation.
+    /// A declared descriptor permits binding correlated and empty sources
+    /// without executing the callback. Every call must return these columns
+    /// in this order. `None` retains the runtime-described call interface.
+    fn output_columns(&self) -> Option<&[String]> {
+        None
+    }
+
     fn call(&self, _args: &[Value]) -> Result<SQLTableFunctionResult, SQLError> {
         Err(SQLError::Unsupported(
             "table function implements only the streaming call interface".into(),

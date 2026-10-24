@@ -26,6 +26,12 @@ pub trait LateralSource<'a>: Send {
     fn admits(&mut self, right: &OwnedPhysicalRow) -> ExecResult<bool>;
 
     fn matches(&mut self, joined: &OwnedPhysicalRow) -> ExecResult<bool>;
+
+    /// Release a source prepared while binding its runtime descriptor, even
+    /// when the consumer never requests the first joined row.
+    fn close(&mut self) -> ExecResult<()> {
+        Ok(())
+    }
 }
 
 fn output_schema(
@@ -234,6 +240,8 @@ impl PhysicalOperator for LateralJoin<'_> {
         self.left_rows = Vec::new().into_iter();
         self.current_left = None;
         let right = self.close_right();
+        let right =
+            crate::physical::with_cleanup(right, self.source.close(), "close lateral source");
         self.matched_left = false;
         self.exhausted = true;
         crate::physical::with_cleanup(right, self.left.close(), "close lateral left input")

@@ -78,9 +78,15 @@ pub(super) fn build_table_function_rows_with_row(
                     &evaluated,
                 )
                 .and_then(|arguments| {
-                    registration
+                    let result = registration
                         .function
-                        .call_with_context(context.runtime.function_context, &arguments)
+                        .call_with_context(context.runtime.function_context, &arguments)?;
+                    super::validate_registered_columns(
+                        name,
+                        registration.function.output_columns(),
+                        &result.columns,
+                    )?;
+                    Ok(result)
                 })
             })
         {

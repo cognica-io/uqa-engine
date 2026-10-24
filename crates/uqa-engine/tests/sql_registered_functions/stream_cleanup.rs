@@ -9,6 +9,10 @@ use uqa_engine::SQLRowSource;
 
 #[path = "stream_cleanup/cte.rs"]
 mod cte;
+#[path = "stream_cleanup/declared.rs"]
+mod declared;
+#[path = "stream_cleanup/schema.rs"]
+mod schema;
 #[path = "stream_cleanup/view_binding.rs"]
 mod view_binding;
 

@@ -326,6 +326,31 @@ pub(crate) fn value_type(value: &Value) -> Option<ColumnType> {
         })
 }
 
+/// Observe an untyped host argument using its physical OID or SQL's runtime
+/// carrier rules. This never reads physical payload bytes or reconstructs an
+/// expression's lost declaration/modifiers. Unknown carriers return None.
+pub fn runtime_value_type_with_control(
+    value: &Value,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
+    if let Value::Datum(datum) = value {
+        if let Some(ty) = crate::catalog::type_metadata::builtin_scalar_type(datum.type_oid()) {
+            return Ok(Some(ty.clone_with_control(control)?));
+        }
+        let ty = catalog
+            .map(|catalog| catalog.value_type_by_oid(datum.type_oid()))
+            .transpose()?
+            .flatten();
+        control.check()?;
+        return Ok(ty
+            .map(|ty| ty.retain_external_with_control(control))
+            .transpose()?);
+    }
+    value_type_with_control(value, control)
+}
+
 pub(crate) fn value_type_with_control(
     value: &Value,
     control: &ProductionControl<'_>,

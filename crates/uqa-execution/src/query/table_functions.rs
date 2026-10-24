@@ -33,6 +33,19 @@ pub struct TableFunctionRows {
     pub rows: crate::PhysicalProjectRows,
 }
 
+fn validate_registered_columns(
+    name: &str,
+    declared: Option<&[String]>,
+    actual: &[String],
+) -> Result<(), SQLError> {
+    if declared.is_some_and(|declared| declared != actual) {
+        return Err(SQLError::TypeMismatch(format!(
+            "table function `{name}` returned columns different from its registered descriptor"
+        )));
+    }
+    Ok(())
+}
+
 impl TableFunctionRows {
     pub fn new(columns: Vec<String>, rows: crate::PhysicalProjectRows) -> Self {
         Self { columns, rows }
