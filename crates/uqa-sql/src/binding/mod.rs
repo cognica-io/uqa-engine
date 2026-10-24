@@ -41,7 +41,10 @@ mod type_resolution;
 mod variable_sites;
 
 pub use commands::analyze_prepared_command_schema;
-pub use execution::bind_query_block_for_execution;
+pub use execution::{
+    bind_query_block_for_execution, bind_query_block_with_sources, BoundExecutionBlock,
+    ExecutionSourceBindings,
+};
 pub use preparation::{
     analyze_column_type_transform, assign_stored_query_input_collations,
     infer_prepared_parameter_types, restore_query_layouts,
@@ -122,6 +125,7 @@ enum ScalarBindingMode {
 }
 
 struct SchemaScope {
+    execution_sources: Option<execution::CapturedSources>,
     collations: preparation::PendingCollations,
     catalog: CatalogReadView,
     resolution: RelationNameResolution,
@@ -160,6 +164,7 @@ fn non_returning_cte_error(name: &str) -> SQLError {
 impl SchemaScope {
     fn from_context(ctes: &BindingContext) -> Result<Self, SQLError> {
         Ok(Self {
+            execution_sources: None,
             collations: preparation::PendingCollations::default(),
             catalog: ctes.catalog.clone(),
             resolution: ctes.resolution.clone(),
@@ -191,6 +196,7 @@ impl SchemaScope {
 
     fn for_catalog_analysis(catalog: CatalogReadView, resolution: RelationNameResolution) -> Self {
         Self {
+            execution_sources: None,
             collations: preparation::PendingCollations::default(),
             catalog,
             resolution,
@@ -292,6 +298,9 @@ impl SchemaScope {
             || Ok(RowSchema::default()),
             |source| self.bind_source(routines, source, &block.subqueries, params, outer),
         )?;
+        if let Some(sources) = &mut self.execution_sources {
+            sources.record(block, &source, outer);
+        }
         // Query-owned metadata types belong to both analysis and metadata-only binding.
         let source = analysis::with_query_source_columns(&source, block);
         let expression_schema = overlay_outer_schema(&source, outer);

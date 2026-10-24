@@ -17,6 +17,7 @@ use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::plan::{CtePlan, QueryPlan};
 use uqa_sql::SQLError;
 
+pub(crate) mod binding;
 mod cte;
 mod definitions;
 #[cfg(test)]

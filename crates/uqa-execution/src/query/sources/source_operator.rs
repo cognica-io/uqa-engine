@@ -12,6 +12,7 @@ use super::{
     build_values_source_operator, qualifier_filter, ColumnPrune, CteScope, QualifierFilters,
     SQLError, SQLParam, SourceContext, SourcePlan,
 };
+use crate::query::binding::sources::SourceBindings;
 
 pub fn build_join_operator_with_ctes<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
@@ -21,7 +22,21 @@ pub fn build_join_operator_with_ctes<'a, S: Clone + Send + Sync + 'static>(
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
-    build_join_operator_with_ctes_at_path(context, from, params, ctes, prune, filters, None)
+    build_join_operator_with_ctes_at_path(context, from, params, ctes, prune, filters, None, None)
+}
+
+pub(crate) fn build_join_operator_with_bound_sources<'a, S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'a, S>,
+    from: &SourcePlan,
+    params: &'a [SQLParam],
+    ctes: &mut CteScope<S>,
+    prune: Option<&ColumnPrune>,
+    filters: Option<&QualifierFilters>,
+    bindings: Option<&SourceBindings<'_>>,
+) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
+    build_join_operator_with_ctes_at_path(
+        context, from, params, ctes, prune, filters, None, bindings,
+    )
 }
 
 pub fn build_join_operator_with_recheck_pins<'a, S: Clone + Send + Sync + 'static>(
@@ -40,10 +55,15 @@ pub fn build_join_operator_with_recheck_pins<'a, S: Clone + Send + Sync + 'stati
         prune,
         filters,
         Some(Vec::new()),
+        None,
     )
 }
 
 /// Recursively assemble a source tree while tracking tuple-recheck paths.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps source metadata and tuple recheck paths scoped to physical assembly"
+)]
 pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
     from: &SourcePlan,
@@ -52,8 +72,10 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync +
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
     recheck_path: Option<Vec<u8>>,
+    bindings: Option<&SourceBindings<'_>>,
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
     use crate::PhysicalOperator;
+    let bindings = bindings.filter(|binding| binding.matches_source(from));
 
     if let Some(source) = recheck_path
         .as_deref()
@@ -88,9 +110,16 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync +
         SourcePlan::Table { .. } => {
             build_table_source_operator(context, from, params, ctes, prune, filters)
         }
-        SourcePlan::Join { .. } => {
-            build_join_source_operator(context, from, params, ctes, prune, filters, recheck_path)
-        }
+        SourcePlan::Join { .. } => build_join_source_operator(
+            context,
+            from,
+            params,
+            ctes,
+            prune,
+            filters,
+            recheck_path,
+            bindings,
+        ),
         SourcePlan::Values { .. } => {
             build_values_source_operator(context, from, params, ctes, prune, filters)
         }
@@ -101,7 +130,7 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync +
             build_function_group_source_operator(context, from, params, ctes, prune, filters)
         }
         SourcePlan::Subquery { .. } => {
-            build_subquery_source_operator(context, from, params, ctes, prune, filters)
+            build_subquery_source_operator(context, from, params, ctes, prune, filters, bindings)
         }
     }
 }

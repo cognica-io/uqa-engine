@@ -10,6 +10,8 @@ use crate::plan::{QueryBlockPlan, RelationalPlan, UnifiedPlan};
 use crate::{ColumnType, FunctionTypeResolver, SQLError};
 use std::borrow::Cow;
 
+mod source_transfer;
+
 struct Routines;
 
 impl FunctionTypeResolver for Routines {
