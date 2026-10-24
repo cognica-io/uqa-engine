@@ -167,6 +167,7 @@ fn legacy_vector_distinct_aggregates_compare_before_deduplicating_in_memory_and_
                         Arc::new(ObservedValues::default),
                         budget,
                     )
+                    .unwrap()
                 } else {
                     AggregateAccumulator::builtin_with_budget("count", budget)
                 };

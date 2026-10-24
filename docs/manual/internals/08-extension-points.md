@@ -10,10 +10,15 @@ The engine registries accept scalar, table, and aggregate implementations:
 | --- | --- |
 | `SQLScalarFunction` | Receives `&[Value]` and returns one `Value` or `SQLError` |
 | `SQLTableFunction` | Returns a table result or pull-based `SQLTableFunctionStream` |
-| `SQLAggregateFunction` | Creates one `SQLAggregateState` per group |
+| `SQLAggregateFunction` | Existing infallible Rust aggregate factory, adapted to `SQLAggregateFactory` |
+| `SQLAggregateFactory` | Creates an independent `SQLAggregateState` or returns `SQLError` |
 | `SQLAggregateState` | Observes argument rows and returns a final value |
 
 The `register_*_function_with_options` methods attach volatility and mutation properties. The default is `VOLATILE` and may mutate, which prevents unsafe optimizer assumptions.
+
+Aggregate registration accepts `SQLAggregateFactory::try_create_state`. Existing `SQLAggregateFunction` implementations and infallible factory closures receive a blanket adapter, so they retain their source interface. Execution propagates creation errors before observing or finishing a missing state, including global aggregates over empty inputs, sorted and DISTINCT replay, and window frame restarts. Partially constructed accumulator sets release their successful states when a later creation fails. Window state starts when a frame is first evaluated; planning and empty window inputs do not invoke the factory. The owning transaction receives the original SQLSTATE, message, detail and hint.
+
+Custom native `AggregateFunctionRegistry` adapters return `Arc<dyn SQLAggregateFactory>`; shared runtime maps store that same factory interface. This owner-level change does not add a second aggregate registration name or require existing infallible callback implementations to change their state factory.
 
 ```mermaid
 flowchart LR

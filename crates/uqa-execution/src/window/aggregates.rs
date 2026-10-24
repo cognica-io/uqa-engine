@@ -9,8 +9,8 @@
 use super::frame::{BoundKind, CurrentRow, FrameCursor, FrameSpec, Membership};
 use super::partition::PartitionRows;
 use crate::aggregation::{
-    aggregate_value_with_args, instantiate_aggregate_accumulators, observe_aggregate,
-    AggregateAccumulator, AggregateAccumulatorTemplate,
+    aggregate_value_with_args, observe_aggregate, AggregateAccumulator,
+    AggregateAccumulatorTemplate,
 };
 use uqa_core::Value;
 use uqa_sql::ast::FrameExclusion;
@@ -23,7 +23,7 @@ pub(super) struct WindowAggregate {
     filter: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
     template: AggregateAccumulatorTemplate,
     budget_bytes: usize,
-    accumulator: AggregateAccumulator,
+    accumulator: Option<AggregateAccumulator>,
     /// The first row the accumulator holds: the frame head it was built for.
     aggregated_base: i64,
     /// The first row the accumulator has not yet considered.
@@ -38,7 +38,6 @@ impl WindowAggregate {
         template: AggregateAccumulatorTemplate,
         budget_bytes: usize,
     ) -> Self {
-        let accumulator = instantiate(&template, budget_bytes);
         Self {
             name: name.to_string(),
             args: crate::scalar::PreparedExpressions::scalars(args.to_vec()),
@@ -47,7 +46,7 @@ impl WindowAggregate {
                 .map(crate::scalar::PreparedExpressions::scalar),
             template,
             budget_bytes,
-            accumulator,
+            accumulator: None,
             aggregated_base: 0,
             aggregated_upto: 0,
             result: Value::Null,
@@ -55,6 +54,7 @@ impl WindowAggregate {
     }
 
     pub(super) fn begin_partition(&mut self) {
+        self.accumulator = None;
         self.aggregated_base = 0;
         self.aggregated_upto = 0;
         self.result = Value::Null;
@@ -86,22 +86,25 @@ impl WindowAggregate {
         {
             return Ok(self.result.clone());
         }
-        if current.position == 0
+        if self.accumulator.is_none()
             || self.aggregated_base != head
             || frame.exclusion != FrameExclusion::NoOthers
             || self.aggregated_upto <= head
         {
-            self.accumulator = instantiate(&self.template, self.budget_bytes);
+            self.accumulator = Some(self.template.instantiate(self.budget_bytes)?);
             self.aggregated_upto = head;
         }
         self.aggregated_base = head;
+        let accumulator = self
+            .accumulator
+            .as_mut()
+            .ok_or_else(|| SQLError::Internal("window aggregate frame has no state".into()))?;
         while self.aggregated_upto < rows.len() {
             match cursor.membership(frame, current, rows, self.aggregated_upto)? {
                 Membership::After => break,
                 Membership::Outside => {}
                 Membership::Inside => {
-                    let (name, args, filter, accumulator) =
-                        (&self.name, &self.args, &self.filter, &mut self.accumulator);
+                    let (name, args, filter) = (&self.name, &self.args, &self.filter);
                     rows.with_context(self.aggregated_upto, |context| {
                         // `advance_windowaggregate`: a row whose filter is not true is skipped.
                         if let Some(filter) = filter {
@@ -125,21 +128,8 @@ impl WindowAggregate {
             }
             self.aggregated_upto += 1;
         }
-        self.result = aggregate_value_with_args(
-            &self.name,
-            &self.accumulator,
-            &self.args,
-            rows.enum_labels(),
-        )?;
+        self.result =
+            aggregate_value_with_args(&self.name, accumulator, &self.args, rows.enum_labels())?;
         Ok(self.result.clone())
     }
-}
-
-fn instantiate(
-    template: &AggregateAccumulatorTemplate,
-    budget_bytes: usize,
-) -> AggregateAccumulator {
-    instantiate_aggregate_accumulators(std::slice::from_ref(template), budget_bytes)
-        .pop()
-        .expect("one template instantiates one accumulator")
 }

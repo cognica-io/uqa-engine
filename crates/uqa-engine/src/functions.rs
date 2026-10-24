@@ -18,7 +18,7 @@ impl uqa_execution::functions::AggregateFunctionRegistry for crate::Engine {
     fn registered_aggregate_function(
         &self,
         name: &str,
-    ) -> Option<std::sync::Arc<dyn SQLAggregateFunction>> {
+    ) -> Option<std::sync::Arc<dyn SQLAggregateFactory>> {
         self.registered_aggregate_function(name)
     }
 }

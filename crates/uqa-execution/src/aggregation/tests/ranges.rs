@@ -37,7 +37,7 @@ fn scalar_range_mode_preserves_classes_in_memory_and_spill() {
                     for reverse in [false, true] {
                         let template = AggregateAccumulatorTemplate::builtin("mode", Some(&ty))
                             .with_ordering_types(vec![Some(ty.clone())]);
-                        let mut accumulator = template.instantiate(budget);
+                        let mut accumulator = template.instantiate(budget).unwrap();
                         let mut inputs = [0, 1, 2, 0, 1, 2, 2];
                         if reverse {
                             inputs.reverse();
@@ -98,7 +98,7 @@ fn scalar_range_aggregate_distinct_preserves_classes_across_merge_runs() {
         for budget in [1, 256, 64 * 1024] {
             let template = AggregateAccumulatorTemplate::builtin("count", Some(&ty))
                 .with_ordering_types(vec![Some(ty.clone())]);
-            let mut accumulator = template.instantiate(budget);
+            let mut accumulator = template.instantiate(budget).unwrap();
             for _ in 0..(AGGREGATE_MERGE_FAN_IN + 1).div_ceil(values.len()) {
                 for value in values.iter().rev() {
                     accumulator

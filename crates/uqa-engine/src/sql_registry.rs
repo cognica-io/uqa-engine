@@ -5,7 +5,7 @@
 //
 
 use super::{
-    Arc, Engine, RegisteredSQLFunction, SQLAggregateFunction, SQLError, SQLFunctionOptions,
+    Arc, Engine, RegisteredSQLFunction, SQLAggregateFactory, SQLError, SQLFunctionOptions,
     SQLFunctionVolatility, SQLScalarFunction, SQLTableFunction, Value,
 };
 
@@ -92,7 +92,7 @@ impl Engine {
         function: F,
     ) -> std::result::Result<(), SQLError>
     where
-        F: SQLAggregateFunction + 'static,
+        F: SQLAggregateFactory + 'static,
     {
         self.register_aggregate_function_with_options(name, SQLFunctionOptions::default(), function)
     }
@@ -106,7 +106,7 @@ impl Engine {
         function: F,
     ) -> std::result::Result<(), SQLError>
     where
-        F: SQLAggregateFunction + 'static,
+        F: SQLAggregateFactory + 'static,
     {
         Self::validate_sql_function_options(options)?;
         let name = Self::normalize_sql_function_name(name)?;
@@ -161,7 +161,7 @@ impl Engine {
     pub(crate) fn registered_aggregate_function(
         &self,
         name: &str,
-    ) -> Option<Arc<dyn SQLAggregateFunction>> {
+    ) -> Option<Arc<dyn SQLAggregateFactory>> {
         self.query_runtime_view()
             .lookup_aggregate_function(name)
             .map(|registration| registration.function)

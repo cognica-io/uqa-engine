@@ -16,6 +16,9 @@ use uqa_engine::{
 };
 use uqa_sql::{ast::ColumnType, SQLError};
 
+#[path = "sql_registered_functions/fallible.rs"]
+mod fallible;
+
 struct Prefixer {
     prefix: String,
 }

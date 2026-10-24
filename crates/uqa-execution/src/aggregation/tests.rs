@@ -9,6 +9,7 @@ use uqa_core::ArrayValue;
 
 mod argument_types;
 mod enums;
+mod factories;
 mod interval;
 mod legacy_vectors;
 mod mode;

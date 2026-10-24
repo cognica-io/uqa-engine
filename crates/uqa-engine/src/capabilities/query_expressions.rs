@@ -71,7 +71,7 @@ impl uqa_execution::functions::AggregateFunctionRegistry for ScopedEngineHook<'_
     fn registered_aggregate_function(
         &self,
         name: &str,
-    ) -> Option<Arc<dyn crate::SQLAggregateFunction>> {
+    ) -> Option<Arc<dyn crate::SQLAggregateFactory>> {
         self.engine.registered_aggregate_function(name)
     }
 }

@@ -156,7 +156,7 @@ pub(super) fn aggregate_sorted_input(
                 if current_key.is_none() {
                     current_key = Some(key);
                     current_accumulators =
-                        instantiate_aggregate_accumulators(&templates, accumulator_budget);
+                        instantiate_aggregate_accumulators(&templates, accumulator_budget)?;
                 }
                 observe_targets(
                     &mut current_accumulators,
@@ -179,7 +179,7 @@ pub(super) fn aggregate_sorted_input(
                 super::output::push_output_row(&mut output, output_schema, &mut pending, row)?;
             }
         } else if statement.group_by.is_empty() {
-            let accumulators = instantiate_aggregate_accumulators(&templates, accumulator_budget);
+            let accumulators = instantiate_aggregate_accumulators(&templates, accumulator_budget)?;
             if let Some(row) = super::output::finish_group(
                 context,
                 statement,

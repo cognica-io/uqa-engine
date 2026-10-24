@@ -17,7 +17,7 @@ use uqa_sql::expr::{cast_value, value_to_json_text};
 use uqa_sql::plan::QueryBlockPlan;
 use uqa_sql::{SQLError, SQLParam};
 
-use crate::functions::{SQLAggregateFunction, SQLAggregateState};
+use crate::functions::{SQLAggregateFactory, SQLAggregateState};
 
 use crate::scalar::plan::{PlanSubqueryArena, QueryExpressionContext};
 use uqa_sql::expr::core_value_to_json;

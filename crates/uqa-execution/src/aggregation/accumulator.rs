@@ -8,14 +8,14 @@
 
 use super::{
     value_as_f64, AggregateValueBuffer, Arc, DecimalValue, DistinctTracker,
-    RegisteredAggregateBuffer, SQLAggregateFunction, SQLAggregateState, SQLError, Value,
+    RegisteredAggregateBuffer, SQLAggregateFactory, SQLAggregateState, SQLError, Value,
 };
 use uqa_core::TemporalInfinity;
 use uqa_sql::expr::enums::{EnumComparisonState, EnumLabelCatalog};
 use uqa_sql::expr::IntervalFields;
 
 pub struct AggregateAccumulator {
-    pub(super) registered: Option<Arc<dyn SQLAggregateFunction>>,
+    pub(super) registered: Option<Arc<dyn SQLAggregateFactory>>,
     pub(super) registered_state: Option<Box<dyn SQLAggregateState>>,
     pub(super) registered_ordered: RegisteredAggregateBuffer,
     pub(super) count: u64,
@@ -270,14 +270,14 @@ impl AggregateAccumulator {
     }
 
     pub(super) fn registered_with_budget(
-        function: Arc<dyn SQLAggregateFunction>,
+        function: Arc<dyn SQLAggregateFactory>,
         budget_bytes: usize,
-    ) -> Self {
-        let state = function.create_state();
+    ) -> Result<Self, SQLError> {
+        let state = function.try_create_state()?;
         let mut accumulator = Self::with_budget(budget_bytes);
         accumulator.registered = Some(function);
         accumulator.registered_state = Some(state);
-        accumulator
+        Ok(accumulator)
     }
 
     pub fn observe(&mut self, value: &Value) -> Result<(), SQLError> {
@@ -762,7 +762,7 @@ impl AggregateAccumulator {
             return Some(state.and_then(|state| state.finish()));
         }
         Some((|| {
-            let mut state = function.create_state();
+            let mut state = function.try_create_state()?;
             self.registered_ordered
                 .observe_ordered_into(state.as_mut(), enums)?;
             state.finish()

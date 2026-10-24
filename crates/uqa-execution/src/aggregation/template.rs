@@ -6,7 +6,7 @@
 
 //! Aggregate call metadata and comparison support retained across groups, frames and spill restoration.
 
-use super::{AggregateAccumulator, AggregateStatePlan, SQLAggregateFunction};
+use super::{AggregateAccumulator, AggregateStatePlan, SQLAggregateFactory};
 use std::sync::Arc;
 use uqa_sql::ast::ColumnType;
 use uqa_sql::expr::enums::EnumComparisonState;
@@ -23,7 +23,7 @@ pub struct AggregateAccumulatorTemplate {
 #[derive(Clone)]
 enum AggregateKind {
     Builtin(AggregateStatePlan),
-    Registered(Arc<dyn SQLAggregateFunction>),
+    Registered(Arc<dyn SQLAggregateFactory>),
 }
 
 impl AggregateAccumulatorTemplate {
@@ -49,7 +49,7 @@ impl AggregateAccumulatorTemplate {
         }
     }
 
-    pub(super) fn registered(function: Arc<dyn SQLAggregateFunction>) -> Self {
+    pub(super) fn registered(function: Arc<dyn SQLAggregateFactory>) -> Self {
         Self {
             kind: AggregateKind::Registered(function),
             extrema: None,
@@ -85,17 +85,20 @@ impl AggregateAccumulatorTemplate {
         }
     }
 
-    pub(super) fn instantiate(&self, budget_bytes: usize) -> AggregateAccumulator {
+    pub(crate) fn instantiate(
+        &self,
+        budget_bytes: usize,
+    ) -> Result<AggregateAccumulator, uqa_sql::SQLError> {
         let mut accumulator = match &self.kind {
             AggregateKind::Builtin(plan) => {
                 AggregateAccumulator::from_plan_with_budget(*plan, budget_bytes)
             }
             AggregateKind::Registered(function) => {
-                AggregateAccumulator::registered_with_budget(Arc::clone(function), budget_bytes)
+                AggregateAccumulator::registered_with_budget(Arc::clone(function), budget_bytes)?
             }
         };
         self.restore_comparison(&mut accumulator);
-        accumulator
+        Ok(accumulator)
     }
 
     pub(super) fn restore_comparison(&self, accumulator: &mut AggregateAccumulator) {

@@ -62,7 +62,7 @@ impl crate::functions::AggregateFunctionRegistry for Services {
     fn registered_aggregate_function(
         &self,
         _: &str,
-    ) -> Option<Arc<dyn crate::functions::SQLAggregateFunction>> {
+    ) -> Option<Arc<dyn crate::functions::SQLAggregateFactory>> {
         None
     }
 }

@@ -427,6 +427,8 @@ Register scalar, table, and aggregate functions with:
 
 Default options are conservative: a function is `VOLATILE` and may mutate. Use `SQLFunctionOptions::read_only(volatility)` only when the callback is truly read-only. A callback that mutates state must remain `VOLATILE`.
 
+Aggregate registration accepts `SQLAggregateFactory`, whose `try_create_state` returns `Result<Box<dyn SQLAggregateState>, SQLError>`. Existing `SQLAggregateFunction` implementations and infallible factory closures remain accepted through a blanket adapter. Creation failures retain their diagnostics and enter the invoking statement's ordinary transaction failure path, including empty global groups; empty grouped or window inputs create no state. See the [Execution lifecycle contract](../internals/08-extension-points.md#runtime-sql-functions).
+
 Runtime callbacks are not serialized to persistent storage. Register them each time the process constructs an engine. New sessions share the runtime registry of their parent engine.
 
 ## Session settings and resource limits

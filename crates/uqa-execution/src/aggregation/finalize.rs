@@ -49,7 +49,7 @@ pub fn aggregate_value_with_args(
             Some(function) => AggregateAccumulator::registered_with_budget(
                 std::sync::Arc::clone(function),
                 budget,
-            ),
+            )?,
             None => AggregateAccumulator::from_plan_with_budget(acc.state_plan, budget),
         };
         unique.enum_comparison.clone_from(&acc.enum_comparison);

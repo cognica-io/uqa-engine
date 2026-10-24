@@ -75,7 +75,7 @@ fn verify_arguments(
     let template = AggregateAccumulatorTemplate::registered(Arc::new(ArgumentCount::default))
         .with_distinct_arguments(2)
         .with_ordering_types(types);
-    let mut accumulator = template.instantiate(budget);
+    let mut accumulator = template.instantiate(budget).unwrap();
     let inputs = [
         (0, Some(1)),
         (1, Some(1)),

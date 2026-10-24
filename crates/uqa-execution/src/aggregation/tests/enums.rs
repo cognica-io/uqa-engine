@@ -72,11 +72,11 @@ fn extrema_keep_transition_enum_state_across_groups_and_partial_merges() {
     for name in ["min", "max"] {
         let catalog = Catalog::default();
         let template = AggregateAccumulatorTemplate::builtin(name, Some(&enum_type()));
-        let mut first = template.instantiate(1);
+        let mut first = template.instantiate(1).unwrap();
         first
             .observe_with_enum_catalog(&physical(5), Some(&catalog))
             .unwrap();
-        let mut second = template.instantiate(1);
+        let mut second = template.instantiate(1).unwrap();
         second
             .observe_with_enum_catalog(&physical(4), Some(&catalog))
             .unwrap();
@@ -88,7 +88,7 @@ fn extrema_keep_transition_enum_state_across_groups_and_partial_merges() {
         );
 
         // Recreating the group or window frame does not recreate the transition function's cache.
-        let mut next = template.instantiate(1);
+        let mut next = template.instantiate(1).unwrap();
         next.observe_with_enum_catalog(&physical(11), Some(&catalog))
             .unwrap();
         let error = next
@@ -137,7 +137,7 @@ fn aggregate_sort_support_keeps_its_enum_state_when_the_group_changes() {
             }
             .with_ordering(1);
             for (group, oids) in [[5, 4], [11, 8]].into_iter().enumerate() {
-                let mut accumulator = template.instantiate(budget);
+                let mut accumulator = template.instantiate(budget).unwrap();
                 let result = (|| {
                     for oid in oids {
                         let value = physical(oid);

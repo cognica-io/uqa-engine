@@ -21,7 +21,7 @@ pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStat
 
 use super::{
     BayesianBM25Params, CommandMutationOverlay, DeepModel, RegisteredSQLFunction, RelationIdentity,
-    SQLAggregateFunction, SQLScalarFunction, SQLStatementCache, SQLTableFunction, SequenceState,
+    SQLAggregateFactory, SQLScalarFunction, SQLStatementCache, SQLTableFunction, SequenceState,
     TableFieldAnalyzerRegistry, TableState, TransactionFrame,
 };
 
@@ -458,7 +458,7 @@ pub(super) struct RuntimeExtensions {
     pub(super) table_functions:
         Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLTableFunction>>>>,
     pub(super) aggregate_functions:
-        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFunction>>>>,
+        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFactory>>>>,
 }
 
 impl RuntimeExtensions {

@@ -7,7 +7,7 @@
 //! Runtime services consumed by physical query operators and host callbacks.
 
 use crate::functions::{
-    RegisteredSQLFunction, SQLAggregateFunction, SQLFunctionOptions, SQLScalarFunction,
+    RegisteredSQLFunction, SQLAggregateFactory, SQLFunctionOptions, SQLScalarFunction,
     SQLTableFunction,
 };
 use parking_lot::RwLock;
@@ -30,7 +30,7 @@ pub struct QueryRuntimeView<'a> {
         &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLScalarFunction>>>,
     pub table_functions: &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLTableFunction>>>,
     pub aggregate_functions:
-        &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFunction>>>,
+        &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFactory>>>,
     pub notices: &'a super::NoticeQueue,
 }
 
@@ -86,7 +86,7 @@ impl QueryRuntimeView<'_> {
     pub fn lookup_aggregate_function(
         &self,
         name: &str,
-    ) -> Option<RegisteredSQLFunction<dyn SQLAggregateFunction>> {
+    ) -> Option<RegisteredSQLFunction<dyn SQLAggregateFactory>> {
         self.aggregate_functions
             .read()
             .get(&name.to_ascii_lowercase())

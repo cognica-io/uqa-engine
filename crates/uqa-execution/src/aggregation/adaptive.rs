@@ -362,7 +362,7 @@ impl AdaptiveAggregateSet {
         let accumulators = instantiate_aggregate_accumulators(
             &self.accumulator_templates,
             self.accumulator_budget,
-        );
+        )?;
         let group_bytes = estimate_group_bytes(key, &accumulators);
         if !self.statement.group_by.is_empty()
             && self

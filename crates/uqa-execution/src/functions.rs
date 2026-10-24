@@ -152,9 +152,27 @@ where
     }
 }
 
-/// Factory for per-group SQL aggregate state.
+/// Infallible factory retained for existing Rust aggregate implementations.
+///
+/// Every implementation also implements [`SQLAggregateFactory`]. A callback
+/// whose state creation can fail implements that fallible interface directly.
 pub trait SQLAggregateFunction: Send + Sync {
     fn create_state(&self) -> Box<dyn SQLAggregateState>;
+}
+
+/// Fallible creation of an independent SQL aggregate state.
+///
+/// Execution propagates creation failure before observing or finishing that
+/// state, including a global aggregate over an empty input. A failed factory
+/// remains responsible for resources it allocated before returning the error.
+pub trait SQLAggregateFactory: Send + Sync {
+    fn try_create_state(&self) -> Result<Box<dyn SQLAggregateState>, SQLError>;
+}
+
+impl<F: SQLAggregateFunction + ?Sized> SQLAggregateFactory for F {
+    fn try_create_state(&self) -> Result<Box<dyn SQLAggregateState>, SQLError> {
+        Ok(self.create_state())
+    }
 }
 
 impl<F, S> SQLAggregateFunction for F
@@ -180,5 +198,5 @@ pub trait AggregateFunctionRegistry:
     fn registered_aggregate_function(
         &self,
         name: &str,
-    ) -> Option<std::sync::Arc<dyn SQLAggregateFunction>>;
+    ) -> Option<std::sync::Arc<dyn SQLAggregateFactory>>;
 }
