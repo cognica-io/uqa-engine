@@ -1,6 +1,6 @@
 # Embedded C binding implementation
 
-Status: implementation in progress on `feature/c-bindings`, based on `5e9863beac6ce0bb72e7de60844e1f29546a86b8`, tracked by [draft PR #1266](https://github.com/cognica-io/uqa-engine/pull/1266). The [C binding design](../design/c-bindings.md) defines the requested interface. Current product source is `d94a294f02adf392efcabbfb4ce6112de33653db`; subsequent task-record changes do not qualify additional product behavior. No C runtime release, completed qualification, or delivery is claimed by this ledger.
+Status: implementation in progress on `feature/c-bindings`, with main `f7cf634b4db0dc56c6ecfbd11bec7b80b56dbff2` integrated at `f7f725338033396bc4e91a5e8f80c68293d6b0db`, tracked by [draft PR #1266](https://github.com/cognica-io/uqa-engine/pull/1266). The [C binding design](../design/c-bindings.md) defines the requested interface. Current product source is `f7f725338033396bc4e91a5e8f80c68293d6b0db`; subsequent task-record changes do not qualify additional product behavior. No C runtime release, completed qualification, or delivery is claimed by this ledger.
 
 ## Scope and accepted requirements
 
@@ -80,13 +80,14 @@ Completed checks below cover the stated implementation and local evidence at the
 
 **13. Five C examples, example matrix and manual updates, actual shared/static C/C++ ABI tests, focused owner tests, sanitizers, and ownership/dependency checks**
 
-- [x] Execute the current C11/C++17 shared ABI clients and focused owner tests: 17 FFI integration tests, 95 native notification tests and 5 bounded-session regressions pass. Strict Clippy, formatting, whitespace, ownership/dependency, harness and Rust-size checks pass; earlier source-scoped owner evidence remains below.
+- [x] Execute C11/C++17 shared ABI clients and focused owner tests. Merged source f7f725338 passes 17 FFI integration tests, 4 materialization owner tests and strict FFI/Engine/Execution Clippy. Notification source d94a294f0 passes 95 native notification tests and 5 bounded-session regressions. Formatting, whitespace, ownership/dependency, harness and Rust-size checks pass; source-scoped evidence remains below.
 - [ ] Implement and execute all five public C examples, update the example matrix/manual, and complete static/shared platform consumers, feature combinations, allocation/panic qualification and sanitizers.
 
 **14. Logical commits, draft PR/task records and repository labels, review corrections, final-source automatic Linux/macOS regression and affected FDW results, and verified delivery**
 
 - [x] Commit and push the implemented units to draft PR #1266, retain the original full scope and source-scoped evidence, and verify its enhancement/area: bindings/area: sql labels, head and task/design links.
-- [ ] Finish the remaining implementation and review fixes, reconcile the current main-branch merge conflict, qualify the final source through automatic Linux/macOS performance regression and affected FDW checks, then complete verified merge/delivery, issue closure and branch cleanup. Keep the PR draft until the implementation and focused review batch is complete.
+- [x] Integrate main f7cf634b4 while preserving both plan-index entries and the unrelated user README edit; verify the inherited materialization correction with owner tests and the C/C++ suite at merge source f7f725338.
+- [ ] Finish the remaining implementation and review fixes, qualify the final source through automatic Linux/macOS performance regression and affected FDW checks, then complete verified merge/delivery, issue closure and branch cleanup. Keep the PR draft until the implementation and focused review batch is complete.
 
 ## Verification record
 
@@ -113,3 +114,5 @@ Notification source `d94a294f02adf392efcabbfb4ce6112de33653db`, with native owne
 `cargo test -p uqa-engine --lib notifications::` passed ninety-five owner tests, including the new admission rejection/unwind and exact-maximum-sequence checks, SQL-session deferral and terminal errors, and existing asynchronous receive, cancellation, provider cleanup and cross-process recovery cases. `cargo test -p uqa-engine --test integration bounded_session::` passed five existing memory/native-SQLite bounded-session regressions. The C transaction expectations use independently captured PostgreSQL 18 notification-session and rule/NOTIFY fixtures; the C adapter adds no SQL parsing or transaction implementation.
 
 Strict Clippy passed for the FFI library/tests and Engine library/tests; formatting, whitespace, workspace dependencies, Engine capability ownership, integration-harness coverage and Rust-size checks passed. All ten checked-in C/header files use the exact required copyright block. The shared Mach-O symbol inventory now contains 129 of 159 declared functions plus 17 internal regex callbacks; full values, prepared statements, UDFs, logging, Arrow and final distribution linkage remain open. No final-source Linux/macOS performance, affected FDW, static, sanitizer, complete-feature or release qualification is claimed. The full delivery checklist remains live and incomplete.
+
+Main integration source `f7f725338033396bc4e91a5e8f80c68293d6b0db` merges `f7cf634b4db0dc56c6ecfbd11bec7b80b56dbff2` and resolves the plan-index conflict by retaining the C implementation entry and the updated upstream records. The unrelated working-tree edit in `tests/parity/pg18/README.md` remains untouched. `cargo test -p uqa-execution --lib batch::tests::materialization` passes all four inherited selected-value transfer regressions, and `cargo test -p uqa-ffi --no-default-features --test integration` passes all seventeen current Rust/C11/C++17 cases. `cargo clippy -p uqa-ffi -p uqa-engine -p uqa-execution --no-default-features --lib --tests -- -D warnings`, formatting, whitespace and workspace ownership/dependency checks pass. Earlier notification owner runs retain their recorded source identities; final-source platform/performance qualification and the remaining implementation are still open.
