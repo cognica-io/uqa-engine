@@ -19,6 +19,8 @@ use crate::{
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 use uqa_core::memory::ProductionControl;
 
+mod table;
+
 fn bound_call() -> (
     Arc<crate::routines::SQLUserFunction>,
     crate::ast::FunctionBinding,

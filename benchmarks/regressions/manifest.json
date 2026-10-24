@@ -24511,6 +24511,19 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_result_descriptions_bound_repeated_declaration_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body/table.rs",
+      "capability": "SQL table routine result description work",
+      "workload": "512 changing values and NULLs through one fixed domain result declaration.",
+      "invariant": "Resolve the unchanged table result declaration once, preserve every current value and all 512 live domain checks.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
