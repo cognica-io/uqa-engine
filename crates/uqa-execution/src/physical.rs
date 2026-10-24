@@ -129,6 +129,12 @@ pub trait PhysicalOperator: Send {
 
     fn open(&mut self) -> ExecResult<()>;
     fn next(&mut self) -> ExecResult<Option<Batch>>;
+
+    /// Whether a complete, effect-free consumer may use native batches without changing SQL expression, side-effect or first-error order relative to singleton demand. Unclassified pipelines retain singleton demand. A producer with additional per-row evaluation above its child must establish that ordering independently; row order alone is insufficient.
+    fn supports_batched_consumption(&self) -> bool {
+        false
+    }
+
     /// Pull at most `rows` newly evaluated output rows. Pipelined expression producers must propagate demand before evaluating their inputs. A semantic materialization boundary may return a larger already-evaluated batch; its consumer retains that remainder without evaluating it again. The default preserves that materialized-batch contract, so an effectful streaming adapter must override this method.
     fn next_with_demand(&mut self, _rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
         self.next()

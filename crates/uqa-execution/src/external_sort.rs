@@ -308,6 +308,11 @@ impl PhysicalOperator for ExternalSort<'_> {
         &self.schema
     }
 
+    fn supports_batched_consumption(&self) -> bool {
+        // Input evaluation finishes in open; both pull methods read the same already-sorted batches.
+        true
+    }
+
     fn output_ordering(&self) -> &[PhysicalOrder] {
         &self.ordering
     }

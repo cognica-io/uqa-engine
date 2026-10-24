@@ -454,6 +454,10 @@ impl PhysicalOperator for ColumnSelection<'_> {
         &self.schema
     }
 
+    fn supports_batched_consumption(&self) -> bool {
+        self.child.supports_batched_consumption()
+    }
+
     fn estimated_cardinality(&self) -> Option<u64> {
         self.child.estimated_cardinality()
     }

@@ -845,6 +845,21 @@ impl crate::RowSource for ScoredDocumentSource {
         self.schema.columns()
     }
 
+    fn supports_batched_consumption(&self) -> bool {
+        // Plain scans keep predicate evaluation in row order. Candidate materialization, generated fields and locking/recheck reads retain their row boundaries.
+        matches!(self.input, ScoredInputCursor::All { .. })
+            && self.lock_origin.is_none()
+            && !self.recheck_pinned
+            && !crate::query::generated::projection_contains_virtual_generated_column(
+                &self.column_definitions,
+                &self.projected_fields,
+            )
+            && !crate::query::document_projection::projections_use_tuple_xmin(
+                &self.projected_fields,
+                &self.column_definitions,
+            )
+    }
+
     fn physical_schema(&self) -> Option<&crate::RowSchema> {
         Some(&self.schema)
     }

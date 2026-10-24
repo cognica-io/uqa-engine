@@ -73,6 +73,10 @@ impl QueryRowConsumer for PublicRows {
         Ok(QueryConsumerControl::Continue)
     }
 
+    fn input_demand(&self) -> Option<std::num::NonZeroUsize> {
+        None
+    }
+
     fn streams_set_inputs(&self) -> bool {
         // Changing final row ownership must preserve the statement's existing set-input evaluation order.
         false

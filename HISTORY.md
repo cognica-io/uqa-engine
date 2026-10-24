@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve native producer batches for complete SQL results when both the consumer and producer preserve evaluation order, avoiding one pipeline pull and batch allocation per row on eligible paths. Computed projections, early-stop, cardinality and directional consumers retain their original evaluation, side-effect and error boundaries.
+
 - Update ctutils to restore constant-time cryptographic operations, Tokio to fix AsyncFd I/O safety, and clipboard-win to the maintained non-yanked patch release. Existing dependency audit and licensing policies remain enforced.
 
 - Read externally shared scan rows directly into columnar output, avoiding per-row projection sorting and failed ownership transfers while retaining payload donation from the final exclusive owner.

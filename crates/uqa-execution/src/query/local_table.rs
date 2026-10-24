@@ -85,6 +85,12 @@ impl crate::RowSource for HierarchyRowSource {
         &self.schema
     }
 
+    fn supports_batched_consumption(&self) -> bool {
+        self.sources
+            .iter()
+            .all(crate::RowSource::supports_batched_consumption)
+    }
+
     fn physical_schema(&self) -> Option<&crate::RowSchema> {
         Some(&self.physical_schema)
     }

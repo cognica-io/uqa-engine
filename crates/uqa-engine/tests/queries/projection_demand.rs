@@ -13,6 +13,40 @@ use uqa_engine::Engine;
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn complete_results_preserve_postgresql_error_and_effect_order(#[case] provider: usize) {
+    // Independent Docker PostgreSQL 18.4: forward rows produce 22003, reversed rows produce 22012, and interleaved nextval calls return 2 then 4.
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("complete-batch-order.db"));
+    for suffix in ["", " LIMIT 2"] {
+        let error = engine
+            .sql(
+                &format!("SELECT 9223372036854775807::bigint + x::bigint FROM (VALUES (1),(0)) v(x) WHERE 10/x > 0{suffix}"),
+                &[],
+            )
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22003"), "{error}");
+    }
+    let error = engine.sql("SELECT 9223372036854775807::bigint + x::bigint FROM (VALUES (0),(1)) v(x) WHERE 10/x > 0", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22012"), "{error}");
+    engine
+        .sql("CREATE SEQUENCE complete_batch_effect", &[])
+        .unwrap();
+    let result = engine.sql("SELECT nextval('complete_batch_effect') AS value FROM (VALUES (1),(2)) v(x) WHERE nextval('complete_batch_effect') > 0", &[]).unwrap();
+    assert_eq!(
+        result
+            .rows
+            .iter()
+            .map(|row| row["value"].clone())
+            .collect::<Vec<_>>(),
+        vec![uqa_core::Value::Int(2), uqa_core::Value::Int(4)]
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn materialized_prefix_matches_postgresql_and_reopen(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("materialized-prefix.db");

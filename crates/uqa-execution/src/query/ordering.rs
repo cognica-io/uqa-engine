@@ -7,7 +7,6 @@
 //! Physical output positions and ordering expression identities.
 
 use crate::query::projection::{projection_target_expression, visible_projection_source_position};
-use crate::query::row_at_a_time::RowAtATime;
 use crate::query::{OutputColumnMapping, PhysicalProjection};
 use crate::{ProjectionTarget, ScalarExpr, SharedExpressionEvaluator};
 use std::collections::HashSet;
@@ -393,11 +392,10 @@ pub fn append_row_at_time_projection<'a>(
     if projections.is_empty() {
         return operator;
     }
-    Box::new(crate::Project::appending_target_evaluator(
-        Box::new(RowAtATime::new(operator)),
-        projections,
-        evaluator,
-    ))
+    Box::new(
+        crate::Project::appending_target_evaluator(operator, projections, evaluator)
+            .with_row_at_a_time_input(),
+    )
 }
 
 #[cfg(test)]
