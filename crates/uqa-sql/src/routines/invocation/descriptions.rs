@@ -23,6 +23,7 @@ use uqa_core::{
 
 mod body;
 mod procedural;
+mod table;
 pub use procedural::ProceduralRoutineDescription;
 
 /// Identity of the native routine registry and type-resolution environment. Adapters must decline or replace it whenever a bound routine or type can resolve differently.
@@ -59,6 +60,7 @@ pub struct RoutineCallDescription {
     parameters: Produced<Vec<OnceLock<Produced<RoutineValueDescription>>>>,
     body_parameters: Produced<Vec<OnceLock<Produced<ColumnType>>>>,
     body_result: OnceLock<Box<body::ResultDescription>>,
+    table_result: OnceLock<Box<Produced<crate::routines::result_check::SQLFunctionResultLayout>>>,
     procedural: OnceLock<Box<procedural::ProceduralSlots>>,
     _memory: Option<MemoryReservation>,
 }
@@ -184,6 +186,7 @@ impl RoutineCallDescription {
             parameters,
             body_parameters,
             body_result: OnceLock::new(),
+            table_result: OnceLock::new(),
             procedural: OnceLock::new(),
             _memory: memory,
         }))

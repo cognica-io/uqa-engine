@@ -48,6 +48,7 @@
 
 pub mod cardinality;
 pub mod cost_model;
+pub mod empty_sources;
 pub mod join_enumerator;
 pub mod join_graph;
 pub mod join_order;

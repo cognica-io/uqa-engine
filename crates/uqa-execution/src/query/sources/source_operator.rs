@@ -77,6 +77,10 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync +
     use crate::PhysicalOperator;
     let bindings = bindings.filter(|binding| binding.matches_source(from));
 
+    if context.planning.source_is_empty(from) {
+        return empty_source_operator(context, from, params, ctes, None);
+    }
+
     if let Some(source) = recheck_path
         .as_deref()
         .and_then(|path| ctes.recheck_source_row(path))
@@ -133,4 +137,21 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync +
             build_subquery_source_operator(context, from, params, ctes, prune, filters, bindings)
         }
     }
+}
+
+/// Keep the analyzed row descriptor while omitting every removed scan's initialization and row effects. SELECT authorization is performed by the containing block before assembly.
+pub(crate) fn empty_source_operator<'a, S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'a, S>,
+    source: &SourcePlan,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    outer: Option<&crate::RowSchema>,
+) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
+    let outer = outer.or_else(|| ctes.row_lock_outer_row().map(|row| &row.schema));
+    let schema =
+        super::bind_source_plan_schema(context.ctes.routines, source, params, ctes, outer)?;
+    Ok(Box::new(crate::TableScan::from_physical_rows(
+        schema,
+        Vec::new(),
+    )))
 }

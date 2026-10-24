@@ -25,6 +25,18 @@ use uqa_sql::{
 
 /// Planner decisions needed when a parameterized source is assembled for execution.
 pub trait SourcePlanning<S: Clone>: Sync {
+    /// Whether the planner removes this source's physical scan. The default keeps initialization for planners without this proof.
+    fn source_is_empty(&self, _source: &SourcePlan) -> bool {
+        false
+    }
+    /// Whether a block keeps its output operators but removes its FROM input.
+    fn block_input_is_empty(&self, _statement: &QueryBlockPlan) -> bool {
+        false
+    }
+    /// Whether an outer join removes one matching input while retaining its preserved side.
+    fn join_input_is_empty(&self, _join: &SourcePlan, _right: bool) -> bool {
+        false
+    }
     fn column_prune_with_filter(
         &self,
         statement: &QueryBlockPlan,

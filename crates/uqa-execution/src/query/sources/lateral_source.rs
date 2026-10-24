@@ -83,12 +83,34 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
         >,
     >,
     pub(super) function_arguments: Option<crate::scalar::PreparedExpressions<Vec<ScalarExpr>>>,
+    pub(super) routine_descriptions:
+        uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions,
+    pub(super) expression_runtime: std::sync::OnceLock<
+        std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
+    >,
     pub(super) params: &'a [SQLParam],
     pub(super) ctes: CteScope<S>,
     /// Calling join row followed by any enclosing-query values. Only the join's own row changes between calls.
     pub(super) input_schema: crate::RowSchema,
     pub(super) right_schema: crate::RowSchema,
     pub(super) pinned_right: Option<crate::OwnedPhysicalRow>,
+}
+
+impl<'a, S: Clone + 'static> QueryLateralSource<'a, S> {
+    fn expression_runtime(
+        &self,
+    ) -> std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a> {
+        if let Some(saved) = self.expression_runtime.get() {
+            if saved.routine_description_scope().is_some() {
+                return std::sync::Arc::clone(saved);
+            }
+        }
+        let hook = self.context.relational.expression_scope(self.ctes.clone());
+        if hook.routine_description_scope().is_some() {
+            let _ = self.expression_runtime.set(std::sync::Arc::clone(&hook));
+        }
+        hook
+    }
 }
 
 impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLateralSource<'a, S> {
@@ -140,39 +162,56 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
             column_types,
         } = &self.right
         {
-            let hook = self.context.relational.expression_scope(self.ctes.clone());
-            let resolved = resolve_user_table_function(
-                self.context.relational.catalog,
-                name,
-                binding.as_ref(),
-                args,
-                &left_row.schema,
-                self.params,
-                hook.as_ref(),
-            )?;
-            validate_table_function_column_definition(
-                self.context.relational.catalog,
-                uqa_sql::semantics::ColumnDefinitionRequest {
+            let hook = self.expression_runtime();
+            let retained_function = binding
+                .as_ref()
+                .filter(|binding| !binding.builtin && left_row.schema == self.input_schema)
+                .and_then(|binding| {
+                    let scope = hook.routine_description_scope()?;
+                    self.routine_descriptions.get(binding, &scope)?.function()
+                });
+            let resolved = if retained_function.is_some() {
+                None
+            } else {
+                resolve_user_table_function(
+                    self.context.relational.catalog,
                     name,
-                    binding: binding.as_ref(),
-                    user_function: resolved.as_ref().map(|resolved| resolved.function.as_ref()),
-                    user_invocation: resolved
-                        .as_ref()
-                        .and_then(|resolved| resolved.binding.invocation.as_deref()),
+                    binding.as_ref(),
                     args,
-                    declared_types: column_types,
-                    column_names: column_aliases,
-                },
-                &left_row.schema,
-                self.params,
-                hook.as_ref(),
-            )?;
+                    &left_row.schema,
+                    self.params,
+                    hook.as_ref(),
+                )?
+            };
+            let selected_binding = resolved
+                .as_ref()
+                .map(|resolved| &resolved.binding)
+                .or(binding.as_ref());
+            // A successful fixed-source validation precedes publication of this
+            // call's description. Explicit record definitions retain live lookup.
+            if retained_function.is_none() || !column_types.is_empty() {
+                validate_table_function_column_definition(
+                    self.context.relational.catalog,
+                    uqa_sql::semantics::ColumnDefinitionRequest {
+                        name,
+                        binding: binding.as_ref(),
+                        user_function: retained_function.as_deref().or_else(|| {
+                            resolved.as_ref().map(|resolved| resolved.function.as_ref())
+                        }),
+                        user_invocation: selected_binding
+                            .and_then(|binding| binding.invocation.as_deref()),
+                        args,
+                        declared_types: column_types,
+                        column_names: column_aliases,
+                    },
+                    &left_row.schema,
+                    self.params,
+                    hook.as_ref(),
+                )?;
+            }
             let call = TableFunctionCall {
                 name,
-                binding: resolved
-                    .as_ref()
-                    .map(|resolved| &resolved.binding)
-                    .or(binding.as_ref()),
+                binding: selected_binding,
                 output_name,
                 relations: relations.as_ref(),
                 args: self
@@ -183,6 +222,7 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
                     .function_arguments
                     .as_ref()
                     .map(crate::scalar::PreparedExpressions::calls),
+                routine_descriptions: Some(&self.routine_descriptions),
                 alias: alias.as_deref(),
                 column_aliases,
                 ordinality: *ordinality,
@@ -221,7 +261,7 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
         let Some(filter) = self.on.as_ref() else {
             return Ok(true);
         };
-        let scoped_hook = self.context.relational.expression_scope(self.ctes.clone());
+        let scoped_hook = self.expression_runtime();
         let subquery_arena =
             PlanSubqueryArena::new(&self.ctes.scalar_subqueries, Some(scoped_hook.as_ref()));
         let context = ScalarEvalContext::from_row_lookup(joined, self.params)

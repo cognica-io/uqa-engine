@@ -72,18 +72,22 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .propagated_join_filters(filters, right, left, on.as_ref())
             });
             let left_filter_ref = left_filters.as_ref().or(filters);
-            let left_operator = build_join_operator_with_ctes_at_path(
-                context,
-                left,
-                params,
-                ctes,
-                prune,
-                left_filter_ref,
-                left_recheck_path,
-                bindings
-                    .and_then(|bindings| bindings.join_child(false))
-                    .as_ref(),
-            )?;
+            let left_operator = if context.planning.join_input_is_empty(from, false) {
+                super::empty_source_operator(context, left, params, ctes, None)?
+            } else {
+                build_join_operator_with_ctes_at_path(
+                    context,
+                    left,
+                    params,
+                    ctes,
+                    prune,
+                    left_filter_ref,
+                    left_recheck_path,
+                    bindings
+                        .and_then(|bindings| bindings.join_child(false))
+                        .as_ref(),
+                )?
+            };
             let implicit_lateral_function = match right.as_ref() {
                 SourcePlan::Function { name, .. } => {
                     let identity = name.to_ascii_lowercase();
@@ -118,7 +122,8 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     },
                 )
             });
-            let dependent = match lateral_input.as_ref() {
+            let right_empty = context.planning.join_input_is_empty(from, true);
+            let dependent = match lateral_input.as_ref().filter(|_| !right_empty) {
                 Some(input) => crate::query::binding::source_depends_on_current_row(
                     context.ctes.routines,
                     right,
@@ -250,6 +255,8 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         }
                         _ => None,
                     },
+                    routine_descriptions: Default::default(),
+                    expression_runtime: std::sync::OnceLock::new(),
                     params,
                     ctes: ctes.clone(),
                     input_schema,
@@ -273,18 +280,22 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 return alias_join_operator(joined, alias.as_deref(), column_aliases);
             }
 
-            let right_operator = build_join_operator_with_ctes_at_path(
-                context,
-                right,
-                params,
-                ctes,
-                prune,
-                right_filter_ref,
-                right_recheck_path,
-                bindings
-                    .and_then(|bindings| bindings.join_child(true))
-                    .as_ref(),
-            )?;
+            let right_operator = if right_empty {
+                super::empty_source_operator(context, right, params, ctes, lateral_input.as_ref())?
+            } else {
+                build_join_operator_with_ctes_at_path(
+                    context,
+                    right,
+                    params,
+                    ctes,
+                    prune,
+                    right_filter_ref,
+                    right_recheck_path,
+                    bindings
+                        .and_then(|bindings| bindings.join_child(true))
+                        .as_ref(),
+                )?
+            };
 
             let left_schema = left_operator.row_schema().clone();
             let right_schema = right_operator.row_schema().clone();

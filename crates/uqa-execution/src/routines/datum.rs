@@ -32,7 +32,6 @@ impl Interpreter<'_> {
         source: Option<&ColumnType>,
         record_schema: Option<uqa_sql::RowSchema>,
     ) -> Result<(), SQLError> {
-        let target_type = self.datum_type(idx)?;
         match &self.datums[idx] {
             PLpgSQLDatum::Var(var) => {
                 if var.constant {
@@ -83,6 +82,7 @@ impl Interpreter<'_> {
                 }
             }
             PLpgSQLDatum::RecField { field, parent } => {
+                let target_type = self.datum_type(idx)?;
                 let value = match target_type.as_ref() {
                     Some(target) => uqa_sql::assignment::conversion::coerce_assignment_value(
                         self.services.expressions,

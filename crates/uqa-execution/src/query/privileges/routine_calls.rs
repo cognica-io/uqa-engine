@@ -87,7 +87,11 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
                     scope,
                 )?;
             }
-            if let Some(from) = &block.from {
+            if let Some(from) = block
+                .from
+                .as_ref()
+                .filter(|_| !context.planning.block_input_is_empty(block))
+            {
                 source_calls(context, permissions, from, params, scope, Some(&schema))?;
             }
         }
@@ -198,6 +202,9 @@ pub(crate) fn source_calls<S: Clone + Send + Sync + 'static>(
     ctes: &CteScope<S>,
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
+    if context.planning.source_is_empty(source) {
+        return Ok(());
+    }
     match source {
         SourcePlan::Table {
             name,
@@ -228,8 +235,12 @@ pub(crate) fn source_calls<S: Clone + Send + Sync + 'static>(
             initialize(context, permissions, body, params, ctes, outer)?;
         }
         SourcePlan::Join { left, right, .. } => {
-            source_calls(context, permissions, left, params, ctes, outer)?;
-            source_calls(context, permissions, right, params, ctes, outer)?;
+            if !context.planning.join_input_is_empty(source, false) {
+                source_calls(context, permissions, left, params, ctes, outer)?;
+            }
+            if !context.planning.join_input_is_empty(source, true) {
+                source_calls(context, permissions, right, params, ctes, outer)?;
+            }
         }
         SourcePlan::Function {
             binding: Some(binding),

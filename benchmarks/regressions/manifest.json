@@ -24524,6 +24524,142 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_declarations_recheck_changed_scope_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body/table.rs",
+      "capability": "Bound table routine descriptions",
+      "workload": "Scoped declaration reuse, missing/changed scope, cancellation, full optional allowance and failed/callback-invalidated resolution.",
+      "invariant": "Retain only a successful fixed declaration in the current scope, preserve live errors and release every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_declarations_decline_full_allowance_and_search_path_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body/table.rs",
+      "capability": "Bound table routine descriptions",
+      "workload": "Scoped declaration reuse, missing/changed scope, cancellation, full optional allowance and failed/callback-invalidated resolution.",
+      "invariant": "Retain only a successful fixed declaration in the current scope, preserve live errors and release every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_or_invalidated_table_declarations_are_never_retained",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body/table.rs",
+      "capability": "Bound table routine descriptions",
+      "workload": "Scoped declaration reuse, missing/changed scope, cancellation, full optional allowance and failed/callback-invalidated resolution.",
+      "invariant": "Retain only a successful fixed declaration in the current scope, preserve live errors and release every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "projection_presence_and_invocation_share_successful_bound_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/invocation/resolution/tests/projection.rs",
+      "capability": "Bound projection routine lookup",
+      "workload": "512 changing arguments, builtin dispatch, current scope and dropped weak routine owner.",
+      "invariant": "Only the first presence and invocation look up the identity; values remain current and stale/expired metadata resumes live lookup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "projection_presence_does_not_pin_a_removed_routine",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/invocation/resolution/tests/projection.rs",
+      "capability": "Bound projection routine lookup",
+      "workload": "512 changing arguments, builtin dispatch, current scope and dropped weak routine owner.",
+      "invariant": "Only the first presence and invocation look up the identity; values remain current and stale/expired metadata resumes live lookup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_table_descriptions_follow_replacement_rollback_and_privileges",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/capabilities/query_expressions/routine_descriptions/tests.rs",
+      "capability": "Native table routine scope adapters",
+      "workload": "SQL and PL/pgSQL table/projection calls with replacement, rollback, STRICT NULL privileges and a 64KiB allowance.",
+      "invariant": "Native adapters qualify metadata, preserve current effects/errors and release admitted state.",
+      "case_names": [
+        "case_1_sql",
+        "case_2_plpgsql"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_bound_table_descriptions_keep_current_values_and_release_allowance",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/capabilities/query_expressions/routine_descriptions/tests.rs",
+      "capability": "Native table routine scope adapters",
+      "workload": "SQL and PL/pgSQL table/projection calls with replacement, rollback, STRICT NULL privileges and a 64KiB allowance.",
+      "invariant": "Native adapters qualify metadata, preserve current effects/errors and release admitted state.",
+      "case_names": [
+        "case_1_sql",
+        "case_2_plpgsql"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "table_routine_descriptions_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/invocation_descriptions.rs",
+      "capability": "Table routine PostgreSQL semantics",
+      "workload": "78 independent PostgreSQL 18.4 statements through memory, SQLite, SQLite Key/Value and redb with persistent reopen.",
+      "invariant": "Preserve values, NULLs, set projections, LATERAL/ROWS FROM/ordinality, defaults, volatile arguments, domains, record targets, replacement, rollback and permissions; eliminated scans skip initialization while LIMIT 0 and implicit aggregate groups retain it.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "empty_source_proofs_preserve_scan_initialization_and_implicit_groups",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/empty_sources/tests.rs",
+      "capability": "Empty relational input initialization",
+      "workload": "Folded false/NULL, runtime predicates, LIMIT 0, implicit/grouped aggregates and preserved outer-join inputs.",
+      "invariant": "Eliminate only statically removed physical inputs; retain runtime-empty scan initialization, implicit aggregate rows and preserved outer-join rows."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "empty_join_proofs_preserve_both_outer_join_sides",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/empty_sources/tests.rs",
+      "capability": "Empty relational input initialization",
+      "workload": "Folded false/NULL, runtime predicates, LIMIT 0, implicit/grouped aggregates and preserved outer-join inputs.",
+      "invariant": "Eliminate only statically removed physical inputs; retain runtime-empty scan initialization, implicit aggregate rows and preserved outer-join rows."
     }
   ]
 }

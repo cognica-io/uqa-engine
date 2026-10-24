@@ -400,6 +400,12 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         )
     }
 
+    fn routine_description_scope(
+        &self,
+    ) -> Option<uqa_sql::routines::invocation::descriptions::RoutineDescriptionScope> {
+        ScopedEngineHook::routine_description_scope(self)
+    }
+
     fn call_bound_user_function_with_descriptions(
         &self,
         binding: &uqa_sql::ast::FunctionBinding,
