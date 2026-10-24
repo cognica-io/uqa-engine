@@ -193,6 +193,8 @@ mod builtin_routine_identities;
 #[path = "pg18_semantics/date_trunc_interval.rs"]
 mod date_trunc_interval;
 
+#[path = "pg18_semantics/integer_bitwise.rs"]
+mod integer_bitwise;
 #[path = "pg18_semantics/numeric_routine_identities.rs"]
 mod numeric_routine_identities;
 

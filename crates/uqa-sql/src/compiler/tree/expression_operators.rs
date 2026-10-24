@@ -255,6 +255,15 @@ impl OperatorLowering {
             "||" => Self::Dispatched(FunctionDispatch::Concat { oid: None }),
             "%" => Self::Dispatched(FunctionDispatch::NumericOperator(NumericOperator::Modulo)),
             "^" => Self::Dispatched(FunctionDispatch::NumericOperator(NumericOperator::Power)),
+            "&" => Self::Dispatched(FunctionDispatch::NumericOperator(NumericOperator::BitAnd)),
+            "|" => Self::Dispatched(FunctionDispatch::NumericOperator(NumericOperator::BitOr)),
+            "#" => Self::Dispatched(FunctionDispatch::NumericOperator(NumericOperator::BitXor)),
+            "<<" => Self::Dispatched(FunctionDispatch::NumericOperator(
+                NumericOperator::ShiftLeft,
+            )),
+            ">>" => Self::Dispatched(FunctionDispatch::NumericOperator(
+                NumericOperator::ShiftRight,
+            )),
             "~" | "~*" | "!~" | "!~*" | "~~" | "!~~" | "~~*" | "!~~*" | "^@" => {
                 Self::Dispatched(FunctionDispatch::Pattern {
                     operator: PatternOperator::from_symbol(name).expect("pattern symbol"),
@@ -342,6 +351,7 @@ fn compile_unary_operator(name: &str, rhs: &pg_query::protobuf::Node) -> Result<
         "|/" => Ok(numeric_operator(NumericOperator::SquareRoot, rhs)),
         "||/" => Ok(numeric_operator(NumericOperator::CubeRoot, rhs)),
         "@" => Ok(numeric_operator(NumericOperator::Absolute, rhs)),
+        "~" => Ok(numeric_operator(NumericOperator::BitNot, rhs)),
         other => Err(SQLError::Unsupported(format!("unary operator `{other}`"))),
     }
 }

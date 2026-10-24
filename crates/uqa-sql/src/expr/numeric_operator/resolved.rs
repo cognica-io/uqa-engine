@@ -58,7 +58,12 @@ impl ResolvedNumericOperator {
             )?;
         }
         let arguments = converted.finish()?;
-        let value = super::evaluate_converted(self.operator, &arguments, control)?;
+        let value = super::evaluate_converted(
+            self.operator,
+            &arguments,
+            &self.result.target_type(),
+            control,
+        )?;
         // The shared value carrier does not encode int2/int4 or real width.
         self.result.evaluate(&value, control)
     }

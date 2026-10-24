@@ -904,7 +904,15 @@ fn numeric_operator_precedence(operator: uqa_sql::ast::NumericOperator) -> u8 {
         NumericOperator::Modulo => 60,
         NumericOperator::Power => 65,
         NumericOperator::Plus => 70,
-        NumericOperator::Absolute | NumericOperator::SquareRoot | NumericOperator::CubeRoot => 45,
+        NumericOperator::Absolute
+        | NumericOperator::SquareRoot
+        | NumericOperator::CubeRoot
+        | NumericOperator::BitAnd
+        | NumericOperator::BitOr
+        | NumericOperator::BitXor
+        | NumericOperator::BitNot
+        | NumericOperator::ShiftLeft
+        | NumericOperator::ShiftRight => 45,
     }
 }
 

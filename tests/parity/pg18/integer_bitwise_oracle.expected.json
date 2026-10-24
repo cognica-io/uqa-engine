@@ -1,0 +1,2125 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TABLE bitwise_inputs(id integer PRIMARY KEY, s smallint, i integer, b bigint)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "create_inputs"
+    },
+    {
+      "sql": "INSERT INTO bitwise_inputs VALUES (1, 7, 7, 7), (2, -7, -7, -7), (3, -32768, -2147483648, -9223372036854775808), (4, 32767, 2147483647, 9223372036854775807), (5, NULL, NULL, NULL)",
+      "command_tags": [
+        "INSERT 0 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "insert_inputs"
+    },
+    {
+      "sql": "SELECT id, s & 3::smallint AS band, s | 3::smallint AS bor, s # 3::smallint AS bxor, ~s AS bnot FROM bitwise_inputs ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "band",
+            "bor",
+            "bxor",
+            "bnot"
+          ],
+          "type_oids": [
+            23,
+            21,
+            21,
+            21,
+            21
+          ],
+          "rows": [
+            [
+              "1",
+              "3",
+              "7",
+              "4",
+              "-8"
+            ],
+            [
+              "2",
+              "1",
+              "-5",
+              "-6",
+              "6"
+            ],
+            [
+              "3",
+              "0",
+              "-32765",
+              "-32765",
+              "32767"
+            ],
+            [
+              "4",
+              "3",
+              "32767",
+              "32764",
+              "-32768"
+            ],
+            [
+              "5",
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "values_s",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id, c.n, s << c.n AS left_shift, s >> c.n AS right_shift FROM bitwise_inputs CROSS JOIN (VALUES (-1), (0), (15), (16), (31), (32), (63), (64)) c(n) ORDER BY id, c.n",
+      "command_tags": [
+        "SELECT 40"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n",
+            "left_shift",
+            "right_shift"
+          ],
+          "type_oids": [
+            23,
+            23,
+            21,
+            21
+          ],
+          "rows": [
+            [
+              "1",
+              "-1",
+              "0",
+              "0"
+            ],
+            [
+              "1",
+              "0",
+              "7",
+              "7"
+            ],
+            [
+              "1",
+              "15",
+              "-32768",
+              "0"
+            ],
+            [
+              "1",
+              "16",
+              "0",
+              "0"
+            ],
+            [
+              "1",
+              "31",
+              "0",
+              "0"
+            ],
+            [
+              "1",
+              "32",
+              "7",
+              "7"
+            ],
+            [
+              "1",
+              "63",
+              "0",
+              "0"
+            ],
+            [
+              "1",
+              "64",
+              "7",
+              "7"
+            ],
+            [
+              "2",
+              "-1",
+              "0",
+              "-1"
+            ],
+            [
+              "2",
+              "0",
+              "-7",
+              "-7"
+            ],
+            [
+              "2",
+              "15",
+              "-32768",
+              "-1"
+            ],
+            [
+              "2",
+              "16",
+              "0",
+              "-1"
+            ],
+            [
+              "2",
+              "31",
+              "0",
+              "-1"
+            ],
+            [
+              "2",
+              "32",
+              "-7",
+              "-7"
+            ],
+            [
+              "2",
+              "63",
+              "0",
+              "-1"
+            ],
+            [
+              "2",
+              "64",
+              "-7",
+              "-7"
+            ],
+            [
+              "3",
+              "-1",
+              "0",
+              "-1"
+            ],
+            [
+              "3",
+              "0",
+              "-32768",
+              "-32768"
+            ],
+            [
+              "3",
+              "15",
+              "0",
+              "-1"
+            ],
+            [
+              "3",
+              "16",
+              "0",
+              "-1"
+            ],
+            [
+              "3",
+              "31",
+              "0",
+              "-1"
+            ],
+            [
+              "3",
+              "32",
+              "-32768",
+              "-32768"
+            ],
+            [
+              "3",
+              "63",
+              "0",
+              "-1"
+            ],
+            [
+              "3",
+              "64",
+              "-32768",
+              "-32768"
+            ],
+            [
+              "4",
+              "-1",
+              "0",
+              "0"
+            ],
+            [
+              "4",
+              "0",
+              "32767",
+              "32767"
+            ],
+            [
+              "4",
+              "15",
+              "-32768",
+              "0"
+            ],
+            [
+              "4",
+              "16",
+              "0",
+              "0"
+            ],
+            [
+              "4",
+              "31",
+              "0",
+              "0"
+            ],
+            [
+              "4",
+              "32",
+              "32767",
+              "32767"
+            ],
+            [
+              "4",
+              "63",
+              "0",
+              "0"
+            ],
+            [
+              "4",
+              "64",
+              "32767",
+              "32767"
+            ],
+            [
+              "5",
+              "-1",
+              null,
+              null
+            ],
+            [
+              "5",
+              "0",
+              null,
+              null
+            ],
+            [
+              "5",
+              "15",
+              null,
+              null
+            ],
+            [
+              "5",
+              "16",
+              null,
+              null
+            ],
+            [
+              "5",
+              "31",
+              null,
+              null
+            ],
+            [
+              "5",
+              "32",
+              null,
+              null
+            ],
+            [
+              "5",
+              "63",
+              null,
+              null
+            ],
+            [
+              "5",
+              "64",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "shifts_s",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id, i & 3::integer AS band, i | 3::integer AS bor, i # 3::integer AS bxor, ~i AS bnot FROM bitwise_inputs ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "band",
+            "bor",
+            "bxor",
+            "bnot"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3",
+              "7",
+              "4",
+              "-8"
+            ],
+            [
+              "2",
+              "1",
+              "-5",
+              "-6",
+              "6"
+            ],
+            [
+              "3",
+              "0",
+              "-2147483645",
+              "-2147483645",
+              "2147483647"
+            ],
+            [
+              "4",
+              "3",
+              "2147483647",
+              "2147483644",
+              "-2147483648"
+            ],
+            [
+              "5",
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "values_i",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id, c.n, i << c.n AS left_shift, i >> c.n AS right_shift FROM bitwise_inputs CROSS JOIN (VALUES (-1), (0), (15), (16), (31), (32), (63), (64)) c(n) ORDER BY id, c.n",
+      "command_tags": [
+        "SELECT 40"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n",
+            "left_shift",
+            "right_shift"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "-1",
+              "-2147483648",
+              "0"
+            ],
+            [
+              "1",
+              "0",
+              "7",
+              "7"
+            ],
+            [
+              "1",
+              "15",
+              "229376",
+              "0"
+            ],
+            [
+              "1",
+              "16",
+              "458752",
+              "0"
+            ],
+            [
+              "1",
+              "31",
+              "-2147483648",
+              "0"
+            ],
+            [
+              "1",
+              "32",
+              "7",
+              "7"
+            ],
+            [
+              "1",
+              "63",
+              "-2147483648",
+              "0"
+            ],
+            [
+              "1",
+              "64",
+              "7",
+              "7"
+            ],
+            [
+              "2",
+              "-1",
+              "-2147483648",
+              "-1"
+            ],
+            [
+              "2",
+              "0",
+              "-7",
+              "-7"
+            ],
+            [
+              "2",
+              "15",
+              "-229376",
+              "-1"
+            ],
+            [
+              "2",
+              "16",
+              "-458752",
+              "-1"
+            ],
+            [
+              "2",
+              "31",
+              "-2147483648",
+              "-1"
+            ],
+            [
+              "2",
+              "32",
+              "-7",
+              "-7"
+            ],
+            [
+              "2",
+              "63",
+              "-2147483648",
+              "-1"
+            ],
+            [
+              "2",
+              "64",
+              "-7",
+              "-7"
+            ],
+            [
+              "3",
+              "-1",
+              "0",
+              "-1"
+            ],
+            [
+              "3",
+              "0",
+              "-2147483648",
+              "-2147483648"
+            ],
+            [
+              "3",
+              "15",
+              "0",
+              "-65536"
+            ],
+            [
+              "3",
+              "16",
+              "0",
+              "-32768"
+            ],
+            [
+              "3",
+              "31",
+              "0",
+              "-1"
+            ],
+            [
+              "3",
+              "32",
+              "-2147483648",
+              "-2147483648"
+            ],
+            [
+              "3",
+              "63",
+              "0",
+              "-1"
+            ],
+            [
+              "3",
+              "64",
+              "-2147483648",
+              "-2147483648"
+            ],
+            [
+              "4",
+              "-1",
+              "-2147483648",
+              "0"
+            ],
+            [
+              "4",
+              "0",
+              "2147483647",
+              "2147483647"
+            ],
+            [
+              "4",
+              "15",
+              "-32768",
+              "65535"
+            ],
+            [
+              "4",
+              "16",
+              "-65536",
+              "32767"
+            ],
+            [
+              "4",
+              "31",
+              "-2147483648",
+              "0"
+            ],
+            [
+              "4",
+              "32",
+              "2147483647",
+              "2147483647"
+            ],
+            [
+              "4",
+              "63",
+              "-2147483648",
+              "0"
+            ],
+            [
+              "4",
+              "64",
+              "2147483647",
+              "2147483647"
+            ],
+            [
+              "5",
+              "-1",
+              null,
+              null
+            ],
+            [
+              "5",
+              "0",
+              null,
+              null
+            ],
+            [
+              "5",
+              "15",
+              null,
+              null
+            ],
+            [
+              "5",
+              "16",
+              null,
+              null
+            ],
+            [
+              "5",
+              "31",
+              null,
+              null
+            ],
+            [
+              "5",
+              "32",
+              null,
+              null
+            ],
+            [
+              "5",
+              "63",
+              null,
+              null
+            ],
+            [
+              "5",
+              "64",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "shifts_i",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id, b & 3::bigint AS band, b | 3::bigint AS bor, b # 3::bigint AS bxor, ~b AS bnot FROM bitwise_inputs ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "band",
+            "bor",
+            "bxor",
+            "bnot"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "3",
+              "7",
+              "4",
+              "-8"
+            ],
+            [
+              "2",
+              "1",
+              "-5",
+              "-6",
+              "6"
+            ],
+            [
+              "3",
+              "0",
+              "-9223372036854775805",
+              "-9223372036854775805",
+              "9223372036854775807"
+            ],
+            [
+              "4",
+              "3",
+              "9223372036854775807",
+              "9223372036854775804",
+              "-9223372036854775808"
+            ],
+            [
+              "5",
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "values_b",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id, c.n, b << c.n AS left_shift, b >> c.n AS right_shift FROM bitwise_inputs CROSS JOIN (VALUES (-1), (0), (15), (16), (31), (32), (63), (64)) c(n) ORDER BY id, c.n",
+      "command_tags": [
+        "SELECT 40"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n",
+            "left_shift",
+            "right_shift"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "-1",
+              "-9223372036854775808",
+              "0"
+            ],
+            [
+              "1",
+              "0",
+              "7",
+              "7"
+            ],
+            [
+              "1",
+              "15",
+              "229376",
+              "0"
+            ],
+            [
+              "1",
+              "16",
+              "458752",
+              "0"
+            ],
+            [
+              "1",
+              "31",
+              "15032385536",
+              "0"
+            ],
+            [
+              "1",
+              "32",
+              "30064771072",
+              "0"
+            ],
+            [
+              "1",
+              "63",
+              "-9223372036854775808",
+              "0"
+            ],
+            [
+              "1",
+              "64",
+              "7",
+              "7"
+            ],
+            [
+              "2",
+              "-1",
+              "-9223372036854775808",
+              "-1"
+            ],
+            [
+              "2",
+              "0",
+              "-7",
+              "-7"
+            ],
+            [
+              "2",
+              "15",
+              "-229376",
+              "-1"
+            ],
+            [
+              "2",
+              "16",
+              "-458752",
+              "-1"
+            ],
+            [
+              "2",
+              "31",
+              "-15032385536",
+              "-1"
+            ],
+            [
+              "2",
+              "32",
+              "-30064771072",
+              "-1"
+            ],
+            [
+              "2",
+              "63",
+              "-9223372036854775808",
+              "-1"
+            ],
+            [
+              "2",
+              "64",
+              "-7",
+              "-7"
+            ],
+            [
+              "3",
+              "-1",
+              "0",
+              "-1"
+            ],
+            [
+              "3",
+              "0",
+              "-9223372036854775808",
+              "-9223372036854775808"
+            ],
+            [
+              "3",
+              "15",
+              "0",
+              "-281474976710656"
+            ],
+            [
+              "3",
+              "16",
+              "0",
+              "-140737488355328"
+            ],
+            [
+              "3",
+              "31",
+              "0",
+              "-4294967296"
+            ],
+            [
+              "3",
+              "32",
+              "0",
+              "-2147483648"
+            ],
+            [
+              "3",
+              "63",
+              "0",
+              "-1"
+            ],
+            [
+              "3",
+              "64",
+              "-9223372036854775808",
+              "-9223372036854775808"
+            ],
+            [
+              "4",
+              "-1",
+              "-9223372036854775808",
+              "0"
+            ],
+            [
+              "4",
+              "0",
+              "9223372036854775807",
+              "9223372036854775807"
+            ],
+            [
+              "4",
+              "15",
+              "-32768",
+              "281474976710655"
+            ],
+            [
+              "4",
+              "16",
+              "-65536",
+              "140737488355327"
+            ],
+            [
+              "4",
+              "31",
+              "-2147483648",
+              "4294967295"
+            ],
+            [
+              "4",
+              "32",
+              "-4294967296",
+              "2147483647"
+            ],
+            [
+              "4",
+              "63",
+              "-9223372036854775808",
+              "0"
+            ],
+            [
+              "4",
+              "64",
+              "9223372036854775807",
+              "9223372036854775807"
+            ],
+            [
+              "5",
+              "-1",
+              null,
+              null
+            ],
+            [
+              "5",
+              "0",
+              null,
+              null
+            ],
+            [
+              "5",
+              "15",
+              null,
+              null
+            ],
+            [
+              "5",
+              "16",
+              null,
+              null
+            ],
+            [
+              "5",
+              "31",
+              null,
+              null
+            ],
+            [
+              "5",
+              "32",
+              null,
+              null
+            ],
+            [
+              "5",
+              "63",
+              null,
+              null
+            ],
+            [
+              "5",
+              "64",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "shifts_b",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id, s & i AS si, i # b AS ib, s | b AS sb FROM bitwise_inputs ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "si",
+            "ib",
+            "sb"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "7",
+              "0",
+              "7"
+            ],
+            [
+              "2",
+              "-7",
+              "0",
+              "-7"
+            ],
+            [
+              "3",
+              "-2147483648",
+              "9223372034707292160",
+              "-32768"
+            ],
+            [
+              "4",
+              "32767",
+              "9223372034707292160",
+              "9223372036854775807"
+            ],
+            [
+              "5",
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "mixed_widths",
+      "reopen": true
+    },
+    {
+      "sql": "CREATE VIEW bitwise_view AS SELECT id, s & 3::smallint AS band, ~(i | 4) AS bnot, (b # 1) << 2 AS shifted, i + (i >> 3) AS precedence FROM bitwise_inputs",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "create_view"
+    },
+    {
+      "sql": "SELECT * FROM bitwise_view ORDER BY id",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "integer out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "view_rows",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('bitwise_view'::regclass) AS definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    (s & (3)::smallint) AS band,\n    (~ (i | 4)) AS bnot,\n    ((b # (1)::bigint) << 2) AS shifted,\n    (i + (i >> 3)) AS precedence\n   FROM bitwise_inputs;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "view_definition"
+    },
+    {
+      "sql": "CREATE VIEW bitwise_mixed_view AS SELECT s & i AS si, i | b AS ib, ~b AS inverse, b % i AS remainder, |/i AS root FROM bitwise_inputs WHERE id = 1",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "mixed_view"
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('bitwise_mixed_view'::regclass) AS definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT ((s)::integer & i) AS si,\n    ((i)::bigint | b) AS ib,\n    (~ b) AS inverse,\n    (b % (i)::bigint) AS remainder,\n    (|/ (i)::double precision) AS root\n   FROM bitwise_inputs\n  WHERE (id = 1);"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "mixed_view_definition",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('bitwise_mixed_view'::regclass, true) AS definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT s::integer & i AS si,\n    i::bigint | b AS ib,\n    ~ b AS inverse,\n    b % i::bigint AS remainder,\n    |/ i::double precision AS root\n   FROM bitwise_inputs\n  WHERE id = 1;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "mixed_view_pretty",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM bitwise_mixed_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "si",
+            "ib",
+            "inverse",
+            "remainder",
+            "root"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            20,
+            701
+          ],
+          "rows": [
+            [
+              "7",
+              "7",
+              "-8",
+              "0",
+              "2.6457513110645907"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "mixed_view_rows",
+      "reopen": true
+    },
+    {
+      "sql": "CREATE TABLE bitwise_generated(id integer PRIMARY KEY, n integer DEFAULT (7 & 3), mask integer GENERATED ALWAYS AS ((n | 8) # 2) STORED, CHECK ((n & 1) = 1))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "create_generated"
+    },
+    {
+      "sql": "INSERT INTO bitwise_generated(id) VALUES (1), (2) RETURNING id, n, mask",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n",
+            "mask"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3",
+              "9"
+            ],
+            [
+              "2",
+              "3",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "insert_generated"
+    },
+    {
+      "sql": "CREATE INDEX bitwise_expression ON bitwise_inputs ((i & 3))",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "expression_index"
+    },
+    {
+      "sql": "SELECT id FROM bitwise_inputs WHERE (i & 3) = 1 ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "expression_index_rows",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id, n, mask FROM bitwise_generated ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n",
+            "mask"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3",
+              "9"
+            ],
+            [
+              "2",
+              "3",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "generated_rows"
+    },
+    {
+      "sql": "UPDATE bitwise_generated SET n = n | 4 WHERE id = 2 RETURNING id, n, mask",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n",
+            "mask"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "7",
+              "13"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "generated_update"
+    },
+    {
+      "sql": "SELECT id, n, mask FROM bitwise_generated ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n",
+            "mask"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3",
+              "9"
+            ],
+            [
+              "2",
+              "7",
+              "13"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "generated_after_update",
+      "reopen": true
+    },
+    {
+      "sql": "INSERT INTO bitwise_generated(id, n) VALUES (3, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"bitwise_generated\" violates check constraint \"bitwise_generated_n_check\"",
+        "detail": "Failing row contains (3, 2, 8).",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "constraint_rejection"
+    },
+    {
+      "sql": "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = 'bitwise_generated'::regclass AND contype = 'c'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CHECK (((n & 1) = 1))"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "constraint_definition"
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "begin_rollback"
+    },
+    {
+      "sql": "UPDATE bitwise_inputs SET i = i # 3 WHERE id = 1 RETURNING id, i",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "i"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "rolled_back_update"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "rollback"
+    },
+    {
+      "sql": "SELECT i FROM bitwise_inputs WHERE id = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "i"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "after_rollback",
+      "reopen": true
+    },
+    {
+      "sql": "CREATE DOMAIN bitwise_positive AS integer CHECK(VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain"
+    },
+    {
+      "sql": "SELECT ~7::bitwise_positive AS inverse, 7::bitwise_positive & 3 AS mask",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "inverse",
+            "mask"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "-8",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_value"
+    },
+    {
+      "sql": "SELECT (-1)::bitwise_positive & 3",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain bitwise_positive violates check constraint \"bitwise_positive_check\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "domain_invalid"
+    },
+    {
+      "sql": "PREPARE bitwise_mixed (smallint, integer, bigint) AS SELECT $1 & $2 AS a, $2 # $3 AS b, ~($1 | $3) AS c, $1 << $2 AS d",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "prepare_mixed"
+    },
+    {
+      "sql": "CREATE SEQUENCE bitwise_effect",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "sequence"
+    },
+    {
+      "sql": "SELECT setval('bitwise_effect', 10)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "10"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sequence_start"
+    },
+    {
+      "sql": "SELECT NULL::integer & nextval('bitwise_effect')::integer AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "constant_null"
+    },
+    {
+      "sql": "SELECT last_value FROM bitwise_effect",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "10"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "constant_null_effect"
+    },
+    {
+      "sql": "SELECT NULL::integer & (1/0) AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "constant_null_error"
+    },
+    {
+      "sql": "PREPARE bitwise_null (integer) AS SELECT $1 & nextval('bitwise_effect')::integer AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "prepare_null"
+    },
+    {
+      "sql": "SET plan_cache_mode = force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "force_generic_plan"
+    },
+    {
+      "sql": "EXECUTE bitwise_mixed(7, 32, 3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            21
+          ],
+          "rows": [
+            [
+              "0",
+              "35",
+              "-8",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "force_generic_plan_mixed"
+    },
+    {
+      "sql": "EXECUTE bitwise_null(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "force_generic_plan_null"
+    },
+    {
+      "sql": "SELECT last_value FROM bitwise_effect",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "11"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "force_generic_plan_effect"
+    },
+    {
+      "sql": "SET plan_cache_mode = force_custom_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "force_custom_plan"
+    },
+    {
+      "sql": "EXECUTE bitwise_mixed(7, 32, 3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            21
+          ],
+          "rows": [
+            [
+              "0",
+              "35",
+              "-8",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "force_custom_plan_mixed"
+    },
+    {
+      "sql": "EXECUTE bitwise_null(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "force_custom_plan_null"
+    },
+    {
+      "sql": "SELECT last_value FROM bitwise_effect",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "11"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "force_custom_plan_effect"
+    },
+    {
+      "sql": "PREPARE bitwise_unknown AS SELECT $1 & 3 AS mask, 1::smallint << $2 AS shifted",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "prepare_unknown"
+    },
+    {
+      "sql": "EXECUTE bitwise_unknown('7', '32')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "mask",
+            "shifted"
+          ],
+          "type_oids": [
+            23,
+            21
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "execute_unknown"
+    },
+    {
+      "sql": "SELECT 1.0 & 3",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: numeric & integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "invalid_float"
+    },
+    {
+      "sql": "SELECT 7 << 1::bigint",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer << bigint",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "invalid_shift_count"
+    },
+    {
+      "sql": "SELECT NULL & NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown & unknown",
+        "detail": null,
+        "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "ambiguous"
+    },
+    {
+      "sql": "SELECT 7 << 'bad'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "invalid_unknown"
+    },
+    {
+      "sql": "DEALLOCATE ALL",
+      "command_tags": [
+        "DEALLOCATE ALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup_prepared"
+    },
+    {
+      "sql": "INSERT INTO bitwise_generated(id) VALUES (4) RETURNING id,n,mask",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n",
+            "mask"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "4",
+              "3",
+              "9"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_default",
+      "after_reopen": true
+    }
+  ],
+  "provenance": {
+    "reference": "PostgreSQL 18.4 in a disposable Docker database",
+    "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "tool_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "4797af8c81130d9de06d52558849607e481a7655ec0c5d6b1008c5bd28b054f6",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ]
+  }
+}

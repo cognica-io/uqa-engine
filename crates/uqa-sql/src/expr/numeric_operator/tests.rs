@@ -8,6 +8,8 @@ use super::*;
 use crate::ast::FunctionDispatch;
 use crate::expr::EngineHook;
 
+mod bitwise;
+
 fn expression(sql: &str) -> Expr {
     let crate::Statement::Select(mut query) =
         crate::compile(&format!("SELECT {sql}")).unwrap().remove(0)
