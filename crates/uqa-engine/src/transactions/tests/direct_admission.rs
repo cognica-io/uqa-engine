@@ -5,6 +5,7 @@
 //
 
 use super::{Engine, SQLError};
+use crate::tests::providers::Provider;
 use serde_json::{json, Value as Json};
 
 fn reference() -> Json {
@@ -72,20 +73,20 @@ fn sequence_call(engine: &Engine, sql: &str, direct: bool, expected: &Json) {
 }
 
 #[rstest::rstest]
-#[case::memory_direct(false, true)]
-#[case::sqlite_direct(true, true)]
-#[case::memory_sql(false, false)]
-#[case::sqlite_sql(true, false)]
+#[case::memory_direct(Provider::Memory, true)]
+#[case::sqlite_native_direct(Provider::SQLiteNative, true)]
+#[case::sqlite_kv_direct(Provider::SQLiteKeyValue, true)]
+#[case::redb_direct(Provider::Redb, true)]
+#[case::memory_sql(Provider::Memory, false)]
+#[case::sqlite_native_sql(Provider::SQLiteNative, false)]
+#[case::sqlite_kv_sql(Provider::SQLiteKeyValue, false)]
+#[case::redb_sql(Provider::Redb, false)]
 fn sequence_operation_failure_and_recovery_match_pg18(
-    #[case] persistent: bool,
+    #[case] provider: Provider,
     #[case] direct: bool,
 ) {
     let directory = tempfile::tempdir().unwrap();
-    let engine = if persistent {
-        Engine::open(&directory.path().join("sequence-admission.db")).unwrap()
-    } else {
-        Engine::new()
-    };
+    let engine = provider.open(&directory.path().join("sequence-admission.db"));
     engine
         .sql("CREATE TEMP SEQUENCE admission_ids MAXVALUE 2", &[])
         .unwrap();
@@ -133,15 +134,13 @@ fn sequence_operation_failure_and_recovery_match_pg18(
 }
 
 #[rstest::rstest]
-#[case::memory(false)]
-#[case::native_sqlite(true)]
-fn read_only_rejection_is_owned_and_failed_admission_precedes_work(#[case] persistent: bool) {
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn read_only_rejection_is_owned_and_failed_admission_precedes_work(#[case] provider: Provider) {
     let directory = tempfile::tempdir().unwrap();
-    let engine = if persistent {
-        Engine::open(&directory.path().join("read-only-admission.db")).unwrap()
-    } else {
-        Engine::new()
-    };
+    let engine = provider.open(&directory.path().join("read-only-admission.db"));
     engine
         .sql(
             "CREATE TABLE items (n integer); INSERT INTO items VALUES (1)",

@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use crate::tests::providers::Provider;
 use crate::Engine;
 use uqa_core::Value;
 use uqa_sql::{ColumnType, SQLParam};
@@ -139,15 +140,15 @@ fn host_preparation_preserves_declared_types_and_failed_registration_is_not_publ
 }
 
 #[rstest::rstest]
-#[case::memory(false)]
-#[case::native_sqlite(true)]
-fn host_execution_keeps_transaction_boundaries_and_fixed_result_schemas(#[case] persistent: bool) {
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn host_execution_keeps_transaction_boundaries_and_fixed_result_schemas(
+    #[case] provider: Provider,
+) {
     let directory = tempfile::tempdir().unwrap();
-    let engine = if persistent {
-        Engine::open(&directory.path().join("prepared.db")).unwrap()
-    } else {
-        Engine::new()
-    };
+    let engine = provider.open(&directory.path().join("prepared.db"));
     engine.sql("CREATE TABLE items (n integer)", &[]).unwrap();
     let insert = engine
         .prepare_statement("INSERT INTO items VALUES ($1) RETURNING n", &[])

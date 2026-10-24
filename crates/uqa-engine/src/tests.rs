@@ -43,6 +43,7 @@ mod catalog;
 mod index_columns;
 mod index_only;
 mod prepared;
+pub(crate) mod providers;
 mod queries;
 mod system_catalog_locks;
 mod system_catalog_security;

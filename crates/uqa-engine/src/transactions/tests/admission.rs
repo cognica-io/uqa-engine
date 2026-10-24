@@ -4,21 +4,20 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use crate::tests::providers::Provider;
 use crate::Engine;
 use std::cell::Cell;
 use uqa_execution::statement::batch::context::BatchTransactions;
 use uqa_sql::SQLError;
 
 #[rstest::rstest]
-#[case::memory(false)]
-#[case::native_sqlite(true)]
-fn admitted_operations_own_failure_and_unwind_recovery(#[case] persistent: bool) {
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn admitted_operations_own_failure_and_unwind_recovery(#[case] provider: Provider) {
     let directory = tempfile::tempdir().unwrap();
-    let engine = if persistent {
-        Engine::open(&directory.path().join("admission.db")).unwrap()
-    } else {
-        Engine::new()
-    };
+    let engine = provider.open(&directory.path().join("admission.db"));
     engine.sql("CREATE TABLE items (n integer)", &[]).unwrap();
     for unwind in [false, true] {
         engine
@@ -84,12 +83,17 @@ fn unresolved_completion_rejects_operations_without_replacing_its_identity() {
     engine.rollback().unwrap();
 }
 
-#[test]
-fn sql_and_prepared_callback_panics_restore_the_owned_savepoint() {
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn sql_and_prepared_callback_panics_restore_the_owned_savepoint(#[case] provider: Provider) {
     use std::sync::Arc;
     use uqa_core::Value;
 
-    let engine = Arc::new(Engine::new());
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Arc::new(provider.open(&directory.path().join("panic-admission.db")));
     engine.sql("CREATE TABLE items (n integer)", &[]).unwrap();
     let weak = Arc::downgrade(&engine);
     engine

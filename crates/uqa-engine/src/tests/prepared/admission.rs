@@ -4,36 +4,32 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use crate::Engine;
+use crate::tests::providers::Provider;
 use serde_json::Value as Json;
 
 #[rstest::rstest]
-#[case::memory(false)]
-#[case::native_sqlite(true)]
-fn prepared_admission_matches_postgresql(#[case] persistent: bool) {
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn prepared_admission_matches_postgresql(#[case] provider: Provider) {
     let reference: Json = serde_json::from_str(include_str!(
         "../../../../../tests/parity/pg18/prepared_admission_oracle.expected.json"
     ))
     .unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let engine = if persistent {
-        Engine::open(&directory.path().join("admission.db")).unwrap()
-    } else {
-        Engine::new()
-    };
+    let engine = provider.open(&directory.path().join("admission.db"));
     super::reference::verify(&engine, &reference);
 }
 
 #[rstest::rstest]
-#[case::memory(false)]
-#[case::native_sqlite(true)]
-fn empty_declaration_errors_and_native_registration_share_recovery(#[case] persistent: bool) {
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn empty_declaration_errors_and_native_registration_share_recovery(#[case] provider: Provider) {
     let directory = tempfile::tempdir().unwrap();
-    let engine = if persistent {
-        Engine::open(&directory.path().join("declaration.db")).unwrap()
-    } else {
-        Engine::new()
-    };
+    let engine = provider.open(&directory.path().join("declaration.db"));
     engine.sql("BEGIN; SAVEPOINT retry", &[]).unwrap();
     let error = engine
         .prepare_statement(
