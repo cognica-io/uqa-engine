@@ -10,6 +10,7 @@ use std::time::Duration;
 use super::*;
 
 mod admission;
+mod direct_admission;
 mod graph_diagnostics;
 mod mutation_failures;
 mod new_rows;

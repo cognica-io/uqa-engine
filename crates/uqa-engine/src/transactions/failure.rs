@@ -134,7 +134,7 @@ impl Engine {
         )
     }
 
-    pub(super) fn finish_existing_transaction_operation<R, E: std::fmt::Display>(
+    fn finish_existing_transaction_operation<R, E: std::fmt::Display>(
         &self,
         result: std::thread::Result<Result<R, E>>,
         map_cleanup_error: impl Fn(SQLError) -> E,

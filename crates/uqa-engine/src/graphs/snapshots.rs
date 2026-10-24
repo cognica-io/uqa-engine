@@ -63,10 +63,14 @@ impl Engine {
     ) -> StorageBackendResult<R> {
         let _statement = self.lock_statement_gate();
         if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()
-                .map_err(super::graph_store_error)?;
-            self.prepare_explicit_statement_snapshot(true)
-                .map_err(super::graph_store_error)?;
+            return self.run_existing_transaction_operation(
+                || {
+                    self.prepare_explicit_statement_snapshot(true)
+                        .map_err(super::graph_store_error)?;
+                    self.with_implicit_storage_transaction(operation)
+                },
+                super::graph_store_error,
+            );
         }
         self.with_implicit_storage_transaction(operation)
     }

@@ -740,7 +740,14 @@ fn pg18_read_only_transactions_reject_typed_catalog_and_graph_mutations() {
         eng.sql("BEGIN READ ONLY", &[]).unwrap();
         let error = eng.save_scoring_params("forbidden", "{}").unwrap_err();
         assert_eq!(error.sqlstate(), Some("25006"), "{error}");
+        assert!(eng.transaction_failed());
+        assert_eq!(
+            eng.sql("SELECT 1", &[]).unwrap_err().sqlstate(),
+            Some("25P02")
+        );
+        eng.sql("ROLLBACK", &[]).unwrap();
         assert_eq!(eng.load_scoring_params("forbidden").unwrap(), None);
+        eng.sql("BEGIN READ ONLY", &[]).unwrap();
         let error = eng
             .run_cypher(
                 "forbidden_graph",
@@ -752,6 +759,7 @@ fn pg18_read_only_transactions_reject_typed_catalog_and_graph_mutations() {
             error.to_string().contains("read-only transaction"),
             "{error}"
         );
+        assert!(eng.transaction_failed());
         eng.sql("ROLLBACK", &[]).unwrap();
 
         eng.sql("SET default_transaction_read_only = on", &[])

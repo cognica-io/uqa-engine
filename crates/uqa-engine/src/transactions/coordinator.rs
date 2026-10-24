@@ -186,19 +186,6 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn ensure_transaction_usable(&self) -> Result<(), SQLError> {
-        if let Some(error) = self
-            .session
-            .transactions
-            .lock()
-            .last()
-            .and_then(|frame| Self::transaction_status_error(frame.status))
-        {
-            return Err(error);
-        }
-        Ok(())
-    }
-
     pub(crate) fn begin_implicit_statement_transaction(
         &self,
         read_only: bool,

@@ -1,0 +1,181 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT lastval()",
+      "failure": {
+        "sqlstate": "55000",
+        "message": "lastval is not yet defined in this session",
+        "transaction_status": 3,
+        "value": null
+      },
+      "blocked": {
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "transaction_status": 3,
+        "value": null
+      },
+      "recovered": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 2,
+        "value": null
+      },
+      "after_recovery": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 2,
+        "value": "1"
+      },
+      "rolled_back": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 0,
+        "value": null
+      }
+    },
+    {
+      "sql": "SELECT currval('admission_ids')",
+      "failure": {
+        "sqlstate": "55000",
+        "message": "currval of sequence \"admission_ids\" is not yet defined in this session",
+        "transaction_status": 3,
+        "value": null
+      },
+      "blocked": {
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "transaction_status": 3,
+        "value": null
+      },
+      "recovered": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 2,
+        "value": null
+      },
+      "after_recovery": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 2,
+        "value": "1"
+      },
+      "rolled_back": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 0,
+        "value": null
+      }
+    },
+    {
+      "sql": "SELECT setval('admission_ids', 3)",
+      "failure": {
+        "sqlstate": "22003",
+        "message": "setval: value 3 is out of bounds for sequence \"admission_ids\" (1..2)",
+        "transaction_status": 3,
+        "value": null
+      },
+      "blocked": {
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "transaction_status": 3,
+        "value": null
+      },
+      "recovered": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 2,
+        "value": null
+      },
+      "after_recovery": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 2,
+        "value": "1"
+      },
+      "rolled_back": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 0,
+        "value": null
+      }
+    },
+    {
+      "sql": "SELECT nextval('admission_ids')",
+      "failure": {
+        "sqlstate": "2200H",
+        "message": "nextval: reached maximum value of sequence \"admission_ids\" (2)",
+        "transaction_status": 3,
+        "value": null
+      },
+      "blocked": {
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "transaction_status": 3,
+        "value": null
+      },
+      "recovered": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 2,
+        "value": null
+      },
+      "after_recovery": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 2,
+        "value": "1"
+      },
+      "rolled_back": {
+        "sqlstate": "",
+        "message": "",
+        "transaction_status": 0,
+        "value": null
+      }
+    }
+  ],
+  "current_value": {
+    "sqlstate": "",
+    "message": "",
+    "transaction_status": 0,
+    "value": "2"
+  },
+  "exhausted": {
+    "sqlstate": "2200H",
+    "message": "nextval: reached maximum value of sequence \"admission_ids\" (2)",
+    "transaction_status": 0,
+    "value": null
+  },
+  "read_only": {
+    "failure": {
+      "sqlstate": "25006",
+      "message": "cannot execute DELETE in a read-only transaction",
+      "transaction_status": 3,
+      "value": null
+    },
+    "blocked": {
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "transaction_status": 3,
+      "value": null
+    },
+    "recovered": {
+      "sqlstate": "",
+      "message": "",
+      "transaction_status": 2,
+      "value": null
+    },
+    "after_recovery": {
+      "sqlstate": "",
+      "message": "",
+      "transaction_status": 2,
+      "value": "1"
+    },
+    "rolled_back": {
+      "sqlstate": "",
+      "message": "",
+      "transaction_status": 0,
+      "value": null
+    }
+  }
+}
