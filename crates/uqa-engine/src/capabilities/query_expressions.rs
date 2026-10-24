@@ -276,8 +276,11 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
     ) -> Option<std::result::Result<Value, SQLError>> {
         let registration = self.runtime.lookup_scalar_function(name)?;
         Some(
-            uqa_sql::expr::enums::render_host_arguments(Some(self.engine), args)
-                .and_then(|args| registration.function.call(&args)),
+            uqa_sql::expr::enums::render_host_arguments(Some(self.engine), args).and_then(|args| {
+                registration
+                    .function
+                    .call_with_context(self.runtime.function_context, &args)
+            }),
         )
     }
 

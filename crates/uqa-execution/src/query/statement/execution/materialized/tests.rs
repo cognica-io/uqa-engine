@@ -295,6 +295,7 @@ fn collect_input(
     mode: crate::query::consumer::QueryOutputMode<'_>,
 ) -> Result<crate::query::output::QueryOutput, uqa_sql::SQLError> {
     let runtime = QueryRuntimeView {
+        function_context: &crate::functions::SQLFunctionContext::empty(),
         diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         cancellation: &uqa_core::CancellationToken::new(),
         settings: &Services,

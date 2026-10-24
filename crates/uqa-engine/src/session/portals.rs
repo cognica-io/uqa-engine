@@ -591,6 +591,7 @@ impl Engine {
             self.sql_function_depth_limit(),
             self.session.state.client_level(),
         );
+        runtime.function_context = std::sync::Arc::clone(&self.runtime.function_context);
         runtime.diagnostics = self.runtime.diagnostics.fork();
         runtime.statement_gate = std::sync::Arc::clone(&self.runtime.statement_gate);
         runtime.cancellation = self.runtime.cancellation.clone();

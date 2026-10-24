@@ -65,6 +65,7 @@ fn execute(sql: &str, mode: QueryOutputMode<'_>) -> Result<QueryOutput, SQLError
     let scope = crate::catalog::test_support::empty_scope();
     crate::query::binding::analyze_query_plan_schema(&Services, &plan, &[], &scope, None)?;
     let runtime = QueryRuntimeView {
+        function_context: &crate::functions::SQLFunctionContext::empty(),
         diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         cancellation: &uqa_core::CancellationToken::new(),
         settings: &Services,

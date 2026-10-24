@@ -12,6 +12,30 @@ use uqa_sql::SQLError;
 
 pub use uqa_sql::ast::FunctionVolatility as SQLFunctionVolatility;
 
+/// Host-owned invocation data belonging to the calling session. Registrations
+/// are shared across sessions; this data travels with execution, including
+/// worker and retained-portal execution, instead of with the registered code.
+/// Hosts should store weak session references here to avoid ownership cycles.
+#[derive(Clone, Default)]
+pub struct SQLFunctionContext(Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>);
+
+impl SQLFunctionContext {
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self(None)
+    }
+
+    #[must_use]
+    pub fn new<T: Send + Sync + 'static>(data: T) -> Self {
+        Self(Some(std::sync::Arc::new(data)))
+    }
+
+    #[must_use]
+    pub fn get<T: 'static>(&self) -> Option<&T> {
+        self.0.as_ref()?.downcast_ref()
+    }
+}
+
 /// Execution properties declared for a Rust-backed SQL callback.
 ///
 /// The default is deliberately conservative: callbacks registered through the
@@ -130,7 +154,19 @@ impl From<SQLTableFunctionResult> for SQLTableFunctionStream {
 
 /// Rust implementation of a scalar SQL function.
 pub trait SQLScalarFunction: Send + Sync {
-    fn call(&self, args: &[Value]) -> Result<Value, SQLError>;
+    fn call(&self, _args: &[Value]) -> Result<Value, SQLError> {
+        Err(SQLError::Unsupported(
+            "scalar function requires an invocation context".into(),
+        ))
+    }
+
+    fn call_with_context(
+        &self,
+        _context: &SQLFunctionContext,
+        args: &[Value],
+    ) -> Result<Value, SQLError> {
+        self.call(args)
+    }
 }
 
 impl<F> SQLScalarFunction for F
@@ -152,6 +188,22 @@ pub trait SQLTableFunction: Send + Sync {
 
     fn call_stream(&self, args: &[Value]) -> Result<SQLTableFunctionStream, SQLError> {
         self.call(args).map(Into::into)
+    }
+
+    fn call_with_context(
+        &self,
+        _context: &SQLFunctionContext,
+        args: &[Value],
+    ) -> Result<SQLTableFunctionResult, SQLError> {
+        self.call(args)
+    }
+
+    fn call_stream_with_context(
+        &self,
+        _context: &SQLFunctionContext,
+        args: &[Value],
+    ) -> Result<SQLTableFunctionStream, SQLError> {
+        self.call_stream(args)
     }
 }
 
@@ -178,7 +230,18 @@ pub trait SQLAggregateFunction: Send + Sync {
 /// state, including a global aggregate over an empty input. A failed factory
 /// remains responsible for resources it allocated before returning the error.
 pub trait SQLAggregateFactory: Send + Sync {
-    fn try_create_state(&self) -> Result<Box<dyn SQLAggregateState>, SQLError>;
+    fn try_create_state(&self) -> Result<Box<dyn SQLAggregateState>, SQLError> {
+        Err(SQLError::Unsupported(
+            "aggregate factory requires an invocation context".into(),
+        ))
+    }
+
+    fn try_create_state_with_context(
+        &self,
+        _context: &SQLFunctionContext,
+    ) -> Result<Box<dyn SQLAggregateState>, SQLError> {
+        self.try_create_state()
+    }
 }
 
 impl<F: SQLAggregateFunction + ?Sized> SQLAggregateFactory for F {

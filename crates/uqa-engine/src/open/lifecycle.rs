@@ -59,8 +59,8 @@ impl Engine {
         Self {
             storage: super::StorageContext::memory(),
             durable: Arc::new(super::DurableCatalogState::new()),
+            extensions: super::RuntimeExtensions::new(&session, &runtime.statement_gate),
             session,
-            extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
             runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),
@@ -302,6 +302,13 @@ impl Engine {
         // Catalog cells keep independent mutable owners over shared immutable
         // values, so a writer cannot expose uncommitted definitions to siblings.
         session.extensions = super::RuntimeExtensions::shared_from(&self.extensions);
+        session
+            .extensions
+            .functions
+            .attach(&session.session, &session.runtime.statement_gate);
+        if internal_read {
+            session.runtime.function_context = Arc::clone(&self.runtime.function_context);
+        }
         if !retained {
             session.synchronize_table_catalog()?;
             session.synchronize_table_data()?;
@@ -407,8 +414,8 @@ impl Engine {
         Self {
             storage: super::StorageContext::persistent(catalog, backend, provider),
             durable: Arc::new(super::DurableCatalogState::new()),
+            extensions: super::RuntimeExtensions::new(&session, &runtime.statement_gate),
             session,
-            extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
             runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),

@@ -9,7 +9,33 @@ use super::{
     SQLFunctionVolatility, SQLScalarFunction, SQLTableFunction, Value,
 };
 
+mod owner;
+mod retained;
+pub(crate) use owner::Registry;
+pub use owner::{SQLFunctionRegistration, SQLFunctionRegistrationError};
+
 impl Engine {
+    /// Install immutable host invocation data for this session. Public sibling
+    /// sessions start empty; internal readers and portal workers inherit it.
+    pub fn install_sql_function_context(
+        &self,
+        context: crate::SQLFunctionContext,
+    ) -> Result<(), SQLFunctionRegistrationError> {
+        let _gate = self
+            .runtime
+            .statement_gate
+            .try_lock_idle()
+            .ok_or(SQLFunctionRegistrationError::Busy)?;
+        self.runtime
+            .function_context
+            .set(context)
+            .map_err(|_| SQLError::Routine {
+                sqlstate: "55000".into(),
+                message: "SQL function context is already installed for this session".into(),
+            })?;
+        Ok(())
+    }
+
     fn normalize_sql_function_name(name: &str) -> std::result::Result<String, SQLError> {
         let normalized = name.trim().to_ascii_lowercase();
         if normalized.is_empty() {
@@ -42,15 +68,26 @@ impl Engine {
     where
         F: SQLScalarFunction + 'static,
     {
+        self.register_scalar_function_retained(name, options, function)
+            .map(drop)
+            .map_err(Into::into)
+    }
+
+    /// Register a callback and return its independent retirement handle.
+    pub fn register_scalar_function_retained<F>(
+        &self,
+        name: &str,
+        options: SQLFunctionOptions,
+        function: F,
+    ) -> Result<SQLFunctionRegistration, SQLFunctionRegistrationError>
+    where
+        F: SQLScalarFunction + 'static,
+    {
         Self::validate_sql_function_options(options)?;
         let name = Self::normalize_sql_function_name(name)?;
-        self.extensions.scalar_functions.write().insert(
-            name.clone(),
-            RegisteredSQLFunction::new(Arc::new(function), options),
-        );
-        self.clear_sql_statement_cache();
-        self.invalidate_prepared_analysis();
-        Ok(())
+        self.extensions
+            .functions
+            .register_scalar(name, Arc::new(function), options)
     }
 
     pub fn register_table_function<F>(
@@ -75,15 +112,26 @@ impl Engine {
     where
         F: SQLTableFunction + 'static,
     {
+        self.register_table_function_retained(name, options, function)
+            .map(drop)
+            .map_err(Into::into)
+    }
+
+    /// Register a callback and return its independent retirement handle.
+    pub fn register_table_function_retained<F>(
+        &self,
+        name: &str,
+        options: SQLFunctionOptions,
+        function: F,
+    ) -> Result<SQLFunctionRegistration, SQLFunctionRegistrationError>
+    where
+        F: SQLTableFunction + 'static,
+    {
         Self::validate_sql_function_options(options)?;
         let name = Self::normalize_sql_function_name(name)?;
-        self.extensions.table_functions.write().insert(
-            name.clone(),
-            RegisteredSQLFunction::new(Arc::new(function), options),
-        );
-        self.clear_sql_statement_cache();
-        self.invalidate_prepared_analysis();
-        Ok(())
+        self.extensions
+            .functions
+            .register_table(name, retained::Table::wrap(function), options)
     }
 
     pub fn register_aggregate_function<F>(
@@ -108,17 +156,28 @@ impl Engine {
     where
         F: SQLAggregateFactory + 'static,
     {
+        self.register_aggregate_function_retained(name, options, function)
+            .map(drop)
+            .map_err(Into::into)
+    }
+
+    /// Register a callback and return its independent retirement handle.
+    pub fn register_aggregate_function_retained<F>(
+        &self,
+        name: &str,
+        options: SQLFunctionOptions,
+        function: F,
+    ) -> Result<SQLFunctionRegistration, SQLFunctionRegistrationError>
+    where
+        F: SQLAggregateFactory + 'static,
+    {
         Self::validate_sql_function_options(options)?;
         let name = Self::normalize_sql_function_name(name)?;
-        self.extensions.aggregate_functions.write().insert(
-            name.clone(),
-            RegisteredSQLFunction::new(Arc::new(function), options),
-        );
-        // Aggregate-vs-projection is a structural choice in `QueryPlan`.
-        // Cached plans compiled before this registration must be rebound.
-        self.clear_sql_statement_cache();
-        self.invalidate_prepared_analysis();
-        Ok(())
+        self.extensions.functions.register_aggregate(
+            name,
+            retained::Aggregate::wrap(function),
+            options,
+        )
     }
 
     fn validate_sql_function_options(options: SQLFunctionOptions) -> Result<(), SQLError> {
@@ -137,8 +196,11 @@ impl Engine {
     ) -> Option<std::result::Result<Value, SQLError>> {
         let registration = self.query_runtime_view().lookup_scalar_function(name)?;
         Some(
-            uqa_sql::expr::enums::render_host_arguments(Some(self), args)
-                .and_then(|args| registration.function.call(&args)),
+            uqa_sql::expr::enums::render_host_arguments(Some(self), args).and_then(|args| {
+                registration
+                    .function
+                    .call_with_context(self.query_runtime_view().function_context, &args)
+            }),
         )
     }
 
@@ -164,7 +226,12 @@ impl Engine {
     ) -> Option<Arc<dyn SQLAggregateFactory>> {
         self.query_runtime_view()
             .lookup_aggregate_function(name)
-            .map(|registration| registration.function)
+            .map(|registration| {
+                Arc::new(retained::BoundAggregate {
+                    function: registration.function,
+                    context: self.query_runtime_view().function_context.clone(),
+                }) as Arc<dyn SQLAggregateFactory>
+            })
     }
 
     pub(crate) fn registered_runtime_function_may_mutate_engine(&self, name: &str) -> bool {
@@ -200,3 +267,6 @@ impl Engine {
         self.query_runtime_view().registered_function_options(name)
     }
 }
+
+#[cfg(test)]
+mod tests;

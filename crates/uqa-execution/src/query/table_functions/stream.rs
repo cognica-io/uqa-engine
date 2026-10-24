@@ -254,7 +254,11 @@ fn build_table_function_value_row_stream_with_row(
         let result = context
             .runtime
             .lookup_table_function(&identity)
-            .map(|registration| registration.function.call_stream(&evaluated))
+            .map(|registration| {
+                registration
+                    .function
+                    .call_stream_with_context(context.runtime.function_context, &evaluated)
+            })
             .ok_or_else(|| {
                 SQLError::Internal(format!(
                     "registered table function `{name}` disappeared during execution"

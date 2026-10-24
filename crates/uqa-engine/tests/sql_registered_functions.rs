@@ -25,6 +25,9 @@ mod aggregate_cleanup;
 #[path = "sql_registered_functions/stream_cleanup.rs"]
 mod stream_cleanup;
 
+#[path = "sql_registered_functions/registration.rs"]
+mod registration;
+
 struct Prefixer {
     prefix: String,
 }

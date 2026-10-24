@@ -28,6 +28,7 @@ pub(crate) struct CachedSQLStatement {
     pub(crate) optimized_plan: Option<Arc<uqa_planner::UnifiedPlan>>,
     pub(crate) analyzed_plan: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
     catalog_epochs: CatalogEpochs,
+    function_registry_revision: u64,
     pub(crate) parser: uqa_sql::parser::ParserMetadata,
 }
 
@@ -45,6 +46,7 @@ impl SQLStatementCache {
         statement: Arc<uqa_sql::ast::Statement>,
         logical_plan: Arc<uqa_planner::UnifiedPlan>,
         catalog_epochs: CatalogEpochs,
+        function_registry_revision: u64,
         parser: uqa_sql::parser::ParserMetadata,
     ) {
         let analyzed_plan = self
@@ -54,6 +56,7 @@ impl SQLStatementCache {
                 Arc::ptr_eq(&entry.statement, &statement)
                     && entry.catalog_epochs.table_catalog == catalog_epochs.table_catalog
                     && entry.catalog_epochs.catalog_registry == catalog_epochs.catalog_registry
+                    && entry.function_registry_revision == function_registry_revision
                     && entry.parser.settings == parser.settings
             })
             .and_then(|entry| entry.analyzed_plan.clone());
@@ -63,6 +66,7 @@ impl SQLStatementCache {
             optimized_plan: None,
             analyzed_plan,
             catalog_epochs,
+            function_registry_revision,
             parser,
         };
         if let Entry::Occupied(mut entry) = self.entries.entry(sql.clone()) {
@@ -152,6 +156,7 @@ impl Engine {
         let epochs = self.catalog_epochs();
         if cached.catalog_epochs.table_catalog != epochs.table_catalog
             || cached.catalog_epochs.catalog_registry != epochs.catalog_registry
+            || cached.function_registry_revision != self.extensions.functions.revision()
             || cached.parser.settings != self.parser_settings()
         {
             return None;
@@ -185,6 +190,7 @@ impl Engine {
             statement,
             logical_plan,
             epochs,
+            self.extensions.functions.revision(),
             parser,
         );
     }

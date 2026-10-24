@@ -20,9 +20,8 @@ mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
 
 use super::{
-    BayesianBM25Params, CommandMutationOverlay, DeepModel, RegisteredSQLFunction, RelationIdentity,
-    SQLAggregateFactory, SQLScalarFunction, SQLStatementCache, SQLTableFunction, SequenceState,
-    TableFieldAnalyzerRegistry, TableState, TransactionFrame,
+    BayesianBM25Params, CommandMutationOverlay, DeepModel, RelationIdentity, SQLStatementCache,
+    SequenceState, TableFieldAnalyzerRegistry, TableState, TransactionFrame,
 };
 
 pub(super) struct StorageContext {
@@ -453,30 +452,21 @@ impl Drop for SessionContext {
 pub(super) struct RuntimeExtensions {
     pub(super) foreign_memory_tables:
         Arc<RwLock<BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>>>,
-    pub(super) scalar_functions:
-        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLScalarFunction>>>>,
-    pub(super) table_functions:
-        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLTableFunction>>>>,
-    pub(super) aggregate_functions:
-        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFactory>>>>,
+    pub(super) functions: Arc<crate::sql_registry::Registry>,
 }
 
 impl RuntimeExtensions {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(session: &Arc<SessionContext>, gate: &Arc<StatementGate>) -> Self {
         Self {
             foreign_memory_tables: Arc::new(RwLock::new(BTreeMap::new())),
-            scalar_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            table_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            aggregate_functions: Arc::new(RwLock::new(BTreeMap::new())),
+            functions: Arc::new(crate::sql_registry::Registry::new(session, gate)),
         }
     }
 
     pub(super) fn shared_from(source: &Self) -> Self {
         Self {
             foreign_memory_tables: source.foreign_memory_tables.clone(),
-            scalar_functions: source.scalar_functions.clone(),
-            table_functions: source.table_functions.clone(),
-            aggregate_functions: source.aggregate_functions.clone(),
+            functions: Arc::clone(&source.functions),
         }
     }
 }
@@ -506,6 +496,15 @@ impl StatementGate {
     /// Hold the gate only if no other thread holds it.
     pub(super) fn try_lock(&self) -> Option<parking_lot::ReentrantMutexGuard<'_, ()>> {
         self.mutex.try_lock()
+    }
+
+    /// Registry changes require an idle session, including on the calling thread.
+    pub(super) fn try_lock_idle(&self) -> Option<parking_lot::ReentrantMutexGuard<'_, ()>> {
+        if self.mutex.is_owned_by_current_thread() {
+            None
+        } else {
+            self.mutex.try_lock()
+        }
     }
 
     pub(super) fn lock_with_cancellation(
@@ -557,6 +556,8 @@ impl Drop for DelegatedStatementGate<'_> {
 }
 
 pub(super) struct QueryRuntime {
+    /// Installation and reads share one cell with internal readers and portal workers.
+    pub(super) function_context: Arc<std::sync::OnceLock<super::SQLFunctionContext>>,
     pub(super) diagnostics: uqa_execution::query::diagnostics::QueryDiagnostics,
     pub(super) statement_gate: Arc<StatementGate>,
     pub(super) sql_execution_depth: AtomicUsize,
@@ -597,6 +598,7 @@ impl QueryRuntime {
         client_level: Arc<std::sync::atomic::AtomicU8>,
     ) -> Self {
         Self {
+            function_context: Arc::new(std::sync::OnceLock::new()),
             diagnostics: uqa_execution::query::diagnostics::QueryDiagnostics::default(),
             statement_gate: Arc::new(StatementGate::new()),
             sql_execution_depth: AtomicUsize::new(0),

@@ -49,6 +49,7 @@ fn materialize(reference: &Reference, spilled: bool) -> QueryOutput {
         .map(PhysicalRow::from_values)
         .collect();
     let runtime = QueryRuntimeView {
+        function_context: &crate::functions::SQLFunctionContext::empty(),
         diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         cancellation: &uqa_core::CancellationToken::new(),
         settings: &Services,

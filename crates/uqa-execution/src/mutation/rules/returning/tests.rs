@@ -51,6 +51,7 @@ impl QueryMemorySettings for Memory {
 
 fn with_runtime(bytes: usize, check: impl FnOnce(QueryRuntimeView<'_>)) {
     check(QueryRuntimeView {
+        function_context: &crate::functions::SQLFunctionContext::empty(),
         diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         cancellation: &CancellationToken::new(),
         settings: &Memory(bytes),

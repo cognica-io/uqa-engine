@@ -43,6 +43,7 @@ fn with_runtime(
     let aggregate_functions = RwLock::default();
     let notices = crate::query::NoticeQueue::default();
     run(QueryRuntimeView {
+        function_context: &crate::functions::SQLFunctionContext::empty(),
         diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         settings,
         cancellation,

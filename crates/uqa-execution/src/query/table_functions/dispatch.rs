@@ -77,7 +77,11 @@ pub(super) fn build_table_function_rows_with_row(
                     context.eval_hook.enum_labels(),
                     &evaluated,
                 )
-                .and_then(|arguments| registration.function.call(&arguments))
+                .and_then(|arguments| {
+                    registration
+                        .function
+                        .call_with_context(context.runtime.function_context, &arguments)
+                })
             })
         {
             return registered_table_function_rows(name, result?, alias, column_aliases);
