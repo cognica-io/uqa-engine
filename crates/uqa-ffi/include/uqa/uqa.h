@@ -55,6 +55,15 @@ typedef struct uqa_bits_view {
     uint32_t bit_length;
 } uqa_bits_view;
 
+/* Native encrypted compressed SQLite container identity and exact state.
+ * Persist the fields in an external trusted store; this struct is not a wire
+ * format. A copied anchor owns no allocation and needs no destruction. */
+typedef struct uqa_sqlite_container_anchor {
+    uint8_t database_id[16];
+    uint64_t generation;
+    uint8_t state_tag[32];
+} uqa_sqlite_container_anchor;
+
 #define UQA_OK                       INT32_C(0)
 #define UQA_DONE                     INT32_C(1)
 #define UQA_TIMEOUT                  INT32_C(2)
@@ -218,6 +227,21 @@ UQA_API uqa_status UQA_CALL uqa_config_get_compression(
     uqa_config config, uint32_t *codec, int32_t *level);
 UQA_API uqa_status UQA_CALL uqa_config_set_compression(
     uqa_config config, uint32_t codec, int32_t level);
+/* The setter copies an anchor; NULL clears it. An unset getter returns DONE.
+ * An anchor requires a key and compressed SQLite, explicitly selected or
+ * detected by SQLITE_AUTO. It cannot create a new container. */
+UQA_API uqa_status UQA_CALL uqa_config_get_trusted_anchor(
+    uqa_config config, uqa_sqlite_container_anchor *out);
+UQA_API uqa_status UQA_CALL uqa_config_set_trusted_anchor(
+    uqa_config config, const uqa_sqlite_container_anchor *anchor);
+/* Authenticate the on-disk committed state without opening an Engine. Read
+ * after closing writers, then retain the result externally before reopening.
+ * Wrong keys, unencrypted containers and other file formats fail. */
+UQA_API uqa_status UQA_CALL uqa_sqlite_get_container_anchor(
+    const char *path, const char *key, uqa_sqlite_container_anchor *out);
+UQA_API uqa_status UQA_CALL uqa_sqlite_get_container_anchor_n(
+    const char *path, size_t path_size, const char *key, size_t key_size,
+    uqa_sqlite_container_anchor *out);
 UQA_API uqa_status UQA_CALL uqa_config_get_ffi_memory_limit(
     uqa_config config, uint64_t *bytes);
 UQA_API uqa_status UQA_CALL uqa_config_set_ffi_memory_limit(

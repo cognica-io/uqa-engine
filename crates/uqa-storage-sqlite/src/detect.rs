@@ -18,7 +18,9 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::compressed_vfs::{FLAG_ENCRYPTED, HEADER_FLAGS_OFFSET, LEGACY_MAGIC, MAGIC};
-use crate::{ManagedConnection, SQLiteCompressionOptions, SQLiteError};
+use crate::{
+    ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions, SQLiteError,
+};
 
 /// First 16 bytes of every plaintext `SQLite` database file.
 const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
@@ -110,11 +112,36 @@ impl ManagedConnection {
     ///
     /// Missing files use `SQLCipher` when a key is supplied and plain `SQLite` otherwise. Existing compressed files retain their recorded codec. A key on an unencrypted file is rejected; encrypted or unrecognized files require a key. New compressed files require an explicit compression constructor.
     pub fn open_auto(path: &Path, key: Option<&str>) -> Result<Self, SQLiteError> {
+        Self::open_detected(path, key, None)
+    }
+
+    /// Detect an existing encrypted compressed container and enforce its externally retained identity and committed state before opening it. Missing and other file formats are rejected without creating a database.
+    pub fn open_auto_with_anchor(
+        path: &Path,
+        key: &str,
+        trusted_anchor: SQLiteCompressedContainerAnchor,
+    ) -> Result<Self, SQLiteError> {
+        Self::open_detected(path, Some(key), Some(trusted_anchor))
+    }
+
+    fn open_detected(
+        path: &Path,
+        key: Option<&str>,
+        anchor: Option<SQLiteCompressedContainerAnchor>,
+    ) -> Result<Self, SQLiteError> {
         let key = match key {
             Some("") => return Err(SQLiteError::EmptyEncryptionKey),
             other => other,
         };
-        match detect_database_file_format(path)? {
+        let format = detect_database_file_format(path)?;
+        if anchor.is_some()
+            && format != (DatabaseFileFormat::CompressedContainer { encrypted: true })
+        {
+            return Err(SQLiteError::StorageBackend(
+                "a trusted anchor requires an existing encrypted compressed container".into(),
+            ));
+        }
+        match format {
             DatabaseFileFormat::Missing => match key {
                 Some(key) => Self::open_encrypted(path, key),
                 None => Self::open(path),
@@ -124,9 +151,19 @@ impl ManagedConnection {
                 None => Self::open(path),
             },
             DatabaseFileFormat::CompressedContainer { encrypted: true } => match key {
-                Some(key) => {
-                    Self::open_compressed_encrypted(path, key, SQLiteCompressionOptions::default())
-                }
+                Some(key) => match anchor {
+                    Some(anchor) => Self::open_compressed_encrypted_with_anchor(
+                        path,
+                        key,
+                        SQLiteCompressionOptions::default(),
+                        anchor,
+                    ),
+                    None => Self::open_compressed_encrypted(
+                        path,
+                        key,
+                        SQLiteCompressionOptions::default(),
+                    ),
+                },
                 None => Err(SQLiteError::EncryptionKeyRequired),
             },
             DatabaseFileFormat::CompressedContainer { encrypted: false } => match key {
@@ -150,6 +187,71 @@ mod tests {
 
     fn temp_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn automatic_anchored_open_preserves_exact_state_and_rejects_missing_files() {
+        let directory = temp_dir();
+        for (index, compression) in [
+            SQLiteCompressionOptions::lz4(),
+            SQLiteCompressionOptions::zstd(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let path = directory.path().join(format!("anchored-{index}"));
+            let old_file = directory.path().join(format!("old-{index}"));
+            let key = "automatic-anchor-key";
+            let connection =
+                ManagedConnection::open_compressed_encrypted(&path, key, compression).unwrap();
+            connection
+                .with(|sql| {
+                    Ok(sql.execute_batch("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (7)")?)
+                })
+                .unwrap();
+            drop(connection);
+            let first = crate::read_authenticated_anchor(&path, key).unwrap();
+            std::fs::copy(&path, &old_file).unwrap();
+            for part in 0..3 {
+                let mut invalid = first;
+                match part {
+                    0 => invalid.database_id[0] ^= 1,
+                    1 => invalid.generation ^= 1,
+                    _ => invalid.state_tag[0] ^= 1,
+                }
+                assert!(ManagedConnection::open_auto_with_anchor(&path, key, invalid).is_err());
+            }
+            let connection = ManagedConnection::open_auto_with_anchor(&path, key, first).unwrap();
+            connection
+                .with(|sql| Ok(sql.execute_batch("INSERT INTO t VALUES (8)")?))
+                .unwrap();
+            drop(connection);
+            let current = crate::read_authenticated_anchor(&path, key).unwrap();
+            assert_eq!(first.database_id, current.database_id);
+            assert!(current.generation > first.generation);
+            assert_ne!(current.state_tag, first.state_tag);
+            assert!(ManagedConnection::open_auto_with_anchor(&path, key, first).is_err());
+            let connection = ManagedConnection::open_auto_with_anchor(&path, key, current).unwrap();
+            let count: i64 = connection
+                .with(|sql| Ok(sql.query_row("SELECT count(*) FROM t", [], |row| row.get(0))?))
+                .unwrap();
+            assert_eq!(count, 2);
+            drop(connection);
+            std::fs::copy(&old_file, &path).unwrap();
+            assert!(ManagedConnection::open_auto_with_anchor(&path, key, current).is_err());
+            let missing = directory.path().join(format!("missing-{index}"));
+            assert!(ManagedConnection::open_auto_with_anchor(&missing, key, current).is_err());
+            assert!(!missing.exists());
+            let plain = directory.path().join(format!("plain-{index}"));
+            let connection = ManagedConnection::open(&plain).unwrap();
+            connection
+                .with(|sql| Ok(sql.execute_batch("CREATE TABLE retained (n INTEGER)")?))
+                .unwrap();
+            drop(connection);
+            let before = std::fs::read(&plain).unwrap();
+            assert!(ManagedConnection::open_auto_with_anchor(&plain, key, current).is_err());
+            assert_eq!(std::fs::read(&plain).unwrap(), before);
+        }
     }
 
     #[test]

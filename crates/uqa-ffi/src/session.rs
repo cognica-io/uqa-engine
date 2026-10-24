@@ -204,6 +204,43 @@ enum PersistentBackend {
     Redb,
 }
 
+fn sqlite_connection(
+    path: &Path,
+    config: &UQAConfig,
+    auto: bool,
+) -> boundary::Result<uqa_storage_sqlite::ManagedConnection> {
+    use uqa_storage_sqlite::ManagedConnection;
+    let key = config.key.as_ref().map(|key| key.as_str());
+    let native = match (config.trusted_anchor, key, config.compression, auto) {
+        (_, _, Some(_), true) => {
+            return Err(UQAError::invalid(
+                "automatic open detects compression from the database file",
+            ))
+        }
+        (Some(anchor), Some(key), None, true) => {
+            ManagedConnection::open_auto_with_anchor(path, key, anchor)
+        }
+        (Some(anchor), Some(key), Some(compression), false) => {
+            ManagedConnection::open_compressed_encrypted_with_anchor(path, key, compression, anchor)
+        }
+        (Some(_), _, _, _) => {
+            return Err(UQAError::invalid(
+                "a trusted anchor requires encryption and explicit or detected compression",
+            ))
+        }
+        (None, key, None, true) => ManagedConnection::open_auto(path, key),
+        (None, None, None, false) => ManagedConnection::open(path),
+        (None, Some(key), None, false) => ManagedConnection::open_encrypted(path, key),
+        (None, None, Some(compression), false) => {
+            ManagedConnection::open_compressed(path, compression)
+        }
+        (None, Some(key), Some(compression), false) => {
+            ManagedConnection::open_compressed_encrypted(path, key, compression)
+        }
+    };
+    native.map_err(|error| UQAError::display(UQA_ERROR_IO, &error))
+}
+
 fn open(
     path: &str,
     config: Option<&UQAConfig>,
@@ -214,66 +251,34 @@ fn open(
     }
     let defaults = UQAConfig::default();
     let config = config.unwrap_or(&defaults);
-    let key = config.key.as_ref().map(|key| key.as_str());
     let path = Path::new(path);
-    if matches!(
-        backend,
-        PersistentBackend::SQLiteNative { auto: true }
-            | PersistentBackend::SQLiteKeyValue { auto: true }
-    ) && config.compression.is_some()
-    {
-        return Err(UQAError::invalid(
-            "automatic open detects compression from the database file",
-        ));
-    }
     let native = match backend {
         PersistentBackend::SQLiteNative { auto } => {
-            let native = if auto {
-                Engine::open_auto(path, key)
-            } else {
-                match (key, config.compression) {
-                    (None, None) => Engine::open(path),
-                    (Some(key), None) => Engine::open_encrypted(path, key),
-                    (None, Some(options)) => Engine::open_compressed(path, options),
-                    (Some(key), Some(options)) => {
-                        Engine::open_compressed_encrypted(path, key, options)
-                    }
-                }
-            };
-            native.map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?
+            let connection = sqlite_connection(path, config, auto)?;
+            let provider = uqa_storage_sqlite::SQLiteStorageProvider::new(connection);
+            Engine::from_persistent_provider(Arc::new(provider))
         }
         PersistentBackend::SQLiteKeyValue { auto } => {
-            use uqa_storage_sqlite::{ManagedConnection, SQLiteKeyValueStorage};
-            let connection = if auto {
-                ManagedConnection::open_auto(path, key)
-            } else {
-                match (key, config.compression) {
-                    (None, None) => ManagedConnection::open(path),
-                    (Some(key), None) => ManagedConnection::open_encrypted(path, key),
-                    (None, Some(options)) => ManagedConnection::open_compressed(path, options),
-                    (Some(key), Some(options)) => {
-                        ManagedConnection::open_compressed_encrypted(path, key, options)
-                    }
-                }
-            }
-            .map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?;
-            let provider = SQLiteKeyValueStorage::from_connection(connection)
+            let connection = sqlite_connection(path, config, auto)?;
+            let provider = uqa_storage_sqlite::SQLiteKeyValueStorage::from_connection(connection)
                 .map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?;
             Engine::from_persistent_provider(Arc::new(provider))
-                .map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?
         }
         PersistentBackend::Redb => {
-            if config.key.is_some() || config.compression.is_some() {
+            if config.key.is_some()
+                || config.compression.is_some()
+                || config.trusted_anchor.is_some()
+            {
                 return Err(UQAError::invalid(
-                    "redb databases do not accept SQLite encryption or compression options",
+                    "redb databases do not accept SQLite encryption, compression or anchors",
                 ));
             }
             let provider = uqa_storage_redb::RedbStorage::open(path)
                 .map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?;
             Engine::from_persistent_provider(Arc::new(provider))
-                .map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?
         }
-    };
+    }
+    .map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?;
     publish_engine(native, true, config.memory_limit)
 }
 
@@ -287,8 +292,8 @@ ffi_fn!(uqa_engine_open(path: *const c_char, flags: UQAOpenFlags, config: *mut U
         }
         let defaults = UQAConfig::default();
         let config = config.unwrap_or(&defaults);
-        if config.key.is_some() || config.compression.is_some() {
-            return Err(UQAError::invalid("memory databases do not accept encryption or compression"));
+        if config.key.is_some() || config.compression.is_some() || config.trusted_anchor.is_some() {
+            return Err(UQAError::invalid("memory databases do not accept encryption, compression or anchors"));
         }
         *out = publish_engine(Engine::new(), false, config.memory_limit)?;
         return Ok(UQA_OK);

@@ -160,6 +160,101 @@ static void storage_options(void) {
     }
 }
 
+static void copy_file(const char *source, const char *target) {
+    FILE *input = fopen(source, "rb"), *output = fopen(target, "wb");
+    unsigned char bytes[8192];
+    size_t count;
+    assert(input != NULL && output != NULL);
+    while ((count = fread(bytes, 1, sizeof(bytes), input)) != 0)
+        assert(fwrite(bytes, 1, count, output) == count);
+    assert(!ferror(input));
+    assert(fclose(input) == 0);
+    assert(fclose(output) == 0);
+}
+
+static void trusted_anchors(void) {
+    const char *key = "C trusted anchor credential";
+    const uint32_t codecs[] = {UQA_COMPRESSION_LZ4, UQA_COMPRESSION_ZSTD};
+    uqa_sqlite_container_anchor empty = {{0}, 0, {0}}, first, current, copied;
+    uqa_config config = NULL;
+    uqa_engine engine = NULL;
+    uqa_result result = NULL;
+    char path[4096], old_file[4096], current_file[4096], name[64];
+    CHECK(uqa_config_create(&config));
+    memset(&copied, 0xff, sizeof(copied));
+    assert(uqa_config_get_trusted_anchor(config, &copied) == UQA_DONE);
+    assert(memcmp(&copied, &empty, sizeof(empty)) == 0);
+    CHECK(uqa_config_set_trusted_anchor(config, &empty));
+    if (test_database_flags() == UQA_OPEN_MEMORY || test_database_flags() == UQA_OPEN_REDB) {
+        assert(test_database_open(config, &engine) == UQA_ERROR_INVALID_ARGUMENT);
+        assert(engine == NULL);
+        CHECK(uqa_config_set_trusted_anchor(config, NULL));
+        assert(uqa_config_get_trusted_anchor(config, &copied) == UQA_DONE);
+        CHECK(uqa_config_destroy(&config));
+        return;
+    }
+    CHECK(uqa_config_set_trusted_anchor(config, NULL));
+    CHECK(uqa_config_set_encryption_key(config, key));
+    for (size_t codec = 0; codec < sizeof(codecs) / sizeof(codecs[0]); ++codec) {
+        (void)snprintf(name, sizeof(name), "anchor-%u", codecs[codec]);
+        database_path(path, sizeof(path), name);
+        (void)snprintf(name, sizeof(name), "anchor-old-%u", codecs[codec]);
+        database_path(old_file, sizeof(old_file), name);
+        (void)snprintf(name, sizeof(name), "anchor-current-%u", codecs[codec]);
+        database_path(current_file, sizeof(current_file), name);
+        CHECK(uqa_config_set_trusted_anchor(config, NULL));
+        CHECK(uqa_config_set_compression(config, codecs[codec], codec == 0 ? 0 : 3));
+        CHECK(test_database_open_path(path, config, &engine));
+        CHECK(uqa_result_create(&result));
+        CHECK(uqa_engine_execute(engine,
+            "CREATE TABLE anchor_values (n integer); INSERT INTO anchor_values VALUES (7)", result));
+        CHECK(uqa_result_destroy(&result));
+        CHECK(uqa_engine_close(&engine));
+        CHECK(uqa_sqlite_get_container_anchor(path, key, &first));
+        copy_file(path, old_file);
+        CHECK(uqa_config_set_trusted_anchor(config, &first));
+        CHECK(uqa_config_get_trusted_anchor(config, &copied));
+        assert(memcmp(&copied, &first, sizeof(first)) == 0);
+        copied.database_id[0] ^= 1;
+        CHECK(uqa_config_get_trusted_anchor(config, &copied));
+        assert(memcmp(&copied, &first, sizeof(first)) == 0);
+        CHECK(test_database_open_path(path, config, &engine));
+        CHECK(uqa_result_create(&result));
+        CHECK(uqa_engine_execute(engine, "INSERT INTO anchor_values VALUES (8)", result));
+        CHECK(uqa_result_destroy(&result));
+        CHECK(uqa_engine_close(&engine));
+        CHECK(uqa_sqlite_get_container_anchor_n(path, strlen(path), key, strlen(key), &current));
+        assert(current.generation > first.generation);
+        assert(memcmp(current.database_id, first.database_id, 16) == 0);
+        assert(memcmp(current.state_tag, first.state_tag, 32) != 0);
+        assert(test_database_open_path(path, config, &engine) == UQA_ERROR_IO);
+        assert(engine == NULL);
+        CHECK(uqa_config_set_trusted_anchor(config, &current));
+        CHECK(uqa_config_set_compression(config, UQA_COMPRESSION_NONE, 0));
+        CHECK(uqa_engine_open(path, test_database_flags() | UQA_OPEN_SQLITE_AUTO, config, &engine));
+        CHECK(uqa_result_create(&result));
+        CHECK(uqa_engine_execute(engine, "SELECT count(*) FROM anchor_values", result));
+        assert(number(result) == 2);
+        CHECK(uqa_result_destroy(&result));
+        CHECK(uqa_engine_close(&engine));
+        CHECK(uqa_sqlite_get_container_anchor(path, key, &current));
+        CHECK(uqa_config_set_trusted_anchor(config, &current));
+        copy_file(path, current_file);
+        copy_file(old_file, path);
+        assert(uqa_engine_open(path, test_database_flags() | UQA_OPEN_SQLITE_AUTO,
+            config, &engine) == UQA_ERROR_IO);
+        assert(engine == NULL);
+        copy_file(current_file, path);
+        CHECK(uqa_engine_open(path, test_database_flags() | UQA_OPEN_SQLITE_AUTO, config, &engine));
+        CHECK(uqa_engine_close(&engine));
+        assert(uqa_sqlite_get_container_anchor(path, "incorrect-key", &copied) == UQA_ERROR_IO);
+        assert(memcmp(&copied, &empty, sizeof(empty)) == 0);
+        assert(uqa_sqlite_get_container_anchor(NULL, key, &copied) == UQA_ERROR_INVALID_ARGUMENT);
+    }
+    CHECK(uqa_config_set_trusted_anchor(config, NULL));
+    CHECK(uqa_config_destroy(&config));
+}
+
 static void invalid_open_flags(void) {
     char path[4096];
     uqa_engine engine = NULL;
@@ -203,5 +298,6 @@ int main(void) {
         sessions_and_reopen();
     }
     storage_options();
+    trusted_anchors();
     return 0;
 }
