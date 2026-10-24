@@ -560,6 +560,14 @@ impl Binder<'_, '_> {
                     &control,
                 )?;
             }
+            if binding.resolution_error.is_none() {
+                // Preserve the selected operand conversions in the scalar tree so stored
+                // expressions retain their types when execution values erase integer widths.
+                for (argument, name) in call.arguments.iter_mut().zip(&binding.argument_types) {
+                    let target = ColumnType::from_sql_name_with_control(name, &control)?;
+                    self.operand_cast(argument, &target)?;
+                }
+            }
             return Ok(call.into_expression());
         }
         if super::containment::is_operator(&call.name) {

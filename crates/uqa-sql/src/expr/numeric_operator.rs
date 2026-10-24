@@ -48,6 +48,7 @@ pub fn eval_numeric_operator_with_control(
         .map(|(value, _)| value)
 }
 
+mod bitwise;
 mod resolved;
 pub use resolved::ResolvedNumericOperator;
 
@@ -92,7 +93,7 @@ pub fn eval_numeric_operator_with_resolution(
             None,
         ));
     }
-    let value = evaluate_converted(operator, &arguments, control)?;
+    let value = evaluate_converted(operator, &arguments, &selected.result, control)?;
     let target = selected.result.sql_name_with_control(control)?;
     super::cast_value_from_with_control(&value, &target, None, control).map(|value| (value, None))
 }
@@ -100,6 +101,7 @@ pub fn eval_numeric_operator_with_resolution(
 fn evaluate_converted(
     operator: NumericOperator,
     arguments: &[Value],
+    result: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     if arguments.iter().any(|value| matches!(value, Value::Null)) {
@@ -115,6 +117,14 @@ fn evaluate_converted(
         NumericOperator::CubeRoot => "cbrt",
         NumericOperator::Absolute => "abs",
         NumericOperator::Plus => unreachable!("unary plus copied its selected operand"),
+        NumericOperator::BitAnd
+        | NumericOperator::BitOr
+        | NumericOperator::BitXor
+        | NumericOperator::BitNot
+        | NumericOperator::ShiftLeft
+        | NumericOperator::ShiftRight => {
+            return bitwise::evaluate(operator, arguments, result, control)
+        }
     };
     super::scalar_core::eval_core_functions_with_control(name, arguments, control)
         .or_else(|| super::scalar_math::eval_math_functions_with_control(name, arguments, control))

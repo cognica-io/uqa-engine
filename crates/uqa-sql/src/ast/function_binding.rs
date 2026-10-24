@@ -431,6 +431,12 @@ pub enum NumericOperator {
     SquareRoot,
     CubeRoot,
     Absolute,
+    BitAnd,
+    BitOr,
+    BitXor,
+    BitNot,
+    ShiftLeft,
+    ShiftRight,
 }
 
 impl NumericOperator {
@@ -443,14 +449,26 @@ impl NumericOperator {
             Self::SquareRoot => "|/",
             Self::CubeRoot => "||/",
             Self::Absolute => "@",
+            Self::BitAnd => "&",
+            Self::BitOr => "|",
+            Self::BitXor => "#",
+            Self::BitNot => "~",
+            Self::ShiftLeft => "<<",
+            Self::ShiftRight => ">>",
         }
     }
 
     #[must_use]
     pub const fn arity(self) -> usize {
         match self {
-            Self::Modulo | Self::Power => 2,
-            Self::Plus | Self::SquareRoot | Self::CubeRoot | Self::Absolute => 1,
+            Self::Modulo
+            | Self::Power
+            | Self::BitAnd
+            | Self::BitOr
+            | Self::BitXor
+            | Self::ShiftLeft
+            | Self::ShiftRight => 2,
+            Self::Plus | Self::SquareRoot | Self::CubeRoot | Self::Absolute | Self::BitNot => 1,
         }
     }
 }

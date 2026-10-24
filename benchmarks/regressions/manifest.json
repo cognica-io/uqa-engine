@@ -24902,6 +24902,49 @@
       "capability": "Integer bitwise operators",
       "workload": "All eighteen PostgreSQL smallint/integer/bigint bitwise operator declarations.",
       "invariant": "Operator and implementation OIDs, operand/result types and unary/binary identities match the independent catalog capture."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_integer_bitwise_operators_preserve_width_and_current_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/numeric_operator/tests/bitwise.rs",
+      "capability": "Integer bitwise operators",
+      "workload": "Retained int2/int4/int8 operator descriptions across wrap boundaries, changed operands, NULL and unknown inputs.",
+      "invariant": "Selected widths match PostgreSQL, current inputs are evaluated, and an invalid cast is not hidden by another NULL operand."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_integer_bitwise_operators_use_invoking_allowance_and_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/numeric_operator/tests/bitwise.rs",
+      "capability": "Integer bitwise operators",
+      "workload": "512 invocations followed by an exhausted allowance and either original or invoking cancellation.",
+      "invariant": "Every result is correct; no invocation allocation escapes, existing owners remain live and both cancellations are observed."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "integer_bitwise_compositions_match_postgresql_and_survive_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/integer_bitwise.rs",
+      "capability": "Integer bitwise operators",
+      "workload": "Independent PostgreSQL replay of row operators, mixed widths, prepared generic/custom plans, strict NULL effects, domains, generated values, expression indexes, views and rollback across four providers and persistent reopen.",
+      "invariant": "Exact values, result types, errors, tags, stored definitions and side effects agree with PostgreSQL; state persists or rolls back as declared."
     }
   ]
 }

@@ -1,0 +1,243 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "create_inputs",
+      "sql": "CREATE TABLE bitwise_inputs(id integer PRIMARY KEY, s smallint, i integer, b bigint)"
+    },
+    {
+      "id": "insert_inputs",
+      "sql": "INSERT INTO bitwise_inputs VALUES (1, 7, 7, 7), (2, -7, -7, -7), (3, -32768, -2147483648, -9223372036854775808), (4, 32767, 2147483647, 9223372036854775807), (5, NULL, NULL, NULL)"
+    },
+    {
+      "id": "values_s",
+      "sql": "SELECT id, s & 3::smallint AS band, s | 3::smallint AS bor, s # 3::smallint AS bxor, ~s AS bnot FROM bitwise_inputs ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "shifts_s",
+      "sql": "SELECT id, c.n, s << c.n AS left_shift, s >> c.n AS right_shift FROM bitwise_inputs CROSS JOIN (VALUES (-1), (0), (15), (16), (31), (32), (63), (64)) c(n) ORDER BY id, c.n",
+      "reopen": true
+    },
+    {
+      "id": "values_i",
+      "sql": "SELECT id, i & 3::integer AS band, i | 3::integer AS bor, i # 3::integer AS bxor, ~i AS bnot FROM bitwise_inputs ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "shifts_i",
+      "sql": "SELECT id, c.n, i << c.n AS left_shift, i >> c.n AS right_shift FROM bitwise_inputs CROSS JOIN (VALUES (-1), (0), (15), (16), (31), (32), (63), (64)) c(n) ORDER BY id, c.n",
+      "reopen": true
+    },
+    {
+      "id": "values_b",
+      "sql": "SELECT id, b & 3::bigint AS band, b | 3::bigint AS bor, b # 3::bigint AS bxor, ~b AS bnot FROM bitwise_inputs ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "shifts_b",
+      "sql": "SELECT id, c.n, b << c.n AS left_shift, b >> c.n AS right_shift FROM bitwise_inputs CROSS JOIN (VALUES (-1), (0), (15), (16), (31), (32), (63), (64)) c(n) ORDER BY id, c.n",
+      "reopen": true
+    },
+    {
+      "id": "mixed_widths",
+      "sql": "SELECT id, s & i AS si, i # b AS ib, s | b AS sb FROM bitwise_inputs ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW bitwise_view AS SELECT id, s & 3::smallint AS band, ~(i | 4) AS bnot, (b # 1) << 2 AS shifted, i + (i >> 3) AS precedence FROM bitwise_inputs"
+    },
+    {
+      "id": "view_rows",
+      "sql": "SELECT * FROM bitwise_view ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "view_definition",
+      "sql": "SELECT pg_get_viewdef('bitwise_view'::regclass) AS definition"
+    },
+    {
+      "id": "mixed_view",
+      "sql": "CREATE VIEW bitwise_mixed_view AS SELECT s & i AS si, i | b AS ib, ~b AS inverse, b % i AS remainder, |/i AS root FROM bitwise_inputs WHERE id = 1"
+    },
+    {
+      "id": "mixed_view_definition",
+      "sql": "SELECT pg_get_viewdef('bitwise_mixed_view'::regclass) AS definition",
+      "reopen": true
+    },
+    {
+      "id": "mixed_view_pretty",
+      "sql": "SELECT pg_get_viewdef('bitwise_mixed_view'::regclass, true) AS definition",
+      "reopen": true
+    },
+    {
+      "id": "mixed_view_rows",
+      "sql": "SELECT * FROM bitwise_mixed_view",
+      "reopen": true
+    },
+    {
+      "id": "create_generated",
+      "sql": "CREATE TABLE bitwise_generated(id integer PRIMARY KEY, n integer DEFAULT (7 & 3), mask integer GENERATED ALWAYS AS ((n | 8) # 2) STORED, CHECK ((n & 1) = 1))"
+    },
+    {
+      "id": "insert_generated",
+      "sql": "INSERT INTO bitwise_generated(id) VALUES (1), (2) RETURNING id, n, mask"
+    },
+    {
+      "id": "expression_index",
+      "sql": "CREATE INDEX bitwise_expression ON bitwise_inputs ((i & 3))"
+    },
+    {
+      "id": "expression_index_rows",
+      "sql": "SELECT id FROM bitwise_inputs WHERE (i & 3) = 1 ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "generated_rows",
+      "sql": "SELECT id, n, mask FROM bitwise_generated ORDER BY id"
+    },
+    {
+      "id": "generated_update",
+      "sql": "UPDATE bitwise_generated SET n = n | 4 WHERE id = 2 RETURNING id, n, mask"
+    },
+    {
+      "id": "generated_after_update",
+      "sql": "SELECT id, n, mask FROM bitwise_generated ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "constraint_rejection",
+      "sql": "INSERT INTO bitwise_generated(id, n) VALUES (3, 2)"
+    },
+    {
+      "id": "constraint_definition",
+      "sql": "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = 'bitwise_generated'::regclass AND contype = 'c'"
+    },
+    {
+      "id": "begin_rollback",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "rolled_back_update",
+      "sql": "UPDATE bitwise_inputs SET i = i # 3 WHERE id = 1 RETURNING id, i"
+    },
+    {
+      "id": "rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "after_rollback",
+      "sql": "SELECT i FROM bitwise_inputs WHERE id = 1",
+      "reopen": true
+    },
+    {
+      "id": "domain",
+      "sql": "CREATE DOMAIN bitwise_positive AS integer CHECK(VALUE > 0)"
+    },
+    {
+      "id": "domain_value",
+      "sql": "SELECT ~7::bitwise_positive AS inverse, 7::bitwise_positive & 3 AS mask"
+    },
+    {
+      "id": "domain_invalid",
+      "sql": "SELECT (-1)::bitwise_positive & 3"
+    },
+    {
+      "id": "prepare_mixed",
+      "sql": "PREPARE bitwise_mixed (smallint, integer, bigint) AS SELECT $1 & $2 AS a, $2 # $3 AS b, ~($1 | $3) AS c, $1 << $2 AS d"
+    },
+    {
+      "id": "sequence",
+      "sql": "CREATE SEQUENCE bitwise_effect"
+    },
+    {
+      "id": "sequence_start",
+      "sql": "SELECT setval('bitwise_effect', 10)"
+    },
+    {
+      "id": "constant_null",
+      "sql": "SELECT NULL::integer & nextval('bitwise_effect')::integer AS value"
+    },
+    {
+      "id": "constant_null_effect",
+      "sql": "SELECT last_value FROM bitwise_effect"
+    },
+    {
+      "id": "constant_null_error",
+      "sql": "SELECT NULL::integer & (1/0) AS value"
+    },
+    {
+      "id": "prepare_null",
+      "sql": "PREPARE bitwise_null (integer) AS SELECT $1 & nextval('bitwise_effect')::integer AS value"
+    },
+    {
+      "id": "force_generic_plan",
+      "sql": "SET plan_cache_mode = force_generic_plan"
+    },
+    {
+      "id": "force_generic_plan_mixed",
+      "sql": "EXECUTE bitwise_mixed(7, 32, 3)"
+    },
+    {
+      "id": "force_generic_plan_null",
+      "sql": "EXECUTE bitwise_null(NULL)"
+    },
+    {
+      "id": "force_generic_plan_effect",
+      "sql": "SELECT last_value FROM bitwise_effect"
+    },
+    {
+      "id": "force_custom_plan",
+      "sql": "SET plan_cache_mode = force_custom_plan"
+    },
+    {
+      "id": "force_custom_plan_mixed",
+      "sql": "EXECUTE bitwise_mixed(7, 32, 3)"
+    },
+    {
+      "id": "force_custom_plan_null",
+      "sql": "EXECUTE bitwise_null(NULL)"
+    },
+    {
+      "id": "force_custom_plan_effect",
+      "sql": "SELECT last_value FROM bitwise_effect"
+    },
+    {
+      "id": "prepare_unknown",
+      "sql": "PREPARE bitwise_unknown AS SELECT $1 & 3 AS mask, 1::smallint << $2 AS shifted"
+    },
+    {
+      "id": "execute_unknown",
+      "sql": "EXECUTE bitwise_unknown('7', '32')"
+    },
+    {
+      "id": "invalid_float",
+      "sql": "SELECT 1.0 & 3"
+    },
+    {
+      "id": "invalid_shift_count",
+      "sql": "SELECT 7 << 1::bigint"
+    },
+    {
+      "id": "ambiguous",
+      "sql": "SELECT NULL & NULL"
+    },
+    {
+      "id": "invalid_unknown",
+      "sql": "SELECT 7 << 'bad'"
+    },
+    {
+      "id": "cleanup_prepared",
+      "sql": "DEALLOCATE ALL"
+    },
+    {
+      "id": "reopen_default",
+      "sql": "INSERT INTO bitwise_generated(id) VALUES (4) RETURNING id,n,mask",
+      "after_reopen": true
+    }
+  ]
+}

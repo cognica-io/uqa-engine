@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Implement PostgreSQL integer bitwise AND, OR, XOR, complement and shifts with selected 16/32/64-bit widths, mixed-input coercions and strict NULL behavior; preserve smallint shift promotion and stored expression identities.
+
 - Preserve PostgreSQL strict constant-NULL arithmetic and concatenation behavior, including selected result types, volatile operand effects, child constant errors and generic prepared parameters.
 - Eliminate statically empty function scans before initializing their routines or argument functions, matching PostgreSQL for folded false/NULL inputs and eligible UNION ALL branches. Preserve relation permissions, runtime-empty and LIMIT 0 initialization, aggregate rows, set-operation boundaries and outer-join NULL extension.
 - Reuse bound routine identity and argument conversion metadata within an unchanged native scope, including SQL body/output descriptions, PL/pgSQL declaration/assignment/return metadata, bound table/set-projection result declarations and immutable correlated ROWS FROM call inputs. Prepared procedural parameters preserve their selected types directly. Preserve live defaults, domain checks, privileges, function replacement, changed record/output schemas, row delivery and rollback. Retired routine bodies are released without waiting for expression metadata to expire.

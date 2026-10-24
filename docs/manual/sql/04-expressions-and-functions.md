@@ -4,7 +4,7 @@ This chapter is a name-level catalog of built-in expression functions. Most sign
 
 ## Operators and conditional expressions
 
-Implemented expression families include arithmetic, comparison, Boolean logic, NULL tests, `BETWEEN`, `IN`, `EXISTS`, `LIKE`, `ILIKE`, regular-expression matching, `SIMILAR TO`, concatenation, array construction and subscripting, casts, and searched or simple `CASE`.
+Implemented expression families include arithmetic, integer bitwise operations, comparison, Boolean logic, NULL tests, `BETWEEN`, `IN`, `EXISTS`, `LIKE`, `ILIKE`, regular-expression matching, `SIMILAR TO`, concatenation, array construction and subscripting, casts, and searched or simple `CASE`.
 
 `expression IS [NOT] TRUE`, `expression IS [NOT] FALSE` and `expression IS [NOT] UNKNOWN` accept a Boolean expression, including a Boolean domain, and always return a non-NULL Boolean. Unknown literals and undeclared parameters receive Boolean context; explicitly declared non-Boolean operands and set-valued operands fail with `42804`, and invalid Boolean input fails with `22P02`. Analysis checks these requirements before runtime short circuits. A reached operand evaluates once, preserving its errors and effects. NULL `IS NOT TRUE` and NULL `IS NOT FALSE` are true, while NULL `IS NOT UNKNOWN` is false. Stored views and constraints retain the predicate and its selected operand types across reopening.
 
@@ -40,6 +40,17 @@ WHERE value LIKE 'a!_b' ESCAPE '!';
 ```sql execute
 SELECT '\xff'::bytea LIKE '_'::bytea AS binary_match,
        'a'::character(4) LIKE 'a' AS padded_match;
+```
+
+## Integer bitwise operators
+
+`left & right`, `left | right` and `left # right` compute bitwise AND, OR and exclusive OR; prefix `~value` complements every bit. These forms select the `smallint`, `integer` or `bigint` overload from the declared operands and return that integer type. Mixed integer operands use the selected common integer width. `value << count` and `value >> count` require an `integer` shift count and preserve the left operand's selected integer type. Right shift extends the sign bit; left shift discards bits beyond the result width. For `smallint`, shifting first promotes the value to 32 bits and then truncates to 16 bits. Shift counts use their low five bits for `smallint` and `integer`, and their low six bits for `bigint`, including negative counts.
+
+These operators are strict and immutable. They introduce no state change; reached argument expressions retain their ordinary effects, conversion errors and evaluation order, including PostgreSQL's planning-time strict-NULL folding. Unknown literals and parameters use ordinary operator inference. Unsupported types report `42883`, an ambiguous all-unknown signature reports `42725`, and invalid or out-of-range integer input retains its normal cast diagnostic. Generated columns, expression indexes and stored views retain the selected integer width through reopening. Binary `~` continues to mean regular-expression matching.
+
+```sql execute
+SELECT 7 & 3 AS intersection, 7 | 8 AS union_bits, 7 # 3 AS exclusive_bits,
+       ~7 AS complement, 1::smallint << 32 AS promoted_shift, (-7)::bigint >> 1 AS signed_shift;
 ```
 
 ## Concatenation
