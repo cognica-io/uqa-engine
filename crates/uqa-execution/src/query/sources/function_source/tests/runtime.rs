@@ -14,7 +14,7 @@ use crate::scalar::plan::{PhysicalOuterRow, PhysicalSubqueryRunner, QueryExpress
 use crate::{FunctionTypeResolver, ScalarExpr, SharedExpressionEvaluator, SubqueryResult};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use uqa_core::Value;
 use uqa_sql::{
@@ -24,6 +24,8 @@ use uqa_sql::{
 #[derive(Default)]
 pub(super) struct Runtime {
     pub(super) calls: AtomicUsize,
+    pub(super) scope:
+        Mutex<Option<uqa_sql::routines::invocation::descriptions::RoutineDescriptionScope>>,
 }
 
 impl FunctionTypeResolver for Runtime {
@@ -53,6 +55,11 @@ impl crate::functions::AggregateFunctionRegistry for Runtime {
     }
 }
 impl EngineHook for Runtime {
+    fn routine_description_scope(
+        &self,
+    ) -> Option<uqa_sql::routines::invocation::descriptions::RoutineDescriptionScope> {
+        self.scope.lock().unwrap().clone()
+    }
     fn nextval(&self, _: &str) -> Result<i64, SQLError> {
         panic!("unexpected sequence access")
     }
@@ -144,9 +151,19 @@ impl SetFunctionRuntime for Runtime {
         assert!(payload.bytes().all(|byte| byte == b'x'));
         let input = row.unwrap().physical_value_at(0).unwrap().clone();
         self.calls.fetch_add(1, Ordering::Relaxed);
+        let mut rows = vec![vec![input.clone(), Value::Int(payload.len() as i64)]];
+        if call.name == "two_payload" {
+            let Value::Int(input) = input else {
+                panic!("integer input")
+            };
+            rows.push(vec![
+                Value::Int(input + 1),
+                Value::Int(payload.len() as i64),
+            ]);
+        }
         Ok(TableFunctionRows::materialized(
             vec!["input".into(), "payload_length".into()],
-            vec![vec![input, Value::Int(payload.len() as i64)]],
+            rows,
         ))
     }
 }

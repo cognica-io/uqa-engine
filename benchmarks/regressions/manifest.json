@@ -15,6 +15,75 @@
       ]
     },
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "correlated_groups_prepare_once_and_keep_live_values_padding_and_ordinality",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/function_source/tests/group.rs",
+      "capability": "Scoped correlated function preparation",
+      "workload": "512 current outer rows, two unequal-length members and 64 KiB arguments under one immutable native scope.",
+      "invariant": "Initialize exactly two members, execute all 1,024 calls and preserve every value, NULL padding and per-outer-row ordinality.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "correlated_group_descriptions_decline_changed_scope_schema_and_mutable_hooks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/function_source/tests/group.rs",
+      "capability": "Scoped correlated function preparation",
+      "workload": "Stable source followed by changed input schema, changed native identity and two calls without a validity identity.",
+      "invariant": "Reuse only the stable preparation, repeat each changed or mutable preparation, and execute no unfetched body.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "correlated_group_initialization_failure_precedes_every_member_effect",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/function_source/tests/group.rs",
+      "capability": "Scoped correlated function preparation",
+      "workload": "Two deferred members whose second initialization fails.",
+      "invariant": "Report the later member initialization failure before any body effect and retain no partial description.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "correlated_group_scope_change_during_preparation_prevents_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/function_source/tests/group.rs",
+      "capability": "Scoped correlated function preparation",
+      "workload": "A native identity expires while the second member initializes.",
+      "invariant": "Decline description publication after the scope expires and preserve first-fetch-only body execution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "correlated_function_sources_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/invocation_descriptions.rs",
+      "capability": "PostgreSQL correlated function sources",
+      "workload": "74 independent PostgreSQL 18 statements across memory, SQLite, SQLite Key/Value and redb with persistent reopen.",
+      "invariant": "Preserve exact values, types, effects, first errors, privileges, lazy arguments, padding, ordinality and replaced/rolled-back routines.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "deferred_parameter_keeps_scalar_carriers_compact_and_errors_lazy",

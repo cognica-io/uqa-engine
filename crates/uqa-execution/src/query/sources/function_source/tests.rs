@@ -10,7 +10,7 @@ use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema, ScalarExpr};
 use std::sync::{atomic::Ordering, Arc};
 use uqa_core::Value;
 
-mod runtime;
+use super::test_support as runtime;
 
 #[test]
 fn deferred_function_calls_share_immutable_inputs_and_read_current_outer_rows() {
@@ -32,12 +32,19 @@ fn deferred_function_calls_share_immutable_inputs_and_read_current_outer_rows() 
     let observer = Arc::new(runtime::Runtime::default());
     let runtime: Arc<dyn SetFunctionRuntime> = observer.clone();
     let allocation = allocation_counter::measure(|| {
+        let call = Arc::new(PreparedFunctionCall::new(&call, None));
         for expected in 0..512 {
             let outer = OwnedPhysicalRow::new(
                 schema.clone(),
                 PhysicalRow::from_values(vec![Value::Int(expected)]),
             );
-            let mut rows = deferred_function_rows(&call, Arc::clone(&runtime), &[], Some(outer), 2);
+            let mut rows = deferred_function_rows(
+                Arc::clone(&call),
+                Arc::clone(&runtime),
+                &[],
+                Some(outer),
+                2,
+            );
             assert_eq!(observer.calls.load(Ordering::Relaxed), expected as usize);
             let row = rows.next().unwrap().unwrap();
             assert_eq!(row.value(0), Some(&Value::Int(expected)));
@@ -48,9 +55,16 @@ fn deferred_function_calls_share_immutable_inputs_and_read_current_outer_rows() 
                 expected as usize + 1
             );
         }
-        drop(deferred_function_rows(&call, runtime, &[], None, 2));
+        drop(deferred_function_rows(
+            Arc::clone(&call),
+            runtime,
+            &[],
+            None,
+            2,
+        ));
         assert_eq!(observer.calls.load(Ordering::Relaxed), 512);
     });
     // Preparing one immutable 64 KiB argument must not copy it for each of 512 outer rows.
     assert!(allocation.bytes_total <= 1024 * 1024, "{allocation:?}");
+    eprintln!("shared function inputs: {allocation:?}");
 }
