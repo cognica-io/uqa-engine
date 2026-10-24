@@ -1,0 +1,249 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "sql": "CREATE SCHEMA uqa_procedural_78a4"
+    },
+    {
+      "sql": "SET search_path = uqa_procedural_78a4, pg_catalog"
+    },
+    {
+      "sql": "CREATE SEQUENCE defaults_seen"
+    },
+    {
+      "sql": "CREATE SEQUENCE domain_checks"
+    },
+    {
+      "sql": "CREATE TABLE permission(allowed boolean)"
+    },
+    {
+      "sql": "INSERT INTO permission VALUES (true)"
+    },
+    {
+      "sql": "CREATE FUNCTION accepts_value(x integer) RETURNS boolean LANGUAGE plpgsql VOLATILE AS $$ BEGIN PERFORM nextval('domain_checks'); RETURN (SELECT allowed FROM permission); END $$"
+    },
+    {
+      "sql": "CREATE DOMAIN checked_integer AS integer CHECK (accepts_value(VALUE))"
+    },
+    {
+      "sql": "CREATE FUNCTION assign_checked(x integer) RETURNS integer LANGUAGE plpgsql VOLATILE AS $$ DECLARE v checked_integer; BEGIN v := x; RETURN v::integer; END $$"
+    },
+    {
+      "sql": "CREATE FUNCTION return_checked(x integer) RETURNS checked_integer LANGUAGE plpgsql VOLATILE AS $$ BEGIN RETURN x; END $$"
+    },
+    {
+      "sql": "SELECT i, assign_checked(i) AS value FROM generate_series(1, 3) t(i) ORDER BY i",
+      "id": "changing assignment values"
+    },
+    {
+      "sql": "SELECT last_value FROM domain_checks",
+      "id": "initialization and assignment checks"
+    },
+    {
+      "sql": "SELECT i, return_checked(i) AS value FROM generate_series(1, 3) t(i) ORDER BY i",
+      "id": "changing return values"
+    },
+    {
+      "sql": "SELECT last_value FROM domain_checks",
+      "id": "return checks stay live"
+    },
+    {
+      "sql": "SELECT assign_checked(NULL) AS a, return_checked(NULL) AS b",
+      "id": "typed null values"
+    },
+    {
+      "sql": "SELECT last_value FROM domain_checks",
+      "id": "null checks stay live"
+    },
+    {
+      "sql": "UPDATE permission SET allowed = false"
+    },
+    {
+      "sql": "SELECT assign_checked(8)",
+      "id": "declaration domain error"
+    },
+    {
+      "sql": "SELECT return_checked(9)",
+      "id": "return domain error"
+    },
+    {
+      "sql": "UPDATE permission SET allowed = true"
+    },
+    {
+      "sql": "SELECT assign_checked(10) AS value",
+      "id": "domain recovers"
+    },
+    {
+      "sql": "CREATE FUNCTION local_defaults(x integer) RETURNS bigint LANGUAGE plpgsql VOLATILE AS $$ DECLARE total bigint := 0; BEGIN FOR i IN 1..x LOOP DECLARE v bigint DEFAULT nextval('defaults_seen'); BEGIN total := total + v; END; END LOOP; RETURN total; END $$"
+    },
+    {
+      "sql": "SELECT i, local_defaults(2) AS value FROM generate_series(1, 3) t(i) ORDER BY i",
+      "id": "block defaults per entry"
+    },
+    {
+      "sql": "CREATE FUNCTION local_types(x smallint) RETURNS text LANGUAGE plpgsql AS $$ DECLARE v smallint := x; BEGIN RETURN pg_typeof(v)::text || ':' || COALESCE(v::text, 'null'); END $$"
+    },
+    {
+      "sql": "SELECT local_types(1::smallint) AS a, local_types(NULL::smallint) AS b",
+      "id": "smallint width and null"
+    },
+    {
+      "sql": "CREATE FUNCTION shadowed(x integer) RETURNS text LANGUAGE plpgsql AS $$ DECLARE v smallint := x; result text := ''; BEGIN result := pg_typeof(v)::text; DECLARE v text := 'current'; BEGIN result := result || ':' || pg_typeof(v)::text || ':' || v; END; RETURN result || ':' || v::text; END $$"
+    },
+    {
+      "sql": "SELECT i, shadowed(i) AS value FROM generate_series(1, 3) t(i) ORDER BY i",
+      "id": "lexical shadowing"
+    },
+    {
+      "sql": "CREATE FUNCTION record_values(x smallint) RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; result text; BEGIN SELECT x AS value INTO r; result := pg_typeof(r.value)::text || ':' || COALESCE(r.value::text, 'null'); SELECT 'next'::text AS value INTO r; RETURN result || ':' || pg_typeof(r.value)::text || ':' || r.value; END $$"
+    },
+    {
+      "sql": "SELECT record_values(7::smallint) AS a, record_values(NULL::smallint) AS b",
+      "id": "current record schemas"
+    },
+    {
+      "sql": "CREATE FUNCTION record_loop() RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; answer text; BEGIN FOR i IN 1..2 LOOP IF i = 1 THEN SELECT 7::smallint AS value INTO r; ELSE SELECT 'changed'::text AS value INTO r; END IF; answer := r.value::text; END LOOP; RETURN answer; END $$"
+    },
+    {
+      "sql": "SELECT record_loop()",
+      "id": "prepared record type mismatch"
+    },
+    {
+      "sql": "CREATE FUNCTION unassigned_record() RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN RETURN r.value::text; END $$"
+    },
+    {
+      "sql": "SELECT unassigned_record()",
+      "id": "unassigned record error"
+    },
+    {
+      "sql": "CREATE FUNCTION unassigned_assignment() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN r.value := 1; RETURN 1; END $$"
+    },
+    {
+      "sql": "SELECT unassigned_assignment()",
+      "id": "unassigned record assignment error"
+    },
+    {
+      "sql": "CREATE FUNCTION conditional_record(initialized boolean) RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN IF initialized THEN SELECT 7::smallint AS value INTO r; END IF; RETURN r.value::text; END $$"
+    },
+    {
+      "sql": "SELECT conditional_record(true)",
+      "id": "prepared record first assignment"
+    },
+    {
+      "sql": "SELECT conditional_record(false)",
+      "id": "prepared unassigned record error"
+    },
+    {
+      "sql": "SELECT conditional_record(true)",
+      "id": "prepared record assignment after error"
+    },
+    {
+      "sql": "CREATE FUNCTION lazy_record(initialized boolean) RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN IF initialized THEN SELECT 8::smallint AS value INTO r; END IF; RETURN CASE WHEN initialized THEN r.value::text ELSE 'not read' END; END $$"
+    },
+    {
+      "sql": "SELECT lazy_record(true)",
+      "id": "lazy record first assignment"
+    },
+    {
+      "sql": "SELECT lazy_record(false)",
+      "id": "unread deferred record error"
+    },
+    {
+      "sql": "SELECT lazy_record(true)",
+      "id": "lazy record assignment after unread error"
+    },
+    {
+      "sql": "CREATE FUNCTION missing_field() RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN SELECT 1 AS present INTO r; RETURN r.absent::text; END $$"
+    },
+    {
+      "sql": "SELECT missing_field()",
+      "id": "missing record field error"
+    },
+    {
+      "sql": "CREATE FUNCTION null_assignment() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE v integer NOT NULL := 1; BEGIN v := NULL; RETURN v; END $$"
+    },
+    {
+      "sql": "SELECT null_assignment()",
+      "id": "not null assignment error"
+    },
+    {
+      "sql": "CREATE FUNCTION lazy_declaration(run boolean) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN IF run THEN DECLARE v integer NOT NULL := NULL; BEGIN RETURN v; END; END IF; RETURN 7; END $$"
+    },
+    {
+      "sql": "SELECT lazy_declaration(false) AS value",
+      "id": "unreached declaration stays lazy"
+    },
+    {
+      "sql": "SELECT lazy_declaration(true)",
+      "id": "reached declaration error"
+    },
+    {
+      "sql": "CREATE FUNCTION caught_error() RETURNS text LANGUAGE plpgsql AS $$ BEGIN BEGIN RAISE EXCEPTION 'observed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ':' || SQLERRM; END; END $$"
+    },
+    {
+      "sql": "SELECT caught_error() AS value",
+      "id": "exception diagnostic variables"
+    },
+    {
+      "sql": "CREATE TYPE held_pair AS (a integer, b text)"
+    },
+    {
+      "sql": "CREATE FUNCTION retained_field() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE r held_pair; BEGIN r := ROW(7, 'old')::held_pair; EXECUTE 'ALTER TYPE uqa_procedural_78a4.held_pair ADD ATTRIBUTE c integer'; RETURN r.a; END $$"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "SELECT retained_field() AS value",
+      "id": "defined retained field after type change"
+    },
+    {
+      "sql": "ROLLBACK"
+    },
+    {
+      "sql": "CREATE FUNCTION replacement(x integer) RETURNS integer LANGUAGE plpgsql AS $$ DECLARE v integer := x; BEGIN RETURN v + 1; END $$"
+    },
+    {
+      "sql": "PREPARE selected(integer) AS SELECT replacement($1) AS value"
+    },
+    {
+      "sql": "EXECUTE selected(2)",
+      "id": "prepared first body"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION replacement(x integer) RETURNS integer LANGUAGE plpgsql AS $$ DECLARE v integer := x; BEGIN RETURN v + 10; END $$"
+    },
+    {
+      "sql": "EXECUTE selected(2)",
+      "id": "replacement body"
+    },
+    {
+      "sql": "ROLLBACK"
+    },
+    {
+      "sql": "EXECUTE selected(2)",
+      "id": "rollback restores body"
+    },
+    {
+      "sql": "DEALLOCATE selected"
+    },
+    {
+      "sql": "SET search_path = uqa_procedural_78a4, pg_catalog",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT local_types(NULL::smallint) AS a, record_values(8::smallint) AS b, shadowed(9) AS c, replacement(3) AS d",
+      "id": "persisted types and body",
+      "reopen": true
+    },
+    {
+      "sql": "DROP SCHEMA uqa_procedural_78a4 CASCADE",
+      "final_cleanup": true
+    }
+  ]
+}

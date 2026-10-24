@@ -140,7 +140,7 @@ fn call_bound_scalar(
     };
     let descriptions = retained.and_then(|retained| {
         let scope = (retained.scope)()?;
-        Some(crate::routines::sql_body::SQLBodyDescriptions {
+        Some(crate::routines::descriptions::RoutineBodyDescriptions {
             description: retained.descriptions.get(binding, &scope)?,
             environment:
                 uqa_sql::routines::invocation::descriptions::RoutineConversionEnvironment {
@@ -164,7 +164,7 @@ fn execute_resolved_scalar_function(
     name: &str,
     args: &[(Option<String>, Value)],
     resolved: ResolvedRoutine<'_>,
-    descriptions: Option<crate::routines::sql_body::SQLBodyDescriptions<'_>>,
+    descriptions: Option<crate::routines::descriptions::RoutineBodyDescriptions<'_>>,
 ) -> Result<Value, SQLError> {
     let ResolvedRoutine {
         function,

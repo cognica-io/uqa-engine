@@ -9,6 +9,7 @@ use std::{borrow::Cow, cell::RefCell};
 pub mod inputs;
 mod statements;
 
+use super::descriptions::RoutineBodyDescriptions;
 use super::transaction::DirectRoutineCommandGuard;
 use super::{CreateFunction, RoutineContext, RoutineOutcome, SQLError, SQLParam, SQLResult, Value};
 use uqa_sql::{
@@ -35,12 +36,6 @@ pub struct SQLBody<'a> {
     pub plans: &'a [UnifiedPlan],
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct SQLBodyDescriptions<'a> {
-    pub description: &'a uqa_sql::routines::invocation::descriptions::RoutineCallDescription,
-    pub environment: uqa_sql::routines::invocation::descriptions::RoutineConversionEnvironment<'a>,
-}
-
 /// `LANGUAGE sql` statements retain their first successful analysis until the
 /// routine, concrete input types, namespace or selected dependencies change.
 /// The final statement is checked before execution and shapes the routine output.
@@ -62,7 +57,7 @@ pub(crate) fn execute_described_sql_language(
     body: SQLBody<'_>,
     bound: &[Value],
     record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
-    descriptions: Option<SQLBodyDescriptions<'_>>,
+    descriptions: Option<RoutineBodyDescriptions<'_>>,
 ) -> Result<RoutineOutcome, SQLError> {
     let SQLBody {
         function,
@@ -158,7 +153,7 @@ fn checked_body_result_layout<'a>(
     definition: &CreateFunction,
     result: &AnalyzedResult,
     record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
-    descriptions: Option<SQLBodyDescriptions<'a>>,
+    descriptions: Option<RoutineBodyDescriptions<'a>>,
 ) -> Result<Cow<'a, SQLFunctionResultLayout>, SQLError> {
     let layout = match descriptions {
         Some(saved) => saved.description.body_result_layout(
@@ -186,7 +181,7 @@ fn body_parameters(
     expressions: &dyn uqa_sql::assignment::routines::RoutineValueContext,
     def: &CreateFunction,
     bound: &[Value],
-    descriptions: Option<SQLBodyDescriptions<'_>>,
+    descriptions: Option<RoutineBodyDescriptions<'_>>,
 ) -> Result<Vec<SQLParam>, SQLError> {
     let call_params = def.call_params();
     if call_params.len() != bound.len() {
@@ -234,7 +229,7 @@ fn shape_result(
     def: &CreateFunction,
     last: &SQLResult,
     layout: &SQLFunctionResultLayout,
-    descriptions: Option<SQLBodyDescriptions<'_>>,
+    descriptions: Option<RoutineBodyDescriptions<'_>>,
 ) -> Result<RoutineOutcome, SQLError> {
     let outputs = def.output_params();
     let anonymous = routine_returns_anonymous_record(def);
@@ -289,7 +284,7 @@ fn result_value(
     layout: &SQLFunctionResultLayout,
     last: &SQLResult,
     mut values: Vec<Value>,
-    descriptions: Option<SQLBodyDescriptions<'_>>,
+    descriptions: Option<RoutineBodyDescriptions<'_>>,
 ) -> Result<Value, SQLError> {
     match layout.kind {
         SQLFunctionResultKind::Void => Ok(Value::Null),

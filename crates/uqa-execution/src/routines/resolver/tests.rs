@@ -5,10 +5,16 @@
 //
 
 use super::*;
+use std::cell::Cell;
 use std::collections::HashMap;
 use uqa_sql::{ast::ColumnDef, RowSchema};
 
-struct Types;
+mod descriptions;
+
+#[derive(Default)]
+struct Types {
+    resolutions: Cell<usize>,
+}
 impl uqa_sql::catalog::domain::DomainCatalog for Types {
     fn domain_by_oid(&self, _: u32) -> Option<uqa_sql::catalog::domain::StoredDomain> {
         None
@@ -37,6 +43,7 @@ impl uqa_sql::assignment::AssignmentContext for Types {
 }
 impl uqa_sql::assignment::routines::RoutineValueContext for Types {
     fn catalog_column_type(&self, name: &str) -> Option<ColumnType> {
+        self.resolutions.set(self.resolutions.get() + 1);
         ColumnType::from_sql_name(name).ok()
     }
 }
@@ -63,6 +70,7 @@ fn record_schema() -> RowSchema {
 
 #[test]
 fn routine_record_fields_preserve_postgresql_declared_collations() {
+    let types = Types::default();
     let names = ["c", "p", "plain", "n"];
     let schema = record_schema();
     let schemas = HashMap::from([(0, schema.clone()), (1, schema)]);
@@ -99,7 +107,8 @@ fn routine_record_fields_preserve_postgresql_declared_collations() {
         let record = Value::Record(fields.into());
         let values = [record.clone(), record, Value::Null];
         let mut resolver = DatumResolver {
-            types: &Types,
+            descriptions: None,
+            types: &types,
             datums: &datums,
             values: &values,
             record_schemas: &schemas,
@@ -145,7 +154,7 @@ fn routine_record_fields_preserve_postgresql_declared_collations() {
             }
         }
         assert_eq!(observed, 16);
-        assert_eq!(resolver.resolved_datum(2).collation_oid, Some(950));
+        assert_eq!(resolver.resolved_datum(2).unwrap().collation_oid, Some(950));
         assert_eq!(
             resolver
                 .resolve_qualified("new", "missing")
@@ -154,4 +163,93 @@ fn routine_record_fields_preserve_postgresql_declared_collations() {
             Some("42703")
         );
     }
+}
+
+#[test]
+fn prepared_record_parameters_preserve_selected_types_without_text_resolution() {
+    let types = Types::default();
+    let datums = [PLpgSQLDatum::Rec { name: "row".into() }];
+    let bindings = HashMap::from([("row".into(), vec![0])]);
+    let reference = uqa_sql::plpgsql::PLpgSQLVariableReference::Qualified {
+        qualifier: "row".into(),
+        column: "value".into(),
+    };
+    for (ty, text) in [(ColumnType::SmallInteger, false), (ColumnType::Text, true)] {
+        let schema =
+            RowSchema::with_column_definitions(None, &[ColumnDef::nullable("value", ty.clone())]);
+        let schemas = HashMap::from([(0, schema)]);
+        for index in 0..256 {
+            let value = if index % 3 == 0 {
+                Value::Null
+            } else if text {
+                Value::Str(index.to_string())
+            } else {
+                Value::Int(index)
+            };
+            let values = [Value::Record(vec![("value".into(), value.clone())].into())];
+            let mut resolver = DatumResolver {
+                descriptions: None,
+                types: &types,
+                datums: &datums,
+                values: &values,
+                record_schemas: &schemas,
+                bindings: &bindings,
+                error: None,
+                param_count: 0,
+            };
+            let parameter = reference.read(&mut resolver).unwrap();
+            assert_eq!(parameter.scalar_value(), Some(&value));
+            assert_eq!(parameter.declared_scalar_type(), Some(&ty));
+        }
+    }
+    assert_eq!(
+        types.resolutions.get(),
+        0,
+        "a record parameter already owns its selected field type"
+    );
+}
+
+#[test]
+fn prepared_scalar_parameters_do_not_resolve_the_selected_type_twice() {
+    let types = Types::default();
+    let datums = [PLpgSQLDatum::Var(Box::new(uqa_sql::plpgsql::PLpgSQLVar {
+        name: "value".into(),
+        type_oid: Some(21),
+        type_name: "smallint".into(),
+        type_reference: None,
+        default: None,
+        constant: false,
+        not_null: false,
+        cursor: None,
+        lineno: None,
+    }))];
+    let bindings = HashMap::from([("value".into(), vec![0])]);
+    let schemas = HashMap::new();
+    for index in 0..512 {
+        let value = if index % 3 == 0 {
+            Value::Null
+        } else {
+            Value::Int(index)
+        };
+        let values = [value.clone()];
+        let mut resolver = DatumResolver {
+            descriptions: None,
+            types: &types,
+            datums: &datums,
+            values: &values,
+            record_schemas: &schemas,
+            bindings: &bindings,
+            error: None,
+            param_count: 1,
+        };
+        let parameter = uqa_sql::plpgsql::PLpgSQLVariableReference::Parameter(1)
+            .read(&mut resolver)
+            .unwrap();
+        assert_eq!(parameter.scalar_value(), Some(&value));
+        assert_eq!(
+            parameter.declared_scalar_type(),
+            Some(&ColumnType::SmallInteger)
+        );
+    }
+    assert_eq!(types.resolutions.get(), 512);
 }

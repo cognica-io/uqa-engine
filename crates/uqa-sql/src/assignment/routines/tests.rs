@@ -17,6 +17,7 @@ use uqa_core::{memory::MemoryBudget, CancellationToken, RelationIdentity};
 
 mod retained_body;
 mod retained_invocation;
+mod retained_procedural;
 
 struct Context {
     domain: StoredDomain,
@@ -99,9 +100,10 @@ impl AssignmentContext for Context {
 impl RoutineValueContext for Context {
     fn catalog_column_type(&self, name: &str) -> Option<ColumnType> {
         self.resolutions.set(self.resolutions.get() + 1);
-        (name == "public.accepted_value" || name == self.domain.column_type().catalog_name())
-            .then(|| self.domain.column_type())
-            .or_else(|| ColumnType::from_sql_name(name).ok())
+        (matches!(name, "public.accepted_value" | "accepted_value")
+            || name == self.domain.column_type().catalog_name())
+        .then(|| self.domain.column_type())
+        .or_else(|| ColumnType::from_sql_name(name).ok())
     }
 }
 

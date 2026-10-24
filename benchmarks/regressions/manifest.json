@@ -4,6 +4,153 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "deferred_parameter_keeps_scalar_carriers_compact_and_errors_lazy",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/params.rs",
+      "capability": "Bounded procedural diagnostic carrier",
+      "workload": "A typed deferred unassigned-record error and the ordinary SQLParam layout.",
+      "invariant": "Retain type and lazy DETAIL/HINT diagnostics without enlarging every scalar parameter beyond its value/type/tag carrier.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_diagnostic_preserves_primary_fields_and_old_serialization",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/identity_sequence/tests.rs",
+      "capability": "Deferred SQL diagnostic preservation",
+      "workload": "Unassigned-record DETAIL, independent HINT, deferred round-trip and legacy primary-only serialized diagnostics.",
+      "invariant": "Retain primary diagnostic fields without eagerly evaluating the deferred parameter or changing legacy encoding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "procedural_datum_descriptions_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/invocation_descriptions.rs",
+      "capability": "PostgreSQL procedural datum consumers",
+      "workload": "Seventy independent PostgreSQL 18 statements covering current procedural values, domains, record schemas, direct/deferred diagnostics, unexecuted CASE branches, replacement, rollback and persistent reopen through four providers.",
+      "invariant": "Preserve exact values, types, command tags and SQLSTATE/message/DETAIL/HINT with live domain/default effects and existing prepared record diagnostics.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_metadata_resolves_once_while_values_and_domain_checks_remain_live",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_procedural.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "512 changing values and NULLs, declared domain parameters, assignments and returns under 16KiB.",
+      "invariant": "Resolve each declaration and conversion once, preserve 1,024 domain checks and later 23514 errors, and release admitted metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_descriptions_bind_compilation_positions_names_and_current_scope",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_procedural.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "512 selected type reads followed by changed names, datum counts, compilation and scope.",
+      "invariant": "Retain one compilation and exact declared positions/names; changed inputs use live resolution without accumulating generations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_unresolved_and_unqualified_declarations_keep_live_resolution",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_procedural.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "Repeated missing declarations, unqualified names and a replacement compilation.",
+      "invariant": "Never retain unresolved results or namespace-sensitive conversions; preserve current value behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_callbacks_invalidate_later_conversions_and_publication",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_procedural.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "Domain callbacks change scope before the next assignment and return.",
+      "invariant": "Run every callback, resolve subsequent targets live and avoid publishing a descriptor invalidated by its own callback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_retention_declines_exhaustion_and_propagates_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_procedural.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "Exhausted 16KiB allowance at table and named-slot boundaries, followed by renewed allowance and cancellation.",
+      "invariant": "Optional retention failure preserves live reads and conversions; cancellation remains 57014 and all leases release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_procedural_parameters_reuse_declarations_but_read_current_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/resolver/tests/descriptions.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "512 changing smallint values and NULLs under 8KiB, followed by two reads after native scope change.",
+      "invariant": "Resolve the native declaration once, preserve selected types/current values, resume live reads after invalidation and release metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_record_parameters_preserve_selected_types_without_text_resolution",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/resolver/tests.rs",
+      "capability": "Procedural selected record metadata",
+      "workload": "512 changing typed procedural parameter reads through the existing resolver.",
+      "invariant": "Read current smallint/text record fields and NULLs without textual type resolution; schema changes select the current field descriptor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_scalar_parameters_do_not_resolve_the_selected_type_twice",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/resolver/tests.rs",
+      "capability": "Procedural scalar parameter handoff",
+      "workload": "512 changing typed procedural parameter reads through the existing resolver.",
+      "invariant": "Preserve current smallint values and NULLs while resolving the mutable declaration once per read, without re-resolving its selected type.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "tuple_result_targets_resolve_once_per_attribute_and_keep_each_domain_check",
       "cases": 1,
       "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",

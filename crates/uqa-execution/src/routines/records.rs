@@ -71,7 +71,7 @@ impl<'a> Interpreter<'a> {
             None,
         )
     }
-    pub(super) fn datum_type(&self, index: usize) -> Option<ColumnType> {
+    pub(super) fn datum_type(&self, index: usize) -> Result<Option<ColumnType>, SQLError> {
         self.resolver().datum_type(index)
     }
 
@@ -126,7 +126,7 @@ impl<'a> Interpreter<'a> {
                     fields
                         .iter()
                         .map(|field| self.datum_type(field.varno))
-                        .collect(),
+                        .collect::<Result<_, _>>()?,
                 )),
                 _ => Ok(self
                     .record_schemas
@@ -149,7 +149,7 @@ impl<'a> Interpreter<'a> {
                 .and_then(|types| types.first())
                 .cloned()
                 .flatten()),
-            PLpgSQLReturnValue::Datum(index) => Ok(self.datum_type(*index)),
+            PLpgSQLReturnValue::Datum(index) => self.datum_type(*index),
         }
     }
 }
