@@ -46,7 +46,7 @@ static int64_t integer(uqa_result result, uint64_t row, uint32_t column) {
 }
 
 /* The harness gives each client an isolated temporary directory. */
-static size_t temporary_files(const char *path) {
+static size_t inspect_temporary_files(const char *path, int damage) {
     size_t count = 0;
 #ifdef _WIN32
     WIN32_FIND_DATAA entry;
@@ -63,7 +63,15 @@ static size_t temporary_files(const char *path) {
         if (strcmp(entry.cFileName, ".") == 0 || strcmp(entry.cFileName, "..") == 0) continue;
         length = snprintf(full, sizeof(full), "%s/%s", path, entry.cFileName);
         assert(length > 0 && (size_t)length < sizeof(full));
-        count += (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? temporary_files(full) : 1;
+        if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            count += inspect_temporary_files(full, damage);
+        } else {
+            count += 1;
+            if (damage && strncmp(entry.cFileName, ".tmp", 4) == 0) {
+                FILE *file = fopen(full, "wb");
+                assert(file != NULL && fclose(file) == 0);
+            }
+        }
     } while (FindNextFileA(directory, &entry));
     assert(GetLastError() == ERROR_NO_MORE_FILES);
     assert(FindClose(directory));
@@ -79,11 +87,70 @@ static size_t temporary_files(const char *path) {
         length = snprintf(full, sizeof(full), "%s/%s", path, entry->d_name);
         assert(length > 0 && (size_t)length < sizeof(full));
         assert(stat(full, &info) == 0);
-        count += S_ISDIR(info.st_mode) ? temporary_files(full) : 1;
+        if (S_ISDIR(info.st_mode)) {
+            count += inspect_temporary_files(full, damage);
+        } else {
+            count += 1;
+            if (damage && strncmp(entry->d_name, ".tmp", 4) == 0) {
+                FILE *file = fopen(full, "wb");
+                assert(file != NULL && fclose(file) == 0);
+            }
+        }
     }
     assert(closedir(directory) == 0);
 #endif
     return count;
+}
+
+static size_t temporary_files(const char *path) {
+    return inspect_temporary_files(path, 0);
+}
+
+/* Corrupt only the cursor's encrypted scratch files in the harness-owned directory. Database files use a separate explicit name. */
+static void terminal_io(uqa_engine engine, uqa_result result, int explicit_tx) {
+    uqa_cursor cursor = NULL;
+    uqa_error original = NULL, repeated = NULL;
+    uqa_string_view message = {NULL, 0}, sqlstate = {NULL, 0};
+    uint32_t completion = 99, state = 99;
+    int64_t previous = 987654;
+    uqa_status failure = UQA_OK;
+    char saved[1024];
+    size_t before = temporary_files(getenv("TMPDIR"));
+    CHECK(uqa_engine_execute(engine, "SELECT 987654", result));
+    if (explicit_tx) CHECK(uqa_transaction_begin(engine));
+    CHECK(uqa_cursor_open(engine,
+        "SELECT n, repeat('f', 512) FROM generate_series(1, 2061) AS s(n)", &cursor));
+    assert(temporary_files(getenv("TMPDIR")) > before);
+    (void)inspect_temporary_files(getenv("TMPDIR"), 1);
+    for (unsigned int attempt = 0; attempt < 2062; ++attempt) {
+        failure = uqa_cursor_fetch(cursor, 1, result);
+        if (failure != UQA_OK) break;
+        previous = integer(result, 0, 0);
+    }
+    assert(failure == UQA_ERROR_SQL);
+    CHECK(uqa_error_get_last(&original));
+    CHECK(uqa_error_get_sqlstate(original, &sqlstate));
+    assert(equal(sqlstate, "XX000"));
+    CHECK(uqa_error_get_completion(original, &completion));
+    assert(completion == (explicit_tx ? UQA_COMPLETION_IN_TRANSACTION : UQA_COMPLETION_COMMITTED));
+    CHECK(uqa_error_get_message(original, &message));
+    assert(message.size > 0 && message.size < sizeof(saved));
+    memcpy(saved, message.data, message.size);
+    saved[message.size] = '\0';
+    assert(integer(result, 0, 0) == previous);
+    assert(temporary_files(getenv("TMPDIR")) == before);
+    CHECK(uqa_transaction_get_state(engine, &state));
+    assert(state == (explicit_tx ? UQA_TRANSACTION_ACTIVE : UQA_TRANSACTION_IDLE));
+    CHECK(uqa_engine_execute(engine, "SELECT 77", result));
+    assert(uqa_cursor_fetch(cursor, 1, result) == failure);
+    CHECK(uqa_error_get_last(&repeated));
+    assert(original == repeated);
+    CHECK(uqa_error_get_message(repeated, &message));
+    assert(equal(message, saved));
+    assert(integer(result, 0, 0) == 77);
+    CHECK(uqa_cursor_close(&cursor));
+    CHECK(uqa_cursor_close(&cursor));
+    if (explicit_tx) CHECK(uqa_transaction_rollback(engine));
 }
 
 static void empty_descriptor(uqa_engine engine, uqa_result result) {
@@ -314,6 +381,8 @@ int main(void) {
     terminal_cancellation(engine, result, 0);
     terminal_cancellation(engine, result, 1);
     early_close(engine, result);
+    terminal_io(engine, result, 0);
+    terminal_io(engine, result, 1);
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_engine_close(&engine));
     retention_limit();

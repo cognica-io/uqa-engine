@@ -61,7 +61,8 @@ Completed checks below cover the stated implementation and local evidence at the
 **6. Bounded cursors, reusable destinations, retained batches, terminal failures, and spill cleanup**
 
 - [x] Implement native cursor open forms, immutable descriptors, shared retained batch slices, reusable destinations, terminal diagnostics and close. C/C++ and concurrent Rust ABI tests pass for empty/duplicate descriptors, result lifetimes, cancellation, allowance rejection, admission ordering and actual spill release.
-- [ ] Qualify cursor platform/static/sanitizer behavior and injected native I/O/panic cleanup failures.
+- [x] Qualify real cursor spill I/O failure through C11/C++17 on Memory, native SQLite, SQLite KV and redb, both after implicit completion and inside an explicit transaction. Truncating only the test's encrypted scratch files preserves the previous result, retains the original terminal SQL diagnostic and completion fact, releases every scratch file, permits unrelated session work and makes repeated close harmless. The same fixture passes shared, static and consumer ASan/UBSan executions.
+- [ ] Qualify remaining cursor platform/full-library sanitizer behavior and injected native panic cleanup failures.
 
 **7. COPY callbacks, partial transfers, flush-before-commit behavior, cancellation, and original diagnostics**
 
@@ -626,3 +627,9 @@ The merge of main `36e0173f6b2b415463b1b331fec54d39bbb8e6d3` onto `d3da375390f21
 The full function gate initially exposed `fact(11)` exceeding the existing native stack budget. Query-block validation kept its schema and binding scratch on the stack while recursive row evaluation ran. Validation now finishes in its own function before evaluation, preserving its original order and diagnostics. The actual recursion and infinite-recursion cases pass with both stack and depth limits unchanged; no retry, caller-side state repair or relaxed limit is introduced.
 
 The completed native source passes all 1,759 function integration cases, 1,835 Execution library cases with seven existing subprocess entry points ignored, 231 Planner cases and 2,327 SQL cases. The 76-case FFI gate executes all fifteen fixtures as C11/C++17 on Memory, native SQLite, SQLite KV and redb. Strict SQL/Planner/Execution/Engine/FFI library/test Clippy passes, as do dependency and capability policies, the single integration-harness inventory, formatting, source-header, Rust-size and whitespace checks. The separate grouping gate passes 28 cases. These are integration and local qualification records; all active implementation and final platform/performance requirements remain open.
+
+### Actual C cursor spill failures
+
+Native product source `7a39787dd` passes the expanded cursor fixture as C11 and C++17 on Memory, native SQLite, SQLite KV and redb. Each client damages only the `.tmp` spill files inside its isolated harness directory, leaving database files untouched. Both implicit and explicit transaction cases require the actual native `UQA_ERROR_SQL` / `XX000` failure, preserve the destination's last published row, retain the identical diagnostic and message after unrelated work, and verify COMMITTED versus IN_TRANSACTION completion. All scratch files disappear at terminal failure, the native transaction remains respectively idle or active, and repeated cursor close succeeds.
+
+The complete 76-case FFI gate includes all eight shared cursor executions. The cursor fixture additionally passes eight static executions against archive SHA-256 `a7491340ddd7d5dbbc3d5cb488d7927eb1e7d902ed797055ffaf8340bfb1df2b` and eight C/C++ ASan/UBSan executions against shared-library SHA-256 `03c1ed4cef3321e1a2702636e22fd727f6e3ba968b9805bae961984e6159ad4a`. This closes the local actual-I/O qualification item; injected panic, other platforms and full-library sanitizer evidence remain required in the original scopes.
