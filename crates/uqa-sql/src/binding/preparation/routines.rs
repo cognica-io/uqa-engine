@@ -69,7 +69,7 @@ pub(crate) fn prepare_routine_body_inputs(
     };
     let constants = analysis.parameters.take_input_constants();
     analysis.parameters.finish()?;
-    constants.apply(plan)?;
+    constants.apply(plan, routines, params)?;
     plan.normalize_window_definitions()?;
     Ok(result.map_or(
         crate::binding::statements::AnalyzedResult::Command,
@@ -185,7 +185,7 @@ pub(crate) fn prepare_procedure_call(
     )?;
     let constants = analysis.parameters.take_input_constants();
     analysis.parameters.finish()?;
-    constants.apply(plan)?;
+    constants.apply(plan, context.routines, params)?;
     let mut dependencies = analysis
         .scope
         .prepared_dependencies

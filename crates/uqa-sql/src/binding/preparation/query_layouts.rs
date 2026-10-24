@@ -28,6 +28,7 @@ pub fn restore_query_layouts(
         schema_expression: None,
     };
     analysis.query(query, outer)?;
-    analysis.parameters.apply_query_schemas(query);
-    Ok(())
+    analysis
+        .parameters
+        .apply_query_schemas(query, routines, params)
 }

@@ -35,38 +35,91 @@ pub fn prepare_grouping_sets(
     }
 
     let mut prepared = statement.clone();
-    // A block's operator holds the block's own columns; a lateral block binds its output names against the scope of its outer row before it builds the operator.
-    let mut changed = bind_grouping_names(engine, &mut prepared, schema, None, params)?;
-    changed |= expressions::bind_grouping_expressions(engine, &mut prepared, schema, params)?;
-    if !prepared.group_distinct {
-        return Ok(changed.then_some(prepared));
-    }
-    prepared.group_distinct = false;
-    let mut seen = HashSet::with_capacity(prepared.grouping_sets.len());
-    let mut distinct = Vec::with_capacity(prepared.grouping_sets.len());
-    for grouping_set in std::mem::take(&mut prepared.grouping_sets) {
-        let identity = grouping_set_identity(engine, &grouping_set, schema, params)?;
-        if seen.insert(identity) {
-            distinct.push(grouping_set);
-        }
-    }
-    prepared.grouping_sets = distinct;
-    Ok(Some(prepared))
+    let changed = prepare_grouping_sets_in_place(engine, &mut prepared, schema, None, params)?;
+    Ok(changed.then_some(prepared))
 }
 
-fn grouping_set_identity(
-    engine: &dyn FunctionTypeResolver,
-    grouping_set: &[ScalarExpr],
+/// Finalize analyzed grouping identity before scalar optimization can erase it.
+pub(crate) fn prepare_grouping_sets_in_place(
+    engine: &dyn crate::routines::RoutineResolution,
+    prepared: &mut QueryBlockPlan,
     schema: &RowSchema,
+    outer: Option<&RowSchema>,
     params: &[SQLParam],
-) -> Result<Vec<Vec<u8>>, SQLError> {
-    let mut identity = grouping_set
-        .iter()
-        .map(|expression| expression_identity(engine, expression, schema, params))
-        .collect::<Result<Vec<_>, _>>()?;
-    identity.sort_unstable();
-    identity.dedup();
-    Ok(identity)
+) -> Result<bool, SQLError> {
+    let mut changed = bind_grouping_names(engine, prepared, schema, outer, params)?;
+    changed |= expressions::bind_grouping_expressions(engine, prepared, schema, params)?;
+    if !prepared.group_distinct {
+        return Ok(changed);
+    }
+    analyze_distinct_grouping(engine, prepared, schema, outer, params)?.apply(prepared)?;
+    Ok(true)
+}
+
+/// Pre-optimization grouping identities. The stored SQL keeps its original DISTINCT clause and sets; this selection belongs only to its analyzed executable copy.
+#[derive(Debug, Clone)]
+pub struct AnalyzedGroupingSets {
+    original_count: usize,
+    retained: Vec<usize>,
+}
+
+impl AnalyzedGroupingSets {
+    /// Remove only sets that were equal before optimization, preserving multiplicity when distinct expressions later fold to the same value.
+    pub fn apply(self, block: &mut QueryBlockPlan) -> Result<(), SQLError> {
+        if !block.group_distinct || block.grouping_sets.len() != self.original_count {
+            return Err(SQLError::Internal(
+                "analyzed grouping selection lost its original sets".into(),
+            ));
+        }
+        let mut retained = self.retained.into_iter().peekable();
+        let mut index = 0;
+        block.grouping_sets.retain(|_| {
+            let keep = retained.peek() == Some(&index);
+            if keep {
+                retained.next();
+            }
+            index += 1;
+            keep
+        });
+        block.group_distinct = false;
+        Ok(())
+    }
+}
+
+pub(crate) fn analyze_distinct_grouping(
+    engine: &dyn crate::routines::RoutineResolution,
+    block: &QueryBlockPlan,
+    schema: &RowSchema,
+    outer: Option<&RowSchema>,
+    params: &[SQLParam],
+) -> Result<AnalyzedGroupingSets, SQLError> {
+    let mut seen = HashSet::with_capacity(block.grouping_sets.len());
+    let mut retained = Vec::with_capacity(block.grouping_sets.len());
+    for (index, set) in block.grouping_sets.iter().enumerate() {
+        let mut identity = set
+            .iter()
+            .map(|expression| {
+                let expression = resolve_grouping_expression_reference(
+                    engine,
+                    expression,
+                    &block.projections,
+                    schema,
+                    outer,
+                    params,
+                )?;
+                expression_identity(engine, expression, schema, params)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        identity.sort_unstable();
+        identity.dedup();
+        if seen.insert(identity) {
+            retained.push(index);
+        }
+    }
+    Ok(AnalyzedGroupingSets {
+        original_count: block.grouping_sets.len(),
+        retained,
+    })
 }
 
 pub(crate) fn expression_identity(
@@ -119,10 +172,10 @@ fn normalize_expression(
             }
         }
         ScalarExpr::Column(column) => schema
-            .unqualified_position(&column)
+            .column_slot(&column)
             .map_or(ScalarExpr::Column(column), ScalarExpr::Position),
         ScalarExpr::QualifiedColumn { qualifier, column } => {
-            schema.qualified_position(&qualifier, &column).map_or(
+            schema.qualified_slot(&qualifier, &column).map_or(
                 ScalarExpr::QualifiedColumn { qualifier, column },
                 ScalarExpr::Position,
             )

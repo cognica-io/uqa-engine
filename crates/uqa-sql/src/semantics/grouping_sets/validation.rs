@@ -96,6 +96,10 @@ pub fn validate_grouped_expressions(
                 ScalarExpr::Position(position) => Some(*position),
                 _ => None,
             };
+            let own_width = schema.physical_width().saturating_sub(outer.map_or(0, RowSchema::physical_width));
+            if position.and_then(|position| schema.physical_slot(position)).is_some_and(|slot| slot >= own_width) {
+                return Ok(false);
+            }
             if let Some(identity) = position.and_then(|position| schema.identity(position)) {
                 let name = identity.qualifier().map_or_else(
                     || identity.column().to_owned(),
