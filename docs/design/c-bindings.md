@@ -583,6 +583,12 @@ UQA_API uqa_status UQA_CALL uqa_cursor_open_params_n(
 UQA_API uqa_status UQA_CALL uqa_cursor_fetch(
     uqa_cursor cursor, uint32_t max_rows,
     uqa_result result);
+UQA_API uqa_status UQA_CALL uqa_cursor_get_row_count(
+    uqa_cursor cursor, uint64_t *out);
+UQA_API uqa_status UQA_CALL uqa_cursor_get_column_count(
+    uqa_cursor cursor, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_cursor_get_column_name(
+    uqa_cursor cursor, uint32_t column, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_cursor_get_column_type(
     uqa_cursor cursor, uint32_t column,
     uqa_type *out);
@@ -591,9 +597,9 @@ UQA_API uqa_status UQA_CALL uqa_cursor_close(uqa_cursor *cursor);
 
 Cursor open follows the same direct C-string, explicit-length, and parameterized forms as execute. Use `Engine::sql_cursor`, whose execution completes into an owned bounded spill before the cursor is returned. This is incremental result consumption, not evaluation deferred until fetch. An implicit statement snapshot completes before return; an existing explicit transaction retains its native transaction boundary. SELECT callbacks, row locks, and effects remain subject to native query rules, so the binding must not infer read-only behavior from the word SELECT.
 
-`max_rows` must be positive. Fetch fills an existing `uqa_result` and returns `UQA_OK` for a nonempty batch, `UQA_DONE` at exhaustion, or an error. Non-success statuses preserve the destination's previous contents and do not indicate a newly delivered batch. Empty queries still expose their descriptor through the cursor. Split native batches with retained slices/offsets rather than rerunning queries or materializing the complete cursor. Reusing one destination replaces its prior batch; use separate `uqa_result_create` objects to retain several batches. Populated results survive cursor close.
+`max_rows` must be positive. Fetch fills an existing `uqa_result` and returns `UQA_OK` for a nonempty batch, `UQA_DONE` at exhaustion, or an error. Non-success statuses preserve the destination's previous contents and do not indicate a newly delivered batch. The cursor's row count is the complete evaluated result count; its column count, names and types remain available for zero-row results and after exhaustion or terminal failure. Column indices are zero-based. Split native batches with retained slices/offsets rather than rerunning queries or materializing the complete cursor. Reusing one destination replaces its prior batch; use separate `uqa_result_create` objects to retain several batches. Populated results survive cursor close. Each populated batch has kind `UQA_RESULT_ROWS`, zero affected rows and no command tag; the binding does not fabricate a native completion tag for a slice.
 
-A fetch failure is terminal and retained; later fetches report the same failure rather than successful EOF. Partial output already delivered remains delivered. `uqa_cursor_close` releases remaining spill resources and clears the handle without committing or rolling back a separate transaction. A fetch error after completed evaluation does not imply that earlier query side effects were undone.
+A failure during an admitted fetch is terminal and retained; later valid fetches report the same failure rather than successful EOF, even after cancellation reset or unrelated calls. Argument validation and busy admission errors do not consume or fail the cursor. Partial output already delivered remains delivered. `uqa_cursor_close` releases remaining spill resources and clears the handle without committing or rolling back a separate transaction. A fetch error after completed evaluation does not imply that earlier query side effects were undone. Its completion field records the successful open's boundary: `UQA_COMPLETION_COMMITTED` for completed implicit evaluation or `UQA_COMPLETION_IN_TRANSACTION` for evaluation within an explicit transaction.
 
 Memory accounting has three distinct scopes: native query workspaces, native provider/session retention, and C-owned copies/handles. `work_mem` is not a process RSS ceiling. A materialized result grows with its output; cursor use bounds native batches/spill buffers but not the sum of batches retained by the application. A single indivisible value can exceed an ordinary batch target.
 

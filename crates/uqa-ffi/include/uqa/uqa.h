@@ -347,6 +347,12 @@ UQA_API uqa_status UQA_CALL uqa_cursor_open_params_n(
 UQA_API uqa_status UQA_CALL uqa_cursor_fetch(
     uqa_cursor cursor, uint32_t max_rows,
     uqa_result result);
+UQA_API uqa_status UQA_CALL uqa_cursor_get_row_count(
+    uqa_cursor cursor, uint64_t *out);
+UQA_API uqa_status UQA_CALL uqa_cursor_get_column_count(
+    uqa_cursor cursor, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_cursor_get_column_name(
+    uqa_cursor cursor, uint32_t column, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_cursor_get_column_type(
     uqa_cursor cursor, uint32_t column,
     uqa_type *out);

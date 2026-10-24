@@ -10,6 +10,7 @@
 mod boundary;
 pub mod abi;
 mod config;
+mod cursor;
 mod error;
 mod execute;
 mod library;
@@ -20,6 +21,7 @@ mod value;
 
 pub use abi::*;
 pub use config::*;
+pub use cursor::*;
 pub use error::{
     uqa_error_get_completion, uqa_error_get_context, uqa_error_get_detail, uqa_error_get_hint,
     uqa_error_get_last, uqa_error_get_message, uqa_error_get_position, uqa_error_get_sqlstate,

@@ -61,6 +61,21 @@ impl Session {
         self.enter_inner(false)
     }
 
+    pub(crate) fn enter_cleanup(&self) -> boundary::Result<SessionCall<'_>> {
+        self.enter_inner(true)
+    }
+
+    pub(crate) fn check_poison(&self) -> boundary::Result<()> {
+        if self.poisoned.load(Ordering::Acquire) {
+            return Err(UQAError::state("session is poisoned after a panic"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn poison(&self) {
+        self.poisoned.store(true, Ordering::Release);
+    }
+
     fn enter_inner(&self, cleanup: bool) -> boundary::Result<SessionCall<'_>> {
         if self
             .busy
@@ -73,8 +88,8 @@ impl Session {
             ));
         }
         let call = SessionCall(self);
-        if !cleanup && self.poisoned.load(Ordering::Acquire) {
-            return Err(UQAError::state("session is poisoned after a panic"));
+        if !cleanup {
+            self.check_poison()?;
         }
         Ok(call)
     }

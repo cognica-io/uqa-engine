@@ -9,6 +9,17 @@
 #[cfg(unix)]
 #[test]
 fn c_and_cpp_messages_use_the_shared_abi() {
+    native_client("messages.c");
+}
+
+#[cfg(unix)]
+#[test]
+fn c_and_cpp_cursors_use_the_shared_abi() {
+    native_client("cursors.c");
+}
+
+#[cfg(unix)]
+fn native_client(fixture: &str) {
     use std::{path::PathBuf, process::Command};
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -42,7 +53,7 @@ fn c_and_cpp_messages_use_the_shared_abi() {
             ])
             .arg("-I")
             .arg(root.join("include"))
-            .arg(root.join("tests/native/messages.c"))
+            .arg(root.join("tests/native").join(fixture))
             .args(["-x", "none"])
             .arg(&library)
             .arg(format!("-Wl,-rpath,{}", dependencies.display()))
@@ -55,7 +66,15 @@ fn c_and_cpp_messages_use_the_shared_abi() {
             "{compiler}: {}",
             String::from_utf8_lossy(&build.stderr)
         );
-        let run = Command::new(&executable).output().unwrap();
+        let temporary = output.path().join(format!("temporary-{compiler}"));
+        std::fs::create_dir(&temporary).unwrap();
+        let run = Command::new(&executable)
+            .env("TMPDIR", &temporary)
+            .env("TMP", &temporary)
+            .env("TEMP", &temporary)
+            .env("SQLITE_TMPDIR", &temporary)
+            .output()
+            .unwrap();
         assert!(
             run.status.success(),
             "{compiler}: {}\n{}",

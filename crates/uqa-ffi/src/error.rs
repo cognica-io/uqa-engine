@@ -12,6 +12,7 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fmt::Write;
+use std::sync::{Arc, OnceLock};
 
 use crate::abi::{
     UQAStatus, UQAStringView, UQA_COMPLETION_NONE, UQA_DONE, UQA_ERROR_BUSY,
@@ -19,6 +20,7 @@ use crate::abi::{
     UQA_ERROR_SQL, UQA_ERROR_STATE, UQA_OK,
 };
 use crate::boundary::{self, Result};
+use uqa_core::memory::{Budgeted, MemoryBudget};
 use uqa_sql::SQLError;
 
 #[derive(Debug)]
@@ -122,8 +124,30 @@ impl From<uqa_core::ValueRetentionError> for UQAError {
     }
 }
 
+/// Allocate a terminal diagnostic slot before admitting a retained operation. Re-publishing it
+/// never copies diagnostic text or loses fields when a later allocation cannot be satisfied.
+pub(crate) type RetainedError = Arc<Budgeted<OnceLock<UQAError>>>;
+
+pub(crate) fn retained_slot(memory: &MemoryBudget) -> Result<RetainedError> {
+    Ok(Budgeted::new(OnceLock::new(), memory.empty_reservation()).into_shared()?)
+}
+
+enum CurrentError {
+    Owned(UQAError),
+    Retained(RetainedError),
+}
+
+impl CurrentError {
+    fn get(&self) -> Option<&UQAError> {
+        match self {
+            Self::Owned(error) => Some(error),
+            Self::Retained(error) => error.get(),
+        }
+    }
+}
+
 thread_local! {
-    static LAST_ERROR: RefCell<Option<UQAError>> = const { RefCell::new(None) };
+    static LAST_ERROR: RefCell<Option<CurrentError>> = const { RefCell::new(None) };
 }
 
 pub(crate) fn clear() {
@@ -136,12 +160,27 @@ pub(crate) fn clear() {
 
 pub(crate) fn publish(error: UQAError) -> UQAStatus {
     let status = error.status;
+    replace(CurrentError::Owned(error));
+    status
+}
+
+pub(crate) fn publish_retained(error: &RetainedError) -> UQAStatus {
+    let Some(diagnostic) = error.get() else {
+        return publish(UQAError::state(
+            "retained diagnostic has not been populated",
+        ));
+    };
+    let status = diagnostic.status;
+    replace(CurrentError::Retained(Arc::clone(error)));
+    status
+}
+
+fn replace(error: CurrentError) {
     let _ = LAST_ERROR.try_with(|slot| {
         if let Ok(mut slot) = slot.try_borrow_mut() {
             *slot = Some(error);
         }
     });
-    status
 }
 
 fn inspect(
@@ -153,7 +192,7 @@ fn inspect(
             let Ok(slot) = slot.try_borrow() else {
                 return UQA_ERROR_BUSY;
             };
-            match slot.as_ref() {
+            match slot.as_ref().and_then(CurrentError::get) {
                 Some(error) if std::ptr::eq(error, pointer) => {
                     read(error).unwrap_or_else(|error| error.status)
                 }
@@ -175,7 +214,7 @@ pub unsafe extern "C" fn uqa_error_get_last(out: *mut *const UQAError) -> UQASta
             let Ok(slot) = slot.try_borrow() else {
                 return UQA_ERROR_BUSY;
             };
-            match slot.as_ref() {
+            match slot.as_ref().and_then(CurrentError::get) {
                 Some(error) => {
                     *out = error;
                     UQA_OK

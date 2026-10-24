@@ -9,7 +9,7 @@
 use crate::{
     abi::{UQAStatus, UQA_ERROR_TYPE, UQA_OK},
     boundary,
-    result::{BatchData, ResultData, UQABatchResult, UQAResult},
+    result::{BatchData, NativeResult, ResultData, UQABatchResult, UQAResult},
     session::{Session, UQAEngine},
     value::UQAValue,
 };
@@ -79,10 +79,12 @@ unsafe fn execute(
     let _call = session.enter()?;
     let params = parameters(session, params, count)?;
     let mut replacement = ResultData::prepare(session)?;
-    replacement.native = session
-        .native
-        .sql(sql, &params)
-        .map_err(|error| session.execution_error(error))?;
+    replacement.native = NativeResult::Materialized(
+        session
+            .native
+            .sql(sql, &params)
+            .map_err(|error| session.execution_error(error))?,
+    );
     boundary::input_mut(result)?.data = Some(replacement);
     Ok(UQA_OK)
 }
@@ -125,7 +127,7 @@ fn batch(session: &Arc<Session>, requests: &[Request<'_>]) -> boundary::Result<B
     // All carriers are admitted before the native batch. Publication performs only ownership moves.
     for (entry, result) in entries.iter_mut().zip(results) {
         if let Some(entry) = entry {
-            entry.native = result;
+            entry.native = NativeResult::Materialized(result);
         }
     }
     Ok(BatchData {

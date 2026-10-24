@@ -9,6 +9,9 @@
 #[path = "cases/config.rs"]
 mod config;
 
+#[path = "cases/cursors.rs"]
+mod cursors;
+
 #[path = "cases/native.rs"]
 mod native;
 
