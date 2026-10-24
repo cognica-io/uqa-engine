@@ -78,7 +78,7 @@ pub(crate) fn read_prepared_inputs(
             routines.enum_labels(),
             routines.catalog_input_functions(),
         )
-        .retain_result_collations(),
+        .retain_result_metadata(),
         schema_expression: None,
     };
     analysis.plan(plan)?;
@@ -146,7 +146,7 @@ fn read_executable_inputs_inner(
             routines.enum_labels(),
             routines.catalog_input_functions(),
         )
-        .retain_result_collations(),
+        .retain_result_metadata(),
         schema_expression: None,
     };
     let mut finish_parameters = false;

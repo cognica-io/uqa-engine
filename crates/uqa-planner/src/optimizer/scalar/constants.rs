@@ -288,12 +288,24 @@ pub(super) fn fold_literal_expression(
     fold_authorized_literal(expression, evaluate, None, None, None)
 }
 
+#[cfg(test)]
 pub(super) fn fold_authorized_literal(
     expression: ScalarExpr,
     evaluate: crate::optimizer::ConstantEvaluator,
     permissions: Option<&dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
     types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
     resolver: Option<&dyn FunctionTypeResolver>,
+) -> Result<ScalarExpr, SQLError> {
+    fold_selected_literal(expression, evaluate, permissions, types, resolver, None)
+}
+
+pub(super) fn fold_selected_literal(
+    expression: ScalarExpr,
+    evaluate: crate::optimizer::ConstantEvaluator,
+    permissions: Option<&dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
+    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
+    resolver: Option<&dyn FunctionTypeResolver>,
+    result_type: Option<&ColumnType>,
 ) -> Result<ScalarExpr, SQLError> {
     if matches!(&expression, ScalarExpr::Func { binding: Some(binding), .. }
         if matches!(binding.dispatch, Some(uqa_sql::ast::FunctionDispatch::NamedArgument | uqa_sql::ast::FunctionDispatch::VariadicArgument)))
@@ -327,25 +339,13 @@ pub(super) fn fold_authorized_literal(
     if matches!(expression, ScalarExpr::RetainedLiteral(_))
         || literal_value(&expression)?.is_some()
         || (!strict_null && !is_constant(&expression, types, resolver))
+        || (strict_null && arithmetic_needs_result_type(&expression, result_type))
     {
         return Ok(expression);
     }
     let schema = RowSchema::default();
-    let selected_type = match &expression {
-        // An analyzed comparison has boolean output even when its discarded operand needs a live catalog to resolve its retained type name.
-        ScalarExpr::Binary { .. } if strict_null => Some(ColumnType::Boolean),
-        ScalarExpr::Func {
-            binding: Some(binding),
-            ..
-        } if strict_null => {
-            if let Some(error) = &binding.resolution_error {
-                return Err(error.sql_error());
-            }
-            uqa_sql::type_resolution::fixed_builtin_return_type(binding)
-        }
-        _ => None,
-    };
-    let ty = match selected_type {
+    let selected_type = strict_null_result_type(&expression, strict_null)?;
+    let ty = match result_type.cloned().or(selected_type) {
         Some(ty) => Some(ty),
         None => constant_scalar_type(&expression, resolver)?,
     };
@@ -391,6 +391,62 @@ pub(super) fn fold_authorized_literal(
         },
         None => literal,
     })
+}
+
+fn strict_null_result_type(
+    expression: &ScalarExpr,
+    strict_null: bool,
+) -> Result<Option<ColumnType>, SQLError> {
+    Ok(match expression {
+        // An analyzed comparison has boolean output even when its discarded operand needs a live catalog to resolve its retained type name.
+        ScalarExpr::Binary {
+            op:
+                BinaryOp::Equal
+                | BinaryOp::NotEqual
+                | BinaryOp::Less
+                | BinaryOp::LessEqual
+                | BinaryOp::Greater
+                | BinaryOp::GreaterEqual,
+            ..
+        } if strict_null => Some(ColumnType::Boolean),
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if strict_null => {
+            if let Some(error) = &binding.resolution_error {
+                return Err(error.sql_error());
+            }
+            uqa_sql::type_resolution::fixed_builtin_return_type(binding)
+        }
+        _ => None,
+    })
+}
+
+fn arithmetic_needs_result_type(expression: &ScalarExpr, result_type: Option<&ColumnType>) -> bool {
+    if result_type.is_some()
+        || !matches!(
+            expression,
+            ScalarExpr::Binary {
+                op: BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide,
+                ..
+            }
+        )
+    {
+        return false;
+    }
+    // A raw optimizer caller has no row or parameter schema. Unknown runtime inputs must not select an operator as if they were SQL unknown literals; analyzed callers retain the result explicitly.
+    let mut unknown = false;
+    expression.visit(&mut |node| {
+        unknown |= matches!(
+            node,
+            ScalarExpr::Column(_)
+                | ScalarExpr::QualifiedColumn { .. }
+                | ScalarExpr::Position(_)
+                | ScalarExpr::InternalColumn(_)
+                | ScalarExpr::Param(_)
+        );
+    });
+    unknown
 }
 
 fn composite_constant_field(
@@ -492,7 +548,7 @@ fn composite_constant_field(
     }))
 }
 
-/// Strict comparisons discard nonconstant siblings when an input is constant NULL, just as strict functions do. Compound predicates expose their individual comparisons before this pass.
+/// Strict operators discard nonconstant siblings when an input is constant NULL, just as strict functions do. Compound predicates expose their individual comparisons before this pass.
 fn strict_null_expression(expression: &ScalarExpr) -> Result<bool, SQLError> {
     use uqa_sql::ast::BinaryOp;
     let null = |argument: &ScalarExpr| {
@@ -533,7 +589,11 @@ fn strict_null_expression(expression: &ScalarExpr) -> Result<bool, SQLError> {
                 | BinaryOp::Less
                 | BinaryOp::LessEqual
                 | BinaryOp::Greater
-                | BinaryOp::GreaterEqual,
+                | BinaryOp::GreaterEqual
+                | BinaryOp::Add
+                | BinaryOp::Subtract
+                | BinaryOp::Multiply
+                | BinaryOp::Divide,
             lhs,
             rhs,
         } => null(lhs)? || null(rhs)?,

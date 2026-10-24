@@ -44,6 +44,30 @@ pub(crate) enum Concatenation<'a> {
 }
 
 impl Concatenation<'_> {
+    pub(crate) fn binding(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<FunctionBinding>, SQLError> {
+        let (mut binding, mut memory) =
+            FunctionBinding::dispatched_with_control(self.dispatch(), control)?.into_parts();
+        if matches!(
+            binding.dispatch,
+            Some(FunctionDispatch::Concat {
+                oid: Some(2779 | 2780)
+            })
+        ) {
+            let mut names = uqa_core::memory::ProductionVec::new(*control);
+            names.reserve(2)?;
+            for position in 0..2 {
+                names.push_produced(self.argument(position).catalog_name_with_control(control)?)?;
+            }
+            let (arguments, arguments_memory) = names.finish()?.into_parts();
+            binding.argument_types = arguments;
+            memory = control.combine(memory, arguments_memory);
+        }
+        Ok(control.finish(binding, memory)?)
+    }
+
     pub(crate) fn dispatch(&self) -> FunctionDispatch {
         match self {
             Self::Array { dispatch, .. } => *dispatch,

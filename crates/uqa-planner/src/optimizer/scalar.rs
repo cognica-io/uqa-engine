@@ -16,7 +16,7 @@ pub(super) mod constants;
 mod nodes;
 
 use conditional::{optimize_boolean, optimize_case, optimize_coalesce};
-use constants::fold_authorized_literal;
+use constants::fold_selected_literal;
 
 pub(super) fn optimize_assignments(
     assignments: &mut [AssignmentPlan],
@@ -88,13 +88,14 @@ fn optimize_scalar(
     match expression {
         expression @ ScalarExpr::Collated { .. } => nodes::optimize_collated(expression, config),
         expression @ ScalarExpr::Func { .. } => nodes::optimize_call(expression, config),
-        other => optimize_noncall_scalar(other, config),
+        other => optimize_noncall_scalar(other, config, None),
     }
 }
 
 fn optimize_noncall_scalar(
     expression: ScalarExpr,
     config: &OptimizerConfig,
+    result_type: Option<&uqa_sql::ColumnType>,
 ) -> Result<ScalarExpr, SQLError> {
     let integer_syntax = matches!(&expression, ScalarExpr::Literal(Value::Int(_)));
     let row_syntax = matches!(&expression, ScalarExpr::Row(_));
@@ -190,7 +191,7 @@ fn optimize_noncall_scalar(
         },
         other => other,
     };
-    finish_scalar(optimized, integer_syntax, row_syntax, config)
+    finish_scalar(optimized, integer_syntax, row_syntax, config, result_type)
 }
 
 fn finish_scalar(
@@ -198,6 +199,7 @@ fn finish_scalar(
     integer_syntax: bool,
     row_syntax: bool,
     config: &OptimizerConfig,
+    result_type: Option<&uqa_sql::ColumnType>,
 ) -> Result<ScalarExpr, SQLError> {
     if let (
         Some(context),
@@ -244,7 +246,7 @@ fn finish_scalar(
             .as_ref()
             .map(|context| context.types),
     )?;
-    let optimized = fold_authorized_literal(
+    let optimized = fold_selected_literal(
         optimized,
         config.constant_evaluator,
         config.builtin_permissions.as_deref(),
@@ -256,6 +258,7 @@ fn finish_scalar(
             .routine_inlining
             .as_ref()
             .map(|context| context.routines as &dyn uqa_sql::FunctionTypeResolver),
+        result_type,
     )?;
     let optimized = if integer_syntax {
         optimized

@@ -174,7 +174,7 @@ pub(super) struct InputConstants(
     BTreeMap<NonNull<ScalarExpr>, crate::ast::FunctionBinding>,
     BTreeMap<NonNull<ScalarExpr>, super::membership::MembershipAnalysis>,
     collations::CollationInputs,
-    results::CollationResults,
+    results::SelectedResults,
     BTreeMap<NonNull<ScalarExpr>, ColumnType>,
     /// Each analyzed call's input collation, recorded on the binding the call keeps.
     BTreeMap<NonNull<ScalarExpr>, Option<crate::catalog::collations::CollationSelection>>,
@@ -541,14 +541,14 @@ impl<'a> ParameterTypes<'a> {
         }
     }
 
-    pub(super) fn retain_result_collations(mut self) -> Self {
+    pub(super) fn retain_result_metadata(mut self) -> Self {
         if let Some(constants) = &mut self.input_constants {
             constants.4.enabled = true;
         }
         self
     }
 
-    pub(super) fn retain_result_collation(
+    pub(super) fn retain_result_metadata_for(
         &mut self,
         expression: &ScalarExpr,
         value: &ExpressionType,
@@ -647,6 +647,9 @@ impl<'a> ParameterTypes<'a> {
                 selected.dispatch,
                 Some(crate::ast::FunctionDispatch::ArraySlicesWithBounds(_))
             )
+            || selected
+                .dispatch
+                .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
         {
             if let Some(constants) = &mut self.input_constants {
                 constants
