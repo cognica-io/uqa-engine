@@ -56,6 +56,7 @@ fn observe_result(result: SQLResult) -> Result<Json, SQLError> {
 fn observe(
     engine: &Engine,
     handles: &mut BTreeMap<String, PreparedStatement>,
+    names: &mut BTreeMap<String, String>,
     case: &Json,
 ) -> Result<Json, SQLError> {
     match case["action"].as_str().unwrap() {
@@ -66,11 +67,30 @@ fn observe(
                 .unwrap()
                 .iter()
                 .map(|oid| {
+                    if let Some(name) = oid.as_str() {
+                        return ColumnType::Named(name.into());
+                    }
                     assert_eq!(oid, 23);
                     ColumnType::Integer
                 })
                 .collect::<Vec<_>>();
+            let previous = engine
+                .session
+                .prepared
+                .read()
+                .keys()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>();
             let handle = engine.prepare_statement(case["sql"].as_str().unwrap(), &types)?;
+            let native_name = engine
+                .session
+                .prepared
+                .read()
+                .keys()
+                .find(|name| !previous.contains(*name))
+                .unwrap()
+                .clone();
+            names.insert(native_name, case["name"].as_str().unwrap().into());
             handles.insert(case["name"].as_str().unwrap().into(), handle);
             Ok(empty_observation(1))
         }
@@ -129,11 +149,16 @@ fn observe(
 
 pub(super) fn verify(engine: &Engine, reference: &Json) {
     let mut handles = BTreeMap::new();
+    let mut names = BTreeMap::new();
     for (index, case) in reference["cases"].as_array().unwrap().iter().enumerate() {
-        let mut actual = observe(engine, &mut handles, case).unwrap_or_else(|error| {
+        let mut actual = observe(engine, &mut handles, &mut names, case).unwrap_or_else(|error| {
             let mut actual = empty_observation(7);
             actual["sqlstate"] = json!(error.sqlstate().unwrap());
-            actual["message"] = json!(error.to_string());
+            let mut message = error.to_string();
+            for (native, reference) in &names {
+                message = message.replace(&format!("\"{native}\""), &format!("\"{reference}\""));
+            }
+            actual["message"] = json!(message);
             actual
         });
         actual["transaction_status"] = json!(if engine.transaction_failed() {

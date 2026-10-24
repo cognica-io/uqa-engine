@@ -443,31 +443,21 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 )
             };
             if is_transaction_control(initial_plan.as_ref()) {
-                // SQL COMMIT/ROLLBACK outside a block warn and succeed; the direct Rust transaction API keeps reporting misuse as an error.
-                if context.transactions.transaction_depth() == 0
-                    && transaction.as_ref().is_some_and(|transaction| {
-                        matches!(
-                            transaction,
-                            uqa_sql::ast::TransactionStmt::Commit
-                                | uqa_sql::ast::TransactionStmt::Rollback
+                // Text commands have no retained inputs to bind. Prepared commands reach the same completion after their native argument conversion.
+                if source.prepared.is_none() {
+                    if let Some(completed) = transaction.as_ref().and_then(|statement| {
+                        super::transactions::complete_idle_transaction(
+                            context.transactions,
+                            context.runtime.notices,
+                            statement,
                         )
-                    })
-                {
-                    context.runtime.notices.push(
-                        uqa_sql::semantics::effects::transaction_blocks::no_transaction_in_progress_warning(),
-                    );
-                    last = SQLResult::empty();
-                    last.command_tag = Some(
-                        uqa_sql::result::completion::transaction_completion(
-                            transaction.as_ref().expect("checked transaction command"),
-                            false,
-                        )
-                        .into(),
-                    );
-                    if statement_index != final_statement_index {
-                        consume_result(context, &last, consumer)?;
+                    }) {
+                        last = completed;
+                        if statement_index != final_statement_index {
+                            consume_result(context, &last, consumer)?;
+                        }
+                        continue;
                     }
-                    continue;
                 }
                 if simple_query_batch
                     && implicit_segment_open

@@ -766,6 +766,13 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 *restart_identity,
             ),
             CommandPlan::Transaction(statement) => {
+                if let Some(completed) = super::transactions::complete_idle_transaction(
+                    self.context.validation.transactions,
+                    self.context.runtime.notices,
+                    statement,
+                ) {
+                    return Ok(completed);
+                }
                 if matches!(
                     statement,
                     uqa_sql::ast::TransactionStmt::SetCharacteristics(_)

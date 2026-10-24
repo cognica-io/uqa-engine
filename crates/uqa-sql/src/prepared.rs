@@ -131,6 +131,21 @@ pub fn execute_parameter_types(
     Ok(types)
 }
 
+/// Host binding checks every supplied parameter, including unused utility declarations.
+pub fn validate_host_parameter_count(
+    name: &str,
+    supplied: usize,
+    expected: usize,
+) -> Result<(), SQLError> {
+    if supplied == expected {
+        return Ok(());
+    }
+    Err(error(
+        "08P01",
+        format!("bind message supplies {supplied} parameters, but prepared statement \"{name}\" requires {expected}"),
+    ))
+}
+
 pub(super) fn error(sqlstate: &str, message: impl Into<String>) -> SQLError {
     SQLError::Routine {
         sqlstate: sqlstate.into(),

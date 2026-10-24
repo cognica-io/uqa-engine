@@ -107,10 +107,9 @@ unsafe fn prepare(
             Some(sizes) => boundary::text_n(*name, sizes[index])?,
             None => boundary::text(*name)?,
         };
-        declared.push_produced(ColumnType::from_sql_name_with_control(
-            name,
-            &session.control(),
-        )?)?;
+        let control = session.control();
+        let (name, memory) = control.copy_text(name)?.into_parts();
+        declared.push_produced(control.finish(ColumnType::Named(name), memory)?)?;
     }
     let declared = declared.finish()?;
     let memory = session.memory.reserve(size_of::<UQAStatement>())?;

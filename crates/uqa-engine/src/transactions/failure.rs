@@ -128,13 +128,13 @@ impl Engine {
         if let Some(error) = Self::transaction_status_error(status) {
             return Err(map_cleanup_error(error));
         }
-        self.finish_existing_transaction_operation(
+        self.finish_transaction_operation(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)),
             map_cleanup_error,
         )
     }
 
-    fn finish_existing_transaction_operation<R, E: std::fmt::Display>(
+    pub(super) fn finish_transaction_operation<R, E: std::fmt::Display>(
         &self,
         result: std::thread::Result<Result<R, E>>,
         map_cleanup_error: impl Fn(SQLError) -> E,

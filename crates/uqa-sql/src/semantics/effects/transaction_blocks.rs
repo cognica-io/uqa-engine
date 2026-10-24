@@ -8,6 +8,20 @@
 
 use crate::SQLError;
 
+/// Transaction exits can be prepared and bound while the current block is aborted.
+pub fn statement_exits_transaction(statement: &crate::Statement) -> bool {
+    matches!(
+        statement,
+        crate::Statement::Transaction(
+            crate::ast::TransactionStmt::Commit
+                | crate::ast::TransactionStmt::CommitAndChain
+                | crate::ast::TransactionStmt::Rollback
+                | crate::ast::TransactionStmt::RollbackAndChain
+                | crate::ast::TransactionStmt::RollbackToSavepoint(_)
+        )
+    )
+}
+
 pub fn transaction_requires_explicit_block(transaction: &crate::ast::TransactionStmt) -> bool {
     matches!(
         transaction,

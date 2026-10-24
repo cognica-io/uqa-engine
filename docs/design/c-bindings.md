@@ -590,6 +590,8 @@ A statement belongs to its creating session; execute does not accept another Eng
 
 Preparation accepts a single native statement or empty/comment-only input; multiple commands report SQLSTATE `42601`. Empty input retains a native prepared definition with no output descriptor. Its execution returns no rows or command tag, takes no transaction snapshot, and still requires bindings for explicitly declared parameters. The native transaction owner permits empty preparation and description in an aborted transaction but rejects execution with `25P02` until recovery. FFI does not implement a separate empty-query execution path.
 
+Preparation failures, including invalid declarations on empty input, participate in native transaction failure recovery. Transaction exits may be prepared in a failed block and executed there when they have no bound parameters. A prepared `ROLLBACK TO` restores the savepoint; `COMMIT` in a failed block completes as `ROLLBACK`. The native prepared request owner enforces this admission and recovery order before FFI publishes a handle or result.
+
 Engine needs a narrow session adapter to create, describe, execute, and release native prepared entries. FFI must not own plans. Track identity and generation independently of a user-supplied SQL name. `DISCARD ALL` and native deallocation invalidate the relevant C handle; subsequent use reports `UQA_ERROR_SQL` with SQLSTATE `26000`, including when a definition with the same SQL name has since been created. Destruction of an already invalidated handle is harmless.
 
 ## 12. Cursors and retained resources

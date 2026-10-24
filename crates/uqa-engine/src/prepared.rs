@@ -5,6 +5,7 @@
 //
 
 use super::Engine;
+use crate::transactions::prepared::PreparedOperation;
 use std::sync::{Arc, Weak};
 use uqa_sql::{ColumnType, RowSchema, SQLError, SQLParam, SQLResult};
 
@@ -40,41 +41,51 @@ impl Engine {
         sql: &str,
         declared: &[ColumnType],
     ) -> Result<PreparedStatement, SQLError> {
-        self.with_prepared_registration(sql, |engine, source| {
-            let name = loop {
-                let identity = engine
-                    .session
-                    .next_prepared_handle
-                    .fetch_update(
-                        std::sync::atomic::Ordering::Relaxed,
-                        std::sync::atomic::Ordering::Relaxed,
-                        |value| value.checked_add(1),
-                    )
-                    .map_err(|_| SQLError::Routine {
-                        sqlstate: "54000".into(),
-                        message: "prepared statement identity space exhausted".into(),
-                    })?;
-                let name = format!("__uqa_prepared_{identity}");
-                if !engine.session.prepared.read().contains_key(&name) {
-                    break name;
-                }
-            };
-            uqa_execution::statement::prepared::register_host_statement(
-                &engine.prepared_registration_context(),
-                name.clone(),
-                &source,
-                sql,
-                declared,
-            )?;
-            let registry = engine.session.prepared.read();
-            let entry = registry.get(&name).expect("published prepared definition");
-            Ok(PreparedStatement {
-                name,
-                source,
-                owner: Arc::downgrade(&engine.session),
-                definition: Arc::downgrade(&entry.source_plan),
-            })
-        })
+        self.with_prepared_registration(
+            |engine| {
+                uqa_execution::statement::prepared::parse_host_sql(
+                    sql,
+                    engine.parser_settings(),
+                    &engine.runtime.notices,
+                    &engine.runtime.cancellation,
+                )
+            },
+            |engine, source| {
+                let name = loop {
+                    let identity = engine
+                        .session
+                        .next_prepared_handle
+                        .fetch_update(
+                            std::sync::atomic::Ordering::Relaxed,
+                            std::sync::atomic::Ordering::Relaxed,
+                            |value| value.checked_add(1),
+                        )
+                        .map_err(|_| SQLError::Routine {
+                            sqlstate: "54000".into(),
+                            message: "prepared statement identity space exhausted".into(),
+                        })?;
+                    let name = format!("__uqa_prepared_{identity}");
+                    if !engine.session.prepared.read().contains_key(&name) {
+                        break name;
+                    }
+                };
+                uqa_execution::statement::prepared::register_host_statement(
+                    &engine.prepared_registration_context(),
+                    name.clone(),
+                    &source,
+                    sql,
+                    declared,
+                )?;
+                let registry = engine.session.prepared.read();
+                let entry = registry.get(&name).expect("published prepared definition");
+                Ok(PreparedStatement {
+                    name,
+                    source,
+                    owner: Arc::downgrade(&engine.session),
+                    definition: Arc::downgrade(&entry.source_plan),
+                })
+            },
+        )
     }
 
     pub fn validate_prepared_statement(
@@ -99,16 +110,25 @@ impl Engine {
         &self,
         statement: &PreparedStatement,
     ) -> Result<PreparedStatementDescription, SQLError> {
-        let _gate = self.lock_statement_gate();
-        let registry = self.session.prepared.read();
-        let entry = registry
-            .get(&statement.name)
-            .filter(|entry| statement.matches(self, entry))
-            .ok_or_else(|| statement.invalid())?;
-        Ok(PreparedStatementDescription {
-            parameter_types: entry.parameter_types.clone(),
-            result_schema: entry.result_schema.clone(),
-        })
+        self.run_prepared_operation(
+            || {
+                let registry = self.session.prepared.read();
+                let entry = registry
+                    .get(&statement.name)
+                    .filter(|entry| statement.matches(self, entry))
+                    .ok_or_else(|| statement.invalid())?;
+                Ok((
+                    PreparedOperation::Describe {
+                        returns_rows: entry.result_schema.is_some(),
+                    },
+                    PreparedStatementDescription {
+                        parameter_types: entry.parameter_types.clone(),
+                        result_schema: entry.result_schema.clone(),
+                    },
+                ))
+            },
+            Ok,
+        )
     }
 
     pub fn execute_prepared_statement(
@@ -116,38 +136,34 @@ impl Engine {
         statement: &PreparedStatement,
         params: &[SQLParam],
     ) -> Result<SQLResult, SQLError> {
-        let _gate = self.lock_statement_gate();
-        self.validate_prepared_statement(statement)?;
-        let expected = self
-            .session
-            .prepared
-            .read()
-            .get(&statement.name)
-            .expect("live definition")
-            .parameter_types
-            .len();
-        if params.len() != expected {
-            return Err(SQLError::Routine {
-                sqlstate: "42601".into(),
-                message: format!(
-                    "wrong number of parameters for prepared statement \"{}\"",
-                    statement.name
-                ),
-            });
-        }
-        let sql = self
-            .session
-            .prepared
-            .read()
-            .get(&statement.name)
-            .expect("live definition")
-            .source_sql
-            .clone();
-        self.execute_compiled_prepared(
-            &statement.name,
-            Arc::clone(&statement.source),
-            sql.as_deref(),
-            params,
+        self.run_prepared_operation(
+            || {
+                let registry = self.session.prepared.read();
+                let entry = registry
+                    .get(&statement.name)
+                    .filter(|entry| statement.matches(self, entry))
+                    .ok_or_else(|| statement.invalid())?;
+                uqa_sql::prepared::validate_host_parameter_count(
+                    &statement.name,
+                    params.len(),
+                    entry.parameter_types.len(),
+                )?;
+                Ok((
+                    PreparedOperation::Bind {
+                        statement: Arc::clone(&statement.source),
+                        parameter_count: params.len(),
+                    },
+                    entry.source_sql.clone(),
+                ))
+            },
+            |sql| {
+                self.execute_compiled_prepared(
+                    &statement.name,
+                    Arc::clone(&statement.source),
+                    sql.as_deref(),
+                    params,
+                )
+            },
         )
     }
 
@@ -168,13 +184,16 @@ impl Engine {
         name: String,
         definition: uqa_sql::ast::Statement,
     ) -> Result<(), uqa_sql::SQLError> {
-        self.with_direct_read_snapshot(|engine| {
-            uqa_execution::statement::prepared::register_statement(
-                &engine.prepared_registration_context(),
-                name,
-                definition,
-            )
-        })
+        self.with_prepared_registration(
+            |_| Ok(Arc::new(definition)),
+            |engine, definition| {
+                uqa_execution::statement::prepared::register_statement(
+                    &engine.prepared_registration_context(),
+                    name,
+                    definition.as_ref().clone(),
+                )
+            },
+        )
     }
 
     pub(crate) fn prepared_parameter_types(

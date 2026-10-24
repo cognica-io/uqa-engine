@@ -55,6 +55,57 @@ static void empty_result(uqa_result result) {
     assert(tag.data == NULL && tag.size == 0);
 }
 
+static void prepared_recovery(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    uqa_statement typed_exit = NULL;
+    uqa_value value = NULL;
+    uint32_t state = 0;
+    const char *integer_type[] = {"integer"};
+    const char *missing_type[] = {"missing_prepared_type"};
+    const char *domain_type[] = {"c_admission_positive"};
+
+    CHECK(uqa_statement_prepare_typed(engine, "ROLLBACK", integer_type, 1, &typed_exit));
+    CHECK(uqa_value_create_int64(1, &value));
+    CHECK(uqa_statement_bind(typed_exit, 1, value));
+    CHECK(uqa_value_destroy(&value));
+    CHECK(uqa_engine_execute(engine, "BEGIN; SAVEPOINT retry", result));
+    assert(uqa_statement_prepare_typed(engine, "", missing_type, 1, &statement) == UQA_ERROR_SQL);
+    assert(statement == NULL);
+    sqlstate("42704");
+    CHECK(uqa_transaction_get_state(engine, &state));
+    assert(state == UQA_TRANSACTION_FAILED);
+    assert(uqa_statement_execute(typed_exit, result) == UQA_ERROR_SQL);
+    sqlstate("25P02");
+    CHECK(uqa_statement_prepare(engine, "ROLLBACK TO retry", &statement));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_transaction_get_state(engine, &state));
+    assert(state == UQA_TRANSACTION_ACTIVE);
+    CHECK(uqa_statement_finalize(&statement));
+    assert(uqa_engine_execute(engine, "SELECT 1/0", result) == UQA_ERROR_SQL);
+    CHECK(uqa_statement_prepare(engine, "COMMIT", &statement));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_transaction_get_state(engine, &state));
+    assert(state == UQA_TRANSACTION_IDLE);
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_statement_finalize(&typed_exit));
+
+    CHECK(uqa_engine_execute(engine, "CREATE DOMAIN c_admission_positive AS integer CHECK (VALUE > 0)", result));
+    CHECK(uqa_statement_prepare_typed(engine, "ROLLBACK", domain_type, 1, &statement));
+    CHECK(uqa_value_create_int64(0, &value));
+    CHECK(uqa_statement_bind(statement, 1, value));
+    CHECK(uqa_value_destroy(&value));
+    assert(uqa_statement_execute(statement, result) == UQA_ERROR_SQL);
+    sqlstate("23514");
+    CHECK(uqa_transaction_get_state(engine, &state));
+    assert(state == UQA_TRANSACTION_IDLE);
+    CHECK(uqa_value_create_int64(1, &value));
+    CHECK(uqa_statement_bind(statement, 1, value));
+    CHECK(uqa_value_destroy(&value));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine, "DROP DOMAIN c_admission_positive", result));
+}
+
 static void utility_statements(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_type type = NULL;
@@ -364,6 +415,7 @@ int main(void) {
         CHECK(uqa_statement_finalize(&statement));
     }
     utility_statements(engine, result);
+    prepared_recovery(engine, result);
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_engine_close(&engine));
     return 0;

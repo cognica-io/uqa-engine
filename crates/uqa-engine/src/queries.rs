@@ -135,33 +135,25 @@ impl Engine {
 
     pub(crate) fn with_prepared_registration<R>(
         &self,
-        sql: &str,
+        parse: impl FnOnce(&Self) -> Result<std::sync::Arc<uqa_sql::Statement>, SQLError>,
         register: impl FnOnce(&Self, std::sync::Arc<uqa_sql::Statement>) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
         let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
-        let statement = uqa_execution::statement::prepared::parse_host_sql(
-            sql,
-            self.parser_settings(),
-            &self.runtime.notices,
-            &self.runtime.cancellation,
+        self.run_prepared_operation(
+            || {
+                self.runtime.cancellation.check()?;
+                let statement = parse(self)?;
+                Ok((
+                    crate::transactions::prepared::PreparedOperation::Parse {
+                        statement: std::sync::Arc::clone(&statement),
+                        outermost: !nested,
+                    },
+                    statement,
+                ))
+            },
+            |statement| register(self, statement),
         )
-        .map_err(|error| {
-            uqa_execution::statement::transactions::abort_explicit_statement_error(
-                self.batch_execution_context().transactions,
-                error,
-            )
-        })?;
-        if matches!(statement.as_ref(), uqa_sql::Statement::Empty) {
-            register(self, statement)
-        } else {
-            self.with_query_transaction_snapshot(
-                !nested && uqa_sql::prepared::utility::statement_requires_analysis(&statement),
-                true,
-                |engine| register(engine, statement),
-                std::convert::identity,
-            )
-        }
     }
 
     /// Execute a simple-query message, delivering each statement's result in order. The whole message is parsed before execution, and implicit transaction segments retain the same boundaries as [`Engine::sql`]. The final result is delivered only after its implicit transaction has committed. Earlier results may have been delivered when a later statement fails; such failure still rolls back its implicit segment. An empty message delivers one result with no command completion.

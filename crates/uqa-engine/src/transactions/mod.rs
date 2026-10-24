@@ -22,6 +22,7 @@ mod fixed_identities;
 use failure::{failed_transaction_error, panic_description};
 mod frame_finish;
 mod implicit;
+pub(crate) mod prepared;
 mod publication;
 mod savepoints;
 mod scope;

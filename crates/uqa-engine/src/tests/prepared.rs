@@ -6,6 +6,8 @@
 
 use crate::Engine;
 
+mod admission;
+
 #[test]
 fn prepared_temporal_constants_keep_the_preparation_clock() {
     use std::sync::atomic::Ordering;
