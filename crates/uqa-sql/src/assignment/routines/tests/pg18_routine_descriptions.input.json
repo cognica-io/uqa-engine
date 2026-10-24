@@ -1,0 +1,152 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "sql": "CREATE SCHEMA uqa_routine_reuse_4ea671"
+    },
+    {
+      "sql": "SET search_path = uqa_routine_reuse_4ea671, pg_catalog"
+    },
+    {
+      "sql": "CREATE SEQUENCE ticks"
+    },
+    {
+      "sql": "CREATE TABLE permission(allowed boolean)"
+    },
+    {
+      "sql": "INSERT INTO permission VALUES(true)"
+    },
+    {
+      "sql": "CREATE FUNCTION accept_int(value integer) RETURNS boolean LANGUAGE sql VOLATILE AS 'SELECT allowed FROM permission'"
+    },
+    {
+      "sql": "CREATE DOMAIN held_integer AS integer CHECK (accept_int(VALUE))"
+    },
+    {
+      "sql": "CREATE TABLE retained_value(value held_integer)"
+    },
+    {
+      "sql": "INSERT INTO retained_value VALUES(7)"
+    },
+    {
+      "sql": "CREATE FUNCTION echo(value held_integer) RETURNS held_integer LANGUAGE plpgsql AS 'BEGIN RETURN value; END'"
+    },
+    {
+      "sql": "CREATE FUNCTION defaulted(value bigint DEFAULT nextval('ticks')) RETURNS bigint LANGUAGE plpgsql AS 'BEGIN RETURN value; END'"
+    },
+    {
+      "sql": "CREATE FUNCTION pair(a bigint, b bigint) RETURNS bigint LANGUAGE plpgsql AS 'BEGIN RETURN a * 10 + b; END'"
+    },
+    {
+      "sql": "CREATE FUNCTION collect(VARIADIC items integer[]) RETURNS integer[] LANGUAGE plpgsql AS 'BEGIN RETURN items; END'"
+    },
+    {
+      "sql": "CREATE FUNCTION polymorphic(value anyelement) RETURNS anyelement LANGUAGE plpgsql AS 'BEGIN RETURN value; END'"
+    },
+    {
+      "sql": "CREATE FUNCTION replacement(value integer) RETURNS integer LANGUAGE plpgsql AS 'BEGIN RETURN value + 1; END'"
+    },
+    {
+      "id": "domain rows allowed",
+      "sql": "SELECT i, echo(i) AS value FROM generate_series(1, 3) AS t(i) ORDER BY i"
+    },
+    {
+      "id": "defaults stay live",
+      "sql": "SELECT i, defaulted() AS value FROM generate_series(1, 3) AS t(i) ORDER BY i"
+    },
+    {
+      "id": "named evaluation order",
+      "sql": "SELECT pair(b => nextval('ticks'), a => nextval('ticks')) AS value"
+    },
+    {
+      "id": "variadic expanded",
+      "sql": "SELECT collect(1, 2, 3) AS value"
+    },
+    {
+      "id": "variadic explicit",
+      "sql": "SELECT collect(VARIADIC ARRAY[4, 5]) AS value"
+    },
+    {
+      "id": "polymorphic integer",
+      "sql": "SELECT i, polymorphic(i) AS value FROM generate_series(1, 3) AS t(i) ORDER BY i"
+    },
+    {
+      "id": "polymorphic text",
+      "sql": "SELECT polymorphic('text'::text) AS value"
+    },
+    {
+      "sql": "UPDATE permission SET allowed = false"
+    },
+    {
+      "id": "domain check changes",
+      "sql": "SELECT echo(9) AS value"
+    },
+    {
+      "id": "established domain membership",
+      "sql": "SELECT echo(value) AS value FROM retained_value"
+    },
+    {
+      "sql": "UPDATE permission SET allowed = true"
+    },
+    {
+      "id": "domain check recovers",
+      "sql": "SELECT echo(11) AS value"
+    },
+    {
+      "id": "before replacement",
+      "sql": "SELECT replacement(10) AS value"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "SAVEPOINT routine_replacement"
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION replacement(value integer) RETURNS integer LANGUAGE plpgsql AS 'BEGIN RETURN value + 2; END'"
+    },
+    {
+      "id": "after replacement",
+      "sql": "SELECT replacement(10) AS value"
+    },
+    {
+      "sql": "ROLLBACK TO routine_replacement"
+    },
+    {
+      "id": "replacement rollback",
+      "sql": "SELECT replacement(10) AS value"
+    },
+    {
+      "sql": "COMMIT"
+    },
+    {
+      "sql": "DROP FUNCTION replacement(integer)"
+    },
+    {
+      "id": "function dropped",
+      "sql": "SELECT replacement(10) AS value"
+    },
+    {
+      "sql": "SET search_path = uqa_routine_reuse_4ea671, pg_catalog",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT echo(value) AS value FROM retained_value",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT collect(VARIADIC ARRAY[4, 5]) AS value",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT polymorphic('text'::text) AS value",
+      "reopen": true
+    },
+    {
+      "sql": "DROP SCHEMA uqa_routine_reuse_4ea671 CASCADE",
+      "final_cleanup": true
+    }
+  ]
+}

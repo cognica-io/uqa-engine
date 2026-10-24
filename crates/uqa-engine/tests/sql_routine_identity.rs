@@ -16,6 +16,8 @@ use uqa_sql::Statement;
 mod alter_routine;
 #[path = "sql_routine_identity/foreign_table_dependencies.rs"]
 mod foreign_table_dependencies;
+#[path = "sql_routine_identity/invocation_descriptions.rs"]
+mod invocation_descriptions;
 #[path = "sql_routine_identity/polymorphic_variadic.rs"]
 mod polymorphic_variadic;
 #[path = "sql_routine_identity/routine_attributes.rs"]
