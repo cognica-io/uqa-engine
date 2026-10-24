@@ -77,8 +77,8 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
       "capability": "SQL routine result input identity",
-      "workload": "A successful output followed by incompatible and missing result schemas.",
-      "invariant": "Reuse only the complete analyzed input and preserve the original 42P13 errors without caching failures.",
+      "workload": "A successful output followed by 512 retained checks, then incompatible and missing result schemas.",
+      "invariant": "Retained result checks perform no allocation or parsed-name copying; reuse only complete analyzed input and preserve original 42P13 errors without caching failures.",
       "case_names": [
         ""
       ]

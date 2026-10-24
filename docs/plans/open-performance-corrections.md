@@ -299,6 +299,8 @@ Final platform verification for #1277: [40100355891](https://github.com/cognica-
 
 ## Scoped SQL routine body descriptions
 
+Draft [#1278](https://github.com/cognica-io/uqa-engine/pull/1278) at `971b4faa7` preserves this unit on dependency #1277. All 1,776 local Execution cases pass (seven existing subprocess helpers separately identified), including 512 changing OUT-before-IN body inputs with one type lookup under 4KiB. The independent PostgreSQL 18.4 capture has 63 statements. The initial complete SQL suite passes all 2,270 cases; review then moved fixed-result name eligibility to first successful publication, eliminating per-row parsed-name metadata copies. A new 512-hit zero-allocation assertion accompanies this correction. Final source SQL/Execution/native/provider acceptance and strict Clippy are in progress. The 100GB commit hook passes at 98.11GB after only old completed intermediate objects are removed.
+
 The successor to #1277 continues original #1108 with SQL-body parameter types, final result-layout checks and output conversion descriptions under the same native invocation scope. SQL and Execution remain the owners; no dependency, feature, Engine algorithm or second plan representation is introduced. The original routine/body requirement remains partially complete until this correction and the remaining procedural/table-function contexts receive their own evidence.
 
 - [x] Inspect manifests, enabled features, dependency direction, existing routine/result ownership and body invalidation boundaries.

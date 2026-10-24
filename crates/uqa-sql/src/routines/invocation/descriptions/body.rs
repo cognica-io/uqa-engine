@@ -136,7 +136,7 @@ impl RoutineCallDescription {
         environment: RoutineConversionEnvironment<'_>,
     ) -> Result<Cow<'a, SQLFunctionResultLayout>, SQLError> {
         environment.control.check()?;
-        let reusable = fixed_result(definition) && self.is_current((environment.scope)().as_ref());
+        let reusable = self.is_current((environment.scope)().as_ref());
         if reusable {
             if let Some(saved) = self.body_result.get().filter(|saved| saved.matches(result)) {
                 return Ok(Cow::Borrowed(&saved.layout));
@@ -145,6 +145,7 @@ impl RoutineCallDescription {
         let layout = sql_function_result_layout(types, definition, result)?;
         if reusable
             && self.body_result.get().is_none()
+            && fixed_result(definition)
             && self.is_current((environment.scope)().as_ref())
         {
             match ResultDescription::new(result, &layout, &environment.control) {

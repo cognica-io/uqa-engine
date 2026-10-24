@@ -227,6 +227,21 @@ fn result_schema_changes_and_missing_results_keep_the_original_checks() {
     saved
         .body_result_layout(&types, &function.def, Some(&result), environment)
         .unwrap();
+    let reused = allocation_counter::measure(|| {
+        for _ in 0..512 {
+            assert!(matches!(
+                saved
+                    .body_result_layout(&types, &function.def, Some(&result), environment)
+                    .unwrap(),
+                std::borrow::Cow::Borrowed(_)
+            ));
+        }
+    });
+    assert_eq!(
+        reused.bytes_total, 0,
+        "result metadata reuse must not copy parsed names or descriptions"
+    );
+    assert_eq!(types.calls.get(), 1);
     let invalid = AnalyzedResult::Rows(vec![Some(ColumnType::Text)]);
     assert_eq!(
         saved
