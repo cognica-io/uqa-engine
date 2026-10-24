@@ -123,6 +123,14 @@ pub trait PhysicalOperator: Send {
         Ok(false)
     }
 
+    /// Fill a native public result from borrowed source values after opening the pipeline. Only complete, effect-free projection chains may forward this request. `false` guarantees that no row was consumed; the caller retains ordinary pulls and always closes the pipeline.
+    fn collect_materialized(
+        &mut self,
+        _sink: &mut crate::query::output::MaterializedResultSink<'_>,
+    ) -> ExecResult<bool> {
+        Ok(false)
+    }
+
     /// Describe backwards-scan support without changing the operator tree. The default is deliberately conservative so a scrollable cursor freezes the complete output of unclassified plans.
     fn backward_scan_support(&self) -> BackwardScanSupport {
         BackwardScanSupport::Unsupported

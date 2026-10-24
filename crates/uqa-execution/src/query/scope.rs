@@ -17,6 +17,7 @@ use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::plan::{CtePlan, QueryPlan};
 use uqa_sql::SQLError;
 
+pub(crate) mod binding;
 mod cte;
 mod definitions;
 mod producers;
@@ -161,6 +162,14 @@ impl<S: Clone> CteScope<S> {
                 "query execution scope has no statement name-resolution snapshot".into(),
             )
         })
+    }
+
+    pub(crate) fn relation_lookup_mode(
+        &self,
+    ) -> Option<uqa_sql::catalog::resolution::RelationLookupMode> {
+        self.catalog_resolution
+            .as_ref()
+            .map(|resolution| resolution.lookup_mode)
     }
 
     pub fn privilege_subject(&self) -> Result<&RoleReference, SQLError> {

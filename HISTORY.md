@@ -12,6 +12,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Eliminate statically empty function scans before initializing their routines or argument functions, matching PostgreSQL for folded false/NULL inputs and eligible UNION ALL branches. Preserve relation permissions, runtime-empty and LIMIT 0 initialization, aggregate rows, set-operation boundaries and outer-join NULL extension.
+- Reuse bound routine identity and argument conversion metadata within an unchanged native scope, including SQL body/output descriptions, PL/pgSQL declaration/assignment/return metadata, and bound table/set-projection result declarations. Prepared procedural parameters preserve their selected types directly. Preserve live defaults, domain checks, privileges, function replacement, changed record/output schemas and rollback. Retired routine bodies are released without waiting for expression metadata to expire.
+- Reuse successful catalog-sensitive cast descriptions within an immutable native expression scope, avoiding repeated qualified type lookup while preserving live values, domain checks, session settings, schema changes and mutable custom hooks.
+- Reuse complete SELECT privilege coverage for unchanged direct derived sources under the same catalog, namespace and role incarnation, avoiding repeated lineage analysis while retaining column denials, view/routine authority and changed-scope checks.
+
+- Reuse successfully bound scalar-query descriptions within one clause-validation call and transfer fresh derived-source metadata into physical assembly. Avoid repeated grouping-alias and nested source analysis while preserving complete scope descriptors, routine selection and the original diagnostics.
+
+- Collect eligible complete SQL results directly from stable decoded memory fields, avoiding temporary shared-row ownership while preserving pure predicates, positional/duplicate output values, exact scan accounting, cancellation and cleanup. Computed, locking, metadata and fallible-provider paths retain ordinary physical row delivery.
+
+- Encode fragmented physical rows for spill in linear traversal order, avoiding repeated fragment searches while preserving serialized values, NULL slots and row-lock metadata.
+
+- Prepare immutable stored-scan projection decisions once, avoiding repeated column checks per page and slot checks per row while preserving generated columns, tuple metadata, locking and rechecks.
+
+- Inspect ordinary public SQL result values once for deferred Datum and enum carriers, avoiding duplicate recursive walks while preserving payload ownership, nested metadata and output-error order.
+
 - Move only selected physical values into named SQL results. Avoid copying discarded fragmented payloads, release row-local aliases before donation, and copy repeated selected values only when their public output requires it.
 
 - Preserve native producer batches for complete SQL results when both the consumer and producer preserve evaluation order, avoiding one pipeline pull and batch allocation per row on eligible paths. Computed projections, early-stop, cardinality and directional consumers retain their original evaluation, side-effect and error boundaries.

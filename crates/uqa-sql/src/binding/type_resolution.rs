@@ -14,6 +14,9 @@ use crate::routines::RoutineResolution;
 
 use super::{QueryPlan, ScalarExpr, SchemaScope};
 
+mod query_results;
+pub(super) use query_results::ValidatedSubqueries;
+
 pub(super) struct QueryFunctionTypeResolver<'a> {
     pub(super) routines: &'a dyn RoutineResolution,
     pub(super) scalar_subquery_schemas: Option<Vec<Option<RowSchema>>>,
@@ -67,32 +70,7 @@ impl SchemaScope {
         subqueries: &[QueryPlan],
         params: &[SQLParam],
     ) -> Result<QueryFunctionTypeResolver<'a>, SQLError> {
-        let mut referenced = std::collections::BTreeSet::new();
-        for expression in expressions {
-            crate::semantics::collect_subquery_ids(expression, &mut referenced);
-        }
-        if referenced.is_empty() {
-            return Ok(QueryFunctionTypeResolver {
-                routines,
-                scalar_subquery_schemas: None,
-                defer_routine_namespace_errors: false,
-            });
-        }
-        // Result typing and validation share the complete lexical row scope.
-        let subquery_outer = Some(schema);
-        let mut scalar_subquery_schemas = vec![None; subqueries.len()];
-        for index in referenced {
-            let plan = subqueries.get(index).ok_or_else(|| {
-                SQLError::Internal(format!("scalar subquery slot {index} is out of bounds"))
-            })?;
-            scalar_subquery_schemas[index] =
-                Some(self.bind_query(routines, plan, params, subquery_outer)?);
-        }
-        Ok(QueryFunctionTypeResolver {
-            routines,
-            scalar_subquery_schemas: Some(scalar_subquery_schemas),
-            defer_routine_namespace_errors: false,
-        })
+        ValidatedSubqueries::new(routines, subqueries, params).resolver(self, expressions, schema)
     }
 }
 

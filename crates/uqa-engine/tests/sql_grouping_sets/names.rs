@@ -142,3 +142,77 @@ fn grouping_names_prefer_output_columns_to_enclosing_columns() {
         vec![vec![0, 1], vec![1, 2]]
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn repeated_scalar_query_aliases_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("clause-query-bindings.db");
+    let open = || match provider {
+        0 => Engine::new(),
+        1 => Engine::open(&path).unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    };
+    let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../uqa-sql/src/binding/tests/pg18_clause_query_results.json"
+    )))
+    .unwrap();
+    let verify = |engine: &Engine| {
+        for case in reference["cases"].as_array().unwrap() {
+            let sql = case["sql"].as_str().unwrap();
+            let result = engine.sql(sql, &[]);
+            if let Some(expected) = case.get("error") {
+                let error = result.unwrap_err();
+                assert_eq!(
+                    error.sqlstate(),
+                    expected["sqlstate"].as_str(),
+                    "{sql}: {error}"
+                );
+                assert_eq!(
+                    error.to_string(),
+                    expected["message"].as_str().unwrap(),
+                    "{sql}"
+                );
+            } else {
+                let result = result.unwrap_or_else(|error| panic!("{sql}: {error}"));
+                assert_eq!(result.columns, ["value"], "{sql}");
+                let expected = case["csv"]
+                    .as_str()
+                    .unwrap()
+                    .lines()
+                    .map(|value| match case["columns"][0][1].as_str().unwrap() {
+                        "integer" => Value::Int(value.parse().unwrap()),
+                        "text" => Value::Str(value.into()),
+                        other => panic!("unsupported fixture type: {other}"),
+                    })
+                    .collect::<Vec<_>>();
+                let actual = result
+                    .rows
+                    .iter()
+                    .map(|row| row["value"].clone())
+                    .collect::<Vec<_>>();
+                assert_eq!(actual, expected, "{sql}");
+            }
+        }
+    };
+    let engine = open();
+    engine.sql("CREATE TABLE input(x integer)", &[]).unwrap();
+    engine.sql("INSERT INTO input VALUES(7)", &[]).unwrap();
+    verify(&engine);
+    if provider != 0 {
+        drop(engine);
+        verify(&open());
+    }
+}

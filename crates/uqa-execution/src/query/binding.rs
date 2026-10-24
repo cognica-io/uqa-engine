@@ -14,6 +14,7 @@ use uqa_sql::plan::{
 use uqa_sql::routines::RoutineResolution;
 use uqa_sql::{ColumnType, SQLError, SQLParam};
 mod context;
+pub(crate) mod sources;
 pub use context::binding_context;
 mod subqueries;
 pub use subqueries::resolve_scalar_subquery_type;

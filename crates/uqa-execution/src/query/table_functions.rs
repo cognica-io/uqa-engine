@@ -21,6 +21,9 @@ pub struct TableFunctionCall<'a> {
     /// State owned by the caller's already-bound argument expressions. A one-shot
     /// caller may leave this absent and let the table-function entry bind them.
     pub function_states: Option<&'a crate::scalar::FunctionCallStates>,
+    /// Metadata owned by the prepared table call, independently of argument expressions.
+    pub routine_descriptions:
+        Option<&'a uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions>,
     pub alias: Option<&'a str>,
     pub column_aliases: &'a [String],
     pub ordinality: bool,

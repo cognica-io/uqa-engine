@@ -59,11 +59,21 @@ fn catalog_cast_qualification_matches_postgresql(#[case] provider: usize) {
 
 #[test]
 fn prepared_temporal_casts_keep_live_settings_and_rollback() {
+    temporal_casts_keep_live_settings("date");
+}
+
+#[test]
+fn catalog_temporal_casts_keep_live_settings_and_rollback() {
+    temporal_casts_keep_live_settings("public.scoped_date");
+}
+
+fn temporal_casts_keep_live_settings(target: &str) {
     use uqa_core::Value;
     let engine = Engine::new();
     engine
         .sql(
-            "CREATE TABLE cast_rows(id integer, v text);
+            "CREATE DOMAIN public.scoped_date AS date CHECK (VALUE > DATE '2000-01-01');
+             CREATE TABLE cast_rows(id integer, v text);
              INSERT INTO cast_rows VALUES (1,'01/02/2020'), (2,'01/02/2020');
              SET DateStyle = 'ISO, MDY'",
             &[],
@@ -71,8 +81,8 @@ fn prepared_temporal_casts_keep_live_settings_and_rollback() {
         .unwrap();
     let result = engine
         .sql(
-            "SELECT id, set_config('DateStyle', CASE id WHEN 1 THEN 'ISO, MDY' ELSE 'ISO, DMY' END, false) AS setting,
-                    v::date - DATE '1970-01-01' AS day FROM cast_rows",
+            &format!("SELECT id, set_config('DateStyle', CASE id WHEN 1 THEN 'ISO, MDY' ELSE 'ISO, DMY' END, false) AS setting,
+                    v::{target} - DATE '1970-01-01' AS day FROM cast_rows"),
             &[],
         )
         .unwrap();
@@ -90,8 +100,8 @@ fn prepared_temporal_casts_keep_live_settings_and_rollback() {
     );
     engine
         .sql(
-            "SET DateStyle = 'ISO, MDY';
-             PREPARE cast_dates AS SELECT v::date - DATE '1970-01-01' AS day FROM cast_rows ORDER BY id",
+            &format!("SET DateStyle = 'ISO, MDY';
+             PREPARE cast_dates AS SELECT v::{target} - DATE '1970-01-01' AS day FROM cast_rows ORDER BY id"),
             &[],
         )
         .unwrap();

@@ -21,6 +21,7 @@ use crate::RelationIdentity;
 
 mod collations;
 mod empty_relations;
+mod repeated_query_binding;
 mod retained_sources;
 
 struct EmptyRoutineResolution;

@@ -8,6 +8,7 @@
 
 use super::{query_scope, Engine, EngineHook, ScopedEngineHook, CATALOG_CAPTURES};
 use std::sync::Arc;
+
 use uqa_core::Value;
 use uqa_sql::{ast::FunctionBinding, expr::composites::CompositeTypeCatalog};
 use uqa_sql::{routines::resolution::RoutineOverloadCatalog, ColumnType};
@@ -329,4 +330,76 @@ fn scoped_runtime_catalog_refreshes_peer_ddl_in_each_isolation_level() {
             engine.sql("ROLLBACK", &[]).unwrap();
         }
     }
+}
+
+#[test]
+fn native_cast_descriptors_keep_qualified_identity_and_live_domain_checks() {
+    use uqa_core::memory::ProductionControl;
+    use uqa_sql::expr::cast_value_with_scoped_resolution;
+    let engine = Engine::new();
+    engine.sql("CREATE DOMAIN public.amount AS integer CHECK (VALUE > 0); CREATE SCHEMA other_types; CREATE DOMAIN other_types.amount AS integer CHECK (VALUE < 0)", &[]).unwrap();
+    let scope = query_scope::new_for_current_routine(&engine);
+    let hook = ScopedEngineHook::new(&engine, &scope);
+    let control = ProductionControl::uncontrolled();
+    let first = cast_value_with_scoped_resolution(
+        &Value::Int(1),
+        Some("pg_catalog.int4"),
+        "public.amount",
+        Some(&hook),
+        &control,
+    )
+    .unwrap();
+    assert_eq!(*first.value, Value::Int(1));
+    let retained = first.catalog.unwrap();
+    engine
+        .sql("SET search_path = other_types, public", &[])
+        .unwrap();
+    assert_eq!(
+        *retained
+            .evaluate(
+                &Value::Int(2),
+                Some("pg_catalog.int4"),
+                "public.amount",
+                Some(&hook),
+                &control
+            )
+            .unwrap()
+            .unwrap(),
+        Value::Int(2)
+    );
+    assert_eq!(
+        retained
+            .evaluate(
+                &Value::Int(-1),
+                Some("pg_catalog.int4"),
+                "public.amount",
+                Some(&hook),
+                &control
+            )
+            .unwrap()
+            .unwrap_err()
+            .sqlstate(),
+        Some("23514")
+    );
+    let unqualified = cast_value_with_scoped_resolution(
+        &Value::Int(-1),
+        Some("pg_catalog.int4"),
+        "amount",
+        Some(&hook),
+        &control,
+    )
+    .unwrap();
+    assert_eq!(*unqualified.value, Value::Int(-1));
+    assert!(unqualified.catalog.is_none());
+    let new_scope = query_scope::new_for_current_routine(&engine);
+    let new_hook = ScopedEngineHook::new(&engine, &new_scope);
+    assert!(retained
+        .evaluate(
+            &Value::Int(3),
+            Some("pg_catalog.int4"),
+            "public.amount",
+            Some(&new_hook),
+            &control
+        )
+        .is_none());
 }

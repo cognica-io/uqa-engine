@@ -36,7 +36,7 @@ pub enum SQLParam {
     #[doc(hidden)]
     DeferredError {
         ty: ColumnType,
-        error: crate::ast::DeferredSQLError,
+        error: Box<crate::ast::DeferredSQLError>,
     },
     Vector(Vec<f32>),
     Tensor(Vec<Vec<f32>>),
@@ -83,7 +83,7 @@ impl SQLParam {
     ) -> Result<Produced<Value>, SQLError> {
         control.check()?;
         match self {
-            Self::DeferredError { error, .. } => Err(error.clone().into()),
+            Self::DeferredError { error, .. } => Err((**error).clone().into()),
             Self::Scalar(value) | Self::TypedScalar { value, .. } => Ok(control.copy_value(value)?),
             Self::Vector(values) => vector_value(values, control),
             Self::Tensor(vectors) => {
@@ -145,6 +145,26 @@ fn vector_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deferred_parameter_keeps_scalar_carriers_compact_and_errors_lazy() {
+        assert!(size_of::<SQLParam>() <= size_of::<(Value, ColumnType, usize)>());
+        let error = crate::plpgsql::runtime_diagnostics::unassigned_record("r");
+        let parameter = SQLParam::DeferredError {
+            ty: ColumnType::SmallInteger,
+            error: Box::new((&error).into()),
+        };
+        assert_eq!(parameter.scalar_value(), None);
+        assert_eq!(
+            parameter.declared_scalar_type(),
+            Some(&ColumnType::SmallInteger)
+        );
+        let observed = parameter.to_value().unwrap_err();
+        assert_eq!(observed.sqlstate(), error.sqlstate());
+        assert_eq!(observed.to_string(), error.to_string());
+        assert_eq!(observed.detail(), error.detail());
+        assert_eq!(observed.hint(), error.hint());
+    }
 
     #[test]
     fn typed_scalar_preserves_declared_type_without_changing_scalar_access() {

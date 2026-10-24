@@ -567,6 +567,17 @@ pub trait DocumentStore: Send + Sync {
         Ok(None)
     }
 
+    /// Visit the same ordered fields as `next_shared_fields` directly from stable decoded memory, without acquiring ownership for each row. This opt-in path must have no fallible provider reads, decoding, or effects that ordinary shared-page construction would perform before the visitor. The visitor must not reenter storage or invoke host callbacks; `false` stops before the next row. Support is stable for this read owner: an eligible provider returns `Some(0)` for a zero limit; `None` always declines without calling the visitor.
+    fn for_each_next_shared_fields_borrowed(
+        &self,
+        _after: Option<DocId>,
+        _limit: usize,
+        _fields: &[&str],
+        _visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> Option<usize> {
+        None
+    }
+
     /// Visit the next bounded id range through a reusable borrowed projection of each backend-owned row. Missing fields are exposed as SQL NULL. `Some(count)` means the backend supports this borrowed cursor and reports how many rows it visited; `None` selects the ordinary cursor path without invoking `visitor`.
     fn for_each_next_fields(
         &self,

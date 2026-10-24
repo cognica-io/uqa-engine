@@ -176,6 +176,8 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
                     }
                     _ => None,
                 },
+                routine_descriptions: Default::default(),
+                expression_runtime: std::sync::OnceLock::new(),
                 params,
                 ctes: ctes.clone(),
                 input_schema: input_schema.clone(),

@@ -10,9 +10,56 @@ use super::ScopedEngineHook;
 use uqa_core::Value;
 use uqa_execution::functions::SQLTableFunctionResult;
 use uqa_execution::query::table_functions::{TableFunctionCall, TableFunctionRows};
+use uqa_execution::routines::invocation::{self, context::RoutineCallRetention};
 use uqa_sql::{ast::FunctionBinding, SQLError, SQLParam};
 
 impl uqa_execution::query::routine_invocation::SQLRoutineInvoker for ScopedEngineHook<'_> {
+    fn has_user_function_with_descriptions(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        descriptions: &uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions,
+    ) -> Result<bool, SQLError> {
+        let scope = || self.routine_description_scope();
+        invocation::has_described_user_function(
+            self.engine,
+            name,
+            binding,
+            RoutineCallRetention {
+                descriptions,
+                scope: &scope,
+                control: uqa_core::memory::ProductionControl::uncontrolled(),
+            },
+        )
+    }
+
+    fn invoke_projection_function(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        arguments: &[(Option<String>, Value)],
+        descriptions: &uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions,
+    ) -> uqa_execution::ExecResult<invocation::RoutineProjectionResult> {
+        let scope = || self.routine_description_scope();
+        invocation::call_user_projection_function(
+            &self.engine.routine_invocation_context(),
+            name,
+            binding,
+            arguments,
+            Some(RoutineCallRetention {
+                descriptions,
+                scope: &scope,
+                control: uqa_core::memory::ProductionControl::uncontrolled(),
+            }),
+        )
+        .ok_or_else(|| {
+            uqa_execution::ExecError::Other(format!(
+                "user function `{name}` disappeared during projection"
+            ))
+        })?
+        .map_err(Into::into)
+    }
+
     fn has_user_function(
         &self,
         name: &str,

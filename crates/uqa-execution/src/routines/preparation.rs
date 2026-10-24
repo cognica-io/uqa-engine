@@ -256,7 +256,7 @@ impl Interpreter<'_> {
                     {
                         return Ok(SQLParam::DeferredError {
                             ty: expected.clone().expect("retained parameter type"),
-                            error: (&error).into(),
+                            error: Box::new((&error).into()),
                         });
                     }
                     result => result?,
@@ -275,7 +275,9 @@ impl Interpreter<'_> {
                 })?;
                 Ok(SQLParam::DeferredError {
                     ty: expected.clone(),
-                    error: uqa_sql::plpgsql::parameter_type_mismatch(number, actual, expected),
+                    error: Box::new(uqa_sql::plpgsql::parameter_type_mismatch(
+                        number, actual, expected,
+                    )),
                 })
             })
             .collect()

@@ -32,8 +32,9 @@ pub(crate) fn encode_physical_row_record(
         .try_reserve_exact(bytes)
         .map_err(|error| spill_error(format!("cannot allocate spill row record: {error}")))?;
     write_u64(&mut record, physical_width)?;
+    let mut values = row.values();
     for slot in 0..physical_width {
-        let value = row.value(slot).ok_or_else(|| {
+        let value = values.next().flatten().ok_or_else(|| {
             spill_error(format!(
                 "physical row is missing slot {slot} of {physical_width}"
             ))
@@ -77,8 +78,30 @@ pub(crate) fn encoded_physical_row_record_size(
     row: &PhysicalRow,
     physical_width: usize,
 ) -> ExecResult<usize> {
-    let mut bytes = 8_usize;
     let mut values = row.values();
+    let mut bytes = encoded_row_value_size(&mut values, physical_width)?;
+    if !row.lock_origins().is_empty() {
+        add_lock_origins_size(&mut bytes, row)?;
+    }
+    check_row_end(&mut values, physical_width)?;
+    Ok(bytes)
+}
+
+pub(crate) fn encoded_borrowed_row_record_size(
+    values: &[&Value],
+    physical_width: usize,
+) -> ExecResult<usize> {
+    let mut values = values.iter().copied().map(Some);
+    let bytes = encoded_row_value_size(&mut values, physical_width)?;
+    check_row_end(&mut values, physical_width)?;
+    Ok(bytes)
+}
+
+fn encoded_row_value_size<'a>(
+    values: &mut impl Iterator<Item = Option<&'a Value>>,
+    physical_width: usize,
+) -> ExecResult<usize> {
+    let mut bytes = 8_usize;
     for slot in 0..physical_width {
         let value = values.next().flatten().ok_or_else(|| {
             spill_error(format!(
@@ -87,15 +110,19 @@ pub(crate) fn encoded_physical_row_record_size(
         })?;
         add_value_size(&mut bytes, value, 0)?;
     }
-    if !row.lock_origins().is_empty() {
-        add_lock_origins_size(&mut bytes, row)?;
-    }
+    Ok(bytes)
+}
+
+fn check_row_end<'a>(
+    values: &mut impl Iterator<Item = Option<&'a Value>>,
+    physical_width: usize,
+) -> ExecResult<()> {
     if values.next().flatten().is_some() {
         return Err(spill_error(format!(
             "physical row has more than {physical_width} slots"
         )));
     }
-    Ok(bytes)
+    Ok(())
 }
 
 pub(crate) fn encoded_batch_overhead_size(schema: &RowSchema) -> ExecResult<usize> {
@@ -503,8 +530,9 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
     write_u64(writer, batch.rows.len())?;
     for row in &batch.rows {
         write_u64(writer, batch.schema.physical_width())?;
+        let mut values = row.values();
         for slot in 0..batch.schema.physical_width() {
-            let value = row.value(slot).ok_or_else(|| {
+            let value = values.next().flatten().ok_or_else(|| {
                 spill_error(format!(
                     "physical row is missing slot {slot} of {}",
                     batch.schema.physical_width()
@@ -799,8 +827,49 @@ pub(super) fn write_raw(
 }
 
 #[cfg(test)]
+mod traversal_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn borrowed_record_sizing_preserves_bytes_depth_and_width_errors() {
+        let values = vec![
+            Value::Int(i64::MIN),
+            Value::Str("日本λ".repeat(128)),
+            Value::Null,
+            Value::List(vec![Value::Bool(true), Value::Void]),
+        ];
+        let borrowed = values.iter().collect::<Vec<_>>();
+        let row = PhysicalRow::from_values(values.clone());
+        assert_eq!(
+            encoded_borrowed_row_record_size(&borrowed, 4).unwrap(),
+            encode_physical_row_record(&row, 4).unwrap().len()
+        );
+        for width in [3, 5] {
+            assert_eq!(
+                encoded_borrowed_row_record_size(&borrowed, width)
+                    .unwrap_err()
+                    .to_string(),
+                encoded_physical_row_record_size(&row, width)
+                    .unwrap_err()
+                    .to_string()
+            );
+        }
+        let mut nested = Value::Null;
+        for _ in 0..=MAX_VALUE_DEPTH {
+            nested = Value::List(vec![nested]);
+        }
+        let error = encoded_borrowed_row_record_size(&[&nested], 1).unwrap_err();
+        assert!(error.to_string().contains("nesting exceeds 128"), "{error}");
+        assert_eq!(
+            error.to_string(),
+            encoded_physical_row_record_size(&PhysicalRow::from_values(vec![nested]), 1)
+                .unwrap_err()
+                .to_string()
+        );
+    }
 
     #[test]
     fn scalar_sizing_preserves_encoded_bytes_depth_and_overflow_order() {

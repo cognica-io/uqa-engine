@@ -94,6 +94,14 @@ pub(super) fn build_table_function_rows_with_row(
         }
     }
     let record_definition = (!column_types.is_empty()).then_some((column_aliases, column_types));
+    let local_descriptions =
+        uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions::default();
+    let scope = || context.eval_hook.routine_description_scope();
+    let retained = invocation::context::RoutineCallRetention {
+        descriptions: call.routine_descriptions.unwrap_or(&local_descriptions),
+        scope: &scope,
+        control: uqa_core::memory::ProductionControl::uncontrolled(),
+    };
     let user_result = match binding {
         Some(binding) if binding.builtin => None,
         None => invocation::call_user_table_function(
@@ -102,11 +110,12 @@ pub(super) fn build_table_function_rows_with_row(
             &call_args,
             record_definition,
         ),
-        Some(binding) => invocation::call_bound_user_table_function(
+        Some(binding) => invocation::call_bound_user_table_function_with_descriptions(
             &context.routines,
             binding,
             &call_args,
             record_definition,
+            retained,
         ),
     };
     if let Some(result) = user_result {

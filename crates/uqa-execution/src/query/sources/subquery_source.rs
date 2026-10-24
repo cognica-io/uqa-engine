@@ -5,13 +5,14 @@
 //
 //! Physical assembly for derived-table sources.
 
+use super::streaming_subquery::try_build_streaming_subquery_with_sources;
 /// Build the physical operator for a subquery source.
 use super::{
     attach_closed_qualifier_filter, execute_view_plan_output_with_parent_cache,
-    qualify_source_operator_with_columns, query_cte_names, try_build_streaming_subquery_operator,
-    ColumnPrune, CteScope, PhysicalOperator, QualifierFilters, QueryPlan, SQLError, SQLParam,
-    SourceContext, SourcePlan,
+    qualify_source_operator_with_columns, query_cte_names, ColumnPrune, CteScope, PhysicalOperator,
+    QualifierFilters, QueryPlan, SQLError, SQLParam, SourceContext, SourcePlan,
 };
+use crate::query::binding::sources::SourceBindings;
 
 pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
@@ -20,6 +21,7 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
     ctes: &mut CteScope<S>,
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
+    bindings: Option<&SourceBindings<'_>>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     match from {
         SourcePlan::Subquery {
@@ -42,7 +44,7 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
             let mut recheck_scope = ctes.enter_recheck_storage_pins(&visible_qualifier);
             let ctes: &mut CteScope<S> = &mut recheck_scope;
             if let Some(operator) =
-                try_build_streaming_subquery_operator(context, body, params, ctes)?
+                try_build_streaming_subquery_with_sources(context, body, params, ctes, bindings)?
             {
                 if let SourcePlan::Subquery {
                     captured_output: Some(relation),

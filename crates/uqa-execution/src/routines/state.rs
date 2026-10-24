@@ -67,6 +67,7 @@ impl<'a> Interpreter<'a> {
             }
         }
         let mut interpreter = Self {
+            descriptions: None,
             preparations: services.statements.plpgsql_preparations(def, parsed),
             services,
             def,
@@ -229,6 +230,7 @@ impl<'a> Interpreter<'a> {
 
     pub(super) fn resolver(&self) -> DatumResolver<'_> {
         DatumResolver {
+            descriptions: self.descriptions,
             types: self.services.expressions,
             datums: self.datums,
             values: &self.values,

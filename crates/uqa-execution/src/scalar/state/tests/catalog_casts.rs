@@ -5,6 +5,8 @@
 //
 
 use super::*;
+
+mod scoped;
 use crate::scalar::evaluator::eval_scalar_inner;
 use std::cell::Cell;
 use uqa_core::{
@@ -87,7 +89,7 @@ fn evaluate(
     prepared: &PreparedExpressions<ScalarExpr>,
     schema: &RowSchema,
     value: Value,
-    catalog: &LiveCatalog,
+    catalog: &dyn EngineHook,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     let row =

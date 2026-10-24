@@ -14,6 +14,8 @@ use uqa_engine::Engine;
 mod condition_binding;
 #[path = "sql_subquery/runtime_schema.rs"]
 mod runtime_schema;
+#[path = "sql_subquery/source_binding.rs"]
+mod source_binding;
 
 fn setup() -> Engine {
     let eng = Engine::new();

@@ -12,6 +12,8 @@ use uqa_execution::{query::scored_input::*, row_locks::recheck::RecheckDoc};
 use uqa_sql::expr::RowLookup;
 use uqa_sql::ResultRow;
 
+mod borrowed_result;
+
 #[test]
 fn pruned_primary_key_is_not_advertised_as_output_ordering() {
     let engine = crate::Engine::new();

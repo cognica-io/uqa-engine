@@ -7,20 +7,33 @@
 
 /// Build a single-consumer derived-table projection as a pull pipeline. Blocking operators inside the query block retain their own bounded state, but a second `SharedSpill` boundary would eagerly exhaust that pipeline before the parent can apply demand such as `LIMIT`.
 use super::{
-    build_join_operator_with_ctes, AccessPathPlan, ComputePlan, CteScope, RelationalPlan, SQLError,
-    SQLParam, SourceContext,
+    build_join_operator_with_bound_sources, AccessPathPlan, ComputePlan, CteScope, RelationalPlan,
+    SQLError, SQLParam, SourceContext,
+};
+use crate::query::binding::sources::{
+    bind_query_block_with_sources, ensure_select_with_sources, BoundQueryBlock, SourceBindings,
 };
 use crate::query::row_at_a_time::RowAtATime;
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves source schema and row identity"
-)]
 pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
     body: &uqa_sql::plan::QueryPlan,
     params: &'a [SQLParam],
     ctes: &mut CteScope<S>,
+) -> Result<Option<Box<dyn crate::PhysicalOperator + 'a>>, SQLError> {
+    try_build_streaming_subquery_with_sources(context, body, params, ctes, None)
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
+pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'a, S>,
+    body: &uqa_sql::plan::QueryPlan,
+    params: &'a [SQLParam],
+    ctes: &mut CteScope<S>,
+    bindings: Option<&SourceBindings<'_>>,
 ) -> Result<Option<Box<dyn crate::PhysicalOperator + 'a>>, SQLError> {
     let mut relation_lookup = ctes.enter_relation_lookup_mode(body.relations_bound)?;
     let ctes = &mut *relation_lookup;
@@ -58,13 +71,18 @@ pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
     if let Some(outer) = &outer_row {
         ctes.set_row_lock_outer_row(outer.clone());
     }
-    let (mut block, source_schema) = crate::query::binding::bind_query_block_for_execution(
+    let BoundQueryBlock {
+        mut block,
+        schema: source_schema,
+        mut sources,
+    } = bind_query_block_with_sources(
         context.ctes.routines,
         block,
         params,
         ctes,
         outer_row.as_ref().map(|row| &row.schema),
         uqa_sql::semantics::should_defer_distinct_limit(block),
+        bindings,
     )?;
     // GROUP BY output names precede enclosing columns. Bind them against this block's own input before adding the outer row, as in the lateral executor.
     if outer_row.is_some() && matches!(block.compute, ComputePlan::Aggregate) {
@@ -93,7 +111,7 @@ pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
         ctes
     };
     if let Some(from) = &block.from {
-        crate::query::privileges::ensure_select_privileges_for_query_block(block, from, ctes)?;
+        sources = ensure_select_with_sources(block, from, ctes, sources.as_ref())?;
     }
     crate::query::binding::validate_query_block_expression_types(
         context.ctes.routines,
@@ -156,13 +174,14 @@ pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
             )?;
             let operator = {
                 let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
-                build_join_operator_with_ctes(
+                build_join_operator_with_bound_sources(
                     context,
                     from,
                     params,
                     &mut scoped_ctes,
                     column_prune.as_ref(),
                     qualifier_filters.as_ref(),
+                    sources.as_ref(),
                 )?
             };
             crate::physical::construction::OperatorBuild::run(operator, |_| {

@@ -16,6 +16,8 @@ use std::sync::{
 };
 use uqa_core::Value;
 
+mod borrowed;
+
 struct Source {
     schema: RowSchema,
     values: Arc<Vec<Value>>,
@@ -294,17 +296,26 @@ fn collect_input(
     source: Box<dyn PhysicalOperator>,
     mode: crate::query::consumer::QueryOutputMode<'_>,
 ) -> Result<crate::query::output::QueryOutput, uqa_sql::SQLError> {
+    collect_input_with_cancellation(source, mode, &uqa_core::CancellationToken::new())
+}
+
+fn collect_input_with_cancellation(
+    source: Box<dyn PhysicalOperator>,
+    mode: crate::query::consumer::QueryOutputMode<'_>,
+    cancellation: &uqa_core::CancellationToken,
+) -> Result<crate::query::output::QueryOutput, uqa_sql::SQLError> {
     let runtime = QueryRuntimeView {
         function_context: &crate::functions::SQLFunctionContext::empty(),
         diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
-        cancellation: &uqa_core::CancellationToken::new(),
+        cancellation,
         settings: &Services,
         scalar_functions: &RwLock::default(),
         table_functions: &RwLock::default(),
         aggregate_functions: &RwLock::default(),
         notices: &crate::query::NoticeQueue::default(),
     };
-    collect_query_operator(runtime, vec!["value".into()], source, mode)
+    let columns = source.schema().to_vec();
+    collect_query_operator(runtime, columns, source, mode)
 }
 
 #[test]

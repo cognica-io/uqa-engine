@@ -13,11 +13,16 @@ use super::{
     PhysicalOperator, QualifierFilters, SQLError, SQLParam, SourceContext, SourcePlan,
 };
 use crate::physical::construction::OperatorBuild;
+use crate::query::binding::sources::SourceBindings;
 use crate::{HashJoin, NestedLoopJoin};
 
 #[expect(
     clippy::too_many_lines,
     reason = "preserves source schema and row identity"
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "forwards source binding metadata and tuple recheck paths"
 )]
 pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
@@ -27,6 +32,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
     recheck_path: Option<Vec<u8>>,
+    bindings: Option<&SourceBindings<'_>>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     match from {
         SourcePlan::Join {
@@ -64,15 +70,22 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .propagated_join_filters(filters, right, left, on.as_ref())
             });
             let left_filter_ref = left_filters.as_ref().or(filters);
-            let left_operator = build_join_operator_with_ctes_at_path(
-                context,
-                left,
-                params,
-                ctes,
-                prune,
-                left_filter_ref,
-                left_recheck_path,
-            )?;
+            let left_operator = if context.planning.join_input_is_empty(from, false) {
+                super::empty_source_operator(context, left, params, ctes, None)?
+            } else {
+                build_join_operator_with_ctes_at_path(
+                    context,
+                    left,
+                    params,
+                    ctes,
+                    prune,
+                    left_filter_ref,
+                    left_recheck_path,
+                    bindings
+                        .and_then(|bindings| bindings.join_child(false))
+                        .as_ref(),
+                )?
+            };
             OperatorBuild::build(left_operator, |left_operator| {
                 let source_binding = if ctes.source_outer_rewrites.is_some() {
                     let outer_schema = ctes.row_lock_outer_row().map(|row| row.schema.clone());
@@ -100,6 +113,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 } else {
                     ctes
                 };
+                let bindings = bindings.filter(|_| source_binding.is_none());
                 let right = source_binding
                     .as_ref()
                     .map_or(right, |binding| &binding.source);
@@ -137,7 +151,8 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         },
                     )
                 });
-                let dependent = match lateral_input.as_ref() {
+                let right_empty = context.planning.join_input_is_empty(from, true);
+                let dependent = match lateral_input.as_ref().filter(|_| !right_empty) {
                     Some(input) => crate::query::binding::source_depends_on_current_row(
                         context.ctes.routines,
                         right,
@@ -170,15 +185,28 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     });
                 }
 
-                let right_operator = build_join_operator_with_ctes_at_path(
-                    context,
-                    right,
-                    params,
-                    ctes,
-                    prune,
-                    right_filter_ref,
-                    right_recheck_path,
-                )?;
+                let right_operator = if right_empty {
+                    super::empty_source_operator(
+                        context,
+                        right,
+                        params,
+                        ctes,
+                        lateral_input.as_ref(),
+                    )?
+                } else {
+                    build_join_operator_with_ctes_at_path(
+                        context,
+                        right,
+                        params,
+                        ctes,
+                        prune,
+                        right_filter_ref,
+                        right_recheck_path,
+                        bindings
+                            .and_then(|bindings| bindings.join_child(true))
+                            .as_ref(),
+                    )?
+                };
 
                 let left_schema = left_operator.row_schema().clone();
                 let right_schema = right_operator.row_schema().clone();

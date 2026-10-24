@@ -7,16 +7,23 @@
 //! Query-block validation and physical source selection.
 
 use super::{
-    bind_query_block_for_execution, binding_context, ensure_select_privileges_for_query_block,
-    execute_query_block_operator_output, expand_from_star_columns, overlay_outer_schema,
-    projection_columns, run_select_without_from_output, run_single_foreign_select_output,
+    binding_context, ensure_select_privileges_for_query_block, execute_query_block_operator_output,
+    expand_from_star_columns, overlay_outer_schema, projection_columns,
+    run_select_without_from_output, run_single_foreign_select_output,
     run_single_table_select_output, validate_query_block_expression_types,
     validate_query_block_references, validate_query_set_contexts,
     validate_source_set_contexts_before_build, with_query_table_pseudo_columns, ComputePlan,
     CteScope, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
     SingleRelation, SourceContext, SourcePlan,
 };
+use crate::query::binding::sources::{
+    bind_query_block_with_sources, ensure_select_with_sources, SourceBindings,
+};
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "borrows the bound source tree throughout physical assembly"
+)]
 fn run_bound_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
     block: &'a QueryBlockPlan,
@@ -25,6 +32,7 @@ fn run_bound_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     ctes: &'a mut CteScope<S>,
     output_mode: QueryOutputMode<'a>,
     source_schema: &crate::RowSchema,
+    sources: Option<&SourceBindings<'_>>,
 ) -> Result<QueryOutput, SQLError> {
     let outer = ctes.row_lock_outer_row().map(|row| row.schema.clone());
     let source_schema = with_query_table_pseudo_columns(source_schema);
@@ -85,6 +93,7 @@ fn run_bound_query_block_output<'a, S: Clone + Send + Sync + 'static>(
         output_mode,
         &expression_schema,
         outer.as_ref(),
+        sources,
     )
 }
 
@@ -105,6 +114,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
     output_mode: QueryOutputMode<'a>,
     expression_schema: &crate::RowSchema,
     outer: Option<&crate::RowSchema>,
+    sources: Option<&SourceBindings<'_>>,
 ) -> Result<QueryOutput, SQLError> {
     let from = stmt
         .from
@@ -255,17 +265,28 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
         params,
         ctes,
     )?;
-    ensure_select_privileges_for_query_block(stmt, from, ctes)?;
+    let sources = ensure_select_with_sources(stmt, from, ctes, sources)?;
     let operator = {
         let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
-        crate::query::sources::build_join_operator_with_ctes(
-            context,
-            from,
-            params,
-            &mut scoped_ctes,
-            column_prune.as_ref(),
-            qualifier_filters.as_ref(),
-        )?
+        if context.planning.block_input_is_empty(stmt) {
+            crate::query::sources::empty_source_operator(
+                context,
+                from,
+                params,
+                &scoped_ctes,
+                outer,
+            )?
+        } else {
+            crate::query::sources::build_join_operator_with_bound_sources(
+                context,
+                from,
+                params,
+                &mut scoped_ctes,
+                column_prune.as_ref(),
+                qualifier_filters.as_ref(),
+                sources.as_ref(),
+            )?
+        }
     };
     let rewrite_subqueries = !stmt.deferred_outer_rewrites.is_empty();
     let rewritten =
@@ -413,28 +434,30 @@ pub fn execute_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     }
     let defer_distinct_limit = uqa_sql::semantics::should_defer_distinct_limit(block);
     let outer = scoped_ctes.row_lock_outer_row().map(|row| &row.schema);
-    let (execution, source_schema) = bind_query_block_for_execution(
+    let bound = bind_query_block_with_sources(
         context.ctes.routines,
         block,
         params,
         &scoped_ctes,
         outer,
         defer_distinct_limit,
+        None,
     )?;
     let mut rewritten_scope;
     let scoped_ctes = if block.deferred_outer_rewrites.is_empty() {
         &mut *scoped_ctes
     } else {
-        rewritten_scope = scoped_ctes.enter_scalar_subqueries(&execution.subqueries);
+        rewritten_scope = scoped_ctes.enter_scalar_subqueries(&bound.block.subqueries);
         &mut *rewritten_scope
     };
     run_bound_query_block_output(
         context,
         block,
-        &execution,
+        &bound.block,
         params,
         scoped_ctes,
         output_mode,
-        &source_schema,
+        &bound.schema,
+        bound.sources.as_ref(),
     )
 }

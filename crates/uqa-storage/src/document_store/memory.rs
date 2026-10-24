@@ -460,6 +460,16 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(Some(self.next_shared_rows(after, limit, fields)))
     }
 
+    fn for_each_next_shared_fields_borrowed(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> Option<usize> {
+        Some(self.visit_next_rows(after, limit, fields, visitor))
+    }
+
     fn for_each_next_fields(
         &self,
         after: Option<DocId>,

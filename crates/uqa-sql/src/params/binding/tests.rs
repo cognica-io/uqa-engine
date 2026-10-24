@@ -135,6 +135,8 @@ fn missing_declarations_report_the_original_outer_parameter_oid() {
                 catalog.error = Some(DeferredSQLError {
                     sqlstate: "42704".into(),
                     message: "type with OID 42000 does not exist".into(),
+                    detail: None,
+                    hint: None,
                 });
             }
             let oid = if matches!(ty, ColumnType::Array(_)) {
@@ -193,10 +195,12 @@ fn procedural_errors_and_anonymous_values_keep_their_observation_boundary() {
     );
     let deferred = SQLParam::DeferredError {
         ty: ty.clone(),
-        error: DeferredSQLError {
+        error: Box::new(DeferredSQLError {
             sqlstate: "XX001".into(),
             message: "unobserved field".into(),
-        },
+            detail: None,
+            hint: None,
+        }),
     };
     assert_eq!(
         *bind_parameter_type_with_control(&deferred, &catalog, &control)
@@ -258,6 +262,8 @@ fn catalog_binding_retains_allowance_and_both_cancellation_sources() {
     catalog.error = Some(DeferredSQLError {
         sqlstate: "40001".into(),
         message: "catalog snapshot changed".into(),
+        detail: None,
+        hint: None,
     });
     let error = bind_parameter_type_with_control(&parameter, &catalog, &control).unwrap_err();
     assert_eq!(error.sqlstate(), Some("40001"));

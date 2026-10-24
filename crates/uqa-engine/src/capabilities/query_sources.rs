@@ -41,6 +41,15 @@ impl Engine {
 }
 
 impl SourcePlanning<StatementReadSnapshot> for Engine {
+    fn source_is_empty(&self, source: &SourcePlan) -> bool {
+        uqa_planner::empty_sources::source_is_empty(source)
+    }
+    fn block_input_is_empty(&self, statement: &QueryBlockPlan) -> bool {
+        uqa_planner::empty_sources::block_input_is_empty(statement)
+    }
+    fn join_input_is_empty(&self, join: &SourcePlan, right: bool) -> bool {
+        uqa_planner::empty_sources::join_input_is_empty(join, right)
+    }
     fn column_prune_with_filter(
         &self,
         statement: &QueryBlockPlan,

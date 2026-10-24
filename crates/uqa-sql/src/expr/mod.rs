@@ -28,6 +28,7 @@ mod in_range;
 pub(crate) mod integer_input;
 mod json;
 mod json_strip;
+pub(crate) mod observations;
 mod random;
 mod range;
 pub(crate) use range::datum as range_datum;
@@ -178,10 +179,11 @@ pub use call_dispatch::{
 };
 pub use context::{
     cast_value_with_numeric_resolution_with_control, cast_value_with_resolution_with_control,
-    cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,
-    coercion_type_name, format_regtype_value, format_regtype_value_with_control,
-    read_catalog_array_input, read_catalog_input, CatalogInputFunctions, EngineHook, EvalContext,
-    RowKeySpace, RowLookup,
+    cast_value_with_scoped_resolution, cast_value_with_type_resolution,
+    cast_value_with_type_resolution_with_control, coercion_type_name, format_regtype_value,
+    format_regtype_value_with_control, read_catalog_array_input, read_catalog_input,
+    CatalogCastScope, CatalogInputFunctions, EngineHook, EvalContext, RetainedCatalogCast,
+    RowKeySpace, RowLookup, ScopedCastResult,
 };
 pub(crate) use context::{
     format_regtype_value_with_catalog_and_control, requires_catalog_constant_input,

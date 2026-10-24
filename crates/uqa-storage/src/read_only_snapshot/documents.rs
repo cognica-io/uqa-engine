@@ -238,6 +238,20 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
         self.0.for_each_next_fields(after, limit, fields, visitor)
     }
 
+    fn for_each_next_shared_fields_borrowed(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> Option<usize> {
+        if self.2.is_some() {
+            return None;
+        }
+        self.0
+            .for_each_next_shared_fields_borrowed(after, limit, fields, visitor)
+    }
+
     fn max_doc_id(&self) -> StorageBackendResult<DocId> {
         self.0.max_doc_id()
     }

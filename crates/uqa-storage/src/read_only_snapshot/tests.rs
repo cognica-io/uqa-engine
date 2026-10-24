@@ -93,6 +93,63 @@ fn document_adapter_preserves_shared_projections_and_rejects_writes() {
 }
 
 #[test]
+fn document_adapter_keeps_stable_borrowed_projection_at_the_original_snapshot() {
+    let mut live = MemoryDocumentStore::new();
+    live.put(7, [("body".into(), Value::Str("retained".into()))].into())
+        .unwrap();
+    let first: Arc<dyn DocumentStore> = Arc::new(ReadOnlySnapshot::new(live.snapshot().unwrap()));
+    let retained = ReadOnlySnapshot::new(first);
+    live.clear().unwrap();
+    assert_eq!(
+        retained
+            .for_each_next_shared_fields_borrowed(None, 0, &[], &mut |_, _| panic!("zero limit")),
+        Some(0)
+    );
+    let mut rows = Vec::new();
+    assert_eq!(
+        retained.for_each_next_shared_fields_borrowed(
+            None,
+            8,
+            &["body", "missing", "body"],
+            &mut |id, values| {
+                rows.push((id, values.iter().copied().cloned().collect::<Vec<_>>()));
+                false
+            }
+        ),
+        Some(1)
+    );
+    assert_eq!(
+        rows,
+        vec![(
+            7,
+            vec![
+                Value::Str("retained".into()),
+                Value::Null,
+                Value::Str("retained".into())
+            ]
+        )]
+    );
+    assert_eq!(
+        retained.for_each_next_shared_fields_borrowed(Some(7), 8, &[], &mut |_, _| panic!(
+            "exhausted cursor"
+        )),
+        Some(0)
+    );
+    let controlled = ReadOnlySnapshot(
+        retained.0,
+        retained.1,
+        Some(StorageReadControl::with_limit(1024)),
+        None,
+    );
+    assert_eq!(
+        controlled.for_each_next_shared_fields_borrowed(None, 0, &[], &mut |_, _| panic!(
+            "controlled owner must decline"
+        )),
+        None
+    );
+}
+
+#[test]
 fn text_adapter_preserves_revisions_borrowed_reads_budgets_and_cancellation() {
     let mut live = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
     live.add_document(7, [("body".into(), "old old".into())].into())

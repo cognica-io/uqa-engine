@@ -2,6 +2,782 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_parameter_keeps_scalar_carriers_compact_and_errors_lazy",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/params.rs",
+      "capability": "Bounded procedural diagnostic carrier",
+      "workload": "A typed deferred unassigned-record error and the ordinary SQLParam layout.",
+      "invariant": "Retain type and lazy DETAIL/HINT diagnostics without enlarging every scalar parameter beyond its value/type/tag carrier.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_diagnostic_preserves_primary_fields_and_old_serialization",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/identity_sequence/tests.rs",
+      "capability": "Deferred SQL diagnostic preservation",
+      "workload": "Unassigned-record DETAIL, independent HINT, deferred round-trip and legacy primary-only serialized diagnostics.",
+      "invariant": "Retain primary diagnostic fields without eagerly evaluating the deferred parameter or changing legacy encoding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "procedural_datum_descriptions_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/invocation_descriptions.rs",
+      "capability": "PostgreSQL procedural datum consumers",
+      "workload": "Seventy independent PostgreSQL 18 statements covering current procedural values, domains, record schemas, direct/deferred diagnostics, unexecuted CASE branches, replacement, rollback and persistent reopen through four providers.",
+      "invariant": "Preserve exact values, types, command tags and SQLSTATE/message/DETAIL/HINT with live domain/default effects and existing prepared record diagnostics.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_metadata_resolves_once_while_values_and_domain_checks_remain_live",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_procedural.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "512 changing values and NULLs, declared domain parameters, assignments and returns under 16KiB.",
+      "invariant": "Resolve each declaration and conversion once, preserve 1,024 domain checks and later 23514 errors, and release admitted metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_descriptions_bind_compilation_positions_names_and_current_scope",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_procedural.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "512 selected type reads followed by changed names, datum counts, compilation and scope.",
+      "invariant": "Retain one compilation and exact declared positions/names; changed inputs use live resolution without accumulating generations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_unresolved_and_unqualified_declarations_keep_live_resolution",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_procedural.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "Repeated missing declarations, unqualified names and a replacement compilation.",
+      "invariant": "Never retain unresolved results or namespace-sensitive conversions; preserve current value behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_callbacks_invalidate_later_conversions_and_publication",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_procedural.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "Domain callbacks change scope before the next assignment and return.",
+      "invariant": "Run every callback, resolve subsequent targets live and avoid publishing a descriptor invalidated by its own callback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_retention_declines_exhaustion_and_propagates_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_procedural.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "Exhausted 16KiB allowance at table and named-slot boundaries, followed by renewed allowance and cancellation.",
+      "invariant": "Optional retention failure preserves live reads and conversions; cancellation remains 57014 and all leases release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_procedural_parameters_reuse_declarations_but_read_current_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/resolver/tests/descriptions.rs",
+      "capability": "Procedural datum descriptions",
+      "workload": "512 changing smallint values and NULLs under 8KiB, followed by two reads after native scope change.",
+      "invariant": "Resolve the native declaration once, preserve selected types/current values, resume live reads after invalidation and release metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_record_parameters_preserve_selected_types_without_text_resolution",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/resolver/tests.rs",
+      "capability": "Procedural selected record metadata",
+      "workload": "512 changing typed procedural parameter reads through the existing resolver.",
+      "invariant": "Read current smallint/text record fields and NULLs without textual type resolution; schema changes select the current field descriptor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_scalar_parameters_do_not_resolve_the_selected_type_twice",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/resolver/tests.rs",
+      "capability": "Procedural scalar parameter handoff",
+      "workload": "512 changing typed procedural parameter reads through the existing resolver.",
+      "invariant": "Preserve current smallint values and NULLs while resolving the mutable declaration once per read, without re-resolving its selected type.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "tuple_result_targets_resolve_once_per_attribute_and_keep_each_domain_check",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "SQL tuple result metadata work",
+      "workload": "512 two-column outputs with distinct domain and integer targets under a 16KiB allowance.",
+      "invariant": "Borrow the first published and later matching result layouts; resolve each attribute target once, run every domain check and release all metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "routine_sql_body_descriptions_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/invocation_descriptions.rs",
+      "capability": "PostgreSQL SQL routine body consumers",
+      "workload": "63 independent PostgreSQL 18.4 cases across memory, SQLite, SQLite Key/Value and redb with persistent reopen: live domain output checks, defaults, OUT-before-IN, whole/tuple composites, changed output schema and rollback.",
+      "invariant": "Preserve exact values, types, command tags and SQLSTATE/message/DETAIL/HINT, including one domain check per returned value and original 42P13 diagnostics.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "repeated_sql_body_inputs_keep_all_parameter_positions_and_current_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/sql_body/tests/descriptions.rs",
+      "capability": "SQL body input scheduling",
+      "workload": "512 changing inputs with an OUT parameter before the first IN parameter.",
+      "invariant": "Preserve every typed input and all-parameter positions while reducing body type lookups from 512 to 1 under 4KiB and releasing the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "body_metadata_declines_exhausted_allowance_and_unqualified_results",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "Optional SQL body metadata retention",
+      "workload": "Exhausted 8KiB allowance, unqualified return names, renewed allowance and cancellation.",
+      "invariant": "Preserve live resolution on misses, admit only fixed result declarations, propagate cancellation and release every lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "body_parameter_descriptions_follow_exact_positions_and_current_scope",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "SQL routine body parameter work",
+      "workload": "512 resolutions followed by a changed parameter spelling, changed scope and cancellation.",
+      "invariant": "Resolve a fixed parameter once; preserve changed targets, live scope misses, cancellation and complete allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "body_results_reuse_descriptions_while_values_and_domain_checks_stay_live",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "SQL routine result description work",
+      "workload": "512 changing domain results and a final failing domain check under a 16KiB allowance.",
+      "invariant": "Resolve the layout and output target once while checking every value; preserve 23514 and release all retained payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "result_schema_changes_and_missing_results_keep_the_original_checks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "SQL routine result input identity",
+      "workload": "A successful output followed by 512 retained checks, then incompatible and missing result schemas.",
+      "invariant": "Retained result checks perform no allocation or parsed-name copying; reuse only complete analyzed input and preserve original 42P13 errors without caching failures.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "output_callbacks_invalidate_later_values_and_do_not_publish_old_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "SQL routine output callback invalidation",
+      "workload": "A domain callback changes the native scope before the next output.",
+      "invariant": "Resolve later targets and result metadata live; never reuse or publish the expired conversion description.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "zero_argument_calls_keep_separate_descriptions_after_owner_moves",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/invocation/resolution/tests/prepared_zero_arguments.rs",
+      "capability": "Zero-argument routine identity",
+      "workload": "Two zero-argument calls evaluated repeatedly after their prepared owner moves, followed by a cloned owner.",
+      "invariant": "Keep one distinct description per owned invocation even when empty argument arrays share an address; clones resolve independently and release all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "invocation_descriptions_do_not_retain_retired_function_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_invocation.rs",
+      "capability": "Routine catalog payload lifetime",
+      "workload": "Retained description after the catalog owner drops the selected function.",
+      "invariant": "Keep only a weak function reference so retired body payload is released, and release all admitted metadata on owner drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_scalar_calls_reuse_invocation_metadata_and_clones_start_fresh",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/invocation/resolution/tests.rs",
+      "capability": "Prepared routine metadata delivery",
+      "workload": "512 changing rows through scalar evaluation followed by a cloned prepared owner.",
+      "invariant": "Use the descriptor hook and one lookup per metadata kind across rows; cloned preparation must resolve independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_descriptions_keep_domain_checks_live_and_preserve_membership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests.rs",
+      "capability": "Routine conversion observations",
+      "workload": "Changing valid and invalid values with existing domain membership.",
+      "invariant": "Reuse target description while retaining every required live domain check.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_pseudotype_descriptions_keep_values_and_reject_each_invalid_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests.rs",
+      "capability": "Routine pseudotype conversion",
+      "workload": "Record, trigger, anyarray, refcursor and void assignments.",
+      "invariant": "Preserve original carrier values and conversion errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_descriptions_admit_owned_payload_and_release_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests.rs",
+      "capability": "Routine type retention",
+      "workload": "Controlled copied descriptions with small memory allowance and cancellation.",
+      "invariant": "Account for owned type payload and release every reservation on failure or drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_invocation_resolves_each_target_once_and_checks_every_value",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_invocation.rs",
+      "capability": "Routine target resolution work",
+      "workload": "Two domain targets, 512 changing argument pairs and a final rejected value.",
+      "invariant": "Resolve each target once while preserving all 1,025 value checks within the existing 16KiB allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_invocation_rejects_changed_bindings_scopes_and_unqualified_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_invocation.rs",
+      "capability": "Routine description validity",
+      "workload": "Changed routine identity, argument mapping, catalog scope and unqualified names.",
+      "invariant": "Reuse only the complete fixed binding and original immutable scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "optional_invocation_retention_declines_small_allowance_and_preserves_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_invocation.rs",
+      "capability": "Optional routine retention",
+      "workload": "One-byte allowance and cancelled admission.",
+      "invariant": "Decline optional retention without changing live invocation; preserve 57014 and release all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "conversion_callbacks_invalidate_later_arguments_and_prevent_stale_publication",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_invocation.rs",
+      "capability": "Routine callback invalidation",
+      "workload": "First domain callback changes the catalog scope before a later argument.",
+      "invariant": "Resolve later arguments live and do not publish the earlier stale target description.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "repeated_bound_calls_resolve_identity_sources_and_targets_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/invocation/resolution/tests.rs",
+      "capability": "Bound routine invocation work",
+      "workload": "512 changing values through ordinary and retained invocation with a 4KiB allowance.",
+      "invariant": "Preserve every result while reducing function/source/target lookups from 512/1024/512 to 1/1/1 and releasing retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_routine_descriptions_follow_replacement_and_rollback",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/capabilities/query_expressions/routine_descriptions/tests.rs",
+      "capability": "Native routine scope",
+      "workload": "SQL and PL/pgSQL: Repeated native calls, replacement, transaction rollback and function drop.",
+      "invariant": "Actually retain eligible native bindings and invalidate them before changed or missing definitions are observed.",
+      "case_names": [
+        "case_1_plpgsql",
+        "case_2_sql"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_routine_descriptions_keep_execute_checks_for_strict_null_calls",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/capabilities/query_expressions/routine_descriptions/tests.rs",
+      "capability": "Native routine authority",
+      "workload": "SQL and PL/pgSQL: Retained strict function followed by EXECUTE revocation and invoking-role change.",
+      "invariant": "Keep the exact 42501 privilege error even for strict NULL input.",
+      "case_names": [
+        "case_1_plpgsql",
+        "case_2_sql"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "routine_invocation_descriptions_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/invocation_descriptions.rs",
+      "capability": "PostgreSQL routine invocation consumers",
+      "workload": "Four providers and persistent reopen against 43 independent PostgreSQL statements: named/default/variadic/polymorphic calls, live side effects, domain failures, replacement/drop and rollback.",
+      "invariant": "Preserve exact values, types, tags and SQLSTATE/message/DETAIL/HINT.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_execution_sources_are_bound_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/source_transfer.rs",
+      "capability": "Nested source binding work",
+      "workload": "Derived source chains of depth 1, 8 and 32 in the same borrowed execution tree, compared with the ordinary source-binding entry.",
+      "invariant": "Bind each source once during physical assembly; preserve descriptors without repeated descendant analysis.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "derived_source_transfer_requires_original_syntax_and_complete_outer_schema",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/source_transfer.rs",
+      "capability": "Derived binding scope validity",
+      "workload": "Original and copied syntax, changed outer types/qualifiers, missing outer scope and deferred DISTINCT slicing.",
+      "invariant": "Reuse only the original node with its exact enclosing schema and unchanged execution syntax.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_transfer_does_not_skip_local_cte_scopes_or_routine_selection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/source_transfer.rs",
+      "capability": "Source scope and routine ownership",
+      "workload": "Derived blocks with local CTE definitions and generate_series table-function sources.",
+      "invariant": "Keep independent CTE analysis and exact execution routine selection; do not replace those effects with retained descriptors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_binding_tree_keeps_join_sides_separate",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/source_transfer.rs",
+      "capability": "Structural source binding transfer",
+      "workload": "Two independently typed derived inputs under a cross join.",
+      "invariant": "Keep each retained descriptor attached to its original borrowed join side.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_metadata_requires_the_same_catalog_and_namespace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/binding/tests.rs",
+      "capability": "Immutable source namespace",
+      "workload": "Shared versus independent catalog snapshots and changed search path/temporary namespace.",
+      "invariant": "Require the original immutable catalog and complete relation namespace; child query modes remain explicitly selected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_metadata_does_not_cross_cte_definitions_or_recursive_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/binding/tests.rs",
+      "capability": "Derived CTE metadata lifetime",
+      "workload": "Changed deferred definition identity, recursive control width and non-returning CTE status.",
+      "invariant": "Decline source reuse when any active CTE binding input changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_transfer_rebinds_changed_parameters_and_cte_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/binding/sources/tests.rs",
+      "capability": "Native binding handoff",
+      "workload": "Integer/text parameter arrays and same-name CTE replacement in the actual Execution-to-SQL binding adapter.",
+      "invariant": "Changed parameters and CTE definitions rebind to their current exact types instead of inheriting stale source metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "derived_source_bindings_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_subquery/source_binding.rs",
+      "capability": "PostgreSQL derived source consumers",
+      "workload": "Four providers and reopen, 14 independent PostgreSQL nested/empty/grouped/lateral/CTE/function/error cases, duplicate labels and repeated prepared parameters.",
+      "invariant": "Preserve exact positional values, multiplicity, labels/types and first SQLSTATE/message under the public Engine boundary.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "target": "integration"
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "repeated_grouping_references_bind_a_scalar_query_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "Repeated grouping-set references",
+      "workload": "One scalar-query alias used by 1, 8 and 64 grouping sets in one clause-validation scope.",
+      "invariant": "Bind the scalar source once regardless of repeated references; preserve the full reference and grouping checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_results_require_the_complete_outer_descriptor",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "Scoped scalar-query descriptions",
+      "workload": "Repeated integer input, text input, restored integer input and a changed relation qualifier.",
+      "invariant": "Only the identical complete outer schema reuses an output; changed types rebind and missing qualifiers still fail.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "clause_results_do_not_cross_parameters_or_cte_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "Scalar-query scope lifetime",
+      "workload": "Integer/text parameters and nested shadowing CTE declarations across independent analyses.",
+      "invariant": "Each invocation observes its own parameter and lexical CTE types; retained results do not survive the clause-validation call.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "clause_query_bindings_preserve_postgresql_descriptors_and_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "PostgreSQL clause diagnostics",
+      "workload": "Eight independently captured PostgreSQL 18.4 grouping-set, nested CTE and multiple-error statements.",
+      "invariant": "Preserve all output labels/types and the first SQLSTATE/message from the independent PostgreSQL reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "repeated_scalar_query_aliases_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_grouping_sets/names.rs",
+      "capability": "Public clause-query binding",
+      "workload": "Eight independent PostgreSQL result/diagnostic cases on memory, SQLite, SQLite Key/Value and redb, including persistent reopen.",
+      "invariant": "Preserve grouping multiplicities, CTE scope types, output labels and the first exact SQLSTATE/message on every provider and after reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_scan_reuses_immutable_projection_classification",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/memory.rs",
+      "capability": "Prepared scan projection",
+      "workload": "512 rows with 64 ordinary projected values through ordered shared storage pages.",
+      "invariant": "Inspect immutable metadata once and 64 identity slots once; return all 32,768 exact values with exactly 512 document visits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "borrowed_scan_reuses_immutable_projection_classification",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/memory.rs",
+      "capability": "Prepared scan projection",
+      "workload": "512 rows with 64 ordinary projected values through ordered borrowed storage pages.",
+      "invariant": "Inspect immutable metadata once, independent of page count; preserve all 32,768 values, row order and exactly 512 document visits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_projection_preserves_selected_generated_and_tuple_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/projection.rs",
+      "capability": "Prepared scan projection",
+      "workload": "Stored, selected/unselected virtual generated, failing virtual and tuple-xmin projections.",
+      "invariant": "Retain selected generated values, lazy division-by-zero errors, tuple metadata and conservative producer batching.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_projection_preserves_declared_metadata_and_repeated_slots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/projection.rs",
+      "capability": "Prepared scan projection",
+      "workload": "Repeated stored slots, missing fields and both declared and structural xmin/document-ID values.",
+      "invariant": "Preserve every output position, NULL and declared-column shadow without mistaking nonidentity projections for shared identity rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_projection_keeps_lock_and_recheck_decisions_dynamic",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/projection.rs",
+      "capability": "Prepared scan projection",
+      "workload": "A prepared ordinary source receives a lock origin and a tuple-local recheck value.",
+      "invariant": "Reevaluate mutable locking/recheck eligibility after preparation; preserve lock identity and the pinned value rather than stored data.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_projection_keeps_retrieval_input_decisions_dynamic",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/projection.rs",
+      "capability": "Prepared scan projection",
+      "workload": "A prepared All scan receives evaluated retrieval entries before its first read.",
+      "invariant": "Retain conservative candidate batching and exact selected output after the input variant changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_datum_does_not_inspect_later_values",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "Malformed deferred integer bytes before a 4,096-element list in the same output value.",
+      "invariant": "Preserve XX001 and inspect only the container and first Datum before failing; later values remain unvisited.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "ordinary_result_values_are_inspected_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "8,192 named rows with two ordinary integer outputs each.",
+      "invariant": "Exactly one carrier inspection per scalar preserves every output without querying type metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "ordinary_nested_output_retains_payloads_with_one_carrier_walk",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "A 4,096-element ordinary list at the public result boundary.",
+      "invariant": "Inspect the container and children once, preserve the original value buffer and exact output, and allocate nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "named_and_positional_output_preserve_nested_metadata_and_decoded_enums",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "Repeated output labels with nested records, typed rows, arrays, maps and lists, plus a deferred enum OID.",
+      "invariant": "Both named and positional output render decoded enums while preserving row field types, array lower bounds, element OIDs and NULLs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "datum_failure_precedes_enum_lookup_and_preserves_the_value",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "A missing enum catalog followed by malformed deferred integer bytes in the same result value.",
+      "invariant": "The complete Datum phase fails with XX001 before enum lookup and leaves the original value representation unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enum_failure_keeps_the_completed_datum_phase",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "A missing enum catalog together with a valid deferred integer in one result value.",
+      "invariant": "Enum output retains its existing diagnostic and preserves the successfully completed Datum phase after the error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
       "test": "legacy_record_decoding_admits_shared_descriptor_conversion_and_releases_scratch",
@@ -21412,6 +22188,45 @@
       ]
     },
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fragmented_record_encoding_traverses_fragments_linearly",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/format/binary/encode/traversal_tests.rs",
+      "capability": "Linear fragmented-row spill encoding",
+      "workload": "Single-row spill records with 16, 128 and 512 one-value fragments and independently assembled integer bytes.",
+      "invariant": "Sizing plus encoding uses at most four fragment-width reads per slot and preserves exact bytes without materializing values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fragmented_batch_encoding_traverses_fragments_linearly",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/format/binary/encode/traversal_tests.rs",
+      "capability": "Linear fragmented-row spill encoding",
+      "workload": "One-row spill batches with 16, 128 and 512 fragments, exact encoded row bytes and decoded schema/values.",
+      "invariant": "Sizing plus encoding uses at most four fragment-width reads per slot; record length, schema and ordered values remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fragmented_encoding_preserves_projection_and_record_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/format/binary/encode/traversal_tests.rs",
+      "capability": "Linear fragmented-row spill encoding",
+      "workload": "Reordered and duplicated shared slots, NULL extension, appended values, lock origins, nullary rows and missing physical slots.",
+      "invariant": "Record and batch serialization preserve slot values, zero-width multiplicity, origins and missing-slot diagnostics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "metadata_selection_preserves_writes_without_loading_rejected_spill_values",
@@ -23328,6 +24143,549 @@
       "capability": "Projection output demand",
       "workload": "A correlated scalar aggregate and a LATERAL aggregate whose GROUP BY output alias matches an enclosing column.",
       "invariant": "Grouping names bind to local outputs before enclosing names; streaming preserves group cardinality."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_public_materialization_avoids_shared_row_ownership_and_preserves_positions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests/borrowed.rs",
+      "capability": "Borrowed native public result collection",
+      "workload": "2,048 stored rows, a pure predicate and reordered duplicate result labels at zero, 1KiB and 64KiB scan allowances.",
+      "invariant": "All 1,024 selected rows preserve independent named and positional values; the direct consumer performs zero shared-row ownership acquisitions while visiting each input once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_public_materialization_keeps_computed_and_metadata_fallbacks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests/borrowed.rs",
+      "capability": "Borrowed native public result collection",
+      "workload": "Computed projections and attached document identities over the same memory source.",
+      "invariant": "Both keep the ordinary physical-row path and preserve complete named and positional output without visiting the opt-in borrowed cursor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_public_materialization_preserves_empty_results_and_rejects_lost_capability",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests/borrowed.rs",
+      "capability": "Borrowed native public result collection",
+      "workload": "An empty memory input and an opt-in provider that violates its stable capability after probing.",
+      "invariant": "Empty output keeps its schema without ownership acquisition; a capability violation fails explicitly without silently restarting through the fallback path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "borrowed_public_results_keep_predicate_errors_and_close_after_partial_output",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests/borrowed/failures.rs",
+      "capability": "Borrowed native public result collection",
+      "workload": "Division by zero after three selected rows, direct and ordinary inputs, with successful and failing operator cleanup.",
+      "invariant": "The original predicate error survives, cleanup errors remain visible, input closes exactly once and no partial SQLResult escapes; direct input visits no row after the failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "borrowed_public_results_observe_cancellation_between_rejected_input_pages",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests/borrowed/failures.rs",
+      "capability": "Borrowed native public result collection",
+      "workload": "Cancellation before a complete result starts and after its first rejected input page.",
+      "invariant": "The original token yields SQLSTATE 57014 before further pages, zero temporary shared-row ownership, and exactly one operator close and source release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "borrowed_batch_sizing_matches_owned_values_before_and_after_lock_origins",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/batch_layout.rs",
+      "capability": "Exact borrowed batch accounting",
+      "workload": "Variable-width Unicode and NULL values, mixed borrowed and lock-bearing rows, followed by reverse row removal.",
+      "invariant": "Borrowed append preserves exact encoded bytes and the first/last lock-origin metadata adjustments, returning to the original empty size.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "borrowed_record_sizing_preserves_bytes_depth_and_width_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/format/binary/encode.rs",
+      "capability": "Exact borrowed batch accounting",
+      "workload": "Borrowed scalar, Unicode, NULL and nested values, wrong physical widths and excessive nesting.",
+      "invariant": "Sizes equal independently emitted record bytes and preserve physical width and depth diagnostics without constructing an owned input row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stable_borrowed_shared_cursor_keeps_slots_and_never_acquires_row_ownership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/tests.rs",
+      "capability": "Stable borrowed memory projection",
+      "workload": "Sparse IDs with different stored layouts, duplicate/reordered/missing fields, empty projection, zero limit and early stop.",
+      "invariant": "Projected values preserve the shared cursor contract while each stored value vector retains its original single owner; limits and callbacks stop at the selected row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "document_adapter_keeps_stable_borrowed_projection_at_the_original_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/read_only_snapshot/tests.rs",
+      "capability": "Stable borrowed memory projection",
+      "workload": "Two nested read-only owners retain a memory snapshot after the live table is cleared; duplicate, missing and exhausted projections and a controlled owner are inspected.",
+      "invariant": "Eligible read-only owners forward the original snapshot and limits; an owner with a fallible retained control declines before any callback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "public_sql_collects_stored_values_without_per_row_shared_ownership",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/queries/table_reads/borrowed_result.rs",
+      "capability": "Native public result adapter",
+      "workload": "The actual Engine::sql statement reads 128 stored rows through a counted memory store and retained snapshots: Unicode/NULL duplicate output names, followed by the analytical scan query shape with a pure predicate and primary-key ordering.",
+      "invariant": "Values, positions, compatibility keys and declared types are preserved; each query visits exactly 128 borrowed inputs with zero shared-row ownership acquisitions, including the predicate and order-preserving path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_catalog_names_are_resolved_once_with_live_values_and_constraints",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/metadata/tests.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "1,000 scalar conversions under a fixed catalog followed by a live constraint failure.",
+      "invariant": "Resolve the two names once while retaining every value conversion and all 1,001 domain callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "changed_scope_declines_before_conversion_and_rebinds_the_new_type",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/metadata/tests.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "A retained integer target changes to smallint under a new explicit catalog identity.",
+      "invariant": "Decline stale metadata before callbacks and preserve the new 22003 overflow.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "callback_scope_changes_and_unqualified_names_do_not_publish_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/metadata/tests.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "A domain callback changes catalog identity; unqualified names are resolved on separate evaluations.",
+      "invariant": "Do not publish stale or search-path-dependent metadata, and keep live callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "fixed_type_spelling_uses_the_sql_parser_and_bound_identity_contract",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/metadata/tests.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "Qualified, quoted, malformed and unqualified type spellings and distinct or cloned identities.",
+      "invariant": "Only parser-proven qualified spellings or bound identities may use the same retained catalog scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "insufficient_metadata_allowance_preserves_successful_scalar_conversion",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/context/casting/metadata/tests.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "A successful builtin-valued catalog cast with zero optional metadata allowance.",
+      "invariant": "Return the converted value and decline metadata retention without leaking memory or repeating callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fixed_catalog_casts_resolve_names_once_and_keep_each_rows_constraints",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts/scoped.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "1,000 cast rows followed by a live domain failure and cancellation under the existing 4KiB allowance.",
+      "invariant": "Exactly two name resolutions and 1,000 conversions; retain each later callback/error, cancellation and zero outstanding memory after release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fixed_cast_descriptors_do_not_cross_catalogs_or_row_schemas",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts/scoped.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "Integer and floating source schemas and a separate narrowing catalog hook.",
+      "invariant": "Rebind on schema or catalog changes, preserving rounding and SQLSTATE 22003.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "operand_changes_catalog_before_retained_cast_validation_without_reexecution",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/tests/catalog_casts/scoped.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "A bound routine changes catalog identity while producing its second operand.",
+      "invariant": "Validate the scope after the operand; resolve new names and convert without executing the routine twice.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_cast_descriptors_keep_qualified_identity_and_live_domain_checks",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/scoped_catalog.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "Native scoped catalogs with two same-named domains and changed search_path.",
+      "invariant": "Qualified identity remains fixed, domain checks stay live, unqualified names rebind, and different native hooks cannot share metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "catalog_temporal_casts_keep_live_settings_and_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/catalog_cast_qualification.rs",
+      "capability": "Scoped catalog cast descriptors",
+      "workload": "A schema-qualified DATE domain across per-row DateStyle changes and prepared execution before/during/after SET LOCAL rollback.",
+      "invariant": "Every row reads current date order and preserves independently captured PostgreSQL days and transaction restoration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "complete_select_coverage_borrows_only_checked_original_nodes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
+      "capability": "Complete SELECT source coverage",
+      "workload": "Original nested and joined sources, changed query objects, local CTE boundaries, unused/filter columns and foreign ACL metadata failures.",
+      "invariant": "Issue source coverage only after complete ordered authorization; preserve exact query identity, column denials and metadata errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "complete_select_coverage_preserves_unused_and_filter_column_denials",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
+      "capability": "Complete SELECT source coverage",
+      "workload": "Original nested and joined sources, changed query objects, local CTE boundaries, unused/filter columns and foreign ACL metadata failures.",
+      "invariant": "Issue source coverage only after complete ordered authorization; preserve exact query identity, column denials and metadata errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "zero_column_foreign_checks_keep_metadata_errors_after_table_grants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
+      "capability": "Complete SELECT source coverage",
+      "workload": "Original nested and joined sources, changed query objects, local CTE boundaries, unused/filter columns and foreign ACL metadata failures.",
+      "invariant": "Issue source coverage only after complete ordered authorization; preserve exact query identity, column denials and metadata errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "join_coverage_projects_only_original_children_and_declines_local_ctes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
+      "capability": "Complete SELECT source coverage",
+      "workload": "Original nested and joined sources, changed query objects, local CTE boundaries, unused/filter columns and foreign ACL metadata failures.",
+      "invariant": "Issue source coverage only after complete ordered authorization; preserve exact query identity, column denials and metadata errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nested_select_coverage_checks_complete_lineage_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/binding/sources/privileges/tests.rs",
+      "capability": "Scoped SELECT authorization work",
+      "workload": "Direct nested blocks at depths 1, 8 and 32; role incarnations, lookup modes, changed query objects and immutable catalog scopes.",
+      "invariant": "Check complete lineage once in an identical scope; recheck changed authority or syntax without suppressing independent routine or view checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "select_coverage_requires_the_same_role_incarnation_and_lookup_mode",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/binding/sources/privileges/tests.rs",
+      "capability": "Scoped SELECT authorization work",
+      "workload": "Direct nested blocks at depths 1, 8 and 32; role incarnations, lookup modes, changed query objects and immutable catalog scopes.",
+      "invariant": "Check complete lineage once in an identical scope; recheck changed authority or syntax without suppressing independent routine or view checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "changed_query_projection_and_catalog_require_new_select_checks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/binding/sources/privileges/tests.rs",
+      "capability": "Scoped SELECT authorization work",
+      "workload": "Direct nested blocks at depths 1, 8 and 32; role incarnations, lookup modes, changed query objects and immutable catalog scopes.",
+      "invariant": "Check complete lineage once in an identical scope; recheck changed authority or syntax without suppressing independent routine or view checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "derived_select_authority_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_information_schema/select_coverage.rs",
+      "capability": "PostgreSQL SELECT coverage consumers",
+      "workload": "Thirteen independent PostgreSQL column, CTE, lateral, view-owner/invoker and routine-definer/invoker observations through four providers and reopen.",
+      "invariant": "Preserve values, complete column authorization and original SQLSTATE/messages across native scopes and persistent reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_result_descriptions_bound_repeated_declaration_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body/table.rs",
+      "capability": "SQL table routine result description work",
+      "workload": "512 changing values and NULLs through one fixed domain result declaration.",
+      "invariant": "Resolve the unchanged table result declaration once, preserve every current value and all 512 live domain checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_declarations_recheck_changed_scope_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body/table.rs",
+      "capability": "Bound table routine descriptions",
+      "workload": "Scoped declaration reuse, missing/changed scope, cancellation, full optional allowance and failed/callback-invalidated resolution.",
+      "invariant": "Retain only a successful fixed declaration in the current scope, preserve live errors and release every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_declarations_decline_full_allowance_and_search_path_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body/table.rs",
+      "capability": "Bound table routine descriptions",
+      "workload": "Scoped declaration reuse, missing/changed scope, cancellation, full optional allowance and failed/callback-invalidated resolution.",
+      "invariant": "Retain only a successful fixed declaration in the current scope, preserve live errors and release every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_or_invalidated_table_declarations_are_never_retained",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body/table.rs",
+      "capability": "Bound table routine descriptions",
+      "workload": "Scoped declaration reuse, missing/changed scope, cancellation, full optional allowance and failed/callback-invalidated resolution.",
+      "invariant": "Retain only a successful fixed declaration in the current scope, preserve live errors and release every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "projection_presence_and_invocation_share_successful_bound_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/invocation/resolution/tests/projection.rs",
+      "capability": "Bound projection routine lookup",
+      "workload": "512 changing arguments, builtin dispatch, current scope and dropped weak routine owner.",
+      "invariant": "Only the first presence and invocation look up the identity; values remain current and stale/expired metadata resumes live lookup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "projection_presence_does_not_pin_a_removed_routine",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/invocation/resolution/tests/projection.rs",
+      "capability": "Bound projection routine lookup",
+      "workload": "512 changing arguments, builtin dispatch, current scope and dropped weak routine owner.",
+      "invariant": "Only the first presence and invocation look up the identity; values remain current and stale/expired metadata resumes live lookup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_table_descriptions_follow_replacement_rollback_and_privileges",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/capabilities/query_expressions/routine_descriptions/tests.rs",
+      "capability": "Native table routine scope adapters",
+      "workload": "SQL and PL/pgSQL table/projection calls with replacement, rollback, STRICT NULL privileges and a 64KiB allowance.",
+      "invariant": "Native adapters qualify metadata, preserve current effects/errors and release admitted state.",
+      "case_names": [
+        "case_1_sql",
+        "case_2_plpgsql"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_bound_table_descriptions_keep_current_values_and_release_allowance",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/capabilities/query_expressions/routine_descriptions/tests.rs",
+      "capability": "Native table routine scope adapters",
+      "workload": "SQL and PL/pgSQL table/projection calls with replacement, rollback, STRICT NULL privileges and a 64KiB allowance.",
+      "invariant": "Native adapters qualify metadata, preserve current effects/errors and release admitted state.",
+      "case_names": [
+        "case_1_sql",
+        "case_2_plpgsql"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "table_routine_descriptions_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/invocation_descriptions.rs",
+      "capability": "Table routine PostgreSQL semantics",
+      "workload": "97 independent PostgreSQL 18.4 statements through memory, SQLite, SQLite Key/Value and redb with persistent reopen.",
+      "invariant": "Preserve values, NULLs, set projections, LATERAL/ROWS FROM/ordinality, defaults, volatile arguments, domains, record targets, replacement, rollback and permissions; eliminated scans skip initialization while LIMIT 0 and implicit aggregate groups retain it.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "empty_source_proofs_preserve_scan_initialization_and_implicit_groups",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/empty_sources/tests.rs",
+      "capability": "Empty relational input initialization",
+      "workload": "Folded false/NULL, runtime predicates, LIMIT 0, implicit/grouped aggregates and preserved outer-join inputs.",
+      "invariant": "Eliminate only statically removed physical inputs; retain runtime-empty scan initialization, implicit aggregate rows and preserved outer-join rows."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "empty_join_proofs_preserve_both_outer_join_sides",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/empty_sources/tests.rs",
+      "capability": "Empty relational input initialization",
+      "workload": "Folded false/NULL, runtime predicates, LIMIT 0, implicit/grouped aggregates and preserved outer-join inputs.",
+      "invariant": "Eliminate only statically removed physical inputs; retain runtime-empty scan initialization, implicit aggregate rows and preserved outer-join rows."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "surviving_source_arguments_keep_order_without_initializing_removed_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/privileges/routine_calls/inputs/tests.rs",
+      "capability": "Surviving routine scan initialization",
+      "workload": "Ordered function arguments and join qualifications with complete or matching-side scan removal.",
+      "invariant": "Initialize only surviving source arguments in their original order, without evaluating an argument or dropping the preserved side."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "empty_append_requires_relation_inputs_and_identical_analyzed_types",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/empty_sources/tests.rs",
+      "capability": "Empty append initialization",
+      "workload": "Relation-backed UNION ALL, other set operators and differing analyzed output types.",
+      "invariant": "Only a flattened noncoercing append of dummy relations can lose scan initialization; distinct/intersection/difference and coercing boundaries survive."
     }
   ]
 }

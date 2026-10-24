@@ -6,38 +6,34 @@
 
 //! `transformWindowDefinitions`' checks of window frames: the `ORDER BY` a frame mode requires, and the type and variables of each frame offset.
 
-use super::super::{QueryBlockPlan, QueryPlan, SQLError, SQLParam, ScalarExpr, SchemaScope};
+use super::super::{QueryBlockPlan, SQLError, ScalarExpr, SchemaScope};
+use super::ValidatedSubqueries;
 use crate::ast::{ColumnType, FrameMode};
-use crate::routines::RoutineResolution;
 use crate::{RowSchema, ScalarFrameBound, ScalarWindowSpec};
 
 /// What a query block's window frames are checked against: `source` resolves every reference, including the outer ones it overlays.
-pub(super) struct WindowFrameScope<'a> {
+pub(super) struct WindowFrameScope<'a, 'r, 'p> {
     pub(super) source: &'a RowSchema,
-    pub(super) subqueries: &'a [QueryPlan],
-    pub(super) params: &'a [SQLParam],
+    pub(super) queries: &'a ValidatedSubqueries<'r, 'p>,
 }
 
 impl SchemaScope {
     /// Check the frames of the windows that a query block's target list and then its `ORDER BY` use, in the order they appear.
     pub(super) fn validate_window_frames(
         &mut self,
-        engine: &dyn RoutineResolution,
         block: &QueryBlockPlan,
-        scope: &WindowFrameScope<'_>,
+        scope: &WindowFrameScope<'_, '_, '_>,
     ) -> Result<(), SQLError> {
         for expression in block
             .windows
             .iter()
             .flat_map(|window| window.spec.expressions())
         {
-            self.validate_expression_references(
-                engine,
+            self.validate_expression_references_with_queries(
+                scope.queries,
                 expression,
                 scope.source,
                 None,
-                scope.subqueries,
-                scope.params,
             )?;
         }
         let mut specs = crate::plan::windows::resolved_window_definitions(block)?;
@@ -56,16 +52,15 @@ impl SchemaScope {
             });
         }
         for spec in &specs {
-            self.validate_window_frame(engine, spec, scope)?;
+            self.validate_window_frame(spec, scope)?;
         }
         Ok(())
     }
 
     fn validate_window_frame(
         &mut self,
-        engine: &dyn RoutineResolution,
         spec: &ScalarWindowSpec,
-        scope: &WindowFrameScope<'_>,
+        scope: &WindowFrameScope<'_, '_, '_>,
     ) -> Result<(), SQLError> {
         let Some(frame) = &spec.frame else {
             return Ok(());
@@ -95,10 +90,10 @@ impl SchemaScope {
             FrameMode::Groups => "GROUPS",
         };
         for offset in offsets {
-            let offset_type = self.known_type(engine, offset, scope)?;
+            let offset_type = self.known_type(offset, scope)?;
             if frame.mode == FrameMode::Range {
                 let order = &spec.order_by[0].expr;
-                let order_type = self.known_type(engine, order, scope)?;
+                let order_type = self.known_type(order, scope)?;
                 crate::range_frame_offset_type(order_type.as_ref(), offset_type.as_ref())?;
             } else if let Some(ty) = offset_type {
                 if !crate::assignment_type_compatible(&ty, &ColumnType::BigInteger) {
@@ -124,23 +119,23 @@ impl SchemaScope {
     /// The type of an expression, or `None` when it is an `unknown` literal or an untyped parameter.
     fn known_type(
         &mut self,
-        engine: &dyn RoutineResolution,
         expression: &ScalarExpr,
-        scope: &WindowFrameScope<'_>,
+        scope: &WindowFrameScope<'_, '_, '_>,
     ) -> Result<Option<ColumnType>, SQLError> {
-        let resolver = self.query_function_type_resolver(
-            engine,
+        let resolver =
+            scope
+                .queries
+                .resolver(self, std::slice::from_ref(expression), scope.source)?;
+        let ty = crate::scalar_type_with_resolver(
             expression,
             scope.source,
-            scope.subqueries,
-            scope.params,
+            scope.queries.params,
+            &resolver,
         )?;
-        let ty =
-            crate::scalar_type_with_resolver(expression, scope.source, scope.params, &resolver)?;
         Ok(crate::effective_overload_argument_type_with_params(
             expression,
             ty,
-            scope.params,
+            scope.queries.params,
         ))
     }
 }

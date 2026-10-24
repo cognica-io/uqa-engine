@@ -73,6 +73,7 @@ use table_source::build_table_source_operator;
 use uqa_sql::semantics::{join_using_predicate, resolve_join_using};
 use values_source::build_values_source_operator;
 
+pub(crate) use source_operator::{build_join_operator_with_bound_sources, empty_source_operator};
 pub use source_operator::{build_join_operator_with_ctes, build_join_operator_with_recheck_pins};
 
 pub fn build_join_spill_with_ctes<S: Clone + Send + Sync + 'static>(

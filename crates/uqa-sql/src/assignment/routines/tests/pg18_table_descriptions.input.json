@@ -1,0 +1,348 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "sql": "CREATE SCHEMA uqa_table_descriptions_1282"
+    },
+    {
+      "sql": "SET search_path = uqa_table_descriptions_1282, pg_catalog"
+    },
+    {
+      "sql": "CREATE SEQUENCE defaults_seen"
+    },
+    {
+      "sql": "CREATE SEQUENCE checks_seen"
+    },
+    {
+      "sql": "CREATE TABLE inputs(id integer PRIMARY KEY, v integer)"
+    },
+    {
+      "sql": "INSERT INTO inputs VALUES (1, 2), (2, NULL), (3, 4)"
+    },
+    {
+      "sql": "CREATE FUNCTION live_check(v integer) RETURNS boolean LANGUAGE SQL VOLATILE AS 'SELECT nextval(''checks_seen'') > 0 AND (v IS NULL OR v >= 0)'"
+    },
+    {
+      "sql": "CREATE DOMAIN accepted_value AS integer CHECK (live_check(VALUE))"
+    },
+    {
+      "sql": "CREATE FUNCTION domain_input(a accepted_value) RETURNS SETOF integer LANGUAGE SQL AS 'SELECT a::integer UNION ALL SELECT a::integer + 30'"
+    },
+    {
+      "sql": "CREATE FUNCTION scalar_set(a integer DEFAULT nextval('defaults_seen')::integer) RETURNS SETOF integer LANGUAGE SQL VOLATILE AS 'SELECT a UNION ALL SELECT a + 10'"
+    },
+    {
+      "sql": "CREATE FUNCTION table_set(a integer) RETURNS TABLE(n integer, label text) LANGUAGE SQL AS 'SELECT a, a::text UNION ALL SELECT a + 1, (a + 1)::text'"
+    },
+    {
+      "sql": "CREATE FUNCTION pl_set(a integer) RETURNS SETOF integer LANGUAGE plpgsql AS $$ BEGIN RETURN NEXT a; RETURN NEXT a + 20; END $$"
+    },
+    {
+      "sql": "CREATE FUNCTION checked_set(a integer) RETURNS SETOF accepted_value LANGUAGE SQL AS 'SELECT a'"
+    },
+    {
+      "sql": "CREATE FUNCTION strict_set(a integer) RETURNS SETOF integer LANGUAGE plpgsql STRICT AS $$ BEGIN RETURN NEXT a; END $$"
+    },
+    {
+      "sql": "CREATE FUNCTION record_set(a integer) RETURNS SETOF record LANGUAGE SQL AS 'SELECT a, a::text'"
+    },
+    {
+      "sql": "CREATE TYPE pair AS (n integer, label text)"
+    },
+    {
+      "sql": "CREATE FUNCTION pair_set(a integer) RETURNS SETOF pair LANGUAGE SQL AS 'SELECT a, a::text'"
+    },
+    {
+      "sql": "SELECT id, scalar_set(v) AS n, pl_set(v) AS p FROM inputs ORDER BY id, n NULLS FIRST, p NULLS FIRST",
+      "id": "changing set projection values"
+    },
+    {
+      "sql": "SELECT i.id, f.n, f.ordinality FROM inputs i CROSS JOIN LATERAL scalar_set(i.v) WITH ORDINALITY AS f(n, ordinality) ORDER BY i.id, f.ordinality",
+      "id": "lateral scalar ordinality"
+    },
+    {
+      "sql": "SELECT i.id, f.n, f.label FROM inputs i CROSS JOIN LATERAL table_set(i.v) f ORDER BY i.id, f.n NULLS FIRST",
+      "id": "lateral table outputs"
+    },
+    {
+      "sql": "SELECT i.id, f.n FROM inputs i LEFT JOIN LATERAL strict_set(i.v) f(n) ON true ORDER BY i.id",
+      "id": "strict null extension"
+    },
+    {
+      "sql": "SELECT i.id, f.a, f.b, f.ordinality FROM inputs i CROSS JOIN LATERAL ROWS FROM (scalar_set(i.v), pl_set(i.v)) WITH ORDINALITY AS f(a, b, ordinality) ORDER BY i.id, f.ordinality",
+      "id": "rows from and ordinality"
+    },
+    {
+      "sql": "SELECT scalar_set() AS n ORDER BY n",
+      "id": "default projection effects"
+    },
+    {
+      "sql": "SELECT last_value FROM defaults_seen",
+      "id": "one default evaluation in projection"
+    },
+    {
+      "sql": "SELECT * FROM scalar_set() ORDER BY scalar_set",
+      "id": "default from effects"
+    },
+    {
+      "sql": "SELECT last_value FROM defaults_seen",
+      "id": "one default evaluation in from"
+    },
+    {
+      "sql": "SELECT id, scalar_set(nextval('defaults_seen')::integer) AS n FROM inputs ORDER BY id, n",
+      "id": "volatile arguments per input"
+    },
+    {
+      "sql": "SELECT last_value FROM defaults_seen",
+      "id": "argument effects do not multiply"
+    },
+    {
+      "sql": "SELECT setval('checks_seen', 1, false)"
+    },
+    {
+      "sql": "SELECT id, domain_input(v) AS n FROM inputs ORDER BY id, n NULLS FIRST",
+      "id": "set projection domain arguments"
+    },
+    {
+      "sql": "SELECT last_value FROM checks_seen",
+      "id": "each projected argument has one domain check"
+    },
+    {
+      "sql": "SELECT setval('checks_seen', 1, false)"
+    },
+    {
+      "sql": "SELECT i.id, f.n FROM inputs i CROSS JOIN LATERAL domain_input(i.v) f(n) ORDER BY i.id, f.n NULLS FIRST",
+      "id": "lateral domain arguments"
+    },
+    {
+      "sql": "SELECT last_value FROM checks_seen",
+      "id": "each lateral argument has one domain check"
+    },
+    {
+      "sql": "SELECT setval('checks_seen', 1, false)"
+    },
+    {
+      "sql": "SELECT i.id, f.v FROM inputs i CROSS JOIN LATERAL checked_set(i.v) f(v) ORDER BY i.id",
+      "id": "live domain checks"
+    },
+    {
+      "sql": "SELECT last_value FROM checks_seen",
+      "id": "all current domain effects"
+    },
+    {
+      "sql": "SELECT * FROM checked_set(-1)",
+      "id": "failing output domain"
+    },
+    {
+      "sql": "SELECT i.id, f.n, f.label FROM inputs i CROSS JOIN LATERAL record_set(i.v) AS f(n integer, label text) ORDER BY i.id",
+      "id": "anonymous record with caller descriptor"
+    },
+    {
+      "sql": "SELECT * FROM record_set(1) AS f(n bigint, label text)",
+      "id": "caller descriptor mismatch"
+    },
+    {
+      "sql": "SELECT i.id, f.n, f.label FROM inputs i CROSS JOIN LATERAL pair_set(i.v) f ORDER BY i.id",
+      "id": "named composite result"
+    },
+    {
+      "sql": "PREPARE retained_table(integer) AS SELECT * FROM table_set($1) ORDER BY n"
+    },
+    {
+      "sql": "EXECUTE retained_table(5)",
+      "id": "prepared table call"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION table_set(a integer) RETURNS TABLE(n integer, label text) LANGUAGE SQL AS 'SELECT a + 100, (a + 100)::text'"
+    },
+    {
+      "sql": "EXECUTE retained_table(5)",
+      "id": "replacement invalidates result/body descriptions"
+    },
+    {
+      "sql": "ROLLBACK"
+    },
+    {
+      "sql": "EXECUTE retained_table(5)",
+      "id": "rollback restores table routine"
+    },
+    {
+      "sql": "DEALLOCATE retained_table"
+    },
+    {
+      "sql": "CREATE ROLE uqa_table_reader_1282"
+    },
+    {
+      "sql": "GRANT USAGE ON SCHEMA uqa_table_descriptions_1282 TO uqa_table_reader_1282"
+    },
+    {
+      "sql": "GRANT SELECT ON inputs TO uqa_table_reader_1282"
+    },
+    {
+      "sql": "REVOKE EXECUTE ON FUNCTION strict_set(integer) FROM PUBLIC"
+    },
+    {
+      "sql": "SET ROLE uqa_table_reader_1282"
+    },
+    {
+      "sql": "SELECT * FROM strict_set(NULL)",
+      "id": "strict null still checks from execute permission"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL strict_set(i.v) f(n)",
+      "id": "statically empty lateral input removes function initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM inputs i CROSS JOIN LATERAL strict_set(i.v) f(n) WHERE false",
+      "id": "root false removes function scan"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE 1=0) i CROSS JOIN LATERAL strict_set(i.v) f(n)",
+      "id": "folded false removes function scan"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE NULL::boolean) i CROSS JOIN LATERAL strict_set(i.v) f(n)",
+      "id": "null qualification removes function scan"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false OFFSET 0) i CROSS JOIN LATERAL strict_set(i.v) f(n)",
+      "id": "false derived offset keeps scan eliminated"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs LIMIT 0) i CROSS JOIN LATERAL strict_set(i.v) f(n)",
+      "id": "derived limit zero initializes function"
+    },
+    {
+      "sql": "SELECT f.n FROM inputs i CROSS JOIN LATERAL strict_set(i.v) f(n) LIMIT 0",
+      "id": "outer limit zero initializes function"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT count(*)::int v FROM inputs WHERE false) i CROSS JOIN LATERAL strict_set(i.v) f(n)",
+      "id": "empty aggregate input still initializes function"
+    },
+    {
+      "sql": "SELECT i.id, f.n FROM inputs i LEFT JOIN LATERAL strict_set(i.v) f(n) ON false ORDER BY i.id",
+      "id": "false outer join preserves left rows without function initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL ROWS FROM (strict_set(i.v)) f(n)",
+      "id": "empty rows from source removes function initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false) i LEFT JOIN LATERAL strict_set(i.v) f(n) ON true",
+      "id": "empty preserved side removes function initialization"
+    },
+    {
+      "sql": "RESET ROLE"
+    },
+    {
+      "sql": "GRANT EXECUTE ON FUNCTION strict_set(integer) TO PUBLIC"
+    },
+    {
+      "sql": "REVOKE EXECUTE ON FUNCTION pg_catalog.abs(integer) FROM PUBLIC"
+    },
+    {
+      "sql": "SET ROLE uqa_table_reader_1282"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "eliminated lateral scan does not initialize builtin arguments"
+    },
+    {
+      "sql": "SELECT f.n FROM inputs i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n) WHERE false",
+      "id": "root false removes builtin argument initialization"
+    },
+    {
+      "sql": "SELECT i.id, f.n FROM inputs i LEFT JOIN LATERAL generate_series(1, abs(i.v)) f(n) ON false ORDER BY i.id",
+      "id": "false outer join removes builtin argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM inputs i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n) LIMIT 0",
+      "id": "limit zero preserves builtin argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE v < 0) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "runtime empty source initializes builtin arguments"
+    },
+    {
+      "sql": "SELECT abs(v) FROM inputs WHERE false",
+      "id": "surviving projection initializes despite false input"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false UNION ALL SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "empty relation append removes function initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false UNION SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "union boundary preserves argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false INTERSECT SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "intersect boundary preserves argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false EXCEPT SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "except boundary preserves argument initialization"
+    },
+    {
+      "sql": "RESET ROLE"
+    },
+    {
+      "sql": "GRANT EXECUTE ON FUNCTION pg_catalog.abs(integer) TO PUBLIC"
+    },
+    {
+      "sql": "REVOKE SELECT ON inputs FROM uqa_table_reader_1282"
+    },
+    {
+      "sql": "SET ROLE uqa_table_reader_1282"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL strict_set(i.v) f(n)",
+      "id": "removed scan retains relation authorization"
+    },
+    {
+      "sql": "RESET ROLE"
+    },
+    {
+      "sql": "GRANT SELECT ON inputs TO uqa_table_reader_1282"
+    },
+    {
+      "sql": "REVOKE SELECT ON inputs FROM uqa_table_reader_1282"
+    },
+    {
+      "sql": "REVOKE USAGE ON SCHEMA uqa_table_descriptions_1282 FROM uqa_table_reader_1282"
+    },
+    {
+      "sql": "DROP ROLE uqa_table_reader_1282"
+    },
+    {
+      "sql": "CREATE VIEW retained_table_values AS SELECT i.id, f.n, f.label FROM inputs i CROSS JOIN LATERAL table_set(i.v) f"
+    },
+    {
+      "sql": "CREATE TABLE saved_values AS SELECT * FROM retained_table_values"
+    },
+    {
+      "sql": "SET search_path = uqa_table_descriptions_1282, pg_catalog",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM retained_table_values ORDER BY id, n NULLS FIRST",
+      "id": "stored table call after reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM saved_values ORDER BY id, n NULLS FIRST",
+      "id": "persisted values",
+      "reopen": true
+    },
+    {
+      "sql": "DROP SCHEMA uqa_table_descriptions_1282 CASCADE",
+      "final_cleanup": true
+    }
+  ]
+}

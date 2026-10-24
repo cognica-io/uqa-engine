@@ -144,15 +144,7 @@ fn evaluate_function(
                     .with_enum_comparison_states(context.enum_comparison_states(args)),
             )
         } else {
-            let sql_context = context.sql_context();
-            let engine = sql_context.engine.ok_or_else(|| {
-                SQLError::Unsupported(
-                    "bound user function requires a logical engine session".into(),
-                )
-            })?;
-            engine
-                .call_bound_user_function(binding, &arguments)
-                .unwrap_or_else(|| Err(SQLError::UnknownFunction(binding.name.clone())))
+            bound_user_function(binding, &arguments, context, control)
         }
     } else {
         uqa_sql::expr::eval_function_call(
@@ -164,6 +156,31 @@ fn evaluate_function(
         )
     };
     ordinary_output(value, control)
+}
+
+fn bound_user_function(
+    binding: &FunctionBinding,
+    arguments: &[(Option<String>, Value)],
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Value, SQLError> {
+    let engine = context.function_hook().ok_or_else(|| {
+        SQLError::Unsupported("bound user function requires a logical engine session".into())
+    })?;
+    context
+        .routine_descriptions(binding)
+        .map_or_else(
+            || engine.call_bound_user_function(binding, arguments),
+            |descriptions| {
+                engine.call_bound_user_function_with_descriptions(
+                    binding,
+                    arguments,
+                    descriptions,
+                    control,
+                )
+            },
+        )
+        .unwrap_or_else(|| Err(SQLError::UnknownFunction(binding.name.clone())))
 }
 
 fn array_access(

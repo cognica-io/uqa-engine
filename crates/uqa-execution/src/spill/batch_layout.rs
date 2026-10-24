@@ -66,6 +66,45 @@ mod tests {
     }
 
     #[test]
+    fn borrowed_batch_sizing_matches_owned_values_before_and_after_lock_origins() {
+        let schema = RowSchema::new(vec!["body".into(), "value".into()]);
+        let values = [Value::Str("日本λ".repeat(128)), Value::Null];
+        let borrowed = values.iter().collect::<Vec<_>>();
+        let plain = PhysicalRow::from_values(values.to_vec());
+        let locked = plain
+            .clone()
+            .with_lock_origin(RowLockOrigin::new("t", "public.t", 2));
+        for locked_first in [false, true] {
+            let mut rows = Vec::new();
+            let mut size = EncodedBatchSizer::new(&schema).unwrap();
+            for is_locked in [locked_first, !locked_first, false] {
+                if is_locked {
+                    size.append(&locked).unwrap();
+                    rows.push(locked.clone());
+                } else {
+                    size.append_borrowed(&borrowed).unwrap();
+                    rows.push(plain.clone());
+                }
+                assert_eq!(
+                    size.bytes(),
+                    super::super::encoded_batch_size(&Batch::from_physical_rows(
+                        schema.clone(),
+                        rows.clone()
+                    ))
+                    .unwrap()
+                );
+            }
+            for row in rows.iter().rev() {
+                size.remove(row).unwrap();
+            }
+            assert_eq!(
+                size.bytes(),
+                EncodedBatchSizer::new(&schema).unwrap().bytes()
+            );
+        }
+    }
+
+    #[test]
     fn retained_batch_layout_rebinds_changed_schema_names_types_and_slots() {
         let plain = RowSchema::with_types(vec!["id".into()], vec![Some(ColumnType::BigInteger)]);
         let qualified = RowSchema::with_relation_qualifier(&plain, "long_relation_name");

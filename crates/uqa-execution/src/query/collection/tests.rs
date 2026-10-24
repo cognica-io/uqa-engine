@@ -163,7 +163,13 @@ fn rejected_consumer_preparation_closes_the_unopened_input() {
             directional,
             reject_preparation,
         });
-        let result = super::collect_consumed_rows(schema.columns(), &schema, &mut input, &consumer);
+        let result = super::collect_consumed_rows(
+            schema.columns(),
+            &schema,
+            &mut input,
+            &consumer,
+            &uqa_core::CancellationToken::new(),
+        );
         let Err(error) = result else {
             panic!("consumer was accepted")
         };

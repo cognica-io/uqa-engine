@@ -49,9 +49,13 @@ pub fn collect_query_operator<'a>(
         QueryOutputMode::ExistsKeySet(catalog) => {
             collect_exists_keys(&columns, operator.as_mut(), catalog)?
         }
-        QueryOutputMode::RowConsumer(consumer) => {
-            collect_consumed_rows(&columns, &internal_schema, &mut operator, &consumer)?
-        }
+        QueryOutputMode::RowConsumer(consumer) => collect_consumed_rows(
+            &columns,
+            &internal_schema,
+            &mut operator,
+            &consumer,
+            runtime.cancellation,
+        )?,
     };
     Ok(QueryOutput {
         columns,
@@ -194,6 +198,7 @@ fn collect_consumed_rows(
     internal_schema: &crate::RowSchema,
     operator: &mut Box<dyn crate::PhysicalOperator + '_>,
     consumer: &Rc<dyn QueryRowConsumer + '_>,
+    cancellation: &uqa_core::CancellationToken,
 ) -> Result<QueryRows, SQLError> {
     if consumer.uses_directional_scan() {
         collect_directional_query_operator(columns, operator, consumer)?;
@@ -210,6 +215,22 @@ fn collect_consumed_rows(
         ));
     }
     let batched_input = operator.supports_batched_consumption();
+    if batched_input && consumer.input_demand().is_none() {
+        match consumer.collect_native_materialized(operator.as_mut(), cancellation) {
+            Ok(true) => {
+                operator.close().map_err(physical_exec_error)?;
+                return Ok(QueryRows::Rows(Vec::new()));
+            }
+            Ok(false) => {}
+            Err(error) => {
+                return Err(close_after_physical_failure(
+                    operator.as_mut(),
+                    error,
+                    "collect native materialized input",
+                ));
+            }
+        }
+    }
     loop {
         let demand = consumer
             .input_demand()

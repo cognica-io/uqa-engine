@@ -9,6 +9,15 @@
 use crate::{expr::cast_value, plpgsql::condition_sqlstates, SQLError, SQLResult};
 use uqa_core::Value;
 
+pub fn unassigned_record(name: &str) -> SQLError {
+    SQLError::Diagnostic {
+        sqlstate: "55000".into(),
+        message: format!("record \"{name}\" is not assigned yet"),
+        detail: Some("The tuple structure of a not-yet-assigned record is indeterminate.".into()),
+        hint: None,
+    }
+}
+
 pub fn return_query_context_error() -> SQLError {
     SQLError::Routine {
         sqlstate: "42601".into(),

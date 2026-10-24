@@ -6,13 +6,16 @@
 
 //! Invoke scalar, table, and procedure routines and materialize their physical results.
 use super::{
-    context::RoutineInvocationContext,
-    execution::execute_routine,
-    resolution::{resolve_bound_routine, resolve_routine, ResolvedRoutine},
+    context::{RoutineCallRetention, RoutineInvocationContext},
+    execution::{execute_described_routine, execute_routine},
+    resolution::{
+        resolve_bound_routine, resolve_described_bound_routine, resolve_routine, ResolvedRoutine,
+    },
 };
 use crate::{
     functions::SQLTableFunctionResult, routines::transaction::nonatomic_routine_entry_allowed,
 };
+use std::borrow::Cow;
 use uqa_core::Value;
 use uqa_sql::{
     ast::FunctionBinding,
@@ -104,7 +107,7 @@ pub fn call_user_scalar_function(
         Err(e) => return Some(Err(e)),
     };
     Some(execute_resolved_scalar_function(
-        context, name, args, resolved,
+        context, name, args, resolved, None,
     ))
 }
 
@@ -113,24 +116,64 @@ pub fn call_bound_user_scalar_function(
     binding: &FunctionBinding,
     args: &[(Option<String>, Value)],
 ) -> Option<Result<Value, SQLError>> {
-    let resolved = match resolve_bound_routine(context, binding, args) {
+    call_bound_scalar(context, binding, args, None)
+}
+
+pub fn call_bound_user_scalar_function_with_descriptions(
+    context: &RoutineInvocationContext<'_>,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+    retained: RoutineCallRetention<'_>,
+) -> Option<Result<Value, SQLError>> {
+    call_bound_scalar(context, binding, args, Some(retained))
+}
+
+fn call_bound_scalar(
+    context: &RoutineInvocationContext<'_>,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+    retained: Option<RoutineCallRetention<'_>>,
+) -> Option<Result<Value, SQLError>> {
+    let resolved = match resolve_described_bound_routine(context, binding, args, retained) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
     };
+    let descriptions = body_descriptions(context.runtime.expressions, binding, retained);
     Some(execute_resolved_scalar_function(
         context,
         &binding.name,
         args,
         resolved,
+        descriptions,
     ))
 }
 
-fn execute_resolved_scalar_function(
+pub(super) fn body_descriptions<'a>(
+    values: &'a dyn uqa_sql::assignment::routines::RoutineValueContext,
+    binding: &FunctionBinding,
+    retained: Option<RoutineCallRetention<'a>>,
+) -> Option<crate::routines::descriptions::RoutineBodyDescriptions<'a>> {
+    retained.and_then(|retained| {
+        let scope = (retained.scope)()?;
+        Some(crate::routines::descriptions::RoutineBodyDescriptions {
+            description: retained.descriptions.get(binding, &scope)?,
+            environment:
+                uqa_sql::routines::invocation::descriptions::RoutineConversionEnvironment {
+                    values,
+                    scope: retained.scope,
+                    control: retained.control,
+                },
+        })
+    })
+}
+
+pub(super) fn execute_resolved_scalar_function(
     context: &RoutineInvocationContext<'_>,
     name: &str,
     args: &[(Option<String>, Value)],
-    resolved: ResolvedRoutine,
+    resolved: ResolvedRoutine<'_>,
+    descriptions: Option<crate::routines::descriptions::RoutineBodyDescriptions<'_>>,
 ) -> Result<Value, SQLError> {
     let ResolvedRoutine {
         function,
@@ -156,7 +199,12 @@ fn execute_resolved_scalar_function(
         )?;
         return Ok(Value::Null);
     }
-    let outcome = execute_routine(context, &function, bound, &invocation, false, None)?;
+    let outcome = match descriptions {
+        Some(descriptions) => {
+            execute_described_routine(context, &function, bound, &invocation, None, descriptions)?
+        }
+        None => execute_routine(context, &function, bound, &invocation, false, None)?,
+    };
     let out_params = function.def.output_params();
     if outcome.out_values.len() != out_params.len() {
         return Err(SQLError::Internal(format!(
@@ -251,6 +299,7 @@ pub fn call_user_table_function(
         args,
         resolved,
         record_definition,
+        None,
     ))
 }
 
@@ -262,7 +311,27 @@ pub fn call_bound_user_table_function(
     args: &[(Option<String>, Value)],
     record_definition: Option<AnonymousRecordDefinition<'_>>,
 ) -> Option<Result<SQLTableFunctionResult, SQLError>> {
-    let resolved = match resolve_bound_routine(context, binding, args) {
+    call_bound_table(context, binding, args, record_definition, None)
+}
+
+pub fn call_bound_user_table_function_with_descriptions(
+    context: &RoutineInvocationContext<'_>,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+    record_definition: Option<AnonymousRecordDefinition<'_>>,
+    retained: RoutineCallRetention<'_>,
+) -> Option<Result<SQLTableFunctionResult, SQLError>> {
+    call_bound_table(context, binding, args, record_definition, Some(retained))
+}
+
+fn call_bound_table(
+    context: &RoutineInvocationContext<'_>,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+    record_definition: Option<AnonymousRecordDefinition<'_>>,
+    retained: Option<RoutineCallRetention<'_>>,
+) -> Option<Result<SQLTableFunctionResult, SQLError>> {
+    let resolved = match resolve_described_bound_routine(context, binding, args, retained) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
@@ -273,15 +342,17 @@ pub fn call_bound_user_table_function(
         args,
         resolved,
         record_definition,
+        body_descriptions(context.runtime.expressions, binding, retained),
     ))
 }
 
-fn execute_resolved_table_function(
+pub(super) fn execute_resolved_table_function(
     context: &RoutineInvocationContext<'_>,
     name: &str,
     args: &[(Option<String>, Value)],
-    resolved: ResolvedRoutine,
+    resolved: ResolvedRoutine<'_>,
     record_definition: Option<AnonymousRecordDefinition<'_>>,
+    descriptions: Option<crate::routines::descriptions::RoutineBodyDescriptions<'_>>,
 ) -> Result<SQLTableFunctionResult, SQLError> {
     let ResolvedRoutine {
         function,
@@ -297,12 +368,22 @@ fn execute_resolved_table_function(
     let out_params = function.def.output_params();
     let specialized =
         uqa_sql::routines::invocation::specialized_definition(&function.def, &invocation)?;
-    let declared = uqa_sql::routines::result_check::declared_sql_function_result(
-        context.types,
-        specialized.as_ref().unwrap_or(&function.def),
-    )?;
+    let definition = specialized.as_ref().unwrap_or(&function.def);
+    let declared = match descriptions {
+        Some(saved) => {
+            saved
+                .description
+                .table_result_layout(context.types, definition, saved.environment)?
+        }
+        None => Cow::Owned(
+            uqa_sql::routines::result_check::declared_sql_function_result(
+                context.types,
+                definition,
+            )?,
+        ),
+    };
     let composite_columns = matches!(declared.declared_type, uqa_sql::ColumnType::Composite(_))
-        .then_some(declared.columns)
+        .then_some(declared.columns.as_deref())
         .flatten();
     let columns = if let Some((columns, _)) = record_definition {
         columns.to_vec()
@@ -328,14 +409,24 @@ fn execute_resolved_table_function(
     let record_target = record_definition
         .map(|(columns, types)| anonymous_record_target(context, columns, types))
         .transpose()?;
-    let outcome = execute_routine(
-        context,
-        &function,
-        bound,
-        &invocation,
-        false,
-        record_target.as_deref(),
-    )?;
+    let outcome = match descriptions {
+        Some(saved) => execute_described_routine(
+            context,
+            &function,
+            bound,
+            &invocation,
+            record_target.as_deref(),
+            saved,
+        )?,
+        None => execute_routine(
+            context,
+            &function,
+            bound,
+            &invocation,
+            false,
+            record_target.as_deref(),
+        )?,
+    };
     if let Some((columns, types)) = record_definition {
         // A polymorphic result that this call resolves to `record` is an anonymous record too.
         if !uqa_sql::routines::routine_returns_anonymous_record(
@@ -355,18 +446,34 @@ fn execute_resolved_table_function(
             record_target.as_deref().unwrap_or_default(),
         );
     }
-    let mut rows = if function.def.returns_set() {
+    shape_declared_table_outcome(
+        outcome,
+        function.def.returns_set(),
+        !out_params.is_empty(),
+        columns,
+        composite_columns.map(<[SQLFunctionResultColumn]>::len),
+    )
+}
+
+fn shape_declared_table_outcome(
+    outcome: crate::routines::RoutineOutcome,
+    returns_set: bool,
+    has_output_params: bool,
+    columns: Vec<String>,
+    composite_column_count: Option<usize>,
+) -> Result<SQLTableFunctionResult, SQLError> {
+    let mut rows = if returns_set {
         outcome.set_rows
-    } else if out_params.is_empty() {
-        vec![vec![outcome.value]]
-    } else {
+    } else if has_output_params {
         vec![outcome.out_values]
+    } else {
+        vec![vec![outcome.value]]
     };
-    if let Some(columns) = &composite_columns {
+    if let Some(column_count) = composite_column_count {
         rows = rows
             .into_iter()
             .map(|mut row| {
-                super::super::sql_body::row_fields(row.pop().unwrap_or(Value::Null), columns.len())
+                super::super::sql_body::row_fields(row.pop().unwrap_or(Value::Null), column_count)
             })
             .collect::<Result<Vec<_>, _>>()?;
     }

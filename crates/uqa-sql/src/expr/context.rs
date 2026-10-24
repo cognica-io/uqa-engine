@@ -21,8 +21,10 @@ mod regtype;
 pub(crate) use casting::evaluate_selected_cast;
 pub use casting::{
     cast_value_with_numeric_resolution_with_control, cast_value_with_resolution_with_control,
-    cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,
-    coercion_type_name, read_catalog_array_input, read_catalog_input, CatalogInputFunctions,
+    cast_value_with_scoped_resolution, cast_value_with_type_resolution,
+    cast_value_with_type_resolution_with_control, coercion_type_name, read_catalog_array_input,
+    read_catalog_input, CatalogCastScope, CatalogInputFunctions, RetainedCatalogCast,
+    ScopedCastResult,
 };
 pub(crate) use casting::{requires_catalog_constant_input, requires_domain_array_input};
 pub(crate) use regtype::format_regtype_value_with_catalog_and_control;
@@ -102,6 +104,11 @@ pub trait EngineHook {
         Err(SQLError::Internal(format!(
             "cache lookup failed for range type {oid}"
         )))
+    }
+
+    /// Certify stable descriptors for bound/schema-qualified type names. Live custom catalogs decline by default; conversion callbacks, settings and unqualified namespace resolution are never covered by this capability.
+    fn catalog_cast_scope(&self) -> Option<&CatalogCastScope> {
+        None
     }
 
     /// Resolve a catalog-owned SQL type name for casts evaluated with an engine context.
@@ -294,6 +301,27 @@ pub trait EngineHook {
         _args: &[(Option<String>, Value)],
     ) -> Option<Result<Value>> {
         None
+    }
+
+    /// Identity for successful bound routine metadata. A mutable context must
+    /// decline reuse or change this identity when its types, registry or role change.
+    /// Returning a valid identity also admits retaining this hook for a fixed
+    /// lateral source; default/custom hooks are reconstructed at their original boundary.
+    fn routine_description_scope(
+        &self,
+    ) -> Option<crate::routines::invocation::descriptions::RoutineDescriptionScope> {
+        None
+    }
+
+    /// Optional metadata belongs to this prepared expression. Mutable/custom hooks preserve their ordinary invocation unless they explicitly support native scope validation.
+    fn call_bound_user_function_with_descriptions(
+        &self,
+        binding: &crate::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+        _descriptions: &crate::routines::invocation::descriptions::RoutineCallDescriptions,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Option<Result<Value>> {
+        self.call_bound_user_function(binding, args)
     }
 }
 
