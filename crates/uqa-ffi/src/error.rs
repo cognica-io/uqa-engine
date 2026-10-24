@@ -21,6 +21,7 @@ use crate::abi::{
 };
 use crate::boundary::{self, Result};
 use uqa_core::memory::{Budgeted, MemoryBudget, MemoryReservation};
+use uqa_core::notifications::NotificationFailureKind;
 use uqa_sql::SQLError;
 
 #[derive(Debug)]
@@ -35,6 +36,15 @@ pub struct UQAError {
     pub(crate) statement_index: Option<u64>,
     cause: Option<RetainedError>,
     memory: Option<MemoryReservation>,
+    notification: Option<NotificationFailureKind>,
+    notification_detail: Option<Box<NotificationDiagnostic>>,
+}
+
+#[derive(Debug)]
+struct NotificationDiagnostic {
+    // Keep the native cause alive alongside its separately exposed private detail.
+    _source: uqa_engine::NotificationSubscriptionError,
+    detail: Cow<'static, str>,
 }
 
 impl UQAError {
@@ -50,6 +60,8 @@ impl UQAError {
             statement_index: None,
             cause: None,
             memory: None,
+            notification: None,
+            notification_detail: None,
         }
     }
 
@@ -81,6 +93,10 @@ impl UQAError {
 
     pub(crate) fn message(&self) -> &str {
         &self.message
+    }
+
+    pub(crate) fn is_notification_failure(&self) -> bool {
+        self.notification.is_some()
     }
 
     pub(crate) fn display(status: UQAStatus, source: &impl std::fmt::Display) -> Self {
@@ -147,6 +163,55 @@ impl From<uqa_core::ValueRetentionError> for UQAError {
             uqa_core::ValueRetentionError::Memory(error) => error.into(),
             error => SQLError::from(error).into(),
         }
+    }
+}
+
+impl From<uqa_engine::NotificationSubscriptionError> for UQAError {
+    fn from(native: uqa_engine::NotificationSubscriptionError) -> Self {
+        let mut error = Self::new(crate::abi::UQA_ERROR_NOTIFICATION, native.code());
+        error.notification = Some(native.kind());
+        if let Some(original) = native.original_error() {
+            let mut detail = DiagnosticWriter(String::new());
+            let detail = if write!(detail, "{original}").is_ok() {
+                Cow::Owned(detail.0)
+            } else {
+                Cow::Borrowed("private diagnostic allocation failed")
+            };
+            error.notification_detail = boundary::boxed(NotificationDiagnostic {
+                _source: native,
+                detail,
+            })
+            .ok();
+        }
+        error
+    }
+}
+
+fn notification_kind(kind: uqa_core::notifications::NotificationFailureKind) -> u32 {
+    use crate::abi::{
+        UQA_NOTIFICATION_FAILURE_AUTHENTICATION, UQA_NOTIFICATION_FAILURE_AUTHORITY_REVOKED,
+        UQA_NOTIFICATION_FAILURE_BACKPRESSURE, UQA_NOTIFICATION_FAILURE_CANCELLED,
+        UQA_NOTIFICATION_FAILURE_CAPACITY, UQA_NOTIFICATION_FAILURE_INVALID_REQUEST,
+        UQA_NOTIFICATION_FAILURE_PROTOCOL, UQA_NOTIFICATION_FAILURE_SEQUENCE_EXHAUSTED,
+        UQA_NOTIFICATION_FAILURE_SERVER_DRAINING, UQA_NOTIFICATION_FAILURE_SOURCE_UNAVAILABLE,
+        UQA_NOTIFICATION_FAILURE_TIMEOUT, UQA_NOTIFICATION_FAILURE_TRANSPORT,
+        UQA_NOTIFICATION_FAILURE_UNSUPPORTED,
+    };
+    use uqa_core::notifications::NotificationFailureKind;
+    match kind {
+        NotificationFailureKind::InvalidRequest => UQA_NOTIFICATION_FAILURE_INVALID_REQUEST,
+        NotificationFailureKind::Authentication => UQA_NOTIFICATION_FAILURE_AUTHENTICATION,
+        NotificationFailureKind::AuthorityRevoked => UQA_NOTIFICATION_FAILURE_AUTHORITY_REVOKED,
+        NotificationFailureKind::Unsupported => UQA_NOTIFICATION_FAILURE_UNSUPPORTED,
+        NotificationFailureKind::Capacity => UQA_NOTIFICATION_FAILURE_CAPACITY,
+        NotificationFailureKind::Backpressure => UQA_NOTIFICATION_FAILURE_BACKPRESSURE,
+        NotificationFailureKind::Protocol => UQA_NOTIFICATION_FAILURE_PROTOCOL,
+        NotificationFailureKind::SourceUnavailable => UQA_NOTIFICATION_FAILURE_SOURCE_UNAVAILABLE,
+        NotificationFailureKind::Transport => UQA_NOTIFICATION_FAILURE_TRANSPORT,
+        NotificationFailureKind::Timeout => UQA_NOTIFICATION_FAILURE_TIMEOUT,
+        NotificationFailureKind::ServerDraining => UQA_NOTIFICATION_FAILURE_SERVER_DRAINING,
+        NotificationFailureKind::Cancelled => UQA_NOTIFICATION_FAILURE_CANCELLED,
+        NotificationFailureKind::SequenceExhausted => UQA_NOTIFICATION_FAILURE_SEQUENCE_EXHAUSTED,
     }
 }
 
@@ -294,7 +359,19 @@ diagnostic_getter!(uqa_error_get_detail, UQAStringView, |e: &UQAError| e
     .native
     .as_ref()
     .and_then(|n| n.detail())
+    .or_else(|| e
+        .notification_detail
+        .as_ref()
+        .map(|diagnostic| diagnostic.detail.as_ref()))
     .map(Into::into));
+diagnostic_getter!(uqa_error_get_notification_kind, u32, |e: &UQAError| e
+    .notification
+    .map(notification_kind));
+diagnostic_getter!(
+    uqa_error_get_notification_code,
+    UQAStringView,
+    |e: &UQAError| e.notification.map(|kind| kind.code().into())
+);
 diagnostic_getter!(uqa_error_get_hint, UQAStringView, |e: &UQAError| e
     .native
     .as_ref()

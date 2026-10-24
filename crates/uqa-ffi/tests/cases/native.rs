@@ -31,6 +31,12 @@ fn c_and_cpp_copy_use_the_shared_abi() {
 }
 
 #[cfg(unix)]
+#[test]
+fn c_and_cpp_notifications_use_the_shared_abi() {
+    native_client("notifications.c");
+}
+
+#[cfg(unix)]
 fn native_client(fixture: &str) {
     use std::{path::PathBuf, process::Command};
 

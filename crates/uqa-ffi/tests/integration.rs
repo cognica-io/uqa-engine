@@ -18,5 +18,8 @@ mod cursors;
 #[path = "cases/native.rs"]
 mod native;
 
+#[path = "cases/notifications.rs"]
+mod notifications;
+
 #[path = "cases/sessions.rs"]
 mod sessions;

@@ -17,8 +17,10 @@ mod error;
 mod execute;
 mod library;
 mod notice;
+mod notification;
 mod result;
 mod session;
+mod subscription;
 mod types;
 mod value;
 
@@ -29,13 +31,16 @@ pub use copy::*;
 pub use cursor::*;
 pub use error::{
     uqa_error_get_cause, uqa_error_get_completion, uqa_error_get_context, uqa_error_get_detail,
-    uqa_error_get_hint, uqa_error_get_last, uqa_error_get_message, uqa_error_get_position,
-    uqa_error_get_sqlstate, uqa_error_get_statement_index, uqa_error_get_status, UQAError,
+    uqa_error_get_hint, uqa_error_get_last, uqa_error_get_message, uqa_error_get_notification_code,
+    uqa_error_get_notification_kind, uqa_error_get_position, uqa_error_get_sqlstate,
+    uqa_error_get_statement_index, uqa_error_get_status, UQAError,
 };
 pub use execute::*;
 pub use library::*;
 pub use notice::*;
+pub use notification::*;
 pub use result::*;
 pub use session::*;
+pub use subscription::*;
 pub use types::*;
 pub use value::*;

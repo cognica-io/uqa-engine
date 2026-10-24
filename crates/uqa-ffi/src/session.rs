@@ -10,7 +10,7 @@ use std::ffi::c_char;
 use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, OnceLock,
 };
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
@@ -27,7 +27,7 @@ use crate::{
     },
     boundary, callback,
     config::UQAConfig,
-    error::UQAError,
+    error::{RetainedError, UQAError},
     library,
 };
 
@@ -39,6 +39,7 @@ pub(crate) struct Session {
     pub(crate) native: Engine,
     pub(crate) memory: MemoryBudget,
     pub(crate) cancellation: CancellationToken,
+    pub(crate) sql_notification_error: OnceLock<RetainedError>,
     persistent: bool,
     busy: AtomicBool,
     poisoned: AtomicBool,
@@ -51,6 +52,7 @@ impl Session {
             native,
             memory: MemoryBudget::new(memory_limit),
             cancellation,
+            sql_notification_error: OnceLock::new(),
             persistent,
             busy: AtomicBool::new(false),
             poisoned: AtomicBool::new(false),

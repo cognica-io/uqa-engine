@@ -34,6 +34,7 @@ typedef struct uqa_notice_t *uqa_notice;
 typedef int32_t uqa_status;
 typedef uint32_t uqa_type_kind;
 typedef uint32_t uqa_notice_level;
+typedef uint32_t uqa_notification_failure_kind;
 
 typedef uqa_status (UQA_CALL *uqa_user_data_destroy_fn)(void *user_data);
 
@@ -62,6 +63,21 @@ typedef struct uqa_bytes_view {
 #define UQA_ERROR_PANIC             (-INT32_C(10))
 #define UQA_ERROR_LIMIT             (-INT32_C(11))
 #define UQA_ERROR_NULL              (-INT32_C(12))
+#define UQA_ERROR_NOTIFICATION      (-INT32_C(13))
+
+#define UQA_NOTIFICATION_FAILURE_INVALID_REQUEST UINT32_C(1)
+#define UQA_NOTIFICATION_FAILURE_AUTHENTICATION UINT32_C(2)
+#define UQA_NOTIFICATION_FAILURE_AUTHORITY_REVOKED UINT32_C(3)
+#define UQA_NOTIFICATION_FAILURE_UNSUPPORTED UINT32_C(4)
+#define UQA_NOTIFICATION_FAILURE_CAPACITY UINT32_C(5)
+#define UQA_NOTIFICATION_FAILURE_BACKPRESSURE UINT32_C(6)
+#define UQA_NOTIFICATION_FAILURE_PROTOCOL UINT32_C(7)
+#define UQA_NOTIFICATION_FAILURE_SOURCE_UNAVAILABLE UINT32_C(8)
+#define UQA_NOTIFICATION_FAILURE_TRANSPORT UINT32_C(9)
+#define UQA_NOTIFICATION_FAILURE_TIMEOUT UINT32_C(10)
+#define UQA_NOTIFICATION_FAILURE_SERVER_DRAINING UINT32_C(11)
+#define UQA_NOTIFICATION_FAILURE_CANCELLED UINT32_C(12)
+#define UQA_NOTIFICATION_FAILURE_SEQUENCE_EXHAUSTED UINT32_C(13)
 
 #define UQA_COMPLETION_NONE UINT32_C(0)
 #define UQA_COMPLETION_COMMITTED UINT32_C(1)
@@ -162,6 +178,10 @@ UQA_API uqa_status UQA_CALL uqa_engine_close(uqa_engine *engine);
 UQA_API uqa_status UQA_CALL uqa_error_get_last(uqa_error *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_status(uqa_error error, uqa_status *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_cause(uqa_error error, uqa_error *out);
+UQA_API uqa_status UQA_CALL uqa_error_get_notification_kind(
+    uqa_error error, uqa_notification_failure_kind *out);
+UQA_API uqa_status UQA_CALL uqa_error_get_notification_code(
+    uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_sqlstate(uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_message(uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_detail(uqa_error error, uqa_string_view *out);
@@ -404,6 +424,9 @@ UQA_API uqa_status UQA_CALL uqa_engine_copy_to_n(
     uqa_copy_write_fn write, uqa_copy_flush_fn flush, void *user_data,
     uint64_t *rows);
 
+#define UQA_SUBSCRIPTION_OPTIONS_VERSION UINT32_C(1)
+#define UQA_SQL_NOTIFICATION_OPTIONS_VERSION UINT32_C(1)
+
 typedef struct uqa_subscription_options {
     uint32_t struct_size;
     uint32_t version;
@@ -418,6 +441,10 @@ UQA_API uqa_status UQA_CALL uqa_subscription_open(
     uqa_engine engine, const char *const *channels, size_t count,
     const uqa_subscription_options *options,
     uqa_subscription *out);
+UQA_API uqa_status UQA_CALL uqa_subscription_open_n(
+    uqa_engine engine, const char *const *channels, const size_t *channel_sizes,
+    size_t count, const uqa_subscription_options *options,
+    uqa_subscription *out);
 UQA_API uqa_status UQA_CALL uqa_notification_create(uqa_notification *out);
 UQA_API uqa_status UQA_CALL uqa_subscription_poll(
     uqa_subscription subscription,
@@ -427,6 +454,30 @@ UQA_API uqa_status UQA_CALL uqa_subscription_wait(
     uqa_notification notification);
 UQA_API uqa_status UQA_CALL uqa_subscription_close(uqa_subscription *subscription);
 UQA_API uqa_status UQA_CALL uqa_notification_destroy(uqa_notification *notification);
+UQA_API uqa_status UQA_CALL uqa_notification_get_channel(
+    uqa_notification notification, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_notification_get_payload(
+    uqa_notification notification, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_notification_get_sender_pid(
+    uqa_notification notification, int32_t *out);
+UQA_API uqa_status UQA_CALL uqa_notification_get_epoch(
+    uqa_notification notification, uqa_bytes_view *out);
+UQA_API uqa_status UQA_CALL uqa_notification_get_sequence(
+    uqa_notification notification, uint64_t *out);
+
+typedef struct uqa_sql_notification_options {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t max_channels;
+    uint64_t max_queued_notifications;
+    uint64_t max_queued_bytes;
+    uint64_t max_registry_entries_per_poll;
+} uqa_sql_notification_options;
+
+UQA_API uqa_status UQA_CALL uqa_engine_configure_sql_notifications(
+    uqa_engine engine, const uqa_sql_notification_options *options);
+UQA_API uqa_status UQA_CALL uqa_engine_poll_sql_notification(
+    uqa_engine engine, uqa_notification notification);
 
 UQA_API uqa_status UQA_CALL uqa_notice_create(
     uqa_engine engine, uqa_notice *out);

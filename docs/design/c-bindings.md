@@ -180,6 +180,7 @@ typedef struct uqa_notice_t *uqa_notice;
 
 typedef int32_t uqa_status;
 typedef uint32_t uqa_type_kind;
+typedef uint32_t uqa_notification_failure_kind;
 
 typedef uqa_status (UQA_CALL *uqa_user_data_destroy_fn)(void *user_data);
 
@@ -208,6 +209,7 @@ typedef struct uqa_bytes_view {
 #define UQA_ERROR_PANIC             (-INT32_C(10))
 #define UQA_ERROR_LIMIT             (-INT32_C(11))
 #define UQA_ERROR_NULL              (-INT32_C(12))
+#define UQA_ERROR_NOTIFICATION      (-INT32_C(13))
 
 UQA_API uqa_status UQA_CALL uqa_library_get_abi_version(uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_library_get_version(uqa_string_view *out);
@@ -291,6 +293,10 @@ UQA_API uqa_status UQA_CALL uqa_error_get_cause(uqa_error error, uqa_error *out)
 UQA_API uqa_status UQA_CALL uqa_error_get_sqlstate(uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_message(uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_detail(uqa_error error, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_error_get_notification_kind(
+    uqa_error error, uqa_notification_failure_kind *out);
+UQA_API uqa_status UQA_CALL uqa_error_get_notification_code(
+    uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_hint(uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_context(uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_completion(uqa_error error, uint32_t *out);
@@ -307,6 +313,8 @@ Each non-diagnostic UQA call replaces the thread's diagnostic state. Successful 
 `uqa_error_get_last` returns `UQA_OK` with a borrowed record, or `UQA_DONE` with NULL output when no error exists. `uqa_error_get_status(error, &stored_status)` reports inspection success separately from the original failure code written to `stored_status`. Applications that need longer retention copy fields into their own storage; ordinary error handling requires no allocation or destroy operation from the caller.
 
 Native SQL failures return `UQA_ERROR_SQL` with the original SQLSTATE, detail, hint, position, and routine context. Classify through `SQLError::primary()`; preserve the separate context chain. Do not manufacture SQLSTATEs for C pointer, type-accessor, or handle-state mistakes. Missing optional string fields return `UQA_DONE` with an empty view; missing index/position likewise returns `UQA_DONE`. A present empty string returns `UQA_OK`. Statement indices are zero-based and SQL positions are one-based character positions. Do not infer locations from display messages.
+
+Native notification failures return `UQA_ERROR_NOTIFICATION`. `uqa_error_get_notification_kind` returns a fixed `UQA_NOTIFICATION_FAILURE_*` code, and `uqa_error_get_notification_code` returns the native content-free `NOTIFICATION_*` string. Both return `UQA_DONE` with zero/empty output for other error categories. The primary message is the same content-free code; `uqa_error_get_detail` explicitly exposes any optional private native cause. Allocation failure may omit private detail but preserves the failure status, kind and code. Terminal receive diagnostics are retained by their subscription or configured SQL inbox and republished on later reads without replacing the original failure.
 
 The final diagnostic is published after the operation's cleanup completes. Internally retain its primary cause and any cleanup context; nested callback helpers must not overwrite that pending failure. Callback failure records are scoped to the invocation and captured by the trampoline before cleanup. Worker-thread failures travel with native results and are published on the calling thread when the synchronous operation returns; never inspect another thread's diagnostic slot.
 
@@ -679,6 +687,23 @@ COPY FROM shares ordinary insertion, constraints, defaults, triggers, partition 
 ## 15. Notifications and SQL notices
 
 ```c
+#define UQA_NOTIFICATION_FAILURE_INVALID_REQUEST UINT32_C(1)
+#define UQA_NOTIFICATION_FAILURE_AUTHENTICATION UINT32_C(2)
+#define UQA_NOTIFICATION_FAILURE_AUTHORITY_REVOKED UINT32_C(3)
+#define UQA_NOTIFICATION_FAILURE_UNSUPPORTED UINT32_C(4)
+#define UQA_NOTIFICATION_FAILURE_CAPACITY UINT32_C(5)
+#define UQA_NOTIFICATION_FAILURE_BACKPRESSURE UINT32_C(6)
+#define UQA_NOTIFICATION_FAILURE_PROTOCOL UINT32_C(7)
+#define UQA_NOTIFICATION_FAILURE_SOURCE_UNAVAILABLE UINT32_C(8)
+#define UQA_NOTIFICATION_FAILURE_TRANSPORT UINT32_C(9)
+#define UQA_NOTIFICATION_FAILURE_TIMEOUT UINT32_C(10)
+#define UQA_NOTIFICATION_FAILURE_SERVER_DRAINING UINT32_C(11)
+#define UQA_NOTIFICATION_FAILURE_CANCELLED UINT32_C(12)
+#define UQA_NOTIFICATION_FAILURE_SEQUENCE_EXHAUSTED UINT32_C(13)
+
+#define UQA_SUBSCRIPTION_OPTIONS_VERSION UINT32_C(1)
+#define UQA_SQL_NOTIFICATION_OPTIONS_VERSION UINT32_C(1)
+
 typedef struct uqa_subscription_options {
     uint32_t struct_size;
     uint32_t version;
@@ -693,6 +718,10 @@ UQA_API uqa_status UQA_CALL uqa_subscription_open(
     uqa_engine engine, const char *const *channels, size_t count,
     const uqa_subscription_options *options,
     uqa_subscription *out);
+UQA_API uqa_status UQA_CALL uqa_subscription_open_n(
+    uqa_engine engine, const char *const *channels, const size_t *channel_sizes,
+    size_t count, const uqa_subscription_options *options,
+    uqa_subscription *out);
 UQA_API uqa_status UQA_CALL uqa_notification_create(uqa_notification *out);
 UQA_API uqa_status UQA_CALL uqa_subscription_poll(
     uqa_subscription subscription,
@@ -702,6 +731,30 @@ UQA_API uqa_status UQA_CALL uqa_subscription_wait(
     uqa_notification notification);
 UQA_API uqa_status UQA_CALL uqa_subscription_close(uqa_subscription *subscription);
 UQA_API uqa_status UQA_CALL uqa_notification_destroy(uqa_notification *notification);
+UQA_API uqa_status UQA_CALL uqa_notification_get_channel(
+    uqa_notification notification, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_notification_get_payload(
+    uqa_notification notification, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_notification_get_sender_pid(
+    uqa_notification notification, int32_t *out);
+UQA_API uqa_status UQA_CALL uqa_notification_get_epoch(
+    uqa_notification notification, uqa_bytes_view *out);
+UQA_API uqa_status UQA_CALL uqa_notification_get_sequence(
+    uqa_notification notification, uint64_t *out);
+
+typedef struct uqa_sql_notification_options {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t max_channels;
+    uint64_t max_queued_notifications;
+    uint64_t max_queued_bytes;
+    uint64_t max_registry_entries_per_poll;
+} uqa_sql_notification_options;
+
+UQA_API uqa_status UQA_CALL uqa_engine_configure_sql_notifications(
+    uqa_engine engine, const uqa_sql_notification_options *options);
+UQA_API uqa_status UQA_CALL uqa_engine_poll_sql_notification(
+    uqa_engine engine, uqa_notification notification);
 
 typedef uint32_t uqa_notice_level;
 #define UQA_NOTICE_LEVEL_DEBUG UINT32_C(0)
@@ -725,15 +778,15 @@ UQA_API uqa_status UQA_CALL uqa_notice_get_hint(
     uqa_notice notice, uqa_string_view *out);
 ```
 
-All five subscription limits are required and positive. Validate duplicate/empty/NUL-containing channels and the native UTF-8 byte limit before registration. Return success only when all requested channels are ready. Preserve the original memory database or persistent provider, encryption, selected role, and shared admission limits through the native subscription owner.
+All five subscription limits are required and positive; there are no default or omitted limits. Set `struct_size` to the complete known structure size and `version` to `UQA_SUBSCRIPTION_OPTIONS_VERSION`. Reject short structures, unsupported versions and nonzero unknown trailing bytes; accept a larger structure with zero unknown bytes. `uqa_subscription_open` borrows an array of C strings for the call, and `_n` borrows the same array plus one exact byte length per channel. Validate duplicate/empty/NUL-containing channels and the native 63-byte UTF-8 limit before registration. Return success only when all requested channels are ready. Preserve the original memory database or persistent provider, encryption, selected role, and shared admission limits through the native subscription owner. The creating Engine's cancellation handle can cancel pending registration; a ready subscription has an independent lifetime and closes only through its own lifecycle.
 
 Create a reusable event destination with `uqa_notification_create`. Poll/wait fills it and returns `UQA_OK` for one event, `UQA_TIMEOUT` when no event is available within the requested wait, and `UQA_DONE` after ordinary closure. Timeout, closure, and failure leave its previous event unchanged; access that event only as previously received data. Poll uses the same no-event status without waiting. Backpressure, source failure, and sequence exhaustion are retained terminal errors, including after internal delivery cleanup, until the subscription handle is released. Expose the native failure kind/code separately from optional private diagnostics; never turn a terminal error into empty success or reconnect automatically.
 
-Read-only notification accessors are `uqa_notification_get_channel`, `uqa_notification_get_payload`, `uqa_notification_get_sender_pid`, `uqa_notification_get_epoch`, and `uqa_notification_get_sequence`. They expose channel, payload, sender process ID, opaque epoch identity, and exact `uint64_t` sequence. Do not convert sequences to doubles. This is an embedded subscription, with no HTTP request ID, replay, or SSE reconnection contract.
+Read-only notification accessors expose channel and payload as `uqa_string_view`, sender process ID as `int32_t`, the opaque 16-byte epoch as `uqa_bytes_view`, and the exact sequence as `uint64_t`. Getters return `UQA_ERROR_STATE` with empty/zero outputs before the first received event. Views borrow the destination until successful replacement or destruction, and remain valid across unsuccessful receives. The destination and its FFI allowance reservation can outlive the subscription and Engine. Admit the wrapper and original string capacities before native dequeue; allocation rejection preserves both the queued event and its sequence. Sequences begin at one for each epoch and never wrap or pass through floating point. This is an embedded subscription, with no HTTP request ID, replay, or SSE reconnection contract.
 
 Serialize consumers of one subscription. `uqa_subscription_close` takes the handle slot, stops delivery, wakes an admitted receiver, joins native cleanup and the active receive lease, releases the handle, and clears the slot. It returns `UQA_OK` for a NULL handle. The caller must prevent new receives from starting once close begins; no alias may be used after it returns. A receive already admitted holds an internal lease until it returns. Registration and cleanup can perform native I/O; an application's event loop must schedule those calls appropriately. An independent subscription can outlive the creating Engine, but it must be closed before the last retained database resources are considered released. There is no second subscription destroy call.
 
-SQL LISTEN/UNLISTEN remains distinct from independent subscriptions. Provide a separately named session-notification drain over bounded `configure_sql_notifications`/`try_take_sql_notifications`; configure its limits before LISTEN. It preserves transaction-deferred delivery and native terminal errors. Never silently reroute SQL LISTEN to an independent listener. SQL notices likewise preserve level, SQLSTATE, message, detail, and hint in emission order; they are not log records.
+SQL LISTEN/UNLISTEN remains distinct from independent subscriptions. `uqa_engine_configure_sql_notifications` configures the native bounded session inbox once, before any transaction, LISTEN registration or queued message. Its version-1 structure requires all four positive limits and the same size/version/tail checks as subscription options. `uqa_engine_poll_sql_notification` fills one reusable destination through the native single-event admission interface; it returns `UQA_TIMEOUT` while a transaction defers delivery or when no message is available. It synchronizes the original provider, preserves LISTEN/UNLISTEN, publisher deduplication, savepoint rollback and native terminal failures, and admits storage before consuming an event. Calling it without configuration returns `UQA_ERROR_NOTIFICATION` with kind `UQA_NOTIFICATION_FAILURE_INVALID_REQUEST`. A terminal failure requires closing that SQL session; it never silently reconnects or replays SQL. SQL notices likewise preserve level, SQLSTATE, message, detail, and hint in emission order; they are not log records.
 
 `uqa_notice_create` creates an owned handle from the next queued SQL notice. It returns `UQA_OK` with that handle, or `UQA_DONE` with NULL output when the queue is empty. Complete allocation/admission before removing the notice so a failed create leaves the queue unchanged. Move the original notice and admit its owned string capacities against the originating session's FFI allowance; preserve emission order and the native emission-time `client_min_messages` filter. The caller releases the handle with `uqa_notice_destroy`, which clears the handle slot and returns `UQA_OK` for a NULL handle. The notice and its allowance reservation can outlive the Engine without retaining its database resources. Extend the native notice owner for bounded dequeue/admission as needed rather than repeatedly copying the complete native notice vector into a second C queue.
 
