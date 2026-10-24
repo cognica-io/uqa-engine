@@ -26,13 +26,9 @@ impl ScoredDocumentSource {
     ) -> ExecResult<Option<bool>> {
         if self.lock_origin.is_some()
             || self.recheck_pinned
-            || crate::query::generated::projection_contains_virtual_generated_column(
+            || super::projection::requires_materialization(
                 &self.column_definitions,
                 &self.projected_fields,
-            )
-            || crate::query::document_projection::projections_use_tuple_xmin(
-                &self.projected_fields,
-                &self.column_definitions,
             )
         {
             return Ok(None);
@@ -110,13 +106,9 @@ impl ScoredDocumentSource {
     ) -> ExecResult<Option<Vec<crate::PhysicalRow>>> {
         if self.lock_origin.is_some()
             || self.recheck_pinned
-            || crate::query::generated::projection_contains_virtual_generated_column(
+            || super::projection::requires_materialization(
                 &self.column_definitions,
                 &self.projected_fields,
-            )
-            || crate::query::document_projection::projections_use_tuple_xmin(
-                &self.projected_fields,
-                &self.column_definitions,
             )
         {
             return Ok(None);
@@ -198,13 +190,7 @@ impl ScoredDocumentSource {
         let source = crate::PhysicalRow::from_shared_values(values, projection);
         if self.appended_doc_id_attribute.is_none()
             && self.appended_score_attribute.is_none()
-            && self
-            .projected_slots
-            .iter()
-            .enumerate()
-            .all(|(expected, slot)| {
-                matches!(slot, crate::ProjectedValueSlot::Field(actual) if *actual == expected)
-            })
+            && super::projection::is_identity(&self.projected_slots)
         {
             return Ok(source);
         }
@@ -344,12 +330,9 @@ impl ScoredDocumentSource {
         }
         let doc_ids = entries.iter().map(|entry| entry.doc_id).collect::<Vec<_>>();
         let store = self.table.read_documents();
-        if crate::query::generated::projection_contains_virtual_generated_column(
+        if super::projection::requires_materialization(
             &self.column_definitions,
             &self.projected_fields,
-        ) || crate::query::document_projection::projections_use_tuple_xmin(
-            &self.projected_fields,
-            &self.column_definitions,
         ) {
             let mut documents =
                 store

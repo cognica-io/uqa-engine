@@ -17,13 +17,9 @@ impl ScoredDocumentSource {
     ) -> ExecResult<Option<Vec<PhysicalRow>>> {
         if self.lock_origin.is_some()
             || self.recheck_pinned
-            || crate::query::generated::projection_contains_virtual_generated_column(
+            || super::projection::requires_materialization(
                 &self.column_definitions,
                 &self.projected_fields,
-            )
-            || crate::query::document_projection::projections_use_tuple_xmin(
-                &self.projected_fields,
-                &self.column_definitions,
             )
         {
             return Ok(None);

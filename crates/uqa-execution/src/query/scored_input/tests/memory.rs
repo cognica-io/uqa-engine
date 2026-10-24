@@ -176,6 +176,86 @@ fn source(table: Arc<dyn TableRead>, local: bool) -> Box<dyn RowSource> {
 }
 
 #[test]
+fn shared_scan_reuses_immutable_projection_classification() {
+    projection_classification(true);
+}
+
+#[test]
+fn borrowed_scan_reuses_immutable_projection_classification() {
+    projection_classification(false);
+}
+
+fn projection_classification(shared: bool) {
+    const WIDTH: usize = 64;
+    const ROWS: u64 = 512;
+    let columns = (0..WIDTH)
+        .map(|slot| format!("field_{slot}"))
+        .collect::<Vec<_>>();
+    let mut documents = MemoryDocumentStore::new();
+    for id in 1..=ROWS {
+        documents
+            .put(
+                id,
+                columns
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, name)| {
+                        (
+                            name.clone(),
+                            Value::Int((id * WIDTH as u64 + slot as u64) as i64),
+                        )
+                    })
+                    .collect(),
+            )
+            .unwrap();
+    }
+    let visited = Arc::new(AtomicUsize::new(0));
+    let table = Arc::new(Table(RwLock::new(Box::new(Documents {
+        rows: documents,
+        shared,
+        visited: Arc::clone(&visited),
+    }))));
+    let before = crate::query::scored_input::projection::inspections();
+    let mut source =
+        ScoredDocumentSource::new("wide", table, ScoredInput::All, columns, None, None)
+            .with_scan_batch_bytes(64 * 1024);
+    assert!(source.supports_batched_consumption());
+    let mut id = 1;
+    loop {
+        let rows = source.next_physical_batch(32).unwrap();
+        assert!(rows.len() <= 32);
+        if rows.is_empty() {
+            break;
+        }
+        for row in rows {
+            for slot in 0..WIDTH {
+                assert_eq!(
+                    row.value(slot),
+                    Some(&Value::Int((id * WIDTH as u64 + slot as u64) as i64))
+                );
+            }
+            id += 1;
+        }
+    }
+    assert_eq!(id, ROWS + 1);
+    assert_eq!(visited.load(Ordering::Relaxed), ROWS as usize);
+    let after = crate::query::scored_input::projection::inspections();
+    let inspected = (after.0 - before.0, after.1 - before.1);
+    if shared {
+        assert_eq!(
+            inspected,
+            (1, WIDTH),
+            "immutable metadata and slots must be classified once per source"
+        );
+    } else {
+        assert_eq!(
+            inspected.0, 1,
+            "borrowed pages must not reclassify immutable metadata"
+        );
+    }
+}
+
+#[test]
 fn ordered_typed_scan_batches_do_not_reencode_the_complete_schema() {
     use crate::query::local_table::{LocalTableRowSource, LocalTableScanConfig};
     use uqa_sql::ColumnType;

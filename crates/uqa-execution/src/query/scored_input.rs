@@ -12,6 +12,7 @@ mod deferred;
 mod hierarchy;
 mod indexed;
 mod materialize;
+mod projection;
 
 pub use capture::CapturedScoredEntries;
 pub(crate) use capture::ScoredEntryCapture;
@@ -850,13 +851,9 @@ impl crate::RowSource for ScoredDocumentSource {
         matches!(self.input, ScoredInputCursor::All { .. })
             && self.lock_origin.is_none()
             && !self.recheck_pinned
-            && !crate::query::generated::projection_contains_virtual_generated_column(
+            && !projection::requires_materialization(
                 &self.column_definitions,
                 &self.projected_fields,
-            )
-            && !crate::query::document_projection::projections_use_tuple_xmin(
-                &self.projected_fields,
-                &self.column_definitions,
             )
     }
 
