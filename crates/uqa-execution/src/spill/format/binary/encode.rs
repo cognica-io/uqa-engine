@@ -32,8 +32,9 @@ pub(crate) fn encode_physical_row_record(
         .try_reserve_exact(bytes)
         .map_err(|error| spill_error(format!("cannot allocate spill row record: {error}")))?;
     write_u64(&mut record, physical_width)?;
+    let mut values = row.values();
     for slot in 0..physical_width {
-        let value = row.value(slot).ok_or_else(|| {
+        let value = values.next().flatten().ok_or_else(|| {
             spill_error(format!(
                 "physical row is missing slot {slot} of {physical_width}"
             ))
@@ -503,8 +504,9 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
     write_u64(writer, batch.rows.len())?;
     for row in &batch.rows {
         write_u64(writer, batch.schema.physical_width())?;
+        let mut values = row.values();
         for slot in 0..batch.schema.physical_width() {
-            let value = row.value(slot).ok_or_else(|| {
+            let value = values.next().flatten().ok_or_else(|| {
                 spill_error(format!(
                     "physical row is missing slot {slot} of {}",
                     batch.schema.physical_width()
@@ -797,6 +799,9 @@ pub(super) fn write_raw(
         .write_all(value)
         .map_err(|error| spill_error(format!("failed to write spill {description}: {error}")))
 }
+
+#[cfg(test)]
+mod traversal_tests;
 
 #[cfg(test)]
 mod tests {

@@ -21568,6 +21568,45 @@
       ]
     },
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fragmented_record_encoding_traverses_fragments_linearly",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/format/binary/encode/traversal_tests.rs",
+      "capability": "Linear fragmented-row spill encoding",
+      "workload": "Single-row spill records with 16, 128 and 512 one-value fragments and independently assembled integer bytes.",
+      "invariant": "Sizing plus encoding uses at most four fragment-width reads per slot and preserves exact bytes without materializing values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fragmented_batch_encoding_traverses_fragments_linearly",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/format/binary/encode/traversal_tests.rs",
+      "capability": "Linear fragmented-row spill encoding",
+      "workload": "One-row spill batches with 16, 128 and 512 fragments, exact encoded row bytes and decoded schema/values.",
+      "invariant": "Sizing plus encoding uses at most four fragment-width reads per slot; record length, schema and ordered values remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fragmented_encoding_preserves_projection_and_record_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/format/binary/encode/traversal_tests.rs",
+      "capability": "Linear fragmented-row spill encoding",
+      "workload": "Reordered and duplicated shared slots, NULL extension, appended values, lock origins, nullary rows and missing physical slots.",
+      "invariant": "Record and batch serialization preserve slot values, zero-width multiplicity, origins and missing-slot diagnostics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "metadata_selection_preserves_writes_without_loading_rejected_spill_values",
