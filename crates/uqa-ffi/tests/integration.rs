@@ -15,6 +15,9 @@ mod copy;
 #[path = "cases/cursors.rs"]
 mod cursors;
 
+#[path = "cases/dense_values.rs"]
+mod dense_values;
+
 #[path = "cases/native.rs"]
 mod native;
 

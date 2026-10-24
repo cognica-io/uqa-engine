@@ -171,3 +171,78 @@ fn casts_reject_quota_before_large_destinations_and_release_partial_arrays() {
     assert_eq!(error.sqlstate(), Some("57014"));
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn dense_casts_share_assignment_dimensions_finite_values_and_admission() {
+    let budget = MemoryBudget::new(65536);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let row = vec![Value::Float(-0.0), Value::Float(f64::from(f32::MAX))];
+    let vector = Value::Array(ArrayValue::try_new(row.clone()).unwrap());
+    let tensor = Value::Array(ArrayValue::try_new(vec![Value::List(row)]).unwrap());
+    for (value, target, ty) in [
+        (&vector, "vector(2)", crate::ColumnType::Vector(2)),
+        (&tensor, "tensor(2)", crate::ColumnType::Tensor(2)),
+        (
+            &Value::List(vec![]),
+            "tensor(2)",
+            crate::ColumnType::Tensor(2),
+        ),
+    ] {
+        let result = cast_value_from_with_control(value, target, None, &control).unwrap();
+        let assigned = crate::assignment::conversion::convert_value_to_column_type_with_control(
+            control.copy_value(value).unwrap(),
+            &ty,
+            &control,
+        )
+        .unwrap();
+        assert_eq!(*result, *assigned);
+        assert_eq!(
+            budget.used(),
+            result.reserved_bytes() + assigned.reserved_bytes()
+        );
+    }
+    assert_eq!(budget.used(), 0);
+    let converted =
+        cast_value_from_with_control(&vector, "pg_catalog.\"vector\"(2)", None, &control).unwrap();
+    let Value::List(values) = &*converted else {
+        panic!("dense list");
+    };
+    let Value::Float(zero) = values[0] else {
+        panic!("float32 element");
+    };
+    assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
+    drop(converted);
+    for (value, target) in [
+        (&vector, "vector(1)"),
+        (&tensor, "tensor(1)"),
+        (&vector, "tensor(2)"),
+        (&tensor, "vector(2)"),
+        (&Value::List(vec![Value::Null]), "vector(1)"),
+        (&Value::List(vec![Value::Float(f64::INFINITY)]), "vector(1)"),
+    ] {
+        assert!(cast_value_from_with_control(value, target, None, &control).is_err());
+        assert_eq!(budget.used(), 0);
+    }
+    let held = control.copy_text(&"x".repeat(65536)).unwrap();
+    assert_eq!(
+        cast_value_from_with_control(&vector, "vector(2)", None, &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(budget.used(), held.reserved_bytes());
+    drop(held);
+    for token in [&original, &invoking] {
+        token.cancel();
+        assert_eq!(
+            cast_value_from_with_control(&Value::List(vec![]), "tensor(2)", None, &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("57014")
+        );
+        token.reset();
+    }
+    assert_eq!(budget.used(), 0);
+}

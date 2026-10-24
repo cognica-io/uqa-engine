@@ -18,9 +18,11 @@ mod input;
 pub use input::create_typed_parameter_with_control;
 mod binding;
 mod packed;
+mod tensor;
 pub use binding::{
     bind_declared_parameter_types, bind_parameter_type_with_control, bind_parameter_types,
 };
+pub use tensor::SQLTensor;
 
 /// Value bound to a `$N` placeholder.
 #[derive(Debug, Clone)]
@@ -40,6 +42,8 @@ pub enum SQLParam {
     },
     Vector(Vec<f32>),
     Tensor(Vec<Vec<f32>>),
+    /// A validated packed tensor whose declared dimension survives an empty row set.
+    TypedTensor(SQLTensor),
 }
 
 impl SQLParam {
@@ -57,7 +61,10 @@ impl SQLParam {
     pub fn scalar_value(&self) -> Option<&Value> {
         match self {
             Self::Scalar(value) | Self::TypedScalar { value, .. } => Some(value),
-            Self::Vector(_) | Self::Tensor(_) | Self::DeferredError { .. } => None,
+            Self::Vector(_)
+            | Self::Tensor(_)
+            | Self::TypedTensor(_)
+            | Self::DeferredError { .. } => None,
         }
     }
 
@@ -66,7 +73,7 @@ impl SQLParam {
     pub fn declared_scalar_type(&self) -> Option<&ColumnType> {
         match self {
             Self::TypedScalar { ty, .. } | Self::DeferredError { ty, .. } => Some(ty),
-            Self::Scalar(_) | Self::Vector(_) | Self::Tensor(_) => None,
+            Self::Scalar(_) | Self::Vector(_) | Self::Tensor(_) | Self::TypedTensor(_) => None,
         }
     }
 
@@ -95,6 +102,7 @@ impl SQLParam {
                 let (values, memory) = output.finish()?.into_parts();
                 Ok(control.finish(Value::List(values), memory)?)
             }
+            Self::TypedTensor(tensor) => tensor.to_value_with_control(control),
         }
     }
 

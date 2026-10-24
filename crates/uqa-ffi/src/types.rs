@@ -116,6 +116,16 @@ ffi_fn!(uqa_type_get_numeric_precision(ty: *const UQAType, out: *mut u32) {
         _ => Ok(UQA_DONE),
     }
 });
+ffi_fn!(uqa_type_get_dimensions(ty: *const UQAType, out: *mut u32) {
+    let out = boundary::output(out)?;
+    match &boundary::input(ty)?.0 {
+        ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions) => {
+            *out = *dimensions;
+            Ok(UQA_OK)
+        }
+        _ => Ok(UQA_DONE),
+    }
+});
 ffi_fn!(uqa_type_get_numeric_scale(ty: *const UQAType, out: *mut i32) {
     let out = boundary::output(out)?;
     match &boundary::input(ty)?.0 {

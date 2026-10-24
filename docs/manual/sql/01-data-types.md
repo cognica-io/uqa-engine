@@ -355,7 +355,7 @@ CREATE TABLE embeddings (
 );
 ```
 
-A vector input must contain exactly `n` finite numeric values. A tensor contains zero or more vectors, each with exactly `n` finite values. KNN uses cosine similarity, and tensor matching assigns the row its best element score.
+A vector input must contain exactly `n` finite numeric values. A tensor contains zero or more vectors, each with exactly `n` finite values. Explicit casts from numeric arrays and column assignment share float32 conversion and dimension checks; a tensor uses a two-dimensional input array or an empty array. KNN uses cosine similarity, and tensor matching assigns the row its best element score.
 
 Only one physical IVF or HNSW index may own a vector column at a time. Brute force remains available when no physical vector index exists.
 

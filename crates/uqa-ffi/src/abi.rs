@@ -189,6 +189,40 @@ pub struct UQABitsView {
     pub bit_length: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct UQAVectorView {
+    pub data: *const f32,
+    pub dimensions: u32,
+}
+
+impl Default for UQAVectorView {
+    fn default() -> Self {
+        Self {
+            data: std::ptr::null(),
+            dimensions: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct UQATensorView {
+    pub data: *const f32,
+    pub row_count: u64,
+    pub dimensions: u32,
+}
+
+impl Default for UQATensorView {
+    fn default() -> Self {
+        Self {
+            data: std::ptr::null(),
+            row_count: 0,
+            dimensions: 0,
+        }
+    }
+}
+
 impl Default for UQABitsView {
     fn default() -> Self {
         Self {

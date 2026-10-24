@@ -98,6 +98,19 @@ pub fn cast_value_from_with_control(
         let target = crate::ColumnType::from_sql_name_with_control(ty, control)?;
         return bit_string::cast(v, &target, source_ty, control);
     }
+    if matches!(target, "vector" | "tensor") {
+        return match &*crate::ColumnType::from_sql_name_with_control(ty, control)? {
+            crate::ColumnType::Vector(dimensions) => {
+                crate::assignment::conversion::convert_vector_with_control(v, *dimensions, control)
+            }
+            crate::ColumnType::Tensor(dimensions) => {
+                crate::assignment::conversion::convert_tensor_with_control(v, *dimensions, control)
+            }
+            _ => Err(SQLError::Internal(
+                "resolved dense cast has no dimension".into(),
+            )),
+        };
+    }
     if let Value::BitString(value) = v {
         let integer_target = match target {
             "integer" | "int" | "int4" => Some("integer"),

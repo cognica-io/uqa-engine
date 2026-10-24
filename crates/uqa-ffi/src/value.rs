@@ -31,6 +31,8 @@ mod input;
 pub use input::*;
 mod packed;
 pub use packed::*;
+mod dense;
+pub use dense::*;
 
 enum ValueSource {
     Owned(Produced<SQLParam>),
@@ -46,6 +48,8 @@ pub struct UQAValue {
     decoded: OnceLock<Produced<Value>>,
     numeric_text: OnceLock<Produced<String>>,
     uuid_bytes: OnceLock<[u8; 16]>,
+    vector_data: OnceLock<Produced<Vec<f32>>>,
+    tensor_data: OnceLock<Produced<uqa_sql::params::SQLTensor>>,
     parameter_type: Option<ColumnType>,
     pub(crate) session: Option<Arc<Session>>,
     _memory: Option<MemoryReservation>,
@@ -66,6 +70,8 @@ impl UQAValue {
             decoded: OnceLock::new(),
             numeric_text: OnceLock::new(),
             uuid_bytes: OnceLock::new(),
+            vector_data: OnceLock::new(),
+            tensor_data: OnceLock::new(),
             parameter_type: None,
             session: Some(Arc::clone(session)),
             _memory: Some(memory),
@@ -77,6 +83,7 @@ impl UQAValue {
         session: Option<Arc<Session>>,
     ) -> boundary::Result<Box<Self>> {
         let parameter_type = match &*value {
+            SQLParam::TypedTensor(tensor) => Some(ColumnType::Tensor(tensor.dimensions())),
             SQLParam::Vector(values) => {
                 Some(ColumnType::Vector(u32::try_from(values.len()).map_err(
                     |_| UQAError::new(UQA_ERROR_RANGE, "vector dimensions exceed the SQL range"),
@@ -93,6 +100,8 @@ impl UQAValue {
             decoded: OnceLock::new(),
             numeric_text: OnceLock::new(),
             uuid_bytes: OnceLock::new(),
+            vector_data: OnceLock::new(),
+            tensor_data: OnceLock::new(),
             parameter_type,
             session,
             _memory: memory,
@@ -209,6 +218,8 @@ impl UQAValue {
             ScalarAccess::Uuid => matches!(ty, ColumnType::Uuid),
             ScalarAccess::Bit => matches!(ty, ColumnType::Bit(_)),
             ScalarAccess::VarBit => matches!(ty, ColumnType::VarBit(_)),
+            ScalarAccess::Vector => matches!(ty, ColumnType::Vector(_)),
+            ScalarAccess::Tensor => matches!(ty, ColumnType::Tensor(_)),
         };
         if accepted {
             Ok(())
@@ -247,6 +258,10 @@ impl UQAValue {
                     return Err(UQAError::state(
                         "internal deferred parameter is not a C value",
                     ))
+                }
+                SQLParam::TypedTensor(tensor) => {
+                    let (tensor, memory) = tensor.copy_with_control(control)?.into_parts();
+                    return Ok(control.finish(SQLParam::TypedTensor(tensor), memory)?);
                 }
                 SQLParam::Scalar(_) | SQLParam::TypedScalar { .. } => {}
             }
@@ -414,6 +429,8 @@ enum ScalarAccess {
     Uuid,
     Bit,
     VarBit,
+    Vector,
+    Tensor,
 }
 
 macro_rules! scalar_getter {

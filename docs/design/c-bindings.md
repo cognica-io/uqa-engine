@@ -496,6 +496,8 @@ UQA_API uqa_status UQA_CALL uqa_type_get_oid(
     uqa_type type, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_modifier(
     uqa_type type, int32_t *out);
+UQA_API uqa_status UQA_CALL uqa_type_get_dimensions(
+    uqa_type type, uint32_t *out);
 ```
 
 `uqa_result_create` allocates an unpopulated result wrapper without executing SQL. `uqa_engine_execute*`, `uqa_statement_execute`, `uqa_cursor_fetch`, and `uqa_batch_result_take` populate that wrapper without allocating a second public result handle. A successful refill releases the previous contents and its session lease after the replacement is ready. Retain both old and replacement reservations during that transition.
@@ -539,6 +541,9 @@ UQA_API uqa_status UQA_CALL uqa_value_create_jsonb(
 UQA_API uqa_status UQA_CALL uqa_value_create_vector_f32(
     const float *data, size_t dimensions,
     uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_tensor_f32(
+    const float *data, uint64_t row_count, uint32_t dimensions,
+    uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_copy(
     uqa_value_view value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_is_null(
@@ -561,6 +566,21 @@ UQA_API uqa_status UQA_CALL uqa_value_get_json(
     uqa_value_view value, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_jsonb(
     uqa_value_view value, uqa_string_view *out);
+typedef struct uqa_vector_view {
+    const float *data;
+    uint32_t dimensions;
+} uqa_vector_view;
+
+typedef struct uqa_tensor_view {
+    const float *data;
+    uint64_t row_count;
+    uint32_t dimensions;
+} uqa_tensor_view;
+
+UQA_API uqa_status UQA_CALL uqa_value_get_vector_f32(
+    uqa_value_view value, uqa_vector_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_tensor_f32(
+    uqa_value_view value, uqa_tensor_view *out);
 UQA_API uqa_status UQA_CALL uqa_buffer_create(uqa_buffer *out);
 UQA_API uqa_status UQA_CALL uqa_value_format_sql(
     uqa_value_view value, uqa_buffer buffer);
@@ -570,6 +590,10 @@ UQA_API uqa_status UQA_CALL uqa_buffer_get_bytes(uqa_buffer buffer, uqa_bytes_vi
 Owned values and borrowed value views are immutable after construction. Scalar constructors retain their explicit SQL type through `SQLParam::TypedScalar`, so INT16/32/64 select their own SQL overloads and overflow rules, FLOAT32 remains REAL, and TEXT remains a typed text parameter. Typed getters do not hide conversions: INT16 widens to int32/int64, INT32 widens to int64, and FLOAT32 widens to double; wider declared types cannot use narrower getters even when a particular value would fit. FLOAT, NUMERIC, and TEXT are not implicitly converted to integers. SQL casts use the SQL owner. A typed getter on NULL returns `UQA_ERROR_NULL`; an incompatible getter returns `UQA_ERROR_TYPE`; index or representation bounds return `UQA_ERROR_RANGE`. `uqa_value_get_is_null` inspects nullness without reading a typed payload and returns `UQA_OK` with a 0/1 output. Native decoding failures retain SQL diagnostics.
 
 `uqa_value_get_type` returns a descriptor borrowed from the value and with the same lifetime. `uqa_value_create_null` creates an untyped NULL, whose type getter returns `UQA_DONE` with a NULL descriptor. Copying a typed result NULL preserves its existing descriptor without reading a payload. Owned vector parameters retain their dimension descriptor; vector input passes through SQL's `SQLParam::vector_with_control`, which validates the positive 32-bit dimension and finite float32 elements before retaining the copied input.
+
+`uqa_value_create_tensor_f32` copies `row_count * dimensions` finite floats in row-major order. The dimension is positive even for an empty tensor; zero rows permit a NULL data pointer. Checked shape arithmetic rejects an unaddressable span before reading it. SQL's packed `SQLTensor` parameter retains the declared dimension independently of the row count, including through copies, preparation and cursor binding. `uqa_type_get_dimensions` returns VECTOR/TENSOR dimensions, or `UQA_DONE` with zero for other types; a domain exposes this through its base descriptor.
+
+`uqa_value_get_vector_f32` and `uqa_value_get_tensor_f32` return borrowed packed float32 storage with the source value's lifetime. An empty tensor has NULL data, zero rows and its positive declared dimension. SQL arrays are distinct types and cannot use these getters. Domain values use their underlying dense type. Typed NULL returns `UQA_ERROR_NULL` and clears the output. Observation uses the native finite-value and dimension conversion under the source's FFI allowance, publishes a stable cache only after success and preserves the source on failure; releasing other retained values permits another attempt. Explicit SQL casts and assignment share the same native conversion.
 
 `uqa_value_create_typed_null` resolves a native SQL type declaration, including modifiers, and validates NULL against that type. `uqa_value_create_from_text` reads UTF-8 text using the same explicit conversion as an unknown SQL input cast to that declaration. Both have `_n` variants; a NULL text pointer is invalid and does not represent SQL NULL. The SQL owner resolves catalog identities and applies input conversion, array bounds, enum labels, composite input, range canonicalization and inherited domain constraints. Type USAGE applies to object declarations and does not add an authorization requirement to these value casts. Session settings and the native input functions' own privileges still apply.
 

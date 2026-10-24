@@ -47,6 +47,11 @@ impl PySQLParam {
             }
             SQLParam::Vector(values) => format!("SQLParam.vector(len={})", values.len()),
             SQLParam::Tensor(values) => format!("SQLParam.tensor(rows={})", values.len()),
+            SQLParam::TypedTensor(value) => format!(
+                "SQLParam.tensor(rows={}, dimensions={})",
+                value.row_count(),
+                value.dimensions()
+            ),
             SQLParam::DeferredError { .. } => "SQLParam.invalid()".into(),
         }
     }

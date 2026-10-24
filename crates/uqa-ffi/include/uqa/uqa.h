@@ -55,6 +55,17 @@ typedef struct uqa_bits_view {
     uint32_t bit_length;
 } uqa_bits_view;
 
+typedef struct uqa_vector_view {
+    const float *data;
+    uint32_t dimensions;
+} uqa_vector_view;
+
+typedef struct uqa_tensor_view {
+    const float *data;
+    uint64_t row_count;
+    uint32_t dimensions;
+} uqa_tensor_view;
+
 /* Native encrypted compressed SQLite container identity and exact state.
  * Persist the fields in an external trusted store; this struct is not a wire
  * format. A copied anchor owns no allocation and needs no destruction. */
@@ -342,6 +353,7 @@ UQA_API uqa_status UQA_CALL uqa_type_get_modifier(
     uqa_type type, int32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_numeric_precision(uqa_type type, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_numeric_scale(uqa_type type, int32_t *out);
+UQA_API uqa_status UQA_CALL uqa_type_get_dimensions(uqa_type type, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_name(uqa_type type, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_schema(uqa_type type, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_base_type(uqa_type type, uqa_type *out);
@@ -406,6 +418,12 @@ UQA_API uqa_status UQA_CALL uqa_value_create_varbit(
 UQA_API uqa_status UQA_CALL uqa_value_create_vector_f32(
     const float *data, size_t dimensions,
     uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_tensor_f32(
+    const float *data, uint64_t row_count, uint32_t dimensions, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_vector_f32(
+    uqa_value_view value, uqa_vector_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_tensor_f32(
+    uqa_value_view value, uqa_tensor_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_copy(
     uqa_value_view value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_is_null(

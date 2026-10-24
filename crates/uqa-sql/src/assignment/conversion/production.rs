@@ -254,29 +254,42 @@ pub fn convert_value_to_column_type_with_control(
         ColumnType::Multirange(subtype) => {
             cast_value_from_with_control(&value, subtype.multirange_name(), None, control)
         }
-        ColumnType::Vector(dimensions) => {
-            let vector = value_to_vector_with_control(&value, control)?;
-            validate_vector_dimensions(*dimensions, vector.len())?;
-            vector_value(&vector, control)
-        }
-        ColumnType::Tensor(dimensions) => {
-            let tensor = value_to_tensor_with_control(&value, control)?;
-            for vector in &*tensor {
-                control.check()?;
-                validate_vector_dimensions(*dimensions, vector.len())?;
-            }
-            let mut output = ProductionVec::new(*control);
-            output.reserve(tensor.len())?;
-            for vector in &*tensor {
-                output.push_produced(vector_value(vector, control)?)?;
-            }
-            let (values, memory) = output.finish()?.into_parts();
-            Ok(control.finish(Value::List(values), memory)?)
-        }
+        ColumnType::Vector(dimensions) => convert_vector_with_control(&value, *dimensions, control),
+        ColumnType::Tensor(dimensions) => convert_tensor_with_control(&value, *dimensions, control),
         ColumnType::Domain { base, .. } => {
             convert_value_to_column_type_with_control(value, base, control)
         }
     }
+}
+
+/// Assignment and explicit casts share the finite float32 conversion and declared dimension check.
+pub(crate) fn convert_vector_with_control(
+    value: &Value,
+    dimensions: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let vector = value_to_vector_with_control(value, control)?;
+    validate_vector_dimensions(dimensions, vector.len())?;
+    vector_value(&vector, control)
+}
+
+pub(crate) fn convert_tensor_with_control(
+    value: &Value,
+    dimensions: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let tensor = value_to_tensor_with_control(value, control)?;
+    for vector in &*tensor {
+        control.check()?;
+        validate_vector_dimensions(dimensions, vector.len())?;
+    }
+    let mut output = ProductionVec::new(*control);
+    output.reserve(tensor.len())?;
+    for vector in &*tensor {
+        output.push_produced(vector_value(vector, control)?)?;
+    }
+    let (values, memory) = output.finish()?.into_parts();
+    Ok(control.finish(Value::List(values), memory)?)
 }
 
 fn numeric_value(

@@ -287,6 +287,7 @@ fn convert_catalog_array_elements(
 }
 
 mod production;
+pub(crate) use production::{convert_tensor_with_control, convert_vector_with_control};
 pub use production::{
     convert_value_to_column_type_from_with_control, convert_value_to_column_type_with_control,
     numeric_field_overflow,

@@ -302,6 +302,7 @@ pub(super) fn parameter_type_with_control(
             return Ok(Some(ty.clone_with_control(control)?))
         }
         SQLParam::Vector(values) => u32::try_from(values.len()).ok().map(ColumnType::Vector),
+        SQLParam::TypedTensor(value) => Some(ColumnType::Tensor(value.dimensions())),
         SQLParam::Tensor(values) => values
             .first()
             .and_then(|values| u32::try_from(values.len()).ok())
