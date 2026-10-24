@@ -1,0 +1,78 @@
+{
+  "reference": {
+    "server": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "image": "uqa-pg18-oracle-python:18.4",
+    "captured": "2026-10-24",
+    "method": "Independent Docker PostgreSQL queries and psql gdesc; temporary input table only."
+  },
+  "cases": [
+    {
+      "sql": "SELECT (SELECT x FROM input) AS value GROUP BY GROUPING SETS ((value), (value))",
+      "csv": "7\n7\n",
+      "columns": [
+        [
+          "value",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 1 AS x) SELECT (SELECT x FROM input) AS value GROUP BY GROUPING SETS ((value), (value))",
+      "csv": "1\n1\n",
+      "columns": [
+        [
+          "value",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 'outer'::text AS x) SELECT (WITH input AS (SELECT 1 AS x) SELECT x FROM input) AS value GROUP BY GROUPING SETS ((value), (value))",
+      "csv": "1\n1\n",
+      "columns": [
+        [
+          "value",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 'outer'::text AS x) SELECT (SELECT x FROM input) AS value GROUP BY GROUPING SETS ((value), (value))",
+      "csv": "outer\nouter\n",
+      "columns": [
+        [
+          "value",
+          "text"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT (SELECT x FROM input) AS value GROUP BY GROUPING SETS ((value), (value)) HAVING missing_having > 0 ORDER BY missing_order",
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_having\" does not exist"
+      }
+    },
+    {
+      "sql": "SELECT (SELECT x FROM input) AS value GROUP BY GROUPING SETS ((value), (missing_group)) ORDER BY missing_order",
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_order\" does not exist"
+      }
+    },
+    {
+      "sql": "SELECT (SELECT x FROM input) AS value WHERE missing_where > 0 GROUP BY GROUPING SETS ((value), (value)) HAVING missing_having > 0",
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_where\" does not exist"
+      }
+    },
+    {
+      "sql": "SELECT (SELECT x FROM input) AS value GROUP BY GROUPING SETS ((value), (value)) ORDER BY missing_order",
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_order\" does not exist"
+      }
+    }
+  ]
+}

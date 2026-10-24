@@ -109,6 +109,11 @@ use crate::RowSchema;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+#[cfg(test)]
+thread_local! {
+    static SOURCE_BINDINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Clone, Copy)]
 enum ScalarBindingMode {
     References,
@@ -365,6 +370,8 @@ impl SchemaScope {
         params: &[SQLParam],
         scope: SourceScope<'_>,
     ) -> Result<RowSchema, SQLError> {
+        #[cfg(test)]
+        SOURCE_BINDINGS.with(|count| count.set(count.get() + 1));
         let input = (!matches!(source, SourcePlan::Join { .. }))
             .then(|| scope.input(source))
             .flatten();

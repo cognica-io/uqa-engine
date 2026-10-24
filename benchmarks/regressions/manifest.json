@@ -2,6 +2,75 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "repeated_grouping_references_bind_a_scalar_query_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "Repeated grouping-set references",
+      "workload": "One scalar-query alias used by 1, 8 and 64 grouping sets in one clause-validation scope.",
+      "invariant": "Bind the scalar source once regardless of repeated references; preserve the full reference and grouping checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_results_require_the_complete_outer_descriptor",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "Scoped scalar-query descriptions",
+      "workload": "Repeated integer input, text input, restored integer input and a changed relation qualifier.",
+      "invariant": "Only the identical complete outer schema reuses an output; changed types rebind and missing qualifiers still fail.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "clause_results_do_not_cross_parameters_or_cte_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "Scalar-query scope lifetime",
+      "workload": "Integer/text parameters and nested shadowing CTE declarations across independent analyses.",
+      "invariant": "Each invocation observes its own parameter and lexical CTE types; retained results do not survive the clause-validation call.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "clause_query_bindings_preserve_postgresql_descriptors_and_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "PostgreSQL clause diagnostics",
+      "workload": "Eight independently captured PostgreSQL 18.4 grouping-set, nested CTE and multiple-error statements.",
+      "invariant": "Preserve all output labels/types and the first SQLSTATE/message from the independent PostgreSQL reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "repeated_scalar_query_aliases_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_grouping_sets/names.rs",
+      "capability": "Public clause-query binding",
+      "workload": "Eight independent PostgreSQL result/diagnostic cases on memory, SQLite, SQLite Key/Value and redb, including persistent reopen.",
+      "invariant": "Preserve grouping multiplicities, CTE scope types, output labels and the first exact SQLSTATE/message on every provider and after reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "shared_scan_reuses_immutable_projection_classification",

@@ -19,6 +19,7 @@ pub(super) use functions::validate_window_function;
 pub(super) use query_sources::{with_projected_open_columns, with_query_source_columns};
 pub(super) use windows::references_local_column;
 
+use super::type_resolution::ValidatedSubqueries;
 use super::{QueryBlockPlan, QueryPlan, SQLError, SQLParam, ScalarExpr, SchemaScope};
 use crate::ast::{ColumnType, FunctionBinding};
 use crate::routines::RoutineResolution;
@@ -41,26 +42,22 @@ struct LimitArgument<'a> {
     /// The block's own columns over the enclosing scope.
     source: &'a RowSchema,
     enclosing: &'a RowSchema,
-    subqueries: &'a [QueryPlan],
 }
 
 struct AliasReferenceScope<'a> {
     primary: &'a RowSchema,
     fallback: &'a RowSchema,
     nested: &'a RowSchema,
-    subqueries: &'a [QueryPlan],
-    params: &'a [SQLParam],
 }
 
 impl SchemaScope {
     /// `DISTINCT ON` and `ORDER BY` items name an output column before a column of the block's source.
     fn validate_output_references(
         &mut self,
-        engine: &dyn RoutineResolution,
+        queries: &ValidatedSubqueries<'_, '_>,
         block: &QueryBlockPlan,
         output: &RowSchema,
         source: &RowSchema,
-        params: &[SQLParam],
     ) -> Result<(), SQLError> {
         for expression in block
             .distinct_on
@@ -68,14 +65,12 @@ impl SchemaScope {
             .chain(block.order_by.iter().map(|order| &order.expr))
         {
             self.validate_alias_reference(
-                engine,
+                queries,
                 expression,
                 AliasReferenceScope {
                     primary: output,
                     fallback: source,
                     nested: source,
-                    subqueries: &block.subqueries,
-                    params,
                 },
             )?;
         }
@@ -92,15 +87,9 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
+        let queries = ValidatedSubqueries::new(engine, &block.subqueries, params).retaining();
         if let Some(predicate) = block.r#where.as_ref() {
-            self.validate_condition_references(
-                engine,
-                predicate,
-                "WHERE",
-                source,
-                &block.subqueries,
-                params,
-            )?;
+            self.validate_condition_references(&queries, predicate, "WHERE", source)?;
         }
         for expression in block
             .group_by
@@ -115,26 +104,12 @@ impl SchemaScope {
                 outer,
                 params,
             )?;
-            self.validate_expression_references(
-                engine,
-                &expression,
-                source,
-                None,
-                &block.subqueries,
-                params,
-            )?;
+            self.validate_expression_references_with_queries(&queries, &expression, source, None)?;
         }
         if let Some(having) = block.having.as_ref() {
-            self.validate_condition_references(
-                engine,
-                having,
-                "HAVING",
-                source,
-                &block.subqueries,
-                params,
-            )?;
+            self.validate_condition_references(&queries, having, "HAVING", source)?;
         }
-        self.validate_output_references(engine, block, output, source, params)?;
+        self.validate_output_references(&queries, block, output, source)?;
         let enclosing = outer.cloned().unwrap_or_default();
         for (expression, construct) in block
             .limit
@@ -143,24 +118,20 @@ impl SchemaScope {
             .chain(block.offset.iter().map(|expression| (expression, "OFFSET")))
         {
             self.validate_limit_argument(
-                engine,
+                &queries,
                 LimitArgument {
                     expression,
                     construct,
                     source,
                     enclosing: &enclosing,
-                    subqueries: &block.subqueries,
                 },
-                params,
             )?;
         }
         self.validate_window_frames(
-            engine,
             block,
             &windows::WindowFrameScope {
                 source,
-                subqueries: &block.subqueries,
-                params,
+                queries: &queries,
             },
         )?;
         crate::semantics::grouping_sets::validate_grouped_expressions(
@@ -171,28 +142,23 @@ impl SchemaScope {
     /// Validate a LIMIT or OFFSET argument, which can name the columns of the enclosing queries and the parameters but no column of its own query level, as `checkExprIsVarFree` requires.
     fn validate_limit_argument(
         &mut self,
-        engine: &dyn RoutineResolution,
+        queries: &ValidatedSubqueries<'_, '_>,
         argument: LimitArgument<'_>,
-        params: &[SQLParam],
     ) -> Result<(), SQLError> {
-        let Err(error) = self.validate_expression_references(
-            engine,
+        let Err(error) = self.validate_expression_references_with_queries(
+            queries,
             argument.expression,
             argument.enclosing,
             None,
-            argument.subqueries,
-            params,
         ) else {
             return Ok(());
         };
         if self
-            .validate_expression_references(
-                engine,
+            .validate_expression_references_with_queries(
+                queries,
                 argument.expression,
                 argument.source,
                 None,
-                argument.subqueries,
-                params,
             )
             .is_ok()
         {
@@ -209,27 +175,23 @@ impl SchemaScope {
 
     fn validate_alias_reference(
         &mut self,
-        engine: &dyn RoutineResolution,
+        queries: &ValidatedSubqueries<'_, '_>,
         expression: &ScalarExpr,
         scope: AliasReferenceScope<'_>,
     ) -> Result<(), SQLError> {
         if matches!(expression, ScalarExpr::Column(_) | ScalarExpr::Position(_)) {
-            self.validate_expression_references(
-                engine,
+            self.validate_expression_references_with_queries(
+                queries,
                 expression,
                 scope.primary,
                 Some(scope.fallback),
-                scope.subqueries,
-                scope.params,
             )
         } else {
-            self.validate_expression_references(
-                engine,
+            self.validate_expression_references_with_queries(
+                queries,
                 expression,
                 scope.nested,
                 None,
-                scope.subqueries,
-                scope.params,
             )
         }
     }
@@ -243,17 +205,30 @@ impl SchemaScope {
         subqueries: &[QueryPlan],
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
-        let schema = self.with_stored_outer_internal_aliases(schema);
-        let schema = &schema;
-        let resolver =
-            self.query_function_type_resolver(engine, expression, schema, subqueries, params)?;
-        Self::validate_expression_references_with_resolver(
-            self.rule_condition_event,
-            engine,
+        self.validate_expression_references_with_queries(
+            &ValidatedSubqueries::new(engine, subqueries, params),
             expression,
             schema,
             fallback,
-            params,
+        )
+    }
+
+    fn validate_expression_references_with_queries(
+        &mut self,
+        queries: &ValidatedSubqueries<'_, '_>,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        fallback: Option<&RowSchema>,
+    ) -> Result<(), SQLError> {
+        let schema = self.with_stored_outer_internal_aliases(schema);
+        let resolver = queries.resolver(self, std::slice::from_ref(expression), &schema)?;
+        Self::validate_expression_references_with_resolver(
+            self.rule_condition_event,
+            queries.routines,
+            expression,
+            &schema,
+            fallback,
+            queries.params,
             &resolver,
         )
     }
@@ -286,33 +261,30 @@ impl SchemaScope {
     /// Reuse only successful subquery bindings from this condition's reference check. Its Boolean coercion still follows reference errors, and no result leaves this lexical scope.
     fn validate_condition_references(
         &mut self,
-        engine: &dyn RoutineResolution,
+        queries: &ValidatedSubqueries<'_, '_>,
         condition: &ScalarExpr,
         construct: &str,
         schema: &RowSchema,
-        subqueries: &[QueryPlan],
-        params: &[SQLParam],
     ) -> Result<(), SQLError> {
         let schema = self.with_stored_outer_internal_aliases(schema);
-        let resolver =
-            self.query_function_type_resolver(engine, condition, &schema, subqueries, params)?;
+        let resolver = queries.resolver(self, std::slice::from_ref(condition), &schema)?;
         Self::validate_expression_references_with_resolver(
             self.rule_condition_event,
-            engine,
+            queries.routines,
             condition,
             &schema,
             None,
-            params,
+            queries.params,
             &resolver,
         )?;
         super::preparation::condition_metadata(
             self,
-            engine,
+            queries.routines,
             condition,
             construct,
-            params,
+            queries.params,
             &super::type_resolution::BoundConditionQueries {
-                plans: subqueries,
+                plans: queries.plans,
                 input: &schema,
                 schemas: resolver.scalar_subquery_schemas.as_deref(),
             },
