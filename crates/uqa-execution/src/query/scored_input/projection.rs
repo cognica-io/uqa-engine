@@ -9,14 +9,32 @@
 use crate::ProjectedValueSlot;
 use uqa_sql::ast::ColumnDef;
 
-pub(super) fn requires_materialization(definitions: &[ColumnDef], fields: &[String]) -> bool {
+pub(super) struct ProjectionProperties {
+    pub(super) requires_materialization: bool,
+    pub(super) identity: bool,
+}
+
+impl ProjectionProperties {
+    pub(super) fn new(
+        definitions: &[ColumnDef],
+        fields: &[String],
+        slots: &[ProjectedValueSlot],
+    ) -> Self {
+        Self {
+            requires_materialization: requires_materialization(definitions, fields),
+            identity: is_identity(slots),
+        }
+    }
+}
+
+fn requires_materialization(definitions: &[ColumnDef], fields: &[String]) -> bool {
     #[cfg(test)]
     INSPECTIONS.with(|counts| counts.set((counts.get().0 + 1, counts.get().1)));
     crate::query::generated::projection_contains_virtual_generated_column(definitions, fields)
         || crate::query::document_projection::projections_use_tuple_xmin(fields, definitions)
 }
 
-pub(super) fn is_identity(slots: &[ProjectedValueSlot]) -> bool {
+fn is_identity(slots: &[ProjectedValueSlot]) -> bool {
     slots.iter().enumerate().all(|(expected, slot)| {
         #[cfg(test)]
         INSPECTIONS.with(|counts| counts.set((counts.get().0, counts.get().1 + 1)));

@@ -26,10 +26,7 @@ impl ScoredDocumentSource {
     ) -> ExecResult<Option<bool>> {
         if self.lock_origin.is_some()
             || self.recheck_pinned
-            || super::projection::requires_materialization(
-                &self.column_definitions,
-                &self.projected_fields,
-            )
+            || self.projection_properties.requires_materialization
         {
             return Ok(None);
         }
@@ -106,10 +103,7 @@ impl ScoredDocumentSource {
     ) -> ExecResult<Option<Vec<crate::PhysicalRow>>> {
         if self.lock_origin.is_some()
             || self.recheck_pinned
-            || super::projection::requires_materialization(
-                &self.column_definitions,
-                &self.projected_fields,
-            )
+            || self.projection_properties.requires_materialization
         {
             return Ok(None);
         }
@@ -190,7 +184,7 @@ impl ScoredDocumentSource {
         let source = crate::PhysicalRow::from_shared_values(values, projection);
         if self.appended_doc_id_attribute.is_none()
             && self.appended_score_attribute.is_none()
-            && super::projection::is_identity(&self.projected_slots)
+            && self.projection_properties.identity
         {
             return Ok(source);
         }
@@ -330,10 +324,7 @@ impl ScoredDocumentSource {
         }
         let doc_ids = entries.iter().map(|entry| entry.doc_id).collect::<Vec<_>>();
         let store = self.table.read_documents();
-        if super::projection::requires_materialization(
-            &self.column_definitions,
-            &self.projected_fields,
-        ) {
+        if self.projection_properties.requires_materialization {
             let mut documents =
                 store
                     .get_stored_many(&doc_ids)
