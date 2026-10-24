@@ -945,7 +945,12 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
     let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
         None => execute_read(context),
-    }?;
-    statement_end::finish_statement(context, params, &stmt.ctes, statement_scope.as_mut())?;
-    Ok(result)
+    };
+    statement_end::finish_statement(
+        context,
+        params,
+        &stmt.ctes,
+        statement_scope.as_mut(),
+        result,
+    )
 }

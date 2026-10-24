@@ -72,6 +72,20 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
             running_statement = Some(crate::mutation::statement_end::enter_statement(statement));
         }
     }
+    let result = ctes.with_cte_producers(!plan.ctes.is_empty(), |ctes| {
+        execute_prepared_query_output(context, plan, params, ctes, output_mode)
+    });
+    drop(running_statement);
+    result
+}
+
+fn execute_prepared_query_output<S: Clone + Send + Sync + 'static>(
+    context: &QueryContext<'_, S>,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+    output_mode: QueryOutputMode<S>,
+) -> Result<QueryOutput, SQLError> {
     let mut relation_lookup = ctes.enter_relation_lookup_mode(plan.relations_bound)?;
     let mut visible_ctes =
         relation_lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
@@ -105,7 +119,6 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
                 .fire_after_triggers(commands.after_triggers())?;
         }
     }
-    drop(running_statement);
     Ok(output)
 }
 fn execute_query_root<S: Clone + Send + Sync + 'static>(

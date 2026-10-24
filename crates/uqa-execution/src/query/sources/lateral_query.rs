@@ -54,6 +54,19 @@ fn execute_lateral_subquery_output_inner<S: Clone + Send + Sync + 'static>(
 ) -> Result<QueryOutput, SQLError> {
     let mut scoped_ctes = ctes.clone();
     scoped_ctes.set_row_lock_outer_row(outer_row.clone());
+    scoped_ctes.with_cte_producers(!plan.ctes.is_empty(), |scoped_ctes| {
+        execute_lateral_query_scope(context, plan, outer_row, params, scoped_ctes, output_mode)
+    })
+}
+
+fn execute_lateral_query_scope<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    plan: &QueryPlan,
+    outer_row: &crate::OwnedPhysicalRow,
+    params: &[SQLParam],
+    scoped_ctes: &mut CteScope<S>,
+    output_mode: QueryOutputMode<'_>,
+) -> Result<QueryOutput, SQLError> {
     let mut lookup = scoped_ctes.enter_relation_lookup_mode(plan.relations_bound)?;
     let mut scoped_ctes = lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     // Keep folded occurrences selected during initialization instead of materializing their original, unpruned definitions for each outer row.

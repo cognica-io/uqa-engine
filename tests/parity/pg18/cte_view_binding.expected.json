@@ -1,0 +1,32 @@
+{
+  "reference": "PostgreSQL",
+  "version": "18.4",
+  "image_id": "sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15",
+  "setup": "BEGIN;\nCREATE TEMP TABLE cte_scope_target(n integer);\nINSERT INTO cte_scope_target VALUES (10),(11);\nCREATE TEMP VIEW cte_scope_view AS SELECT * FROM cte_scope_target;\nCREATE TEMP VIEW cte_scope_alias AS SELECT n AS alias_n FROM cte_scope_target;\nCREATE FUNCTION pg_temp.host_rows(integer) RETURNS TABLE(n integer) LANGUAGE sql VOLATILE AS 'SELECT generate_series(0, $1 - 1)';\nSAVEPOINT probe;\n",
+  "cases": [
+    {
+      "name": "local_update",
+      "query": "WITH c AS MATERIALIZED (SELECT * FROM pg_temp.host_rows(100)) UPDATE cte_scope_view SET n = (SELECT 1/n FROM c LIMIT 1) RETURNING n",
+      "returning": [],
+      "sqlstate": "22012",
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "local_delete",
+      "query": "WITH c AS MATERIALIZED (SELECT * FROM pg_temp.host_rows(100)) DELETE FROM cte_scope_view WHERE n > (SELECT 1/n FROM c LIMIT 1) RETURNING n",
+      "returning": [],
+      "sqlstate": "22012",
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "outer_alias",
+      "query": "WITH c AS MATERIALIZED (SELECT * FROM pg_temp.host_rows(100)) UPDATE cte_scope_alias SET alias_n = (SELECT alias_n FROM c LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "10",
+        "11"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    }
+  ]
+}

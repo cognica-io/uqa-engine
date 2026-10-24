@@ -40,6 +40,17 @@ pub fn try_build_retained_query_operator<'a, S: Clone + Send + Sync + 'static>(
         crate::query::sources::prepared_queries::prepare(&context.source, plan, params, &scope)?;
     let plan = prepared.as_ref();
     crate::query::privileges::routine_calls::query(&context.source, plan, params, &scope)?;
+    scope.retain_cte_producers(!plan.ctes.is_empty(), |scope| {
+        build_retained_root(context, plan, params, scope)
+    })
+}
+
+fn build_retained_root<'a, S: Clone + Send + Sync + 'static>(
+    context: &QueryContext<'a, S>,
+    plan: &QueryPlan,
+    params: &'a [SQLParam],
+    scope: &mut CteScope<S>,
+) -> Result<Option<Box<dyn PhysicalOperator + 'a>>, SQLError> {
     let mut scope = scope.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     if !plan.ctes.is_empty() {
         let scheduled = schedule_plan_ctes(context.source.volatility, plan)?;

@@ -19,6 +19,7 @@ use uqa_sql::SQLError;
 
 mod cte;
 mod definitions;
+mod producers;
 #[cfg(test)]
 mod retained_plans;
 mod row_locks;
@@ -31,6 +32,7 @@ use subqueries::ScalarSubqueryCacheEntry;
 
 #[derive(Clone)]
 pub struct CteScope<S: Clone = ()> {
+    producers: producers::CteProducers,
     pub rows: BTreeMap<String, crate::query::cte::rows::CteRows>,
     deferred_ctes: BTreeMap<String, Arc<CtePlan>>,
     definition_scopes: BTreeMap<String, Arc<definitions::DefinitionBindings>>,
@@ -60,6 +62,7 @@ pub struct CteScope<S: Clone = ()> {
 impl<S: Clone> Default for CteScope<S> {
     fn default() -> Self {
         Self {
+            producers: producers::CteProducers::default(),
             rows: BTreeMap::new(),
             deferred_ctes: BTreeMap::new(),
             definition_scopes: BTreeMap::new(),

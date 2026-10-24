@@ -7,6 +7,9 @@
 use super::*;
 use uqa_engine::SQLRowSource;
 
+#[path = "stream_cleanup/cte.rs"]
+mod cte;
+
 #[derive(Default)]
 struct Counts {
     created: AtomicUsize,

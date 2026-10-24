@@ -195,10 +195,11 @@ fn install_read_only_prefix<S: Clone>(
             let operator = Box::new(
                 crate::ColumnSelection::with_positions(operator, columns).discarding_lock_origins(),
             );
-            ctes.insert_rows(
-                plan.name.clone(),
-                rows::CteRows::from_producer(operator, context.runtime.work_mem_bytes()?),
-            );
+            let (operator, budget) =
+                crate::physical::construction::OperatorBuild::run(operator, |_| {
+                    context.runtime.work_mem_bytes()
+                })?;
+            ctes.insert_producer(plan.name.clone(), operator, budget)?;
             return Ok(true);
         }
     }
