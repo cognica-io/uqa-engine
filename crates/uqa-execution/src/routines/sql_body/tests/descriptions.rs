@@ -5,7 +5,7 @@
 //
 
 use super::definition;
-use crate::routines::sql_body::{body_parameters, SQLBodyDescriptions};
+use crate::routines::{descriptions::RoutineBodyDescriptions, sql_body::body_parameters};
 use std::{cell::Cell, sync::Arc};
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
@@ -111,7 +111,7 @@ fn repeated_sql_body_inputs_keep_all_parameter_positions_and_current_values() {
                 &control,
             )
             .unwrap();
-        let descriptions = retain.then(|| SQLBodyDescriptions {
+        let descriptions = retain.then(|| RoutineBodyDescriptions {
             description: state.get(&binding, &scope).unwrap(),
             environment: RoutineConversionEnvironment {
                 values: &inputs,

@@ -164,6 +164,8 @@ fn identity_declarations_keep_their_options_until_the_sequence_is_created() {
             Some(crate::ast::DeferredSQLError {
                 sqlstate: "42601".into(),
                 message: "conflicting or redundant options".into(),
+                detail: None,
+                hint: None,
             }),
             "{sql}"
         );

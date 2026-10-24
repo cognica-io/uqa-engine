@@ -44,6 +44,16 @@ impl ResolvedVariable {
 /// Resolves routine variables while a compiled expression / statement
 /// is being specialized for one execution.
 pub trait VariableResolver {
+    /// Read a prepared variable with its selected concrete type. Existing resolvers
+    /// retain textual resolution; typed activation records can preserve their
+    /// descriptor without spelling and resolving it again.
+    fn resolve_parameter(
+        &mut self,
+        reference: &super::PLpgSQLVariableReference,
+    ) -> Result<Option<crate::SQLParam>> {
+        super::parameters::resolve_parameter(reference, self)
+    }
+
     /// Concrete parameter metadata for a declared datum; catalog implementations
     /// preserve user-type identity instead of inferring from a carrier value.
     fn parameter_type(&self, name: &str) -> Option<crate::ColumnType> {

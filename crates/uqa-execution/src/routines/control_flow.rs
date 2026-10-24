@@ -7,10 +7,9 @@
 //! Loop and return control-flow execution.
 
 use super::{
-    canonical_routine_type_name, coerce_routine_value, result_row_values, to_i64_value,
-    value_type_name, ArrayValue, ColumnType, Flow, FunctionReturns, Interpreter, LoopSignal,
-    PLpgSQLDatum, PLpgSQLExpression, PLpgSQLReturnValue, PLpgSQLStmt, RoutineContext, SQLError,
-    SQLResult, Value,
+    canonical_routine_type_name, result_row_values, to_i64_value, value_type_name, ArrayValue,
+    ColumnType, Flow, FunctionReturns, Interpreter, LoopSignal, PLpgSQLDatum, PLpgSQLExpression,
+    PLpgSQLReturnValue, PLpgSQLStmt, RoutineContext, SQLError, SQLResult, Value,
 };
 
 impl Interpreter<'_> {
@@ -240,12 +239,9 @@ impl Interpreter<'_> {
             let value = self.eval_return_value(value)?;
             self.validate_record_return(&value, self.ret_record_types.as_deref())?;
             self.ret = match &self.def.returns {
-                FunctionReturns::Scalar { type_name } => super::coerce_routine_value_from(
-                    self.services.expressions,
-                    &value,
-                    type_name,
-                    source.as_ref(),
-                )?,
+                FunctionReturns::Scalar { type_name } => {
+                    self.coerce_return(type_name, &value, source.as_ref())?
+                }
                 _ => value,
             };
             return Ok(Flow::Return);
@@ -307,9 +303,7 @@ impl Interpreter<'_> {
         let value = self.eval_return_value(value)?;
         self.validate_record_return(&value, types.as_deref())?;
         let value = match &self.def.returns {
-            FunctionReturns::SetOf { type_name } => {
-                coerce_routine_value(self.services.expressions, &value, type_name)?
-            }
+            FunctionReturns::SetOf { type_name } => self.coerce_return(type_name, &value, None)?,
             _ => value,
         };
         self.set_rows.push(vec![value]);

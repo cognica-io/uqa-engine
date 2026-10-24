@@ -44,6 +44,7 @@ mod blocks;
 mod control_flow;
 mod cursors;
 mod datum;
+mod descriptions;
 mod error_context;
 mod plans;
 pub mod preparation;
@@ -96,6 +97,7 @@ pub struct RoutineOutcome {
 /// Mutable activation record for one PL/pgSQL invocation.
 pub struct Interpreter<'a> {
     preparations: std::sync::Arc<preparation::PLpgSQLPreparations>,
+    descriptions: Option<descriptions::ProceduralDescriptions<'a>>,
     services: RoutineContext<'a>,
     def: &'a CreateFunction,
     datums: &'a [PLpgSQLDatum],
@@ -130,6 +132,7 @@ struct RecordReturnTarget<'a> {
 
 /// Maps variable names and positional parameters onto an activation record.
 struct DatumResolver<'a> {
+    descriptions: Option<descriptions::ProceduralDescriptions<'a>>,
     types: &'a dyn uqa_sql::assignment::routines::RoutineValueContext,
     datums: &'a [PLpgSQLDatum],
     values: &'a [Value],

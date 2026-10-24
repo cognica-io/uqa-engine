@@ -32,7 +32,7 @@ impl Interpreter<'_> {
         source: Option<&ColumnType>,
         record_schema: Option<uqa_sql::RowSchema>,
     ) -> Result<(), SQLError> {
-        let target_type = self.datum_type(idx);
+        let target_type = self.datum_type(idx)?;
         match &self.datums[idx] {
             PLpgSQLDatum::Var(var) => {
                 if var.constant {
@@ -41,12 +41,7 @@ impl Interpreter<'_> {
                         message: format!("variable \"{}\" is declared CONSTANT", var.name),
                     });
                 }
-                let value = super::coerce_routine_value_from(
-                    self.services.expressions,
-                    &value,
-                    &var.type_name,
-                    source,
-                )?;
+                let value = self.coerce_datum(idx, &var.type_name, &value, source)?;
                 if var.not_null && matches!(value, Value::Null) {
                     return Err(SQLError::Routine {
                         sqlstate: "22004".into(),
@@ -113,10 +108,7 @@ impl Interpreter<'_> {
                         *field_value = value;
                         Ok(())
                     }
-                    _ => Err(SQLError::Routine {
-                        sqlstate: "55000".into(),
-                        message: format!("record \"{parent_name}\" is not assigned yet"),
-                    }),
+                    _ => Err(super::diagnostics::unassigned_record(&parent_name)),
                 }
             }
             PLpgSQLDatum::Row { .. } => Err(SQLError::Internal(

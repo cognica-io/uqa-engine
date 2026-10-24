@@ -35,12 +35,8 @@ impl Interpreter<'_> {
                     Some(expression) => self.eval_expr_with_type(expression)?,
                     None => (super::Value::Null, None),
                 };
-                let value = super::coerce_routine_value_from(
-                    self.services.expressions,
-                    &value,
-                    &variable.type_name,
-                    source.as_ref(),
-                )?;
+                let value =
+                    self.coerce_datum(*index, &variable.type_name, &value, source.as_ref())?;
                 if variable.not_null && matches!(value, super::Value::Null) {
                     return Err(SQLError::Routine {
                         sqlstate: "22004".into(),

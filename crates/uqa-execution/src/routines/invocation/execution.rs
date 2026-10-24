@@ -47,7 +47,7 @@ pub(super) fn execute_described_scalar_routine(
     function: &SQLUserFunction,
     bound: Vec<Value>,
     invocation: &RoutineInvocationBinding,
-    descriptions: crate::routines::sql_body::SQLBodyDescriptions<'_>,
+    descriptions: crate::routines::descriptions::RoutineBodyDescriptions<'_>,
 ) -> Result<RoutineOutcome, SQLError> {
     execute_entry(
         context,
@@ -66,7 +66,7 @@ enum RoutineEntry<'a> {
     Invocation {
         allow_nonatomic: bool,
         record_target: Option<&'a [uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
-        descriptions: Option<crate::routines::sql_body::SQLBodyDescriptions<'a>>,
+        descriptions: Option<crate::routines::descriptions::RoutineBodyDescriptions<'a>>,
     },
     CatalogCallback,
 }
@@ -162,12 +162,17 @@ fn execute_compiled_body(
     compiled: &CompiledFunctionBody,
     bound: Vec<Value>,
     record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
-    descriptions: Option<crate::routines::sql_body::SQLBodyDescriptions<'_>>,
+    descriptions: Option<crate::routines::descriptions::RoutineBodyDescriptions<'_>>,
 ) -> Result<RoutineOutcome, SQLError> {
     match compiled {
-        CompiledFunctionBody::PLpgSQL(parsed) => {
-            execute_plpgsql_language(context, definition, parsed, bound, record_target)
-        }
+        CompiledFunctionBody::PLpgSQL(parsed) => execute_plpgsql_language(
+            context,
+            definition,
+            parsed,
+            bound,
+            record_target,
+            descriptions,
+        ),
         CompiledFunctionBody::SQL(statements) => execute_sql_language(
             context,
             function,
@@ -210,8 +215,10 @@ fn execute_plpgsql_language(
     parsed: &uqa_sql::plpgsql::PLpgSQLFunction,
     bound: Vec<Value>,
     record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
+    descriptions: Option<crate::routines::descriptions::RoutineBodyDescriptions<'_>>,
 ) -> Result<RoutineOutcome, SQLError> {
     let mut interpreter = Interpreter::new(context.runtime, definition, parsed, bound)?;
+    interpreter.set_descriptions(parsed, descriptions)?;
     interpreter.set_record_target(context.types, record_target);
     interpreter.run(&parsed.action)?;
     Ok(interpreter.into_outcome())
@@ -224,7 +231,7 @@ fn execute_sql_language(
     plans: &[uqa_sql::plan::UnifiedPlan],
     bound: &[Value],
     record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
-    descriptions: Option<crate::routines::sql_body::SQLBodyDescriptions<'_>>,
+    descriptions: Option<crate::routines::descriptions::RoutineBodyDescriptions<'_>>,
 ) -> Result<RoutineOutcome, SQLError> {
     crate::routines::sql_body::execute_described_sql_language(
         context.runtime,

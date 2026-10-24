@@ -9,6 +9,8 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use uqa_sql::{ast::ColumnDef, RowSchema};
 
+mod descriptions;
+
 #[derive(Default)]
 struct Types {
     resolutions: Cell<usize>,
@@ -105,6 +107,7 @@ fn routine_record_fields_preserve_postgresql_declared_collations() {
         let record = Value::Record(fields.into());
         let values = [record.clone(), record, Value::Null];
         let mut resolver = DatumResolver {
+            descriptions: None,
             types: &types,
             datums: &datums,
             values: &values,
@@ -151,7 +154,7 @@ fn routine_record_fields_preserve_postgresql_declared_collations() {
             }
         }
         assert_eq!(observed, 16);
-        assert_eq!(resolver.resolved_datum(2).collation_oid, Some(950));
+        assert_eq!(resolver.resolved_datum(2).unwrap().collation_oid, Some(950));
         assert_eq!(
             resolver
                 .resolve_qualified("new", "missing")
@@ -185,6 +188,7 @@ fn prepared_record_parameters_preserve_selected_types_without_text_resolution() 
             };
             let values = [Value::Record(vec![("value".into(), value.clone())].into())];
             let mut resolver = DatumResolver {
+                descriptions: None,
                 types: &types,
                 datums: &datums,
                 values: &values,
@@ -229,6 +233,7 @@ fn prepared_scalar_parameters_do_not_resolve_the_selected_type_twice() {
         };
         let values = [value.clone()];
         let mut resolver = DatumResolver {
+            descriptions: None,
             types: &types,
             datums: &datums,
             values: &values,

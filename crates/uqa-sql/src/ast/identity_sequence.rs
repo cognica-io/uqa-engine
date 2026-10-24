@@ -35,6 +35,10 @@ pub struct IdentitySequenceName {
 pub struct DeferredSQLError {
     pub sqlstate: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 impl From<&SQLError> for DeferredSQLError {
@@ -42,15 +46,28 @@ impl From<&SQLError> for DeferredSQLError {
         Self {
             sqlstate: error.sqlstate().unwrap_or("XX000").to_string(),
             message: error.to_string(),
+            detail: error.detail().map(str::to_owned),
+            hint: error.hint().map(str::to_owned),
         }
     }
 }
 
 impl From<DeferredSQLError> for SQLError {
     fn from(error: DeferredSQLError) -> Self {
+        if error.detail.is_some() || error.hint.is_some() {
+            return Self::Diagnostic {
+                sqlstate: error.sqlstate,
+                message: error.message,
+                detail: error.detail,
+                hint: error.hint,
+            };
+        }
         Self::Routine {
             sqlstate: error.sqlstate,
             message: error.message,
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

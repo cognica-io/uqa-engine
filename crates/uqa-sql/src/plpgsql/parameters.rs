@@ -28,6 +28,8 @@ pub fn parameter_type_mismatch(
             actual.display_name(),
             expected.display_name()
         ),
+        detail: None,
+        hint: None,
     }
 }
 
@@ -39,18 +41,27 @@ pub enum PLpgSQLVariableReference {
 }
 impl PLpgSQLVariableReference {
     pub fn read(&self, resolver: &mut dyn VariableResolver) -> Result<SQLParam, SQLError> {
-        let value = match self {
-            Self::Name(name) => resolver.resolve_name(name),
-            Self::Qualified { qualifier, column } => resolver.resolve_qualified(qualifier, column),
-            Self::Parameter(index) => resolver.resolve_param(*index),
-        }?
-        .ok_or_else(|| {
+        resolver.resolve_parameter(self)?.ok_or_else(|| {
             SQLError::Internal("prepared PL/pgSQL variable no longer resolves".into())
-        })?;
-        Ok(parameter(value, resolver))
+        })
     }
 }
-fn parameter(value: ResolvedVariable, resolver: &dyn VariableResolver) -> SQLParam {
+
+pub(super) fn resolve_parameter<R: VariableResolver + ?Sized>(
+    reference: &PLpgSQLVariableReference,
+    resolver: &mut R,
+) -> Result<Option<SQLParam>, SQLError> {
+    let value = match reference {
+        PLpgSQLVariableReference::Name(name) => resolver.resolve_name(name),
+        PLpgSQLVariableReference::Qualified { qualifier, column } => {
+            resolver.resolve_qualified(qualifier, column)
+        }
+        PLpgSQLVariableReference::Parameter(index) => resolver.resolve_param(*index),
+    }?;
+    Ok(value.map(|value| parameter(value, resolver)))
+}
+
+fn parameter<R: VariableResolver + ?Sized>(value: ResolvedVariable, resolver: &R) -> SQLParam {
     match value
         .declared_type
         .as_deref()
