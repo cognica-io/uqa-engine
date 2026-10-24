@@ -113,35 +113,8 @@ impl Engine {
     /// [`Engine::open_compressed_encrypted`] to choose compression for
     /// a new database.
     pub fn open_auto(path: &Path, key: Option<&str>) -> Result<Self, SQLiteError> {
-        use uqa_storage_sqlite::DatabaseFileFormat;
-        let key = match key {
-            Some("") => return Err(SQLiteError::EmptyEncryptionKey),
-            other => other,
-        };
-        match uqa_storage_sqlite::detect_database_file_format(path)? {
-            DatabaseFileFormat::Missing => match key {
-                Some(key) => Self::open_encrypted(path, key),
-                None => Self::open(path),
-            },
-            DatabaseFileFormat::PlainSQLite => match key {
-                Some(_) => Err(SQLiteError::NotEncrypted),
-                None => Self::open(path),
-            },
-            DatabaseFileFormat::CompressedContainer { encrypted: true } => match key {
-                Some(key) => {
-                    Self::open_compressed_encrypted(path, key, SQLiteCompressionOptions::default())
-                }
-                None => Err(SQLiteError::EncryptionKeyRequired),
-            },
-            DatabaseFileFormat::CompressedContainer { encrypted: false } => match key {
-                Some(_) => Err(SQLiteError::NotEncrypted),
-                None => Self::open_compressed(path, SQLiteCompressionOptions::default()),
-            },
-            DatabaseFileFormat::Unrecognized => match key {
-                Some(key) => Self::open_encrypted(path, key),
-                None => Err(SQLiteError::EncryptionKeyRequired),
-            },
-        }
+        let connection = ManagedConnection::open_auto(path, key)?;
+        Self::open_with_connection(&connection)
     }
 
     /// SQLCipher-backed engine. Applies `key` before any catalog

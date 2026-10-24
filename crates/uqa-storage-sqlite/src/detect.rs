@@ -18,6 +18,7 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::compressed_vfs::{FLAG_ENCRYPTED, HEADER_FLAGS_OFFSET, LEGACY_MAGIC, MAGIC};
+use crate::{ManagedConnection, SQLiteCompressionOptions, SQLiteError};
 
 /// First 16 bytes of every plaintext `SQLite` database file.
 const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
@@ -104,6 +105,42 @@ pub fn detect_database_file_format(path: &Path) -> std::io::Result<DatabaseFileF
     Ok(DatabaseFileFormat::Unrecognized)
 }
 
+impl ManagedConnection {
+    /// Open the detected `SQLite` file format, preserving encryption requirements.
+    ///
+    /// Missing files use `SQLCipher` when a key is supplied and plain `SQLite` otherwise. Existing compressed files retain their recorded codec. A key on an unencrypted file is rejected; encrypted or unrecognized files require a key. New compressed files require an explicit compression constructor.
+    pub fn open_auto(path: &Path, key: Option<&str>) -> Result<Self, SQLiteError> {
+        let key = match key {
+            Some("") => return Err(SQLiteError::EmptyEncryptionKey),
+            other => other,
+        };
+        match detect_database_file_format(path)? {
+            DatabaseFileFormat::Missing => match key {
+                Some(key) => Self::open_encrypted(path, key),
+                None => Self::open(path),
+            },
+            DatabaseFileFormat::PlainSQLite => match key {
+                Some(_) => Err(SQLiteError::NotEncrypted),
+                None => Self::open(path),
+            },
+            DatabaseFileFormat::CompressedContainer { encrypted: true } => match key {
+                Some(key) => {
+                    Self::open_compressed_encrypted(path, key, SQLiteCompressionOptions::default())
+                }
+                None => Err(SQLiteError::EncryptionKeyRequired),
+            },
+            DatabaseFileFormat::CompressedContainer { encrypted: false } => match key {
+                Some(_) => Err(SQLiteError::NotEncrypted),
+                None => Self::open_compressed(path, SQLiteCompressionOptions::default()),
+            },
+            DatabaseFileFormat::Unrecognized => match key {
+                Some(key) => Self::open_encrypted(path, key),
+                None => Err(SQLiteError::EncryptionKeyRequired),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,6 +150,76 @@ mod tests {
 
     fn temp_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn automatic_connections_preserve_data_and_encryption_across_all_codecs() {
+        let directory = temp_dir();
+        for (index, compression) in [
+            None,
+            Some(SQLiteCompressionOptions::zstd()),
+            Some(SQLiteCompressionOptions::lz4()),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for key in [None, Some("automatic-open-test-key")] {
+                let path = directory.path().join(format!("{index}-{}", key.is_some()));
+                let connection = match (compression, key) {
+                    (None, key) => ManagedConnection::open_auto(&path, key),
+                    (Some(options), None) => ManagedConnection::open_compressed(&path, options),
+                    (Some(options), Some(key)) => {
+                        ManagedConnection::open_compressed_encrypted(&path, key, options)
+                    }
+                }
+                .unwrap();
+                connection
+                    .with(|sqlite| {
+                        Ok(sqlite.execute_batch(
+                            "CREATE TABLE retained (n INTEGER); INSERT INTO retained VALUES (101)",
+                        )?)
+                    })
+                    .unwrap();
+                drop(connection);
+                let reopened = ManagedConnection::open_auto(&path, key).unwrap();
+                let value = reopened
+                    .with(|sqlite| {
+                        Ok(sqlite
+                            .query_row("SELECT n FROM retained", [], |row| row.get::<_, i64>(0))?)
+                    })
+                    .unwrap();
+                assert_eq!(value, 101);
+                drop(reopened);
+                if key.is_some() {
+                    assert!(matches!(
+                        ManagedConnection::open_auto(&path, None),
+                        Err(SQLiteError::EncryptionKeyRequired)
+                    ));
+                    assert!(ManagedConnection::open_auto(&path, Some("wrong-key")).is_err());
+                } else {
+                    assert!(matches!(
+                        ManagedConnection::open_auto(&path, Some("unused-key")),
+                        Err(SQLiteError::NotEncrypted)
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn automatic_connections_reject_empty_keys_before_creating_files() {
+        let directory = temp_dir();
+        let path = directory.path().join("absent.db");
+        assert!(matches!(
+            ManagedConnection::open_auto(&path, Some("")),
+            Err(SQLiteError::EmptyEncryptionKey)
+        ));
+        assert!(!path.exists());
+        std::fs::write(&path, b"a foreign file with an unrecognized header").unwrap();
+        assert!(matches!(
+            ManagedConnection::open_auto(&path, None),
+            Err(SQLiteError::EncryptionKeyRequired)
+        ));
     }
 
     #[test]
