@@ -1145,6 +1145,57 @@
       "reopen": true
     },
     {
+      "sql": "SELECT * FROM bitwise_view WHERE id IN (1, 2, 5) ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "band",
+            "bnot",
+            "shifted",
+            "precedence"
+          ],
+          "type_oids": [
+            23,
+            21,
+            23,
+            20,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "3",
+              "-8",
+              "24",
+              "7"
+            ],
+            [
+              "2",
+              "1",
+              "2",
+              "-32",
+              "-8"
+            ],
+            [
+              "5",
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "view_safe_rows",
+      "reopen": true
+    },
+    {
       "sql": "SELECT pg_get_viewdef('bitwise_view'::regclass) AS definition",
       "command_tags": [
         "SELECT 1"
@@ -1167,6 +1218,169 @@
       ],
       "notices": [],
       "id": "view_definition"
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('bitwise_view'::regclass, true) AS definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    s & 3::smallint AS band,\n    ~ (i | 4) AS bnot,\n    (b # 1::bigint) << 2 AS shifted,\n    i + (i >> 3) AS precedence\n   FROM bitwise_inputs;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "view_pretty",
+      "reopen": true
+    },
+    {
+      "sql": "CREATE VIEW bitwise_prefix_view AS SELECT id, ~(i | 4) AS inverse, ~(~i) AS nested, +(i | 4) AS positive, @(i | 4) AS absolute, i & (i % 4) AS mixed FROM bitwise_inputs",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "prefix_view"
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('bitwise_prefix_view'::regclass) AS definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    (~ (i | 4)) AS inverse,\n    (~ (~ i)) AS nested,\n    (+ (i | 4)) AS positive,\n    (@ (i | 4)) AS absolute,\n    (i & (i % 4)) AS mixed\n   FROM bitwise_inputs;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "prefix_view_definition",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('bitwise_prefix_view'::regclass, true) AS definition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "definition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    ~ (i | 4) AS inverse,\n    ~ (~ i) AS nested,\n    + (i | 4) AS positive,\n    @ (i | 4) AS absolute,\n    i & (i % 4) AS mixed\n   FROM bitwise_inputs;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "prefix_view_pretty",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM bitwise_prefix_view ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "inverse",
+            "nested",
+            "positive",
+            "absolute",
+            "mixed"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "-8",
+              "7",
+              "7",
+              "7",
+              "3"
+            ],
+            [
+              "2",
+              "2",
+              "-7",
+              "-3",
+              "3",
+              "-7"
+            ],
+            [
+              "3",
+              "2147483643",
+              "-2147483648",
+              "-2147483644",
+              "2147483644",
+              "0"
+            ],
+            [
+              "4",
+              "-2147483648",
+              "2147483647",
+              "2147483647",
+              "2147483647",
+              "3"
+            ],
+            [
+              "5",
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "prefix_view_rows",
+      "reopen": true
     },
     {
       "sql": "CREATE VIEW bitwise_mixed_view AS SELECT s & i AS si, i | b AS ib, ~b AS inverse, b % i AS remainder, |/i AS root FROM bitwise_inputs WHERE id = 1",
@@ -2115,7 +2329,7 @@
     "reference": "PostgreSQL 18.4 in a disposable Docker database",
     "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
     "tool_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
-    "input_sha256": "4797af8c81130d9de06d52558849607e481a7655ec0c5d6b1008c5bd28b054f6",
+    "input_sha256": "e656854c20398c871918e16aff612f12151d32dd0e32f8e3a946399734a0401a",
     "options": [
       "--rows",
       "--details",

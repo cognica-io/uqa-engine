@@ -50,18 +50,21 @@ impl Deparser<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
         let priority = numeric_operator_precedence(operator);
+        let arithmetic = priority != 0;
+        // Generic numeric operators keep nested operator expressions parenthesized;
+        // casts and self-delimiting expressions retain their existing syntax.
+        let priority = if arithmetic { priority } else { 80 };
+        let separator = |operand: &str| if operand.starts_with('\n') { "" } else { " " };
         let text = match args {
-            [argument] if operator.arity() == 1 => format!(
-                "{} {}",
-                operator.symbol(),
-                self.operand(argument, priority, false, scope, subqueries)?
-            ),
-            [left, right] if operator.arity() == 2 => format!(
-                "{} {} {}",
-                self.operand(left, priority, false, scope, subqueries)?,
-                operator.symbol(),
-                self.operand(right, priority, true, scope, subqueries)?
-            ),
+            [argument] if operator.arity() == 1 => {
+                let argument = self.operand(argument, priority, false, scope, subqueries)?;
+                format!("{}{}{argument}", operator.symbol(), separator(&argument))
+            }
+            [left, right] if operator.arity() == 2 => {
+                let left = self.operand(left, priority, false, scope, subqueries)?;
+                let right = self.operand(right, priority, arithmetic, scope, subqueries)?;
+                format!("{left} {}{}{right}", operator.symbol(), separator(&right))
+            }
             _ => {
                 return Err(SQLError::Internal(
                     "invalid numeric operator operands".into(),

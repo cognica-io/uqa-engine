@@ -57,8 +57,37 @@
       "reopen": true
     },
     {
+      "id": "view_safe_rows",
+      "sql": "SELECT * FROM bitwise_view WHERE id IN (1, 2, 5) ORDER BY id",
+      "reopen": true
+    },
+    {
       "id": "view_definition",
       "sql": "SELECT pg_get_viewdef('bitwise_view'::regclass) AS definition"
+    },
+    {
+      "id": "view_pretty",
+      "sql": "SELECT pg_get_viewdef('bitwise_view'::regclass, true) AS definition",
+      "reopen": true
+    },
+    {
+      "id": "prefix_view",
+      "sql": "CREATE VIEW bitwise_prefix_view AS SELECT id, ~(i | 4) AS inverse, ~(~i) AS nested, +(i | 4) AS positive, @(i | 4) AS absolute, i & (i % 4) AS mixed FROM bitwise_inputs"
+    },
+    {
+      "id": "prefix_view_definition",
+      "sql": "SELECT pg_get_viewdef('bitwise_prefix_view'::regclass) AS definition",
+      "reopen": true
+    },
+    {
+      "id": "prefix_view_pretty",
+      "sql": "SELECT pg_get_viewdef('bitwise_prefix_view'::regclass, true) AS definition",
+      "reopen": true
+    },
+    {
+      "id": "prefix_view_rows",
+      "sql": "SELECT * FROM bitwise_prefix_view ORDER BY id",
+      "reopen": true
     },
     {
       "id": "mixed_view",
