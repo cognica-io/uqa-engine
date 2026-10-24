@@ -14,6 +14,9 @@ use uqa_core::{
 
 use crate::ast::ColumnType;
 
+mod input;
+pub use input::create_typed_parameter_with_control;
+
 /// Value bound to a `$N` placeholder.
 #[derive(Debug, Clone)]
 pub enum SQLParam {

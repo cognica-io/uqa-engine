@@ -32,6 +32,8 @@ pub fn sql(
 
 `SQLParam` accepts scalar values and also has explicit vector and tensor constructors. Positional placeholders are `$1`, `$2`, and so on.
 
+`Engine::create_typed_parameter_with_control(type_name, text, control)` resolves a native SQL type declaration and returns a retained `Produced<SQLParam>`. `Some(text)` uses native explicit conversion from unknown text; `None` creates a typed NULL and still applies domain constraints. Type modifiers, catalog identities and session input settings are preserved. The operation shares the session's statement and transaction boundary, including routine effects during domain input, failure of an active frame and savepoint recovery. Reusing the admitted parameter does not rerun its input checks. The supplied `ProductionControl` retains output allocations and observes both cancellation tokens; dropping the produced parameter releases its reservations.
+
 ```rust
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLParam};

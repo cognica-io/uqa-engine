@@ -96,6 +96,7 @@ mod hook;
 mod models;
 mod notifications;
 mod open;
+mod parameters;
 mod prepared;
 pub use prepared::{PreparedStatement, PreparedStatementDescription};
 mod relations;

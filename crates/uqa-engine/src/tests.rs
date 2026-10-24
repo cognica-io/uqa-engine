@@ -42,6 +42,7 @@ mod search_and_vectors;
 mod catalog;
 mod index_columns;
 mod index_only;
+mod parameters;
 mod prepared;
 pub(crate) mod providers;
 mod queries;
