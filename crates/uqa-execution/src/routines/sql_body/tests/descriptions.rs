@@ -69,7 +69,9 @@ impl RoutineValueContext for Inputs {
 
 #[test]
 fn repeated_sql_body_inputs_keep_all_parameter_positions_and_current_values() {
-    let mut definition = definition("CREATE FUNCTION public.body_inputs(OUT label text, IN value integer) LANGUAGE sql AS 'SELECT value::text'");
+    let mut definition = definition(
+        "CREATE FUNCTION public.body_inputs(OUT label text, IN value integer) LANGUAGE sql AS 'SELECT value::text'",
+    );
     definition.object_id = Some([11; 16]);
     definition.params[0].type_name = "pg_catalog.text".into();
     definition.params[1].type_name = "public.input_value".into();

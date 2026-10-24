@@ -75,27 +75,13 @@ pub(crate) fn execute_described_sql_language(
     }
     let layout = RefCell::new(None);
     let check_result = |result: &AnalyzedResult| {
-        let result_layout = match descriptions {
-            Some(saved) => {
-                saved
-                    .description
-                    .body_result_layout(types, def, Some(result), saved.environment)?
-            }
-            None => Cow::Owned(sql_function_result_layout(types, def, Some(result))?),
-        };
-        if result_layout.kind == SQLFunctionResultKind::Tuple
-            && routine_returns_anonymous_record(def)
-        {
-            if let Some(target) = record_target {
-                uqa_sql::routines::result_check::validate_anonymous_record_result(
-                    types,
-                    result.column_types().unwrap_or_default(),
-                    target,
-                    Some(SQLFunctionResultKind::Tuple),
-                )?;
-            }
-        }
-        *layout.borrow_mut() = Some(result_layout);
+        *layout.borrow_mut() = Some(checked_body_result_layout(
+            types,
+            def,
+            result,
+            record_target,
+            descriptions,
+        )?);
         Ok(())
     };
     let parameters = matches!(def.body, FunctionBody::Source(_))
@@ -165,6 +151,35 @@ pub(crate) fn execute_described_sql_language(
             uqa_sql::routines::diagnostics::SQLRoutineStage::Statement(plans.len()),
         ))
     })
+}
+
+fn checked_body_result_layout<'a>(
+    types: &dyn RoutineTypeCatalog,
+    definition: &CreateFunction,
+    result: &AnalyzedResult,
+    record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
+    descriptions: Option<SQLBodyDescriptions<'a>>,
+) -> Result<Cow<'a, SQLFunctionResultLayout>, SQLError> {
+    let layout = match descriptions {
+        Some(saved) => saved.description.body_result_layout(
+            types,
+            definition,
+            Some(result),
+            saved.environment,
+        )?,
+        None => Cow::Owned(sql_function_result_layout(types, definition, Some(result))?),
+    };
+    if layout.kind == SQLFunctionResultKind::Tuple && routine_returns_anonymous_record(definition) {
+        if let Some(target) = record_target {
+            uqa_sql::routines::result_check::validate_anonymous_record_result(
+                types,
+                result.column_types().unwrap_or_default(),
+                target,
+                Some(SQLFunctionResultKind::Tuple),
+            )?;
+        }
+    }
+    Ok(layout)
 }
 
 fn body_parameters(

@@ -150,7 +150,15 @@ impl RoutineCallDescription {
         {
             match ResultDescription::new(result, &layout, &environment.control) {
                 Ok(saved) => {
-                    let _ = self.body_result.set(saved);
+                    if self.body_result.set(saved).is_ok() {
+                        return Ok(Cow::Borrowed(
+                            &self
+                                .body_result
+                                .get()
+                                .expect("published result description")
+                                .layout,
+                        ));
+                    }
                 }
                 Err(ValueRetentionError::Memory(_)) => {}
                 Err(error) => return Err(error.into()),
@@ -179,11 +187,12 @@ impl RoutineCallDescription {
             &layout.declared_type
         };
         if self.is_current((environment.scope)().as_ref()) {
-            if let Some(saved) = self
-                .body_result
-                .get()
-                .filter(|saved| *saved.layout == *layout)
-            {
+            if let Some(saved) = self.body_result.get().filter(|saved| {
+                std::ptr::eq(
+                    std::ptr::from_ref(&*saved.layout),
+                    std::ptr::from_ref(layout),
+                )
+            }) {
                 if let Some(slot) = saved.conversions.get(index) {
                     if let Some(description) = slot.get() {
                         return description.coerce(environment.values, value, source);

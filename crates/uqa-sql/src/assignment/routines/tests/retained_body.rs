@@ -279,7 +279,7 @@ fn output_callbacks_invalidate_later_values_and_do_not_publish_old_metadata() {
     let current = Rc::new(RefCell::new(initial.clone()));
     let callback = Rc::clone(&current);
     *values.after_check.borrow_mut() = Some(Box::new(move || {
-        *callback.borrow_mut() = RoutineDescriptionScope::default()
+        *callback.borrow_mut() = RoutineDescriptionScope::default();
     }));
     let scope = || Some(current.borrow().clone());
     let state = RoutineCallDescriptions::default();
@@ -398,6 +398,80 @@ fn body_metadata_declines_exhausted_allowance_and_unqualified_results() {
             .unwrap_err()
             .sqlstate(),
         Some("57014")
+    );
+    drop(state);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn tuple_result_targets_resolve_once_per_attribute_and_keep_each_domain_check() {
+    let values = Context::new();
+    let types = Types {
+        values: &values,
+        calls: Cell::new(0),
+    };
+    let (mut function, mut binding) = bound_call();
+    let definition = &mut Arc::get_mut(&mut function).unwrap().def;
+    definition.returns = FunctionReturns::None;
+    definition.body = crate::ast::FunctionBody::Source("SELECT 1, 2".into());
+    for parameter in &mut definition.params {
+        parameter.mode = crate::ast::FunctionParamMode::Out;
+    }
+    definition.params[1].type_name = "pg_catalog.int4".into();
+    binding.argument_types.clear();
+    let invocation = binding.invocation.as_mut().unwrap();
+    invocation.argument_positions.clear();
+    invocation.argument_targets.clear();
+    invocation.argument_sources.clear();
+    invocation.parameter_types[1] = "pg_catalog.int4".into();
+    invocation.return_type = Some("pg_catalog.record".into());
+    let state = RoutineCallDescriptions::default();
+    let scope = RoutineDescriptionScope::default();
+    let current = || Some(scope.clone());
+    let budget = MemoryBudget::new(16 * 1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    state
+        .remember(&binding, &function, &[], scope.clone(), &control)
+        .unwrap();
+    let saved = state.get(&binding, &scope).unwrap();
+    let environment = RoutineConversionEnvironment {
+        values: &values,
+        scope: &current,
+        control,
+    };
+    let result = AnalyzedResult::Rows(vec![Some(ColumnType::Integer); 2]);
+    for row in 0..512 {
+        let layout = saved
+            .body_result_layout(&types, &function.def, Some(&result), environment)
+            .unwrap();
+        assert!(
+            matches!(layout, std::borrow::Cow::Borrowed(_)),
+            "the first published layout and later hits share the retained description"
+        );
+        assert_eq!(layout.kind, SQLFunctionResultKind::Tuple);
+        for index in 0..2 {
+            let value = Value::Int(row * 2 + index as i64);
+            assert_eq!(
+                saved
+                    .coerce_body_result(
+                        &layout,
+                        index,
+                        &value,
+                        Some(&ColumnType::Integer),
+                        environment
+                    )
+                    .unwrap(),
+                value
+            );
+        }
+    }
+    assert_eq!(types.calls.get(), 2);
+    assert_eq!(values.resolutions.get(), 2);
+    assert_eq!(
+        values.checks.get(),
+        512,
+        "only the domain attribute has a live domain check"
     );
     drop(state);
     assert_eq!(budget.used(), 0);

@@ -2,6 +2,19 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "tuple_result_targets_resolve_once_per_attribute_and_keep_each_domain_check",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "SQL tuple result metadata work",
+      "workload": "512 two-column outputs with distinct domain and integer targets under a 16KiB allowance.",
+      "invariant": "Borrow the first published and later matching result layouts; resolve each attribute target once, run every domain check and release all metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "test",
       "target": "integration",
