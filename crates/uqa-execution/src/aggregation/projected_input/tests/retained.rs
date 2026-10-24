@@ -162,3 +162,75 @@ fn retained_integer_aggregate_metadata_preserves_scalar_fallback_and_casts() {
     let plans = ProjectedAggregatePlans::compile(&|_: &str| false, &targets, &schema);
     assert!(!plans.all_direct());
 }
+
+#[test]
+fn retained_integer_aggregate_metadata_preserves_division_and_nulls() {
+    let schema = RowSchema::with_types(
+        vec!["a".into(), "b".into()],
+        vec![Some(ColumnType::Integer); 2],
+    );
+    let argument = retained(
+        ScalarExpr::Binary {
+            op: BinaryOp::Divide,
+            lhs: Box::new(ScalarExpr::Column("a".into())),
+            rhs: Box::new(ScalarExpr::Column("b".into())),
+        },
+        ColumnType::Integer,
+    );
+    let plans =
+        ProjectedAggregatePlans::compile(&|_: &str| false, &[aggregate("sum", argument)], &schema);
+    assert!(plans.all_direct());
+    let mut accumulators = vec![AggregateAccumulator::builtin("sum")];
+    plans
+        .observe_direct(
+            &mut accumulators,
+            &PositionalRow(vec![Value::Null, Value::Int(0)]),
+            &[],
+            None,
+        )
+        .unwrap();
+    assert_eq!(accumulators[0].count, 0);
+    let error = plans
+        .observe_direct(
+            &mut accumulators,
+            &PositionalRow(vec![Value::Int(1), Value::Int(0)]),
+            &[],
+            None,
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22012"));
+    assert_eq!(accumulators[0].count, 0);
+}
+
+#[test]
+fn retained_integer_aggregate_metadata_keeps_selected_operand_types() {
+    let schema = RowSchema::with_types(vec!["a".into()], vec![Some(ColumnType::Integer)]);
+    let argument = retained(
+        ScalarExpr::Binary {
+            op: BinaryOp::Add,
+            lhs: Box::new(retained(
+                ScalarExpr::Column("a".into()),
+                ColumnType::Integer,
+            )),
+            rhs: Box::new(retained(
+                ScalarExpr::Literal(Value::Int(1)),
+                ColumnType::BigInteger,
+            )),
+        },
+        ColumnType::BigInteger,
+    );
+    let plans =
+        ProjectedAggregatePlans::compile(&|_: &str| false, &[aggregate("sum", argument)], &schema);
+    assert!(plans.all_direct());
+    let mut accumulators = vec![AggregateAccumulator::builtin("sum")];
+    plans
+        .observe_direct(
+            &mut accumulators,
+            &PositionalRow(vec![Value::Int(i64::from(i32::MAX))]),
+            &[],
+            None,
+        )
+        .unwrap();
+    // PostgreSQL: a + 1::bigint widens the operation; stripping the operand metadata would overflow INTEGER.
+    assert_eq!(accumulators[0].integer_sum, 2_147_483_648);
+}

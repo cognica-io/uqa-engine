@@ -41,6 +41,32 @@
       ]
     },
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_integer_aggregate_metadata_preserves_division_and_nulls",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/projected_input/tests/retained.rs",
+      "capability": "Retained aggregate input metadata",
+      "workload": "NULL and non-NULL dividends with a zero divisor under retained result metadata.",
+      "invariant": "NULL contributes no aggregate value and a non-NULL zero division keeps PostgreSQL 22012 without publishing partial state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_integer_aggregate_metadata_keeps_selected_operand_types",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/projected_input/tests/retained.rs",
+      "capability": "Retained aggregate input metadata",
+      "workload": "A metadata-wrapped integer column and a typed BIGINT literal widen addition beyond the INTEGER maximum.",
+      "invariant": "Resolve positional columns through metadata while retaining the original selected operand types for width inference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-planner",
       "kind": "lib",
       "test": "strict_arithmetic_does_not_guess_a_result_for_an_unanalyzed_row",
