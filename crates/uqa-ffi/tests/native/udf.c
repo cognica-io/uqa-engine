@@ -5,7 +5,7 @@
  */
 
 #include "test_udf.h"
-#include <pthread.h>
+#include "test_threads.h"
 
 enum mode { IDENTITY, CONSTANT, NULL_RESULT, MISSING, FAIL, NEGATIVE, POSITIVE, REENTRY, BLOCK, LIMIT_RESULT, CANCEL_RESULT, CANCEL_ASSIGNMENT };
 struct data {
@@ -15,8 +15,8 @@ struct data {
     uqa_engine engine, other;
     uqa_udf *handle;
     uqa_cancel_handle cancellation;
-    pthread_mutex_t mutex;
-    pthread_cond_t condition;
+    test_mutex mutex;
+    test_condition condition;
     int entered, released;
 };
 
@@ -81,11 +81,11 @@ static uqa_status UQA_CALL scalar(uqa_udf_context context, uqa_value_view const 
             return udf_set_int(context, 81);
         }
         case BLOCK:
-            assert(pthread_mutex_lock(&data->mutex) == 0);
+            assert(test_mutex_lock(&data->mutex) == 0);
             data->entered = 1;
-            assert(pthread_cond_broadcast(&data->condition) == 0);
-            while (!data->released) assert(pthread_cond_wait(&data->condition, &data->mutex) == 0);
-            assert(pthread_mutex_unlock(&data->mutex) == 0);
+            assert(test_condition_broadcast(&data->condition) == 0);
+            while (!data->released) assert(test_condition_wait(&data->condition, &data->mutex) == 0);
+            assert(test_mutex_unlock(&data->mutex) == 0);
             return udf_set_int(context, 92);
         case CONSTANT: return udf_set_int(context, data->number);
         case LIMIT_RESULT: {
@@ -228,22 +228,22 @@ int main(void) {
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_result_create(&result));
     data.mode = BLOCK;
-    assert(pthread_mutex_init(&data.mutex, NULL) == 0);
-    assert(pthread_cond_init(&data.condition, NULL) == 0);
-    pthread_t worker;
-    assert(pthread_create(&worker, NULL, execute_blocked, &data) == 0);
-    assert(pthread_mutex_lock(&data.mutex) == 0);
-    while (!data.entered) assert(pthread_cond_wait(&data.condition, &data.mutex) == 0);
-    assert(pthread_mutex_unlock(&data.mutex) == 0);
+    assert(test_mutex_init(&data.mutex) == 0);
+    assert(test_condition_init(&data.condition) == 0);
+    test_thread worker;
+    assert(test_thread_create(&worker, execute_blocked, &data) == 0);
+    assert(test_mutex_lock(&data.mutex) == 0);
+    while (!data.entered) assert(test_condition_wait(&data.condition, &data.mutex) == 0);
+    assert(test_mutex_unlock(&data.mutex) == 0);
     assert(uqa_udf_unregister(&function) == UQA_ERROR_BUSY);
     assert(function == original && data.destroyed == 0);
-    assert(pthread_mutex_lock(&data.mutex) == 0);
+    assert(test_mutex_lock(&data.mutex) == 0);
     data.released = 1;
-    assert(pthread_cond_broadcast(&data.condition) == 0);
-    assert(pthread_mutex_unlock(&data.mutex) == 0);
-    assert(pthread_join(worker, NULL) == 0);
-    assert(pthread_cond_destroy(&data.condition) == 0);
-    assert(pthread_mutex_destroy(&data.mutex) == 0);
+    assert(test_condition_broadcast(&data.condition) == 0);
+    assert(test_mutex_unlock(&data.mutex) == 0);
+    assert(test_thread_join(&worker) == 0);
+    assert(test_condition_destroy(&data.condition) == 0);
+    assert(test_mutex_destroy(&data.mutex) == 0);
 
     /* Replacement and old-handle retirement have distinct identities. */
     struct data replacement;

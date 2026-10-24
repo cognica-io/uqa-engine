@@ -86,3 +86,52 @@ jobs:
           if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
           python3 scripts/verify-c-examples.py --sanitize --library "target/debug/deps/libuqa_ffi.$suffix"
           python3 scripts/verify-c-clients.py --sanitize --library "target/debug/deps/libuqa_ffi.$suffix"
+
+  native-sanitizers:
+    name: Native ASan (${{ matrix.os }}, ${{ matrix.features }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+        features: [minimal, arrow-export]
+    env:
+      CC: clang
+      CXX: clang++
+      CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+      CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+      RUSTFLAGS: -Zsanitizer=address -Zexternal-clangrt -Cforce-frame-pointers=yes -Clinker=clang -Clink-arg=-fsanitize=address,undefined
+      CARGO_PROFILE_DEV_OPT_LEVEL: "1"
+      CARGO_PROFILE_DEV_DEBUG: "1"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "1"
+      CARGO_PROFILE_TEST_DEBUG: "1"
+      ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - name: Free Linux runner disk
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - name: Instrument Rust, its standard library and native dependencies
+        shell: bash
+        run: |
+          target=$(rustc +nightly -vV | sed -n 's/^host: //p')
+          args=(--no-default-features)
+          if [[ '${{ matrix.features }}' != minimal ]]; then
+            args+=(--features '${{ matrix.features }}')
+          fi
+          cargo +nightly build --locked -Zbuild-std --target "$target" --profile test -p uqa-ffi "${args[@]}"
+          cargo +nightly test --locked -Zbuild-std --target "$target" -p uqa-ffi --test integration "${args[@]}" -- --skip native::
+          suffix=so
+          if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
+          python3 scripts/verify-c-clients.py --sanitize --library "target/$target/debug/libuqa_ffi.$suffix"
+          python3 scripts/verify-c-examples.py --sanitize --library "target/$target/debug/libuqa_ffi.$suffix"

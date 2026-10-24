@@ -40,6 +40,30 @@ def fixture():
 
 
 class RecoverySourceTest(unittest.TestCase):
+    def test_c_release_requires_every_successful_target_and_original_artifact(self):
+        run, jobs, artifacts = fixture()
+        c_jobs = [{"name": name, "conclusion": "success"} for name in sorted(RECOVERY.C_BUILD_JOBS)]
+        c_artifacts = [{"name": "c-bindings-" + target, "expired": False,
+                        "workflow_run": {"id": 123, "head_sha": COMMIT}}
+                       for target in RECOVERY.C_TARGETS]
+        RECOVERY.validate(run, TAG, COMMIT, REPOSITORY, jobs + c_jobs, artifacts + c_artifacts)
+        for index in range(len(c_jobs)):
+            for conclusion in ("failure", "skipped", "cancelled", None):
+                changed = copy.deepcopy(c_jobs)
+                changed[index]["conclusion"] = conclusion
+                with self.assertRaises(ValueError):
+                    RECOVERY.validate(run, TAG, COMMIT, REPOSITORY, jobs + changed, artifacts + c_artifacts)
+            with self.assertRaises(ValueError):
+                RECOVERY.validate(run, TAG, COMMIT, REPOSITORY, jobs + c_jobs[:index] + c_jobs[index+1:], artifacts + c_artifacts)
+        for index in range(len(c_artifacts)):
+            with self.assertRaises(ValueError):
+                RECOVERY.validate(run, TAG, COMMIT, REPOSITORY, jobs + c_jobs, artifacts + c_artifacts[:index] + c_artifacts[index+1:])
+            for replacement in ({"expired": True}, {"workflow_run": {"id": 123, "head_sha": "b" * 40}}):
+                changed = copy.deepcopy(c_artifacts)
+                changed[index].update(replacement)
+                with self.assertRaises(ValueError):
+                    RECOVERY.validate(run, TAG, COMMIT, REPOSITORY, jobs + c_jobs, artifacts + changed)
+
     def test_cli_enabled_release_requires_all_six_unexpired_original_archives(self):
         run, jobs, artifacts = fixture()
         jobs[0]["steps"] = [{"name": "Build and verify usql release archive", "conclusion": "success"}]

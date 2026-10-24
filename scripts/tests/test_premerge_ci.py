@@ -74,7 +74,8 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
     def test_pull_request_validation_runs_only_for_completed_batches(self) -> None:
         expected = {"pr-checks.yml", "performance-checks.yml", "dependency-checks.yml",
                     "regular-expression-checks.yml", "http-carrier-parity.yml",
-                    "fdw-features.yml", "wasm-build-checks.yml", "usql-release-checks.yml"}
+                    "fdw-features.yml", "wasm-build-checks.yml", "usql-release-checks.yml",
+                    "c-bindings.yml", "c-packages.yml"}
         actual = set()
         for path in (ROOT / ".github/workflows").glob("*.yml"):
             workflow = path.read_text(encoding="utf-8")

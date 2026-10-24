@@ -2,7 +2,7 @@
 
 This crate implements the embedded C ABI described in the [C binding design](../../docs/design/c-bindings.md). Implementation and qualification are in progress; the [implementation ledger](../../docs/plans/0028-c-bindings.md) records the complete scope and remaining work. The checked-in headers are not a released interface yet.
 
-The Cargo library target is `uqa_ffi`, avoiding a collision with the existing Rust `uqa` facade. Planned native distribution packages will install the library as `uqa` and include the headers under `include/uqa`.
+The Cargo library target is `uqa_ffi`, avoiding a collision with the existing Rust `uqa` facade. The native distribution installs the library as `uqa` and includes headers under `include/uqa`. CMake links the Cargo static archive with the platform's exact public-symbol list. Final platform and release qualification remains in the implementation ledger.
 
 Host logging is deferred at the maintainer's request. `uqa_log.h` retains interface declarations only; their functions are not implemented or exported. This delivery adds no native logging or callback adapter.
 
@@ -24,4 +24,31 @@ Reusable UDF options use matching create/destroy and get/set functions. The fixe
 
 Enable `arrow-export` for `uqa_result_export_arrow` and `uqa_cursor_fetch_arrow`; the header includes the standard Arrow C Data Interface. `UQA_ARROW_LOSSLESS` uses declared exact mappings and rejects unqualified types or values. `UQA_ARROW_SQL_TEXT` explicitly selects SQL presentation text. Schema and array releases are independent, and moved top-level structs or detached children retain their owners after result/cursor/Engine destruction. The array allowance remains charged until its last retained array child is released; keeping schema metadata alone does not retain the data allowance. Export failure leaves empty outputs, and a conversion failure after a cursor fetch is terminal. Without the feature, both symbols return `UQA_ERROR_UNSUPPORTED`; Arrow export does not enable either foreign-data wrapper.
 
-Run `cargo test -p uqa-ffi --no-default-features --test integration` for the current source ABI suite. On Unix, its single Rust harness compiles and executes the same fifteen native fixtures as C11 and C++17 clients against all four backends. Persistent cases also verify sibling isolation, savepoint recovery, retained subscriptions, exact scalar and packed-value storage, restored catalog type input, close/reopen, rollback on close and SQLite encryption/compression. Static linkage, additional platforms, feature combinations and release qualification remain tracked in the implementation ledger.
+Run `cargo test -p uqa-ffi --no-default-features --test integration` for the current source ABI suite. On Unix, its single Rust harness compiles and executes the same fifteen native fixtures as C11 and C++17 clients against all four backends. Persistent cases also verify sibling isolation, savepoint recovery, retained subscriptions, exact scalar and packed-value storage, restored catalog type input, close/reopen, rollback on close and SQLite encryption/compression. `scripts/verify-c-package.py` compiles the installed CMake shared/static targets and pkg-config consumers, including Windows native synchronization and spill cleanup. Additional platforms, feature combinations and release qualification remain tracked in the implementation ledger.
+
+## Native builds and installed consumers
+
+Source builds require Rust, CMake 3.24 or later, Python 3.11 or later and the target's C/C++ toolchain. `scripts/build-c-bindings.py` compiles the selected native target, obtains its actual static-link dependencies from rustc, links the restricted shared library and installs both libraries, headers and metadata. Select the native target triple for your host. On macOS, set `MACOSX_DEPLOYMENT_TARGET` before compiling Rust or native dependencies; distribution CI uses 11.0. Windows uses the MSVC ABI and dynamic CRT (`/MD`).
+
+```sh
+MACOSX_DEPLOYMENT_TARGET=11.0 python3 scripts/build-c-bindings.py \
+  --target aarch64-apple-darwin \
+  --prefix target/c-installed --build-directory target/c-native-build
+python3 scripts/verify-c-package.py --prefix target/c-installed
+```
+
+The build defaults to `nori,kuromoji`. `--features ""` selects the minimal library; `--features nori,kuromoji,arrow-export` adds Arrow export. `arrow` and `duckdb` select their independent native foreign handlers. The source build script uses the development profile by default. Release CI selects the release profile and qualifies the actual installed libraries before archiving them.
+
+Use `find_package(UQA CONFIG REQUIRED)` with the installation prefix in `CMAKE_PREFIX_PATH`, then link one target:
+
+```cmake
+find_package(UQA CONFIG REQUIRED)
+add_executable(application application.c)
+target_link_libraries(application PRIVATE UQA::uqa)
+```
+
+`UQA::uqa` propagates `UQA_USE_SHARED`; `UQA::uqa_static` selects the exact static archive and its native dependencies without a shared-consumer macro. The pkg-config equivalents are `uqa` and `uqa-static`. Use `pkg-config --cflags --libs uqa-static` for the static archive. Windows pkgconf supports `--msvc-syntax`; its compile flags belong before the MSVC `/link` separator and its library flags after it.
+
+Packages contain `include/uqa`, libraries, `lib/cmake/UQA`, `lib/pkgconfig`, and `share/uqa`. `share/uqa/uqa-build.json` identifies product version, ABI major, source revision, enabled features, exact exports, deferred logging declarations, native link requirements, build runtime baseline and dependency license digests. Runtime library identity is checked against that manifest. Shared libraries use ABI major 1 independently of the product version. Windows keeps `uqa.lib` for the DLL import library and `uqa_static.lib` for the static archive.
+
+The automatic C package workflow targets Linux x86_64/aarch64, macOS x86_64/arm64 and Windows x86_64. It relocates the installation into a path containing spaces, compiles every installed header in all three linkage modes, rejects conflicting modes, checks the final native exports, and executes every ABI fixture and public example as C11/C++17 with shared and static linkage. Release publication requires all five target artifacts and verifies their source identity, complete file inventory, checksums, licenses and embedded dictionaries. Logging stays declaration-only. Configuring these gates does not establish that a pending candidate has passed them.

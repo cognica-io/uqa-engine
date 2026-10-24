@@ -36,6 +36,8 @@ PACKAGE_ARTIFACTS = {
     *("python-wheel-" + target for target in TARGETS),
     *("node-addon-" + target for target in TARGETS),
 }
+C_TARGETS = TARGETS[:-1]
+C_BUILD_JOBS = {f"c packages / C package ({target})" for target in C_TARGETS}
 
 WHEEL_RUNNERS = ("ubuntu-24.04", "ubuntu-24.04-arm", "macos-15-intel", "macos-14", "windows-latest", "windows-11-arm")
 WHEEL_MATRIX = {
@@ -128,9 +130,14 @@ def validate(run: dict, tag: str, commit: str, repository: str, jobs: list[dict]
     if any(statuses.get(name) != "success" for name in BUILD_JOBS - deferred):
         raise ValueError("every package, example and benchmark build must have passed")
     # A future additional build must not be silently omitted by this inventory.
-    if any(job["conclusion"] != "success" for job in jobs if job["name"] not in deferred and job["name"].startswith(("python /", "javascript packages /", "release benchmarks /"))):
+    if any(job["conclusion"] != "success" for job in jobs if job["name"] not in deferred and job["name"].startswith(("python /", "javascript packages /", "release benchmarks /", "c packages /"))):
         raise ValueError("an additional release build did not pass")
     required = PACKAGE_ARTIFACTS | {f"release-benchmarks-{tag}-{run['id']}-{run['run_attempt']}"}
+    if any(job["name"].startswith("c packages") for job in jobs) or any(
+            artifact["name"].startswith("c-bindings-") for artifact in artifacts):
+        if any(statuses.get(name) != "success" for name in C_BUILD_JOBS):
+            raise ValueError("every native C package and installed consumer must have passed")
+        required |= {"c-bindings-" + target for target in C_TARGETS}
     # Original releases without the CLI remain recoverable. New builds must
     # retain every CLI archive, including when artifact transport later fails.
     cli_steps = {"Build and verify usql release archive", "Build the CLI with bundled analyzers and foreign handlers"}

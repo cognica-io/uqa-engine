@@ -482,6 +482,18 @@ def check_embedded_dictionary(path: pathlib.Path, members: dict[str, bytes], lan
     files = {"nori": NORI_FILES, "kuromoji": KUROMOJI_FILES}[language]
     data_root = ROOT / f"crates/uqa-{language}-data"
     bundle = (data_root / files[0]).read_bytes()
+    if path.name.startswith("uqa-c-"):
+        # C distributions contain independently usable shared and static code;
+        # the DLL import library and SONAME symlinks are not runtime payloads.
+        shared = {name: data for name, data in members.items()
+                  if pathlib.PurePosixPath(name).name == "uqa.dll"
+                  or re.fullmatch(r"libuqa(?:\.[0-9.]+)?\.dylib|libuqa\.so(?:\.[0-9.]+)?",
+                                  pathlib.PurePosixPath(name).name)}
+        static = {name: data for name, data in members.items()
+                  if pathlib.PurePosixPath(name).name in {"libuqa.a", "uqa_static.lib"}}
+        if len(shared) != 1 or len(static) != 1 or any(bundle not in data for data in (*shared.values(), *static.values())):
+            raise RuntimeError(f"{path} must embed the complete pinned {language} bundle in both C libraries")
+        return
     binaries = {name: data for name, data in members.items()
                 if name.endswith((".node", ".wasm", ".so", ".pyd"))
                 or pathlib.PurePosixPath(name).name in {"usql", "usql.exe"}}

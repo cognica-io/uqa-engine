@@ -1,0 +1,13 @@
+# Unified Query Algebra
+# Copyright (c) 2023-2026 Cognica, Inc.
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/UQATargets.cmake")
+if(NOT TARGET UQA::uqa_static)
+  add_library(UQA::uqa_static STATIC IMPORTED)
+  set_target_properties(UQA::uqa_static PROPERTIES
+    IMPORTED_LOCATION "@PACKAGE_CMAKE_INSTALL_LIBDIR@/@UQA_STATIC_FILENAME@"
+    INTERFACE_INCLUDE_DIRECTORIES "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@"
+    INTERFACE_LINK_LIBRARIES "@UQA_NATIVE_LIBRARIES@")
+endif()
+check_required_components(UQA)

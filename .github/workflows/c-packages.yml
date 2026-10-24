@@ -1,0 +1,110 @@
+name: C packages
+
+on:
+  pull_request:
+    types: [ready_for_review]
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - "crates/**"
+      - "examples/c/**"
+      - "scripts/*c-bindings*"
+      - scripts/c_bindings_licenses.py
+      - "scripts/c-bindings/**"
+      - scripts/verify-c-package.py
+      - .github/workflows/c-packages.yml
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c-packages-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_RELEASE_DEBUG: "0"
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+
+jobs:
+  package:
+    name: C package (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
+      - name: Free Linux runner disk
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: c-distribution
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build and install the C distribution
+        # Native Perl must remain ahead of Git Bash for Windows dependencies.
+        run: python scripts/build-c-bindings.py --target '${{ matrix.target }}' --profile release --prefix target/c-installed --build-directory target/c-package-build
+      - name: Install native Windows pkgconf
+        if: runner.os == 'Windows'
+        id: pkgconf
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-pkgconf
+      - name: Relocate and qualify installed C and C++ consumers
+        env:
+          PKG_CONFIG: ${{ runner.os == 'Windows' && format('{0}/mingw64/bin/pkgconf.exe', steps.pkgconf.outputs.msys2-location) || 'pkg-config' }}
+        run: |
+          python -c 'from pathlib import Path; Path("target/c-installed").rename("target/relocated C package")'
+          python scripts/verify-c-package.py --prefix 'target/relocated C package'
+      - name: Archive the qualified native package
+        shell: bash
+        run: |
+          shopt -s nullglob
+          python scripts/c-bindings-release.py package --target '${{ matrix.target }}' --prefix 'target/relocated C package' --directory dist/c
+          archives=(dist/c/uqa-c-*.tgz dist/c/uqa-c-*.zip)
+          python scripts/check-release-licenses.py --require-nori --require-kuromoji "${archives[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-bindings-${{ matrix.target }}
+          path: dist/c/*
+          if-no-files-found: error
+      - name: Retain native build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c-bindings-diagnostics-${{ matrix.target }}
+          path: |
+            target/c-package-build/native-build.log
+            target/c-package-build/cmake/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore

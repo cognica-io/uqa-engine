@@ -20,6 +20,9 @@ UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt text eol=lf
 scripts/install-usql.sh text eol=lf
 scripts/install-usql.ps1 text eol=lf
 scripts/usql-release/licenses/*.txt -text -whitespace linguist-vendored
+scripts/c-bindings/licenses/*.txt -text -whitespace linguist-vendored
+scripts/c-bindings/licenses/sources.json text eol=lf
+crates/uqa-ffi/include/uqa/*.h text eol=lf
 scripts/fixtures/usql-release/rows.arrow binary
 crates/uqa-sql/THIRD-PARTY/POSTGRESQL-SORT-NOTICE.txt text eol=lf
 crates/uqa-pg-regex/THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt text eol=lf

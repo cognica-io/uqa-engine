@@ -7,11 +7,16 @@
 #include <uqa/uqa.h>
 #include "test_database.h"
 #include <assert.h>
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <dirent.h>
 #include <sys/stat.h>
+#endif
 
 static void checked(uqa_status status, int line) {
     if (status != UQA_OK) {
@@ -43,6 +48,26 @@ static int64_t integer(uqa_result result, uint64_t row, uint32_t column) {
 /* The harness gives each client an isolated temporary directory. */
 static size_t temporary_files(const char *path) {
     size_t count = 0;
+#ifdef _WIN32
+    WIN32_FIND_DATAA entry;
+    char pattern[4096];
+    int length = snprintf(pattern, sizeof(pattern), "%s/*", path);
+    assert(length > 0 && (size_t)length < sizeof(pattern));
+    HANDLE directory = FindFirstFileA(pattern, &entry);
+    if (directory == INVALID_HANDLE_VALUE) {
+        assert(GetLastError() == ERROR_FILE_NOT_FOUND);
+        return 0;
+    }
+    do {
+        char full[4096];
+        if (strcmp(entry.cFileName, ".") == 0 || strcmp(entry.cFileName, "..") == 0) continue;
+        length = snprintf(full, sizeof(full), "%s/%s", path, entry.cFileName);
+        assert(length > 0 && (size_t)length < sizeof(full));
+        count += (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? temporary_files(full) : 1;
+    } while (FindNextFileA(directory, &entry));
+    assert(GetLastError() == ERROR_NO_MORE_FILES);
+    assert(FindClose(directory));
+#else
     DIR *directory = opendir(path);
     struct dirent *entry;
     assert(directory != NULL);
@@ -57,6 +82,7 @@ static size_t temporary_files(const char *path) {
         count += S_ISDIR(info.st_mode) ? temporary_files(full) : 1;
     }
     assert(closedir(directory) == 0);
+#endif
     return count;
 }
 
