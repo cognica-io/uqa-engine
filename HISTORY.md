@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse successful catalog-sensitive cast descriptions within an immutable native expression scope, avoiding repeated qualified type lookup while preserving live values, domain checks, session settings, schema changes and mutable custom hooks.
+
 - Reuse successfully bound scalar-query descriptions within one clause-validation call and transfer fresh derived-source metadata into physical assembly. Avoid repeated grouping-alias and nested source analysis while preserving complete scope descriptors, routine selection and the original diagnostics.
 
 - Collect eligible complete SQL results directly from stable decoded memory fields, avoiding temporary shared-row ownership while preserving pure predicates, positional/duplicate output values, exact scan accounting, cancellation and cleanup. Computed, locking, metadata and fallible-provider paths retain ordinary physical row delivery.

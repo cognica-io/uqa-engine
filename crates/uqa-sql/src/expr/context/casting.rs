@@ -21,6 +21,10 @@ use crate::{
 
 mod datestyle;
 mod intervalstyle;
+mod metadata;
+pub use metadata::{
+    cast_value_with_scoped_resolution, CatalogCastScope, RetainedCatalogCast, ScopedCastResult,
+};
 mod ranges;
 mod timezone;
 
@@ -340,18 +344,24 @@ fn cast_with_resolution(
     control: &ProductionControl<'_>,
     resolved: &mut Option<ResolvedCast>,
 ) -> Result<Produced<Value>> {
-    control.check()?;
-    let resolved_target = resolve_catalog_type_with_control(target_ty, engine, control)?;
-    control.check()?;
-    let resolved_source_type = source_ty
-        .map(|source| resolve_catalog_type_with_control(source, engine, control))
-        .transpose()?
-        .flatten();
-    let parsed_target = if resolved_target.is_some() {
-        None
-    } else {
-        optional_type_name(target_ty, control)?
-    };
+    let types = metadata::CastTypes::resolve(source_ty, target_ty, engine, control)?;
+    cast_with_resolved_types(
+        value, source_ty, target_ty, engine, control, &types, resolved,
+    )
+}
+
+fn cast_with_resolved_types(
+    value: &Value,
+    source_ty: Option<&str>,
+    target_ty: &str,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+    types: &metadata::CastTypes,
+    resolved: &mut Option<ResolvedCast>,
+) -> Result<Produced<Value>> {
+    let resolved_target = &types.target;
+    let resolved_source_type = &types.source;
+    let parsed_target = &types.parsed_target;
     let target_column_type = resolved_target.as_deref().or(parsed_target.as_deref());
     let _date_order = datestyle::input_scope(value, target_column_type, engine, control)?;
     let _interval_style = intervalstyle::cast_scope(value, target_column_type, engine, control)?;
@@ -424,7 +434,8 @@ fn cast_with_resolution(
         }
     }
     let resolved_source = resolved_source_type
-        .map(|ty| coercion_type_name_with_control(&ty, control))
+        .as_ref()
+        .map(|ty| coercion_type_name_with_control(ty, control))
         .transpose()?;
     let source_ty = resolved_source.as_deref().map(String::as_str).or(source_ty);
     let target_name = resolved_target
