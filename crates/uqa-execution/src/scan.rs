@@ -27,6 +27,11 @@ pub trait RowSource: Send {
     /// Stable column order for the rows produced by [`Self::next_row`].
     fn schema(&self) -> &[String];
 
+    /// Native batch reads preserve the SQL evaluation and first-error order of consecutive single-row reads when the caller consumes the complete input. Custom sources must establish this before opting in.
+    fn supports_batched_consumption(&self) -> bool {
+        false
+    }
+
     /// Optional non-identity schema used by positional sources. This carries
     /// hidden lookup aliases and slot remaps that cannot be represented by the
     /// legacy column-name slice.
@@ -158,6 +163,10 @@ impl PhysicalOperator for RowIteratorScan<'_> {
         &self.schema
     }
 
+    fn supports_batched_consumption(&self) -> bool {
+        true
+    }
+
     fn open(&mut self) -> ExecResult<()> {
         self.exhausted = false;
         Ok(())
@@ -221,6 +230,10 @@ impl<'a> PhysicalRowIteratorScan<'a> {
 impl PhysicalOperator for PhysicalRowIteratorScan<'_> {
     fn row_schema(&self) -> &RowSchema {
         &self.schema
+    }
+
+    fn supports_batched_consumption(&self) -> bool {
+        true
     }
 
     fn backward_scan_support(&self) -> BackwardScanSupport {
@@ -303,6 +316,10 @@ impl RowSource for VecSource {
         &self.schema
     }
 
+    fn supports_batched_consumption(&self) -> bool {
+        true
+    }
+
     fn physical_schema(&self) -> Option<&RowSchema> {
         Some(&self.physical_schema)
     }
@@ -328,6 +345,10 @@ impl PhysicalVecSource {
 impl RowSource for PhysicalVecSource {
     fn schema(&self) -> &[String] {
         self.schema.columns()
+    }
+
+    fn supports_batched_consumption(&self) -> bool {
+        true
     }
 
     fn physical_schema(&self) -> Option<&RowSchema> {
@@ -403,6 +424,12 @@ impl TableScan {
 impl PhysicalOperator for TableScan {
     fn row_schema(&self) -> &RowSchema {
         &self.schema
+    }
+
+    fn supports_batched_consumption(&self) -> bool {
+        self.source
+            .as_ref()
+            .is_some_and(|source| source.supports_batched_consumption())
     }
 
     fn estimated_cardinality(&self) -> Option<u64> {

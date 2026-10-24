@@ -12,7 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Preserve native producer batches when collecting a complete SQL result, avoiding one pipeline pull and batch allocation per row. Early-stop, cardinality and directional consumers retain their original evaluation and error boundaries.
+- Preserve native producer batches for complete SQL results when both the consumer and producer preserve evaluation order, avoiding one pipeline pull and batch allocation per row on eligible paths. Computed projections, early-stop, cardinality and directional consumers retain their original evaluation, side-effect and error boundaries.
 
 - Update ctutils to restore constant-time cryptographic operations, Tokio to fix AsyncFd I/O safety, and clipboard-win to the maintained non-yanked patch release. Existing dependency audit and licensing policies remain enforced.
 

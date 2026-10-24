@@ -380,6 +380,10 @@ impl PhysicalOperator for Project<'_> {
         &self.schema
     }
 
+    fn supports_batched_consumption(&self) -> bool {
+        self.computed.is_empty() && self.child.supports_batched_consumption()
+    }
+
     fn output_ordering(&self) -> &[crate::PhysicalOrder] {
         &self.ordering
     }

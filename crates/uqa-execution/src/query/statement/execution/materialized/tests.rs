@@ -56,7 +56,10 @@ impl Source {
                 message: "late input failure".into(),
             }));
         }
-        let count = self.remaining.min(maximum);
+        let available = self.fail_after.map_or(self.remaining, |limit| {
+            limit.saturating_sub(self.emitted.load(Ordering::Relaxed))
+        });
+        let count = self.remaining.min(maximum).min(available);
         self.remaining -= count;
         self.emitted.fetch_add(count, Ordering::Relaxed);
         Ok((count != 0).then(|| {
@@ -76,6 +79,10 @@ impl Source {
 impl PhysicalOperator for Source {
     fn row_schema(&self) -> &RowSchema {
         &self.schema
+    }
+
+    fn supports_batched_consumption(&self) -> bool {
+        true
     }
 
     fn open(&mut self) -> ExecResult<()> {
@@ -103,7 +110,19 @@ fn public_result_collection_releases_physical_batches_before_reading_the_next() 
     let observed_owners = Arc::clone(&source.observed_owners);
     let closes = Arc::clone(&source.closes);
     let pulls = Arc::clone(&source.pulls);
-    let result = collect_source(source).unwrap();
+    let projection = crate::Project::new(
+        Box::new(source),
+        vec![("selected".into(), crate::ScalarExpr::Column("value".into()))],
+        Vec::new(),
+    );
+    let selection = crate::ColumnSelection::with_mapping(
+        Box::new(projection),
+        vec![("value".into(), "selected".into())],
+    );
+    let result = super::collect::<()>(|mode| {
+        collect_input(Box::new(selection), bind_output_mode(None, mode, None)?)
+    })
+    .unwrap();
     assert_eq!(result.columns, ["value"]);
     assert_eq!(result.rows.len(), COUNT);
     assert!(result
@@ -124,11 +143,13 @@ fn public_result_collection_releases_physical_batches_before_reading_the_next() 
 }
 
 fn collect_source(source: Source) -> Result<uqa_sql::SQLResult, uqa_sql::SQLError> {
-    super::collect::<()>(|mode| collect_input(source, bind_output_mode(None, mode, None)?))
+    super::collect::<()>(|mode| {
+        collect_input(Box::new(source), bind_output_mode(None, mode, None)?)
+    })
 }
 
 fn collect_input(
-    source: Source,
+    source: Box<dyn PhysicalOperator>,
     mode: crate::query::consumer::QueryOutputMode<'_>,
 ) -> Result<crate::query::output::QueryOutput, uqa_sql::SQLError> {
     let runtime = QueryRuntimeView {
@@ -140,7 +161,90 @@ fn collect_input(
         aggregate_functions: &RwLock::default(),
         notices: &crate::query::NoticeQueue::default(),
     };
-    collect_query_operator(runtime, vec!["value".into()], Box::new(source), mode)
+    collect_query_operator(runtime, vec!["value".into()], source, mode)
+}
+
+#[test]
+fn complete_result_collection_preserves_interleaved_row_effects() {
+    use uqa_sql::{expr::RowLookup, ScalarExpr};
+
+    struct Effect {
+        calls: Arc<AtomicUsize>,
+        output: bool,
+    }
+    impl crate::ExpressionEvaluator for Effect {
+        fn evaluate(&self, _: &ScalarExpr, _: &dyn RowLookup) -> ExecResult<Value> {
+            let value = i64::try_from(self.calls.fetch_add(1, Ordering::Relaxed) + 1).unwrap();
+            Ok(if self.output {
+                Value::Int(value)
+            } else {
+                Value::Bool(true)
+            })
+        }
+    }
+    struct Unclassified(Box<dyn PhysicalOperator>);
+    impl PhysicalOperator for Unclassified {
+        fn row_schema(&self) -> &RowSchema {
+            self.0.row_schema()
+        }
+        fn open(&mut self) -> ExecResult<()> {
+            self.0.open()
+        }
+        fn next(&mut self) -> ExecResult<Option<Batch>> {
+            self.0.next()
+        }
+        fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+            self.0.next_with_demand(rows)
+        }
+        fn close(&mut self) -> ExecResult<()> {
+            self.0.close()
+        }
+    }
+
+    for opaque in [false, true] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let source = crate::TableScan::from_physical_rows(
+            RowSchema::new(vec!["id".into()]),
+            [1, 2]
+                .into_iter()
+                .map(|id| PhysicalRow::from_values(vec![Value::Int(id)]))
+                .collect(),
+        );
+        let filter = crate::Filter::with_evaluator(
+            Box::new(source),
+            ScalarExpr::Literal(Value::Bool(true)),
+            Arc::new(Effect {
+                calls: Arc::clone(&calls),
+                output: false,
+            }),
+        );
+        let projection = crate::Project::with_evaluator(
+            Box::new(filter),
+            vec![("value".into(), ScalarExpr::Literal(Value::Int(0)))],
+            Arc::new(Effect {
+                calls: Arc::clone(&calls),
+                output: true,
+            }),
+        );
+        let producer: Box<dyn PhysicalOperator> = if opaque {
+            Box::new(Unclassified(Box::new(projection)))
+        } else {
+            Box::new(projection)
+        };
+        let result = super::collect::<()>(|mode| {
+            collect_input(producer, bind_output_mode(None, mode, None)?)
+        })
+        .unwrap();
+        assert_eq!(
+            result
+                .rows
+                .iter()
+                .map(|row| row["value"].clone())
+                .collect::<Vec<_>>(),
+            vec![Value::Int(2), Value::Int(4)]
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 4);
+    }
 }
 
 #[test]
@@ -187,7 +291,7 @@ fn row_sensitive_consumers_keep_singleton_production_and_first_error() {
             remaining: Cell::new(3),
             fail,
         });
-        match collect_input(source, QueryOutputMode::RowConsumer(consumer)) {
+        match collect_input(Box::new(source), QueryOutputMode::RowConsumer(consumer)) {
             Ok(_) => assert!(!fail),
             Err(error) => {
                 assert!(fail);

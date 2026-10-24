@@ -199,8 +199,12 @@ fn collect_consumed_rows(
             "open row consumer input",
         ));
     }
+    let batched_input = operator.supports_batched_consumption();
     loop {
-        let next = match consumer.input_demand() {
+        let demand = consumer
+            .input_demand()
+            .or_else(|| (!batched_input).then_some(crate::physical::demand::ONE));
+        let next = match demand {
             Some(rows) => operator.next_with_demand(rows),
             None => operator.next(),
         };

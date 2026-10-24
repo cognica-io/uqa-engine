@@ -24,7 +24,7 @@ pub trait QueryRowConsumer {
         Ok(QueryConsumerControl::Continue)
     }
 
-    /// Requested output rows before this consumer receives control. The default retains row-level demand for stop and error boundaries. A consumer that accepts complete input may return `None` to retain the producer's ordinary bounded batches.
+    /// Requested output rows before this consumer receives control. The default retains row-level demand for stop and error boundaries. A consumer that accepts all input without per-row observable effects or failures may return `None`; native batches additionally require the producer's ordering guarantee.
     fn input_demand(&self) -> Option<std::num::NonZeroUsize> {
         Some(crate::physical::demand::ONE)
     }

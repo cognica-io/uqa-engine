@@ -340,6 +340,16 @@ impl crate::RowSource for LocalTableRowSource {
         &self.schema
     }
 
+    fn supports_batched_consumption(&self) -> bool {
+        // Ordinary stored-column scans evaluate predicates in row order. Generated fields and command/candidate partition projection retain singleton scheduling until their cross-stage error order is established.
+        self.command_changes.is_none()
+            && self.candidates.is_none()
+            && !crate::query::generated::projection_contains_virtual_generated_column(
+                &self.column_definitions,
+                &self.columns,
+            )
+    }
+
     fn physical_schema(&self) -> Option<&crate::RowSchema> {
         Some(&self.physical_schema)
     }

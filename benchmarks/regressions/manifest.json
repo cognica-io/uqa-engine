@@ -18901,7 +18901,7 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests.rs",
       "capability": "Incremental public SQL materialization",
-      "workload": "16,384 shared physical rows arrive through a demand-aware producer with native 128-row batches at the public SQL result boundary.",
+      "workload": "16,384 shared physical rows pass through a demand-aware 128-row producer, slot-only projection and column selection at the public SQL result boundary.",
       "invariant": "Complete collection uses exactly 129 producer calls, including exhaustion, and releases each physical batch before the next pull; every Unicode value and row remains in the public result.",
       "case_names": [
         ""
@@ -18918,6 +18918,36 @@
       "invariant": "Only three rows are produced in three pulls; the first consumer result is preserved, the source closes once and all physical owners are released.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_result_collection_preserves_interleaved_row_effects",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests.rs",
+      "capability": "Query consumer evaluation demand",
+      "workload": "Complete public collection over predicate and projection effects, directly and behind an unclassified custom producer.",
+      "invariant": "Evaluation remains row-wise across stages: output values are 2 and 4 after exactly four effects; unclassified producers retain conservative demand.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "complete_results_preserve_postgresql_error_and_effect_order",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/projection_demand.rs",
+      "capability": "Query consumer evaluation demand",
+      "workload": "Independent Docker PostgreSQL 18.4 competing overflow/division errors and predicate/projection nextval effects on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Complete and LIMIT 2 results retain first-row 22003 before later 22012; reversing rows yields 22012; sequence projection returns 2 and 4.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
       ]
     },
     {
