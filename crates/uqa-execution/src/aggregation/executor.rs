@@ -27,6 +27,7 @@ pub struct PhysicalAggregateExecutor<'a> {
     input_row_schema: RowSchema,
     output_schema: RowSchema,
     output_budget: usize,
+    outer: Option<super::AggregateOuterRow>,
     sets: Vec<AggregateSet>,
 }
 
@@ -39,6 +40,26 @@ impl<'a> PhysicalAggregateExecutor<'a> {
         input_schema: RowSchema,
         output_schema: RowSchema,
         work_mem_bytes: usize,
+    ) -> Result<Self, SQLError> {
+        Self::with_outer_scope(
+            context,
+            statement,
+            params,
+            input_schema,
+            output_schema,
+            work_mem_bytes,
+            None,
+        )
+    }
+
+    pub(crate) fn with_outer_scope(
+        context: std::sync::Arc<dyn QueryExpressionContext + 'a>,
+        statement: &QueryBlockPlan,
+        params: &'a [SQLParam],
+        input_schema: RowSchema,
+        output_schema: RowSchema,
+        work_mem_bytes: usize,
+        outer: Option<super::AggregateOuterRow>,
     ) -> Result<Self, SQLError> {
         let runtime = context;
         let context = runtime.as_ref();
@@ -66,6 +87,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                         set_budget,
                         &input_schema,
                         params,
+                        outer.as_ref(),
                     )
                     .map(|set| AggregateSet::Adaptive(Box::new(set)));
                 }
@@ -82,6 +104,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                             phase_budget,
                             &input_schema,
                             params,
+                            outer.as_ref(),
                         )?,
                     ))
                 } else {
@@ -108,6 +131,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
             input_row_schema: input_schema,
             output_schema,
             output_budget: (work_mem_bytes / 3).max(1),
+            outer,
             sets,
         })
     }
@@ -142,6 +166,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                     self.params,
                     phase_budget,
                     relaxed,
+                    self.outer.as_ref(),
                 )
             }
         }

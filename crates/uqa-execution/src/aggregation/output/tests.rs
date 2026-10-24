@@ -45,6 +45,7 @@ fn constant_group_outputs_read_finalized_slots_without_an_input_row() {
             false,
             &RowSchema::default(),
             &[],
+            None,
         )
         .unwrap();
         let labels = vec!["output".into(); expected.len()];
@@ -76,6 +77,7 @@ fn grouped_expression_outputs_keep_the_finalized_null_value() {
         false,
         &RowSchema::default(),
         &[],
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -91,4 +93,104 @@ fn grouped_expression_outputs_keep_the_finalized_null_value() {
         .unwrap(),
         Some(vec![Value::Null, Value::Null, Value::Bool(true)])
     );
+}
+
+#[test]
+fn enclosing_group_outputs_survive_empty_input_and_appended_local_slots() {
+    let local = RowSchema::with_qualified_types(
+        "t",
+        vec!["n".into()],
+        vec![Some(uqa_sql::ast::ColumnType::Integer)],
+    );
+    for value in [3, 4] {
+        let outer = OwnedPhysicalRow::new(
+            RowSchema::with_qualified_types(
+                "o",
+                vec!["n".into()],
+                vec![Some(uqa_sql::ast::ColumnType::Integer)],
+            ),
+            PhysicalRow::from_values(vec![Value::Int(value)]),
+        );
+        let input = RowSchema::with_outer_schema(&local, &outer.schema);
+        let scope = outer::AggregateOuterRow::new(&outer, input.physical_width()).unwrap();
+        let input = RowSchema::append_typed(
+            &input,
+            &[("computed".into(), Some(uqa_sql::ast::ColumnType::Integer))],
+        );
+        for (sql, grouped_outer) in [
+            (
+                "SELECT o.n, count(*) FROM t GROUP BY GROUPING SETS ((t.n), ())",
+                false,
+            ),
+            (
+                "SELECT o.n, count(*) FROM t GROUP BY GROUPING SETS ((o.n), ())",
+                true,
+            ),
+        ] {
+            let statement = block(sql);
+            for (selected, empty_input) in [
+                (&statement.grouping_sets[0], false),
+                (&statement.grouping_sets[1], true),
+            ] {
+                let active = uqa_sql::semantics::aggregates::select_grouping_set(
+                    &Services, &statement, selected,
+                )
+                .unwrap();
+                let target = active.projections[1].expr.clone();
+                let output = AggregateOutputPlan::compile(
+                    &Services,
+                    &active,
+                    &[target],
+                    true,
+                    &input,
+                    &[],
+                    Some(&scope),
+                )
+                .unwrap();
+                let mut count = AggregateAccumulator::builtin("count");
+                if !empty_input {
+                    count.observe(&Value::Int(1)).unwrap();
+                }
+                let keys = if empty_input {
+                    Vec::new()
+                } else {
+                    vec![Value::Int(if grouped_outer { value } else { 1 })]
+                };
+                let expected = if grouped_outer && empty_input {
+                    Value::Null
+                } else {
+                    Value::Int(value)
+                };
+                assert_eq!(
+                    finish_group(
+                        &Services,
+                        &active,
+                        &output,
+                        vec![count],
+                        &keys,
+                        &["n".into(), "count".into()],
+                        &[]
+                    )
+                    .unwrap(),
+                    Some(vec![expected, Value::Int(i64::from(!empty_input))]),
+                    "{sql}"
+                );
+            }
+        }
+        let statement = block("SELECT computed FROM t");
+        let output = AggregateOutputPlan::compile(
+            &Services,
+            &statement,
+            &[],
+            true,
+            &input,
+            &[],
+            Some(&scope),
+        )
+        .unwrap();
+        assert!(
+            matches!(output.projections[0], AggregateProjectionPlan::Null),
+            "an appended local value must not become an enclosing input"
+        );
+    }
 }

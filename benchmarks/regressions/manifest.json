@@ -6846,7 +6846,7 @@
       ],
       "source": "crates/uqa-engine/tests/pg18_semantics/generated_concatenation.rs",
       "capability": "Planned text conversion mutability",
-      "workload": "Thirty-six independent PostgreSQL messages on memory, native SQLite, SQLite Key/Value and redb.",
+      "workload": "Thirty-nine independent PostgreSQL messages on memory, native SQLite, SQLite Key/Value and redb.",
       "invariant": "Generated concatenation admission and exact error priority match PostgreSQL for scalar, enum, composite and domain operands."
     },
     {
@@ -24876,6 +24876,48 @@
       "capability": "Empty append initialization",
       "workload": "Relation-backed UNION ALL, other set operators and differing analyzed output types.",
       "invariant": "Only a flattened noncoercing append of dummy relations can lose scan initialization; distinct/intersection/difference and coercing boundaries survive."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "distinct_grouping_keeps_analyzed_identity_and_original_stored_syntax",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/grouping_identity.rs",
+      "capability": "Analyzed grouping identity",
+      "workload": "Six PostgreSQL grouping identities across serialization and rebinding.",
+      "invariant": "Deduplicate analyzed sets before scalar rewriting without changing stored DISTINCT syntax; transient selections never persist."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "distinct_grouping_identity_matches_postgresql_before_folding_and_after_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/sql_grouping_sets/identity.rs",
+      "capability": "Analyzed grouping identity",
+      "workload": "Forty-five independent PostgreSQL statements covering grouping identity, outer/local scope, empty inputs, set projection, CTEs, generic/custom parameters, view definitions, routines, rollback and reopen.",
+      "invariant": "Strict-NULL and constant folding preserve the analyzed grouping-set multiplicity, original stored SQL and reached error order."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "enclosing_group_outputs_survive_empty_input_and_appended_local_slots",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/aggregation/output/tests.rs",
+      "capability": "Correlated aggregate scope",
+      "workload": "Changing outer rows, selected/absent grouping keys, empty input and local slots appended after the enclosing fragment.",
+      "invariant": "Finalized grouping preserves enclosing values without treating local slots as outer inputs or restoring absent group keys."
     }
   ]
 }
