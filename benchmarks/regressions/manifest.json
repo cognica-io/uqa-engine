@@ -19005,6 +19005,58 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "named_fragmented_output_copies_only_selected_shared_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/materialization.rs",
+      "capability": "Named result value ownership",
+      "workload": "A scalar projection over one shared wide fragment and an owned metadata fragment.",
+      "invariant": "Exact scalar output and released physical owners require at most 8KiB allocation; unselected shared payload size adds no copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "empty_named_projection_releases_fragments_without_copying_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/materialization.rs",
+      "capability": "Named result value ownership",
+      "workload": "A zero-column projection over shared and owned wide physical fragments.",
+      "invariant": "Preserve one empty result row, release shared owners and stay within 8KiB without copying either discarded payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "named_output_donates_payload_after_discarding_row_local_aliases",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/materialization.rs",
+      "capability": "Named result value ownership",
+      "workload": "One selected string in a row whose two fragments alias the same owned value vector.",
+      "invariant": "Discard unselected aliases before ownership transfer; retain the original selected string allocation within an 8KiB metadata allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "named_output_clones_only_the_repeated_selected_alias",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/materialization.rs",
+      "capability": "Named result value ownership",
+      "workload": "Two public labels select the same string through different row-local physical fragments, with a large unselected sibling.",
+      "invariant": "Preserve both values and donate one original buffer; allocate at most one necessary payload copy plus 8KiB of metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "expanded_projection_spills_before_retaining_a_complete_input_batch",
       "cases": 1,
       "source": "crates/uqa-execution/src/relational/project/tests.rs",
