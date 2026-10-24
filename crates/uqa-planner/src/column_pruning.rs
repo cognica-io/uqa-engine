@@ -61,6 +61,9 @@ pub fn column_prune_for_stmt_with_filter(
     from: &SourcePlan,
     filter: Option<&ScalarExpr>,
 ) -> Result<Option<ColumnPrune>, SQLError> {
+    if !stmt.deferred_outer_rewrites.is_empty() {
+        return Ok(None);
+    }
     let catalog = context.catalog;
     let resolution = context.resolution;
     let requires_full_projection = source_contains_join_alias(from)

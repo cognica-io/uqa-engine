@@ -27,6 +27,11 @@ pub mod context;
 use context::{stored_view_schema, ViewRewriteContext};
 
 mod correlation;
+mod deferred;
+pub use deferred::{
+    bind_outer_rewrite_scope, resolve_outer_expression_rewrites, resolve_outer_rewrites,
+    resolve_outer_source_rewrites, resolve_outer_sources, DeferredOuterRewrite,
+};
 mod layer_privileges;
 mod returning;
 mod rewrite_insert;

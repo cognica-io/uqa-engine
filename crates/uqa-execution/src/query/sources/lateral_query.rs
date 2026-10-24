@@ -139,6 +139,7 @@ fn execute_lateral_relational_root_output<S: Clone + Send + Sync + 'static>(
             let order_plan =
                 (!order_by.is_empty() || limit.is_some() || offset.is_some()).then(|| {
                     QueryBlockPlan {
+                        deferred_outer_rewrites: Vec::new(),
                         privilege_columns: std::collections::BTreeSet::default(),
                         projections: Vec::new(),
                         from: None,
@@ -197,8 +198,11 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
     scoped_ctes: &mut CteScope<S>,
     output_mode: QueryOutputMode<'_>,
 ) -> Result<QueryOutput, SQLError> {
+    let captured_outer = crate::query::binding::bind_outer_rewrite_row(stmt, outer_row);
+    let outer_row = captured_outer.as_ref();
+    let rewrite_subqueries = !stmt.deferred_outer_rewrites.is_empty();
     let inherited_lock_identities = scoped_ctes.lock_identities.emit;
-    let mut scoped_ctes = scoped_ctes.enter_scalar_subqueries(&stmt.subqueries);
+    let mut scoped_ctes = scoped_ctes.enter_query_block(stmt);
     scoped_ctes.set_row_lock_outer_row(outer_row.clone());
     let row_identity_barrier = stmt.distinct
         || !stmt.distinct_on.is_empty()
@@ -226,6 +230,13 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         )?;
     }
     let stmt = stmt.as_ref();
+    let mut bound_scope;
+    let scoped_ctes = if rewrite_subqueries {
+        bound_scope = scoped_ctes.enter_scalar_subqueries(&stmt.subqueries);
+        &mut *bound_scope
+    } else {
+        &mut *scoped_ctes
+    };
     if let Some(from) = stmt.from.as_ref() {
         uqa_sql::semantics::sets::validation::validate_source_set_contexts_before_build(
             context.relational.catalog,
@@ -235,18 +246,30 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
                 .as_ref(),
             from,
             params,
-            &crate::query::binding::binding_context(&scoped_ctes)?,
+            &crate::query::binding::binding_context(scoped_ctes)?,
             Some(&outer_row.schema),
         )?;
     }
-    let (operator, residual) = build_lateral_query_source(
-        context,
-        stmt,
-        &own_schema,
-        outer_row,
-        params,
-        &mut scoped_ctes,
-    )?;
+    let LateralInput {
+        operator,
+        residual,
+        local_schema,
+    } = build_lateral_query_source(context, stmt, &own_schema, outer_row, params, scoped_ctes)?;
+    let pending = !stmt.deferred_outer_rewrites.is_empty();
+    let rewritten = uqa_sql::semantics::view_rewrite::resolve_outer_rewrites(stmt, &local_schema);
+    let stmt = rewritten.as_ref();
+    let residual = if pending {
+        stmt.r#where.clone()
+    } else {
+        residual
+    };
+    let rewritten_scope;
+    let scoped_ctes = if rewrite_subqueries {
+        rewritten_scope = scoped_ctes.enter_scalar_subqueries(&stmt.subqueries);
+        &*rewritten_scope
+    } else {
+        &*scoped_ctes
+    };
     let (operator, columns) =
         crate::physical::construction::OperatorBuild::run(operator, |operator| {
             bind_lateral_output_columns(
@@ -255,7 +278,7 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
                 operator.row_schema(),
                 &outer_row.schema,
                 params,
-                &scoped_ctes,
+                scoped_ctes,
             )
         })?;
     crate::query::relational::output::execute_query_block_operator_output(
@@ -265,7 +288,7 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         stmt,
         stmt,
         params,
-        &scoped_ctes,
+        scoped_ctes,
         columns,
         output_mode,
     )
@@ -319,6 +342,12 @@ fn bind_lateral_output_columns<S: Clone + Send + Sync + 'static>(
     Ok(columns)
 }
 
+struct LateralInput<'a> {
+    operator: Box<dyn crate::PhysicalOperator + 'a>,
+    residual: Option<uqa_sql::ScalarExpr>,
+    local_schema: crate::RowSchema,
+}
+
 /// Build the block's sources with the conjuncts this invocation can place in them, and return the remaining filter over the overlaid rows.
 fn build_lateral_query_source<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
@@ -327,16 +356,10 @@ fn build_lateral_query_source<'a, S: Clone + Send + Sync + 'static>(
     outer_row: &crate::OwnedPhysicalRow,
     params: &'a [SQLParam],
     scoped_ctes: &mut CteScope<S>,
-) -> Result<
-    (
-        Box<dyn crate::PhysicalOperator + 'a>,
-        Option<uqa_sql::ScalarExpr>,
-    ),
-    SQLError,
-> {
+) -> Result<LateralInput<'a>, SQLError> {
     let placement = outer_constants::placement(context, stmt, own_schema, outer_row, scoped_ctes)?;
     let filters = placement.filters.as_ref();
-    let operator: Box<dyn crate::PhysicalOperator + 'a> = if let Some(from) = stmt.from.as_ref() {
+    let child: Box<dyn crate::PhysicalOperator + 'a> = if let Some(from) = stmt.from.as_ref() {
         let source_row_locks = crate::query::locking::resolve_row_locks(
             context.locking,
             from,
@@ -349,14 +372,20 @@ fn build_lateral_query_source<'a, S: Clone + Send + Sync + 'static>(
             let mut source_scope = scoped_ctes.enter_source_row_locks(source_row_locks);
             build_join_operator_with_ctes(context, from, params, &mut source_scope, None, filters)?
         };
-        Box::new(crate::ScopeOverlay::new(child, outer_row.clone()))
+        child
     } else {
         let child: Box<dyn crate::PhysicalOperator + '_> =
             Box::new(crate::TableScan::from_physical_rows(
                 crate::RowSchema::default(),
                 vec![crate::PhysicalRow::default()],
             ));
-        Box::new(crate::ScopeOverlay::new(child, outer_row.clone()))
+        child
     };
-    Ok((operator, placement.residual))
+    let local_schema = child.row_schema().clone();
+    let operator = Box::new(crate::ScopeOverlay::new(child, outer_row.clone()));
+    Ok(LateralInput {
+        operator,
+        residual: placement.residual,
+        local_schema,
+    })
 }

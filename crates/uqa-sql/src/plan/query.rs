@@ -48,7 +48,8 @@ impl QueryBlockPlan {
 
     /// One scalar SELECT with no relational clauses or subplans. The caller must also reject set-returning routines using its selected catalog.
     pub fn is_single_expression(&self) -> bool {
-        matches!(self.compute, ComputePlan::Project)
+        self.deferred_outer_rewrites.is_empty()
+            && matches!(self.compute, ComputePlan::Project)
             && self.from.is_none()
             && self.r#where.is_none()
             && self.group_by.is_empty()
@@ -326,6 +327,7 @@ impl QueryBlockPlan {
             })
             .collect();
         let mut block = Self {
+            deferred_outer_rewrites: Vec::new(),
             windows,
             projections,
             privilege_columns: std::collections::BTreeSet::default(),

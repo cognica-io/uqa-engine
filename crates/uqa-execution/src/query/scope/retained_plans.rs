@@ -171,3 +171,31 @@ fn definition_declarations_do_not_reparse_quoted_names_as_references() {
         assert!(scope.definition_scope("public.\"Q.CTE\"").is_none());
     }
 }
+
+#[test]
+fn scalar_query_scopes_restore_outer_rows_after_completion_and_unwind() {
+    let row = |value| {
+        crate::OwnedPhysicalRow::new(
+            crate::RowSchema::new(vec!["n".into()]),
+            crate::PhysicalRow::from_values(vec![uqa_core::Value::Int(value)]),
+        )
+    };
+    for parent in [None, Some(row(7))] {
+        for unwind in [false, true] {
+            let mut scope = CteScope::<()>::new();
+            if let Some(parent) = &parent {
+                scope.set_row_lock_outer_row(parent.clone());
+            }
+            let mut retained = None;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut nested = scope.enter_scalar_subqueries(&[]);
+                nested.set_row_lock_outer_row(row(9));
+                retained = Some((*nested).clone());
+                assert!(!unwind, "injected query unwind");
+            }));
+            assert_eq!(result.is_err(), unwind);
+            assert_eq!(scope.row_lock_outer_row(), parent.as_ref());
+            assert_eq!(retained.unwrap().row_lock_outer_row(), Some(&row(9)));
+        }
+    }
+}

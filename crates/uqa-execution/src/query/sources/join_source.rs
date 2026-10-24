@@ -7,12 +7,13 @@
 
 /// Build the physical operator for a join source.
 use super::{
-    alias_join_operator, bind_source_plan_schema, build_join_operator_with_ctes_at_path,
-    combine_filters, join_using_predicate, null_row_for_schema, physical_exec_error,
-    physical_work_mem_bytes, qualifier_filter, require_lateral_function_execute,
-    resolve_join_using, shape_join_using_output, unproduced_column, validate_join_on_schema,
-    ColumnPrune, CteScope, JoinExecutionStrategy, PhysicalOperator, QualifierFilters,
-    QueryLateralSource, RowSchemaExecution, SQLError, SQLParam, SourceContext, SourcePlan,
+    alias_join_operator, bind_join_on_schema, bind_source_plan_schema,
+    build_join_operator_with_ctes_at_path, combine_filters, join_using_predicate,
+    null_row_for_schema, physical_exec_error, physical_work_mem_bytes, qualifier_filter,
+    require_lateral_function_execute, resolve_join_using, shape_join_using_output,
+    unproduced_column, ColumnPrune, CteScope, JoinExecutionStrategy, PhysicalOperator,
+    QualifierFilters, QueryLateralSource, RowSchemaExecution, SQLError, SQLParam, SourceContext,
+    SourcePlan,
 };
 use crate::physical::construction::OperatorBuild;
 use crate::{HashJoin, LateralJoin, NestedLoopJoin};
@@ -77,6 +78,35 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 left_recheck_path,
             )?;
             OperatorBuild::build(left_operator, |left_operator| {
+                let source_binding = if ctes.source_outer_rewrites.is_some() {
+                    let outer_schema = ctes.row_lock_outer_row().map(|row| row.schema.clone());
+                    let preceding = uqa_sql::binding::SourceScope::new(outer_schema.as_ref())
+                        .right_namespace(left, left_operator.row_schema(), *kind);
+                    crate::query::binding::bind_outer_source_rewrites(
+                        context.ctes.routines,
+                        right,
+                        params,
+                        ctes,
+                        uqa_sql::binding::SourceScope {
+                            outer: outer_schema.as_ref(),
+                            preceding: Some(&preceding),
+                            inherited_lateral: *lateral,
+                            retain_names: true,
+                        },
+                    )?
+                } else {
+                    None
+                };
+                let mut source_scope;
+                let ctes = if let Some(binding) = &source_binding {
+                    source_scope = ctes.enter_scalar_subqueries(&binding.subqueries);
+                    &mut *source_scope
+                } else {
+                    ctes
+                };
+                let right = source_binding
+                    .as_ref()
+                    .map_or(right, |binding| &binding.source);
                 let implicit_lateral_function = match right.as_ref() {
                     SourcePlan::Function { name, .. } => {
                         let identity = name.to_ascii_lowercase();
@@ -137,7 +167,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         Some(&input_schema),
                     )?;
                     require_lateral_function_execute(context, right, &input_schema, params, ctes)?;
-                    validate_join_on_schema(
+                    let (on, evaluator) = bind_join_on_schema(
                         context,
                         on.as_ref(),
                         &left_schema,
@@ -151,7 +181,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     let effective_on = resolved_using
                         .as_ref()
                         .and_then(|using| join_using_predicate(using, &left_schema, &right_schema))
-                        .or_else(|| on.clone());
+                        .or(on);
                     if *kind == uqa_sql::ast::JoinKind::Full {
                         super::join_keys::join_keys(
                             *kind,
@@ -218,11 +248,11 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                                 &right_schema,
                                 left_nulls.keys().chain(right_nulls.keys()).cloned(),
                             );
-                            crate::scalar::PreparedExpressions::scalar(
-                                context
-                                    .relational
-                                    .evaluator(params, ctes)
-                                    .bind_type_introspection(expression, &joined),
+                            (
+                                crate::scalar::PreparedExpressions::scalar(
+                                    evaluator.bind_type_introspection(expression, &joined),
+                                ),
+                                evaluator.clone(),
                             )
                         }),
                         function_arguments: match right.as_ref() {
@@ -299,7 +329,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         work_mem,
                     ),
                 ) = OperatorBuild::run(right_operator, |right_operator| {
-                    validate_join_on_schema(
+                    let (on, evaluator) = bind_join_on_schema(
                         context,
                         on.as_ref(),
                         &left_schema,
@@ -312,9 +342,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     let effective_on = resolved_using
                         .as_ref()
                         .and_then(|using| join_using_predicate(using, &left_schema, &right_schema))
-                        .or_else(|| on.clone());
-
-                    let evaluator = context.relational.evaluator(params, ctes);
+                        .or(on);
                     let effective_on = effective_on.map(|predicate| {
                         let schema = crate::RowSchema::join(&left_schema, &right_schema, []);
                         evaluator.bind_type_introspection(predicate, &schema)

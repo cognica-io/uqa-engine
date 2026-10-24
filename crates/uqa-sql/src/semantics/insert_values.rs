@@ -88,6 +88,7 @@ pub fn single_row_values_query(
         relations_bound: insert.relations_bound,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
+            deferred_outer_rewrites: Vec::new(),
             windows: Vec::new(),
             projections,
             privilege_columns: std::collections::BTreeSet::default(),

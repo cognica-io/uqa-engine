@@ -93,7 +93,8 @@ pub fn decorrelate_exists(
     let Some(source) = block.from.as_ref() else {
         return Ok(None);
     };
-    if !matches!(block.compute, ComputePlan::Project)
+    if !block.deferred_outer_rewrites.is_empty()
+        || !matches!(block.compute, ComputePlan::Project)
         || !block.group_by.is_empty()
         || !block.grouping_sets.is_empty()
         || block.having.is_some()

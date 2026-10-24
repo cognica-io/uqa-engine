@@ -203,14 +203,12 @@ pub(super) fn schema_public_columns(schema: &RowSchema) -> BTreeSet<String> {
         .collect()
 }
 
-struct CorrelatedRewriteContext<'a> {
-    services: ViewRewriteContext<'a>,
-    layer: &'a AutomaticViewLayer,
-    default_target_qualifier: &'a str,
-    target_qualifiers: &'a BTreeSet<String>,
-    source: Option<&'a RowSchema>,
-    params: &'a [crate::SQLParam],
-    outer: &'a RowSchema,
+pub(super) struct CorrelatedRewriteContext<'a> {
+    pub(super) services: ViewRewriteContext<'a>,
+    pub(super) layer: &'a AutomaticViewLayer,
+    pub(super) default_target_qualifier: &'a str,
+    pub(super) target_qualifiers: &'a BTreeSet<String>,
+    pub(super) source: Option<&'a RowSchema>,
 }
 
 #[expect(
@@ -244,80 +242,19 @@ fn rewrite_correlated_query(
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
-            let local_schema = block
-                .from
-                .as_ref()
-                .map(|source| {
-                    crate::semantics::view_rewrite::context::analyze_source_plan_schema(
-                        context.services,
-                        source,
-                        context.params,
-                        &query_scope,
-                        Some(context.outer),
-                    )
-                })
-                .transpose()?;
-            let mut qualifier_shadows = inherited_qualifier_shadows.clone();
-            if let Some(schema) = local_schema.as_ref() {
-                qualifier_shadows.extend(
-                    context
-                        .target_qualifiers
-                        .iter()
-                        .filter(|qualifier| schema.has_qualifier(qualifier))
-                        .cloned(),
-                );
-            }
-            let mut column_shadows = inherited_column_shadows.clone();
-            if let Some(schema) = local_schema.as_ref() {
-                column_shadows.extend(schema_public_columns(schema));
-            }
-            let original_subquery_count = block.subqueries.len();
-            for subquery in &mut block.subqueries[..original_subquery_count] {
-                rewrite_correlated_query(
-                    context,
-                    subquery,
-                    &query_scope,
-                    &qualifier_shadows,
-                    &column_shadows,
-                )?;
-            }
-            let mut rewrite = |expression: &mut ScalarExpr| {
-                rewrite_correlated_scalar(
-                    context,
-                    expression,
-                    &qualifier_shadows,
-                    &column_shadows,
-                    &mut block.subqueries,
-                )
-            };
-            for projection in &mut block.projections {
-                rewrite(&mut projection.expr)?;
-            }
-            if let Some(predicate) = &mut block.r#where {
-                rewrite(predicate)?;
-            }
-            for expression in &mut block.group_by {
-                rewrite(expression)?;
-            }
-            for set in &mut block.grouping_sets {
-                for expression in set {
-                    rewrite(expression)?;
+            if block.deferred_outer_rewrites.is_empty() {
+                block
+                    .deferred_outer_rewrites
+                    .push(super::DeferredOuterRewrite::capture(
+                        context,
+                        block,
+                        inherited_qualifier_shadows,
+                        inherited_column_shadows,
+                    )?);
+            } else {
+                for rewrite in &mut block.deferred_outer_rewrites {
+                    rewrite.rebase(context)?;
                 }
-            }
-            if let Some(having) = &mut block.having {
-                rewrite(having)?;
-            }
-            for order in &mut block.order_by {
-                rewrite(&mut order.expr)?;
-            }
-            if let Some(limit) = &mut block.limit {
-                rewrite(limit)?;
-            }
-            if let Some(offset) = &mut block.offset {
-                rewrite(offset)?;
-            }
-            for expression in &mut block.distinct_on {
-                rewrite(expression)?;
             }
         }
         RelationalPlan::SetOp {
@@ -398,6 +335,24 @@ fn rewrite_correlated_query(
         }
     }
     Ok(())
+}
+
+pub(super) fn rewrite_outer_expression(
+    context: &CorrelatedRewriteContext<'_>,
+    expression: &mut crate::plan::ExpressionPlan,
+) -> Result<(), SQLError> {
+    let scope = context.services.catalog.binding_scope()?;
+    let shadows = BTreeSet::new();
+    for query in &mut expression.subqueries {
+        rewrite_correlated_query(context, query, &scope, &shadows, &shadows)?;
+    }
+    rewrite_correlated_scalar(
+        context,
+        &mut expression.scalar,
+        &shadows,
+        &shadows,
+        &mut expression.subqueries,
+    )
 }
 
 pub(super) fn dml_source_schema(
@@ -567,7 +522,7 @@ pub(super) fn rewrite_correlated_dml_context(
     context: CorrelatedDmlContext<'_>,
     subqueries: &mut [QueryPlan],
 ) -> Result<(), SQLError> {
-    let (outer, target_qualifiers) = dml_correlated_outer_schema(
+    let (_, target_qualifiers) = dml_correlated_outer_schema(
         context.services,
         context.layer,
         context.target_qualifier,
@@ -587,8 +542,6 @@ pub(super) fn rewrite_correlated_dml_context(
         default_target_qualifier: context.target_qualifier,
         target_qualifiers: &target_qualifiers,
         source: context.source,
-        params: context.params,
-        outer: &outer,
     };
     for id in context.ids {
         let query = subqueries.get_mut(*id).ok_or_else(|| {

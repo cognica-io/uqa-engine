@@ -171,6 +171,117 @@ impl crate::FunctionTypeResolver for NoRoutines {
 
 impl crate::routines::RoutineResolution for NoRoutines {}
 
+struct BuiltinRoutines;
+
+impl crate::FunctionTypeResolver for BuiltinRoutines {
+    fn resolve_function_type(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+        _: &[Option<String>],
+        _: &[Option<ColumnType>],
+        _: bool,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+}
+
+impl crate::routines::RoutineResolution for BuiltinRoutines {
+    fn resolve_table_function_overload_with_builtins(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        names: &[Option<String>],
+        types: &[Option<ColumnType>],
+        variadic: bool,
+        builtins: &[crate::type_resolution::BuiltinFunctionOverload],
+    ) -> Result<Option<crate::type_resolution::ResolvedFunctionOverload>, SQLError> {
+        assert!(!variadic);
+        crate::type_resolution::resolve_local_builtin_overload(
+            name, binding, names, types, builtins,
+        )
+        .map(Some)
+    }
+}
+
+#[test]
+fn dynamic_table_arguments_bind_from_values_without_retyping_declared_inputs() {
+    use super::{resolve_runtime_table_function_binding, resolve_table_function_binding};
+    use uqa_core::Value;
+    let args = vec![ScalarExpr::qualified_column("local", "n"); 2];
+    for (declared, expected) in [(None, "integer"), (Some(ColumnType::BigInteger), "bigint")] {
+        let schema =
+            RowSchema::with_qualified_types("local", vec!["n".into()], vec![declared.clone()]);
+        let binding = resolve_table_function_binding(
+            &BuiltinRoutines,
+            "generate_series",
+            None,
+            &args,
+            &schema,
+            &[],
+            &BuiltinRoutines,
+        )
+        .unwrap();
+        assert_eq!(binding.is_some(), declared.is_some());
+        let observed = resolve_runtime_table_function_binding(
+            &BuiltinRoutines,
+            "generate_series",
+            &args,
+            &[(None, Value::Int(1)), (None, Value::Int(2))],
+            &schema,
+            &[],
+            &BuiltinRoutines,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(observed.argument_types, [expected, expected]);
+    }
+    let schema = RowSchema::default();
+    let dynamic_schema = RowSchema::with_qualified_types("local", vec!["n".into()], vec![None]);
+    let error = resolve_runtime_table_function_binding(
+        &BuiltinRoutines,
+        "generate_series",
+        &args,
+        &[
+            (None, Value::Str("1".into())),
+            (None, Value::Str("2".into())),
+        ],
+        &dynamic_schema,
+        &[],
+        &BuiltinRoutines,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42883"));
+    let literals = vec![ScalarExpr::Literal(Value::Null); 2];
+    let error = resolve_table_function_binding(
+        &BuiltinRoutines,
+        "generate_series",
+        None,
+        &literals,
+        &schema,
+        &[],
+        &BuiltinRoutines,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42725"));
+    let literals = vec![
+        ScalarExpr::Literal(Value::Str("1".into())),
+        ScalarExpr::Literal(Value::Int(2)),
+    ];
+    let observed = resolve_runtime_table_function_binding(
+        &BuiltinRoutines,
+        "generate_series",
+        &literals,
+        &[(None, Value::Str("1".into())), (None, Value::Int(2))],
+        &schema,
+        &[],
+        &BuiltinRoutines,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(observed.argument_types, ["integer", "integer"]);
+}
+
 fn column_definition(name: &str, args: &[ScalarExpr], declared: &[&str]) -> Result<(), SQLError> {
     let declared_types = declared.iter().map(ToString::to_string).collect::<Vec<_>>();
     let column_names = (1..=declared.len())

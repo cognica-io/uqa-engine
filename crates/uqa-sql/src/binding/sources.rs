@@ -68,6 +68,25 @@ pub(super) struct JoinSchemaBinding<'a> {
     pub(super) outer: Option<&'a RowSchema>,
 }
 
+/// Inputs already visited by an ordered source traversal. Join binding consumes the child descriptors without analyzing their sources again.
+#[doc(hidden)]
+pub enum SourceBindingInput<'a> {
+    Leaf(&'a SourcePlan),
+    Join {
+        source: &'a SourcePlan,
+        left: &'a RowSchema,
+        right: &'a RowSchema,
+    },
+}
+
+impl<'a> SourceBindingInput<'a> {
+    pub fn source(&self) -> &'a SourcePlan {
+        match self {
+            Self::Leaf(source) | Self::Join { source, .. } => source,
+        }
+    }
+}
+
 pub(super) fn table_function_member_source(function: &TableFunctionPlan) -> SourcePlan {
     SourcePlan::Function {
         name: function.name.clone(),
@@ -116,6 +135,23 @@ pub fn bind_source_plan_schema_in_scope(
     )
 }
 
+/// Bind one visited source using its already analyzed child descriptors.
+pub fn bind_source_input_schema(
+    routines: &dyn RoutineResolution,
+    input: SourceBindingInput<'_>,
+    params: &[SQLParam],
+    ctes: &BindingContext,
+    scope: SourceScope<'_>,
+) -> Result<RowSchema, SQLError> {
+    SchemaScope::from_context(ctes)?.bind_source_input(
+        routines,
+        input,
+        ctes.scalar_subqueries,
+        params,
+        scope,
+    )
+}
+
 /// Add query-block pseudo columns after the complete source scope is known, so `_meta` is exposed only for one unambiguous local-table source and never shadows a real relation alias.
 pub fn with_query_table_pseudo_columns(schema: &RowSchema) -> RowSchema {
     analysis::with_unqualified_table_pseudo_columns(schema)
@@ -156,6 +192,56 @@ pub fn bind_source_plan_schema_for_execution(
 }
 
 impl SchemaScope {
+    pub(super) fn bind_source_input(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        input: SourceBindingInput<'_>,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        scope: SourceScope<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        let SourceBindingInput::Join {
+            source,
+            left,
+            right,
+        } = input
+        else {
+            return self.bind_source_in_scope(routines, input.source(), subqueries, params, scope);
+        };
+        let SourcePlan::Join {
+            kind,
+            on,
+            using,
+            natural,
+            alias,
+            column_aliases,
+            ..
+        } = source
+        else {
+            unreachable!("join inputs belong to a join source")
+        };
+        let condition = scope.condition();
+        let schema = self.bind_join_output_schema(JoinSchemaBinding {
+            routines,
+            kind: *kind,
+            on: on.as_ref(),
+            using: using.as_ref(),
+            natural: *natural,
+            alias: alias.as_deref(),
+            column_aliases,
+            left,
+            right,
+            subqueries,
+            params,
+            outer: condition.as_ref(),
+        })?;
+        Ok(if scope.retain_names {
+            SourceScope::describe_output(source, schema)
+        } else {
+            schema
+        })
+    }
+
     pub(super) fn bind_source(
         &mut self,
         routines: &dyn RoutineResolution,

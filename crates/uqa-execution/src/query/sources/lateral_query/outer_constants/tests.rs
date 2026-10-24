@@ -52,6 +52,24 @@ fn qualified(qualifier: &str, column: &str) -> ScalarExpr {
 }
 
 #[test]
+fn runtime_local_names_are_not_replaced_by_outer_constants() {
+    let schema = RowSchema::with_open_columns(&lineitem(), Some("lineitem"));
+    let filter = equal(
+        ScalarExpr::Column("ps_partkey".into()),
+        ScalarExpr::Literal(Value::Int(5)),
+    );
+    assert_eq!(
+        bind_outer_constants(&filter, &schema, &partsupp_row()),
+        None
+    );
+    let qualified = equal(
+        qualified("partsupp", "ps_partkey"),
+        ScalarExpr::Literal(Value::Int(5)),
+    );
+    assert!(bind_outer_constants(&qualified, &schema, &partsupp_row()).is_some());
+}
+
+#[test]
 fn unshadowed_outer_keys_become_typed_literals_of_their_current_values() {
     let filter = ScalarExpr::And(vec![
         equal(

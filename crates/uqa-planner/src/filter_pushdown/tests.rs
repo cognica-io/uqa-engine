@@ -60,6 +60,7 @@ fn joined_source(kind: JoinKind, on: ScalarExpr) -> SourcePlan {
 
 fn query_block(filter: ScalarExpr, from: SourcePlan) -> QueryBlockPlan {
     QueryBlockPlan {
+        deferred_outer_rewrites: Vec::new(),
         privilege_columns: std::collections::BTreeSet::default(),
         projections: Vec::new(),
         from: Some(from),

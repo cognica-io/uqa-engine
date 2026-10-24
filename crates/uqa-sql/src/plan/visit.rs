@@ -40,6 +40,9 @@ impl QueryPlan {
         visit_ctes(&self.ctes, visit);
         match &self.root {
             RelationalPlan::QueryBlock(block) => {
+                for rewrite in &block.deferred_outer_rewrites {
+                    rewrite.visit_scalar_expressions(visit);
+                }
                 if let Some(source) = &block.from {
                     source.visit_scalar_expressions(visit);
                 }

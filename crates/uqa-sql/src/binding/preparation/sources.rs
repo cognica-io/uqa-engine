@@ -8,13 +8,37 @@
 
 use super::super::{
     operator_join_relation_schemas, overlay_outer_schema, rename_schema, JoinSchemaBinding,
-    SourcePlan, SourceScope,
+    SourceBindingInput, SourcePlan, SourceScope,
 };
 use super::{Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{FunctionBinding, OperatorJoinRelations};
 use crate::semantics::sets::placement::SetPlacement;
 
 impl Preparation<'_> {
+    pub(super) fn source_input(
+        &mut self,
+        input: SourceBindingInput<'_>,
+        subqueries: &[QueryPlan],
+        scope: SourceScope<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        let SourceBindingInput::Join {
+            source,
+            left,
+            right,
+        } = input
+        else {
+            return self.source_in_scope(input.source(), subqueries, scope);
+        };
+        let schema = self.join_source_output(source, (left, right), subqueries, scope)?;
+        let schema = if scope.retain_names {
+            SourceScope::describe_output(source, schema)
+        } else {
+            schema
+        };
+        self.parameters.retain_source_schema(source, &schema);
+        Ok(schema)
+    }
+
     pub(super) fn source(
         &mut self,
         source: &SourcePlan,
@@ -136,11 +160,6 @@ impl Preparation<'_> {
             left,
             right,
             kind,
-            on,
-            using,
-            natural,
-            alias,
-            column_aliases,
             lateral,
             ..
         } = source
@@ -160,10 +179,32 @@ impl Preparation<'_> {
                 retain_names: true,
             },
         )?;
+        self.join_source_output(source, (&left, &right), subqueries, scope)
+    }
+
+    fn join_source_output(
+        &mut self,
+        source: &SourcePlan,
+        (left, right): (&RowSchema, &RowSchema),
+        subqueries: &[QueryPlan],
+        scope: SourceScope<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        let SourcePlan::Join {
+            kind,
+            on,
+            using,
+            natural,
+            alias,
+            column_aliases,
+            ..
+        } = source
+        else {
+            unreachable!("join inputs belong to a join source")
+        };
         let condition = scope.condition();
         let outer = condition.as_ref();
         if let Some(on) = on {
-            let joined = RowSchema::join(&left, &right, std::iter::empty::<String>());
+            let joined = RowSchema::join(left, right, std::iter::empty::<String>());
             let input = overlay_outer_schema(&joined, outer);
             self.in_placement(SetPlacement::JoinCondition, |analysis| {
                 analysis.require_boolean(on, &input, subqueries, "JOIN/ON")
@@ -177,8 +218,8 @@ impl Preparation<'_> {
             natural: *natural,
             alias: alias.as_deref(),
             column_aliases,
-            left: &left,
-            right: &right,
+            left,
+            right,
             subqueries,
             params: &self.parameters.values(),
             outer,

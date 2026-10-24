@@ -142,6 +142,7 @@ fn project(body: Box<QueryPlan>, width: usize) -> QueryPlan {
         relations_bound: body.relations_bound,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
+            deferred_outer_rewrites: Vec::new(),
             projections: columns
                 .iter()
                 .map(|name| ProjectionPlan {

@@ -208,10 +208,44 @@ pub fn resolve_table_function_binding(
     }
     let (argument_names, argument_types, explicit_variadic) =
         crate::function_call_argument_signature(args, input_schema, params, Some(resolver))?;
+    if crate::type_resolution::function_arguments_have_runtime_types(args, &argument_types)? {
+        return Ok(None);
+    }
     resolve_table_function_binding_for_types(
         routines,
         name,
         binding,
+        crate::type_resolution::RoutineCallDescriptor {
+            argument_names: &argument_names,
+            argument_types: &argument_types,
+            explicit_variadic,
+        },
+    )
+}
+
+/// Select a call whose dynamic inputs have now produced values, preserving every statically declared argument type and the original SQL unknown-literal rules.
+pub fn resolve_runtime_table_function_binding(
+    routines: &dyn RoutineResolution,
+    name: &str,
+    args: &[ScalarExpr],
+    values: &[(Option<String>, uqa_core::Value)],
+    input_schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<Option<FunctionBinding>, SQLError> {
+    let (argument_names, mut argument_types, explicit_variadic) =
+        crate::function_call_argument_signature(args, input_schema, params, Some(resolver))?;
+    let arguments = crate::scalar_call_arguments(args)?;
+    assert_eq!(arguments.len(), values.len());
+    for ((argument, ty), (_, value)) in arguments.iter().zip(&mut argument_types).zip(values) {
+        if crate::type_resolution::runtime_input(argument.value, ty.as_ref()) {
+            *ty = crate::type_resolution::value_type(value);
+        }
+    }
+    resolve_table_function_binding_for_types(
+        routines,
+        name,
+        None,
         crate::type_resolution::RoutineCallDescriptor {
             argument_names: &argument_names,
             argument_types: &argument_types,

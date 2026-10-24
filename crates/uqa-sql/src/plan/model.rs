@@ -170,6 +170,9 @@ pub enum RelationalPlan {
 /// into explicit parent/child nodes.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryBlockPlan {
+    /// Transient outer-column substitutions whose local namespace is supplied by a runtime row descriptor. Stored syntax never retains an execution's view rewrite.
+    #[serde(skip)]
+    pub deferred_outer_rewrites: Vec<crate::semantics::view_rewrite::DeferredOuterRewrite>,
     /// The canonical owners of window inputs; calls keep resolved execution copies.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<crate::ast::WindowDefinition<crate::ir::ScalarWindowSpec>>,

@@ -30,6 +30,7 @@ pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
     let RelationalPlan::QueryBlock(block) = &body.root else {
         return Ok(None);
     };
+    let rewrite_subqueries = !block.deferred_outer_rewrites.is_empty();
     // A block whose qualification calls a registered retrieval function (text_match, knn_match, graph_traverse, rpq, ...) executes it through the operator-tree bridge of the single-table executor; the residual scalar filter of a streamed block cannot evaluate such calls. Plain comparisons keep streaming so an outer LIMIT still bounds locking demand inside the derived table.
     if matches!(block.access, AccessPathPlan::Hybrid)
         || block
@@ -49,9 +50,14 @@ pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
     crate::query::privileges::routine_calls::query(context, body, params, ctes)?;
 
     // The block's scalar subqueries live in their own arena for the whole pull pipeline: the evaluators built below snapshot this scope, so a derived table with subqueries still streams and an outer LIMIT keeps its inner locking demand-driven.
-    let mut ctes = ctes.enter_scalar_subqueries(&block.subqueries);
+    let mut ctes = ctes.enter_query_block(block);
     let ctes: &mut CteScope<S> = &mut ctes;
-    let outer_row = ctes.row_lock_outer_row().cloned();
+    let outer_row = ctes
+        .row_lock_outer_row()
+        .map(|outer| crate::query::binding::bind_outer_rewrite_row(block, outer).into_owned());
+    if let Some(outer) = &outer_row {
+        ctes.set_row_lock_outer_row(outer.clone());
+    }
     let (mut block, source_schema) = crate::query::binding::bind_query_block_for_execution(
         context.ctes.routines,
         block,
@@ -79,6 +85,13 @@ pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
         _ => unreachable!(),
     };
     let block = block.as_ref();
+    let mut bound_scope;
+    let ctes = if rewrite_subqueries {
+        bound_scope = ctes.enter_scalar_subqueries(&block.subqueries);
+        &mut *bound_scope
+    } else {
+        ctes
+    };
     if let Some(from) = &block.from {
         crate::query::privileges::ensure_select_privileges_for_query_block(block, from, ctes)?;
     }
@@ -165,6 +178,27 @@ pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
                 )) as Box<dyn crate::PhysicalOperator + 'a>,
                 block.r#where.clone(),
             )
+        };
+        let pending = !block.deferred_outer_rewrites.is_empty();
+        let rewritten =
+            uqa_sql::semantics::view_rewrite::resolve_outer_rewrites(block, operator.row_schema());
+        let rewritten_original = uqa_sql::semantics::view_rewrite::resolve_outer_rewrites(
+            original,
+            operator.row_schema(),
+        );
+        let block = rewritten.as_ref();
+        let original = rewritten_original.as_ref();
+        let residual = if pending {
+            block.r#where.clone()
+        } else {
+            residual
+        };
+        let rewritten_scope;
+        let ctes = if rewrite_subqueries {
+            rewritten_scope = ctes.enter_scalar_subqueries(&block.subqueries);
+            &*rewritten_scope
+        } else {
+            &*ctes
         };
         let operator: Box<dyn crate::PhysicalOperator + 'a> = match outer_row {
             Some(outer) => Box::new(crate::ScopeOverlay::new(operator, outer)),

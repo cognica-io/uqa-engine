@@ -164,6 +164,7 @@ fn scalar_query(
         relations_bound: false,
         ctes: Vec::new(),
         root: uqa_sql::plan::RelationalPlan::QueryBlock(Box::new(uqa_sql::plan::QueryBlockPlan {
+            deferred_outer_rewrites: Vec::new(),
             windows: Vec::new(),
             projections: row
                 .into_iter()

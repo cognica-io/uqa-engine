@@ -362,9 +362,13 @@ pub fn select_contains_volatile_function(
     block: &QueryBlockPlan,
 ) -> bool {
     block
-        .projections
+        .deferred_outer_rewrites
         .iter()
-        .any(|projection| expr_contains_volatile_function_with(catalog, &projection.expr, false))
+        .flat_map(super::view_rewrite::DeferredOuterRewrite::expressions)
+        .any(|expression| expr_contains_volatile_function_with(catalog, &expression.scalar, true))
+        || block.projections.iter().any(|projection| {
+            expr_contains_volatile_function_with(catalog, &projection.expr, false)
+        })
         || block
             .r#where
             .as_ref()

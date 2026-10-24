@@ -308,6 +308,7 @@ fn joined_catalog_query() -> QueryPlan {
         relations_bound: false,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
+            deferred_outer_rewrites: Vec::new(),
             privilege_columns: std::collections::BTreeSet::default(),
             windows: Vec::new(),
             projections: vec![

@@ -177,10 +177,46 @@ fn build_table_function_value_row_stream_with_row(
     row: Option<&crate::OwnedPhysicalRow>,
 ) -> Result<TableFunctionRows, SQLError> {
     if let Some(lower) = streaming_builtin(&call) {
+        let call_args = evaluate_arguments(context, &call, row)?;
+        let empty = crate::RowSchema::default();
+        let selected = if call.binding.is_none() {
+            uqa_sql::semantics::resolve_runtime_table_function_binding(
+                context.routines.lookup,
+                call.name,
+                call.args,
+                &call_args,
+                row.map_or(&empty, |row| &row.schema),
+                context.params,
+                context.resolver,
+            )?
+        } else {
+            None
+        };
+        let binding = selected.as_ref().or(call.binding);
+        if let Some(binding) = binding.filter(|binding| !binding.builtin) {
+            let record =
+                (!call.column_types.is_empty()).then_some((call.column_aliases, call.column_types));
+            let result = crate::routines::invocation::call_bound_user_table_function(
+                &context.routines,
+                binding,
+                &call_args,
+                record,
+            )
+            .ok_or_else(|| SQLError::Internal("selected table function disappeared".into()))??;
+            return super::registered_table_function_rows(
+                call.name,
+                result,
+                call.alias,
+                call.column_aliases,
+            );
+        }
+        if let Some(binding) = selected.as_ref() {
+            context.eval_hook.require_builtin_execute(binding)?;
+        }
         let columns = builtin_value_columns(&lower, &call)?;
-        let evaluated = evaluate_builtin_arguments(context, &call, &lower, row)?;
+        let evaluated = builtin_arguments(&lower, call_args)?;
         // The regular-expression functions read the call's input collation, `PostgreSQL`'s `inputcollid`.
-        let collation = uqa_sql::ast::FunctionBinding::selected_input_collation(call.binding);
+        let collation = uqa_sql::ast::FunctionBinding::selected_input_collation(binding);
         let rows = builtin_value_rows(context, &lower, evaluated, collation, &columns)?;
         return Ok(TableFunctionRows::new(columns, rows));
     }
@@ -230,13 +266,12 @@ fn build_table_function_value_row_stream_with_row(
     build_table_function_rows_with_row(context, call, row)
 }
 
-/// Evaluate a streaming built-in's arguments in its caller's row scope, placing named arguments at their declared positions as a scalar call does.
-fn evaluate_builtin_arguments(
+/// Evaluate arguments once in their calling scope before choosing a dynamically typed overload.
+fn evaluate_arguments(
     context: &TableFunctionContext<'_>,
     call: &TableFunctionCall<'_>,
-    lower: &str,
     row: Option<&crate::OwnedPhysicalRow>,
-) -> Result<Vec<Value>, SQLError> {
+) -> Result<Vec<(Option<String>, Value)>, SQLError> {
     let subquery_arena = PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
     let scalar_context = match row {
         Some(row) => ScalarEvalContext::from_row_lookup(row, context.params)
@@ -265,7 +300,13 @@ fn evaluate_builtin_arguments(
             })
             .collect::<Vec<_>>()
     });
-    let call_args = eval_call_arguments(bound.as_deref().unwrap_or(call.args), &scalar_context)?;
+    eval_call_arguments(bound.as_deref().unwrap_or(call.args), &scalar_context)
+}
+
+fn builtin_arguments(
+    lower: &str,
+    call_args: Vec<(Option<String>, Value)>,
+) -> Result<Vec<Value>, SQLError> {
     // Named arguments take their declared positions as in a scalar call; a function without such a signature is undefined.
     if call_args.iter().any(|(name, _)| name.is_some()) {
         return Ok(uqa_sql::expr::builtin_named_args(

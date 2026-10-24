@@ -2,7 +2,8 @@
   "reference": "PostgreSQL",
   "version": "18.4",
   "image_id": "sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15",
-  "setup": "BEGIN;\nCREATE TEMP TABLE cte_scope_target(n integer);\nINSERT INTO cte_scope_target VALUES (10),(11);\nCREATE TEMP VIEW cte_scope_view AS SELECT * FROM cte_scope_target;\nCREATE TEMP VIEW cte_scope_alias AS SELECT n AS alias_n FROM cte_scope_target;\nCREATE FUNCTION pg_temp.host_rows(integer) RETURNS TABLE(n integer) LANGUAGE sql VOLATILE AS 'SELECT generate_series(0, $1 - 1)';\nSAVEPOINT probe;\n",
+  "schema_setup": "CREATE TABLE cte_scope_target(n INTEGER); INSERT INTO cte_scope_target VALUES (10),(11); CREATE VIEW cte_scope_view AS SELECT * FROM cte_scope_target; CREATE VIEW cte_scope_alias AS SELECT n AS alias_n FROM cte_scope_target; CREATE VIEW cte_scope_layer AS SELECT alias_n AS layered_n FROM cte_scope_alias; CREATE VIEW cte_scope_computed AS SELECT n, 1/0 AS bad FROM cte_scope_target; CREATE VIEW cte_scope_subquery AS SELECT n, (SELECT n + 1) AS calc FROM cte_scope_target; CREATE VIEW cte_scope_returning AS SELECT n, (SELECT incoming.v FROM (VALUES (7)) incoming(v)) AS calc FROM cte_scope_target; CREATE FUNCTION public.generate_series(integer, integer) RETURNS SETOF integer LANGUAGE sql AS 'SELECT $1 + 100'",
+  "setup": "BEGIN;\nCREATE TABLE cte_scope_target(n INTEGER); INSERT INTO cte_scope_target VALUES (10),(11); CREATE VIEW cte_scope_view AS SELECT * FROM cte_scope_target; CREATE VIEW cte_scope_alias AS SELECT n AS alias_n FROM cte_scope_target; CREATE VIEW cte_scope_layer AS SELECT alias_n AS layered_n FROM cte_scope_alias; CREATE VIEW cte_scope_computed AS SELECT n, 1/0 AS bad FROM cte_scope_target; CREATE VIEW cte_scope_subquery AS SELECT n, (SELECT n + 1) AS calc FROM cte_scope_target; CREATE VIEW cte_scope_returning AS SELECT n, (SELECT incoming.v FROM (VALUES (7)) incoming(v)) AS calc FROM cte_scope_target; CREATE FUNCTION public.generate_series(integer, integer) RETURNS SETOF integer LANGUAGE sql AS 'SELECT $1 + 100'; CREATE TEMP TABLE reference_scope(i integer); CREATE FUNCTION pg_temp.host_rows(integer) RETURNS TABLE(n integer) LANGUAGE sql VOLATILE AS 'SELECT pg_catalog.generate_series(0, $1 - 1)'; CREATE FUNCTION pg_temp.host_bad_rows(integer) RETURNS TABLE(bad integer) LANGUAGE sql VOLATILE AS 'SELECT pg_catalog.generate_series(0, $1 - 1)'; CREATE FUNCTION pg_temp.host_alias_rows(integer) RETURNS TABLE(alias_n integer) LANGUAGE sql VOLATILE AS 'SELECT pg_catalog.generate_series(0, $1 - 1)';\nSAVEPOINT probe;\n",
   "cases": [
     {
       "name": "local_update",
@@ -24,6 +25,339 @@
       "returning": [
         "10",
         "11"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "direct_local_update",
+      "query": "UPDATE cte_scope_view SET n = (SELECT 1/n FROM pg_temp.host_rows(100) LIMIT 1) RETURNING n",
+      "returning": [],
+      "sqlstate": "22012",
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "direct_local_delete",
+      "query": "DELETE FROM cte_scope_view WHERE n > (SELECT 1/n FROM pg_temp.host_rows(100) LIMIT 1) RETURNING n",
+      "returning": [],
+      "sqlstate": "22012",
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "direct_outer_alias",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT alias_n FROM pg_temp.host_rows(100) LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "10",
+        "11"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "nested_local",
+      "query": "UPDATE cte_scope_view SET n = (SELECT (SELECT 1/n) FROM pg_temp.host_rows(100) LIMIT 1) RETURNING n",
+      "returning": [],
+      "sqlstate": "22012",
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "nested_outer_alias",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT (SELECT alias_n FROM pg_temp.host_rows(2) LIMIT 1) FROM pg_temp.host_rows(2) LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "10",
+        "11"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "inner_local_shadows_ancestor",
+      "query": "UPDATE cte_scope_view SET n = (SELECT (SELECT 1/n FROM pg_temp.host_rows(100) LIMIT 1) FROM (VALUES (9)) v(n)) RETURNING n",
+      "returning": [],
+      "sqlstate": "22012",
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "derived_local",
+      "query": "UPDATE cte_scope_view SET n = (SELECT 1/n FROM (SELECT * FROM pg_temp.host_rows(100)) r LIMIT 1) RETURNING n",
+      "returning": [],
+      "sqlstate": "22012",
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "qualified_local",
+      "query": "UPDATE cte_scope_view SET n = (SELECT 1/cte_scope_view.n FROM pg_temp.host_rows(100) AS cte_scope_view LIMIT 1) RETURNING n",
+      "returning": [],
+      "sqlstate": "22012",
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "qualified_outer_alias",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT cte_scope_alias.alias_n FROM pg_temp.host_rows(100) LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "10",
+        "11"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "layered_outer_alias",
+      "query": "UPDATE cte_scope_layer SET layered_n = (SELECT layered_n FROM pg_temp.host_rows(100) LIMIT 1) RETURNING layered_n",
+      "returning": [
+        "10",
+        "11"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "ambiguous_local",
+      "query": "UPDATE cte_scope_view SET n = (SELECT n FROM pg_temp.host_rows(2) a CROSS JOIN pg_temp.host_rows(2) b LIMIT 1) RETURNING n",
+      "returning": [],
+      "sqlstate": "42702",
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "local_predicate",
+      "query": "UPDATE cte_scope_view SET n = (SELECT n FROM pg_temp.host_rows(100) WHERE n = 0 LIMIT 1) RETURNING n",
+      "returning": [
+        "0",
+        "0"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "outer_alias_predicate",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT n FROM pg_temp.host_rows(100) WHERE alias_n = 10 AND n = 2 LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "2",
+        ""
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "computed_fallback",
+      "query": "UPDATE cte_scope_computed SET n = (SELECT bad FROM pg_temp.host_rows(100) LIMIT 1) RETURNING n",
+      "returning": [],
+      "sqlstate": "22012",
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "computed_shadowed",
+      "query": "UPDATE cte_scope_computed SET n = (SELECT bad FROM pg_temp.host_bad_rows(100) LIMIT 1) RETURNING n",
+      "returning": [
+        "0",
+        "0"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "nested_computed_shadowed",
+      "query": "UPDATE cte_scope_computed SET n = (SELECT (SELECT bad) FROM pg_temp.host_bad_rows(100) LIMIT 1) RETURNING n",
+      "returning": [
+        "0",
+        "0"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "set_local",
+      "query": "UPDATE cte_scope_view SET n = (SELECT 1/n FROM pg_temp.host_rows(100) UNION ALL SELECT 9 LIMIT 1) RETURNING n",
+      "returning": [],
+      "sqlstate": "22012",
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "distinct_outer_alias",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT DISTINCT alias_n FROM pg_temp.host_rows(2) LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "10",
+        "11"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "subquery_fallback",
+      "query": "UPDATE cte_scope_subquery SET n = (SELECT calc FROM pg_temp.host_rows(100) LIMIT 1) RETURNING n",
+      "returning": [
+        "11",
+        "12"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "qualifier_collision",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT alias_n FROM pg_temp.host_rows(100) AS cte_scope_alias LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "10",
+        "11"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "source_outer_argument",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT n FROM pg_temp.host_rows(alias_n) LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "0",
+        "0"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "source_qualified_argument",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT n FROM pg_temp.host_rows(cte_scope_alias.alias_n) AS cte_scope_alias LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "0",
+        "0"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "source_scalar_subquery_argument",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT n FROM pg_temp.host_rows((SELECT alias_n)) LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "0",
+        "0"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "source_view_subquery_argument",
+      "query": "UPDATE cte_scope_subquery SET n = (SELECT n FROM pg_temp.host_rows(calc) LIMIT 1) RETURNING n",
+      "returning": [
+        "0",
+        "0"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "peer_local_argument",
+      "query": "UPDATE cte_scope_view SET n = (SELECT g FROM pg_temp.host_rows(3) a CROSS JOIN LATERAL generate_series(n,n) g LIMIT 1) RETURNING n",
+      "returning": [
+        "0",
+        "0"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "peer_outer_argument",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT g FROM pg_temp.host_rows(3) a CROSS JOIN LATERAL generate_series(alias_n,alias_n) g LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "10",
+        "11"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "peer_qualifier_collision",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT g FROM pg_temp.host_rows(3) cte_scope_alias CROSS JOIN LATERAL generate_series(alias_n,alias_n) g LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "10",
+        "11"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "peer_renamed_local_argument",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT g FROM pg_temp.host_alias_rows(3) a CROSS JOIN LATERAL generate_series(alias_n,alias_n) g LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "0",
+        "0"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "join_outer_condition",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT a.n FROM pg_temp.host_rows(3) a JOIN generate_series(1,1) g ON alias_n=10 LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "0",
+        ""
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "join_local_condition",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT a.alias_n FROM pg_temp.host_alias_rows(3) a JOIN generate_series(1,1) g ON alias_n=0 LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "0",
+        "0"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "non_lateral_outer_argument",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT result FROM pg_temp.host_alias_rows(3) a, (SELECT alias_n AS result) q LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "10",
+        "11"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "join_outer_scalar_subquery",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT a.n FROM pg_temp.host_rows(3) a JOIN generate_series(1,1) g ON (SELECT alias_n)=10 LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "0",
+        ""
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "lateral_join_outer_condition",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT a.n FROM pg_temp.host_rows(3) a JOIN LATERAL generate_series(a.n,a.n) g ON alias_n=10 LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "0",
+        ""
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "returning_local_qualifier",
+      "query": "UPDATE cte_scope_returning SET n=n RETURNING WITH (OLD AS incoming, NEW AS outgoing) (SELECT calc FROM pg_temp.host_rows(3) LIMIT 1)",
+      "returning": [
+        "7",
+        "7"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "dynamic_user_overload",
+      "query": "SET LOCAL search_path = public, pg_catalog; UPDATE cte_scope_alias SET alias_n = (SELECT g FROM pg_temp.host_rows(3) a CROSS JOIN LATERAL generate_series(a.n,a.n) g LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "100",
+        "100"
+      ],
+      "sqlstate": null,
+      "sum_after_savepoint_rollback": "21"
+    },
+    {
+      "name": "hash_join_outer_condition",
+      "query": "UPDATE cte_scope_alias SET alias_n = (SELECT a.n FROM pg_temp.host_rows(3) a JOIN generate_series(0,2) g ON a.n::integer=g AND alias_n=10 ORDER BY a.n LIMIT 1) RETURNING alias_n",
+      "returning": [
+        "0",
+        ""
       ],
       "sqlstate": null,
       "sum_after_savepoint_rollback": "21"

@@ -374,3 +374,60 @@ impl<S: Clone> uqa_sql::binding::statements::StatementBindingScope for CteScope<
         binding_context(self)
     }
 }
+
+/// Add SQL-owned structural identities while retaining the outer row's existing physical fragments.
+pub(crate) fn bind_outer_rewrite_row<'a>(
+    block: &QueryBlockPlan,
+    outer: &'a crate::OwnedPhysicalRow,
+) -> std::borrow::Cow<'a, crate::OwnedPhysicalRow> {
+    match uqa_sql::semantics::view_rewrite::bind_outer_rewrite_scope(block, &outer.schema) {
+        std::borrow::Cow::Borrowed(_) => std::borrow::Cow::Borrowed(outer),
+        std::borrow::Cow::Owned(schema) => std::borrow::Cow::Owned(crate::OwnedPhysicalRow {
+            schema,
+            row: outer.row.clone(),
+        }),
+    }
+}
+
+/// Source syntax and the scalar arena selected with its actual preceding row descriptor.
+pub(crate) struct OuterSourceBinding {
+    pub(crate) source: Box<SourcePlan>,
+    pub(crate) subqueries: Vec<QueryPlan>,
+}
+
+pub(crate) fn bind_outer_source_rewrites<S: Clone>(
+    routines: &dyn uqa_sql::routines::RoutineResolution,
+    source: &SourcePlan,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    scope: uqa_sql::binding::SourceScope<'_>,
+) -> Result<Option<OuterSourceBinding>, SQLError> {
+    let Some(rewrites) = &ctes.source_outer_rewrites else {
+        return Ok(None);
+    };
+    let context = binding_context(ctes)?;
+    let mut subqueries = ctes.scalar_subqueries.to_vec();
+    let source = uqa_sql::semantics::view_rewrite::resolve_outer_source_rewrites(
+        source,
+        rewrites,
+        &mut subqueries,
+        scope,
+        &mut |source, subqueries, scope| {
+            uqa_sql::binding::bind_source_input_schema(
+                routines,
+                source,
+                params,
+                &uqa_sql::binding::BindingContext {
+                    scalar_subqueries: subqueries,
+                    ..context.clone()
+                },
+                scope,
+            )
+        },
+    )?
+    .into_owned();
+    Ok(Some(OuterSourceBinding {
+        source: Box::new(source),
+        subqueries,
+    }))
+}

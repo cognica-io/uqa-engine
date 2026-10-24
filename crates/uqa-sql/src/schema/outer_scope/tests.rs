@@ -95,3 +95,57 @@ fn unchanged_virtual_bindings_share_indexes_and_new_bindings_preserve_the_source
     assert_eq!(new.qualified_collation("local", "value"), Some(951));
     assert_eq!(new.physical_width(), input.physical_width());
 }
+
+#[test]
+fn named_structural_capture_keeps_slots_types_collations_and_virtual_attributes() {
+    let physical = ColumnIdentity::qualified("target", "value");
+    let virtual_column = ColumnIdentity::qualified("target", "absent");
+    let outer = RowSchema::with_qualified_types(
+        "target",
+        vec!["value".into()],
+        vec![Some(ColumnType::Text)],
+    )
+    .with_column_collations([Some(951)]);
+    let outer = RowSchema::with_typed_virtual_identities(
+        &outer,
+        &[(virtual_column.clone(), Some(ColumnType::Text))],
+    )
+    .with_virtual_collation(&virtual_column, 950)
+    .unwrap();
+    let relation = crate::ast::InternalRelationId::allocate();
+    let bindings = [
+        (relation.column(0), physical),
+        (relation.column(1), virtual_column),
+    ];
+    let captured = RowSchema::with_named_internal_aliases(&outer, &bindings);
+    assert_eq!(captured.physical_width(), 1);
+    assert_eq!(captured.internal_slot(relation.column(0)), Some(0));
+    assert_eq!(
+        captured.internal_type(relation.column(0)),
+        Some(&ColumnType::Text)
+    );
+    assert_eq!(captured.internal_collation(relation.column(0)), Some(951));
+    assert!(captured.has_internal_column(relation.column(1)));
+    assert_eq!(captured.internal_slot(relation.column(1)), None);
+    assert_eq!(
+        captured.internal_type(relation.column(1)),
+        Some(&ColumnType::Text)
+    );
+    assert_eq!(captured.internal_collation(relation.column(1)), Some(950));
+    let local = RowSchema::with_qualified_types(
+        "target",
+        vec!["value".into()],
+        vec![Some(ColumnType::Integer)],
+    );
+    let combined = RowSchema::with_outer_schema(&local, &captured);
+    let rebound = RowSchema::with_named_internal_aliases(&combined, &bindings);
+    assert_eq!(rebound.qualified_slot("target", "value"), Some(0));
+    assert_eq!(rebound.internal_slot(relation.column(0)), Some(1));
+    assert!(!rebound.slot_is_local(1));
+    assert_eq!(
+        rebound.internal_type(relation.column(0)),
+        Some(&ColumnType::Text)
+    );
+    assert_eq!(rebound.internal_collation(relation.column(0)), Some(951));
+    assert_eq!(rebound.internal_slot(relation.column(1)), None);
+}

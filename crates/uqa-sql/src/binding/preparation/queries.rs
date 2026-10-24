@@ -199,6 +199,15 @@ impl Preparation<'_> {
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
+        let captured_outer = outer
+            .map(|schema| crate::semantics::view_rewrite::bind_outer_rewrite_scope(block, schema));
+        let outer = captured_outer.as_deref();
+        let source_rewrites = crate::semantics::view_rewrite::resolve_outer_sources(
+            block,
+            outer,
+            &mut |source, subqueries, scope| self.source_input(source, subqueries, scope),
+        )?;
+        let block = source_rewrites.as_ref();
         let source = block
             .from
             .as_ref()
@@ -219,6 +228,11 @@ impl Preparation<'_> {
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
+        let captured_outer = outer
+            .map(|schema| crate::semantics::view_rewrite::bind_outer_rewrite_scope(block, schema));
+        let outer = captured_outer.as_deref();
+        let rewritten = crate::semantics::view_rewrite::resolve_outer_rewrites(block, source);
+        let block = rewritten.as_ref();
         self.in_query_level(|analysis| {
             analysis.block_level_output(block, source, outer, preserve_unknown)
         })

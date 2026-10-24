@@ -7,9 +7,9 @@
 //! Lateral source execution and correlated query-block remapping.
 
 use super::{
-    build_join_operator_with_ctes, eval_scalar, resolve_user_table_function,
-    validate_table_function_column_definition, CteScope, PlanSubqueryArena, SQLError, SQLParam,
-    ScalarEvalContext, ScalarExpr, SourceContext, SourcePlan, TableFunctionCall,
+    build_join_operator_with_ctes, resolve_user_table_function,
+    validate_table_function_column_definition, CteScope, SQLError, SQLParam, ScalarExpr,
+    SourceContext, SourcePlan, TableFunctionCall,
 };
 
 /// Enforce EXECUTE on each function of a lateral FROM item, which the join calls once per outer row, as `PostgreSQL` checks it when it initializes the scan, before any outer row is read.
@@ -71,7 +71,10 @@ pub(super) fn require_lateral_function_execute<S: Clone + Send + Sync + 'static>
 pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) context: SourceContext<'a, S>,
     pub(super) right: SourcePlan,
-    pub(super) on: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
+    pub(super) on: Option<(
+        crate::scalar::PreparedExpressions<ScalarExpr>,
+        crate::SharedExpressionEvaluator<'a>,
+    )>,
     /// The planner's predicates on the right relation's qualifiers, bound to `right_schema`. The planner removes them from the query block's residual filter, so every produced right row must satisfy them. An error names a column they read that the relation does not produce.
     pub(super) right_filter: Option<
         Result<
@@ -213,17 +216,16 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
     }
 
     fn matches(&mut self, joined: &crate::OwnedPhysicalRow) -> crate::ExecResult<bool> {
-        let Some(filter) = self.on.as_ref() else {
+        let Some((filter, evaluator)) = self.on.as_ref() else {
             return Ok(true);
         };
-        let scoped_hook = self.context.relational.expression_scope(self.ctes.clone());
-        let subquery_arena =
-            PlanSubqueryArena::new(&self.ctes.scalar_subqueries, Some(scoped_hook.as_ref()));
-        let context = ScalarEvalContext::from_row_lookup(joined, self.params)
-            .with_function_hook(scoped_hook.as_ref())
-            .with_function_states(filter.calls())
-            .with_subquery_runner(&subquery_arena)
-            .with_physical_outer_row(&joined.schema, &joined.row);
-        Ok(uqa_sql::expr::truthy(&eval_scalar(filter, &context)?))
+        Ok(uqa_sql::expr::truthy(
+            &evaluator.evaluate_physical_with_function_states(
+                filter,
+                &joined.schema,
+                &joined.row,
+                filter.calls(),
+            )?,
+        ))
     }
 }

@@ -21,6 +21,7 @@ mod call;
 mod cast_compatibility;
 mod checksum;
 mod common;
+pub(crate) use common::{function_arguments_have_runtime_types, runtime_input};
 pub(crate) mod concatenation;
 pub(crate) use common::literal_input_type_with_control;
 pub(crate) use common::select_common_input_type_in_with_control;

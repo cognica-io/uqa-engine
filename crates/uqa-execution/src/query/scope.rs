@@ -39,6 +39,8 @@ pub struct CteScope<S: Clone = ()> {
     folded_ctes: BTreeSet<String>,
     pub non_returning_ctes: BTreeSet<String>,
     pub scalar_subqueries: Arc<[QueryPlan]>,
+    pub(crate) source_outer_rewrites:
+        Option<Arc<[uqa_sql::semantics::view_rewrite::DeferredOuterRewrite]>>,
     pub lock_identities: LockIdentityOptions,
     row_lock: Option<Box<RowLockScopeState>>,
     visible_cte_names: BTreeSet<String>,
@@ -69,6 +71,7 @@ impl<S: Clone> Default for CteScope<S> {
             folded_ctes: BTreeSet::new(),
             non_returning_ctes: BTreeSet::new(),
             scalar_subqueries: Arc::default(),
+            source_outer_rewrites: None,
             lock_identities: LockIdentityOptions::default(),
             row_lock: None,
             visible_cte_names: BTreeSet::new(),

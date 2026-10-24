@@ -111,6 +111,24 @@ impl ProjectedPredicate {
         schema: &RowSchema,
         params: &[SQLParam],
     ) -> Result<Option<Self>, SQLError> {
+        let mut local = true;
+        expression.visit(&mut |node| {
+            local &= match node {
+                ScalarExpr::Column(name) => schema.unqualified_position(name).is_some(),
+                ScalarExpr::QualifiedColumn { qualifier, column } => {
+                    schema.qualified_position(qualifier, column).is_some()
+                }
+                ScalarExpr::InternalColumn(_)
+                | ScalarExpr::ScalarSubquery(_)
+                | ScalarExpr::Exists { .. }
+                | ScalarExpr::InSubquery { .. } => false,
+                _ => true,
+            };
+        });
+        // A projected predicate only owns local positional inputs. Expressions needing another row or a subquery belong to the caller's scoped evaluator, including their type binding.
+        if !local {
+            return Ok(None);
+        }
         match compile::compile(expression, schema, params) {
             Ok(expression) => Ok(expression.map(|expression| Self { expression })),
             Err(SQLError::Unsupported(_)) => Ok(None),
@@ -145,6 +163,29 @@ mod tests {
     use crate::{eval_scalar, ScalarEvalContext};
     use uqa_sql::ast::ColumnType;
     use uqa_sql::expr::truthy;
+
+    #[test]
+    fn predicates_with_outer_attributes_keep_the_scoped_evaluator() {
+        let column = uqa_sql::ast::InternalRelationId::allocate().column(0);
+        for input in [
+            ScalarExpr::InternalColumn(column),
+            ScalarExpr::qualified_column("outer", "n"),
+            ScalarExpr::ScalarSubquery(0),
+        ] {
+            let expression = ScalarExpr::Binary {
+                op: BinaryOp::Equal,
+                lhs: Box::new(input),
+                rhs: Box::new(ScalarExpr::Literal(Value::Int(10))),
+            };
+            assert!(ProjectedPredicate::compile_with_schema(
+                &expression,
+                &RowSchema::default(),
+                &[]
+            )
+            .unwrap()
+            .is_none());
+        }
+    }
 
     #[test]
     fn positional_predicate_preserves_null_and_short_circuit_semantics() {

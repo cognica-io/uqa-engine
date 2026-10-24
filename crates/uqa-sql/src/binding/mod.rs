@@ -75,8 +75,8 @@ pub use scope::{
 };
 pub use scope::{overlay_outer_schema, values_schema_in_scope, values_types_in_scope};
 pub use sources::{
-    analyze_source_plan_schema, bind_source_plan_schema, bind_source_plan_schema_for_execution,
-    with_query_table_pseudo_columns,
+    analyze_source_plan_schema, bind_source_input_schema, bind_source_plan_schema,
+    bind_source_plan_schema_for_execution, with_query_table_pseudo_columns, SourceBindingInput,
 };
 pub use variable_sites::{resolve_variable_sites, VariableSiteResolution};
 
@@ -283,12 +283,25 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
+        let captured_outer = outer
+            .map(|schema| crate::semantics::view_rewrite::bind_outer_rewrite_scope(block, schema));
+        let outer = captured_outer.as_deref();
+        let source_rewrites = crate::semantics::view_rewrite::resolve_outer_sources(
+            block,
+            outer,
+            &mut |source, subqueries, scope| {
+                self.bind_source_input(routines, source, subqueries, params, scope)
+            },
+        )?;
+        let block = source_rewrites.as_ref();
         let source = block.from.as_ref().map_or_else(
             || Ok(RowSchema::default()),
             |source| self.bind_source(routines, source, &block.subqueries, params, outer),
         )?;
         // Query-owned metadata types belong to both analysis and metadata-only binding.
         let source = analysis::with_query_source_columns(&source, block);
+        let rewritten = crate::semantics::view_rewrite::resolve_outer_rewrites(block, &source);
+        let block = rewritten.as_ref();
         let expression_schema = overlay_outer_schema(&source, outer);
         let output = preparation::block_metadata(self, routines, block, &source, outer, params)?;
         let output = analysis::with_projected_open_columns(&output, &block.projections, &source);

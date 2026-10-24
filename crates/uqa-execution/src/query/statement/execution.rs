@@ -389,6 +389,7 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
     );
     if !order_by.is_empty() || limit.is_some() || offset.is_some() {
         let synthetic = QueryBlockPlan {
+            deferred_outer_rewrites: Vec::new(),
             privilege_columns: std::collections::BTreeSet::default(),
             projections: Vec::new(),
             from: None,

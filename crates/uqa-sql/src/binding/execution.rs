@@ -24,21 +24,63 @@ pub fn bind_query_block_for_execution<'a>(
     outer: Option<&RowSchema>,
     defer_distinct_limit: bool,
 ) -> Result<(Cow<'a, QueryBlockPlan>, RowSchema), SQLError> {
-    if defer_distinct_limit || block.from.as_ref().is_some_and(source_binds_routines) {
+    let captured_outer =
+        outer.map(|schema| crate::semantics::view_rewrite::bind_outer_rewrite_scope(block, schema));
+    let outer = captured_outer.as_deref();
+    if defer_distinct_limit
+        || block.from.as_ref().is_some_and(source_binds_routines)
+        || !block.deferred_outer_rewrites.is_empty() && block.from.is_some()
+    {
         let mut execution = crate::semantics::select_execution_stmt(block, defer_distinct_limit);
+        if let Cow::Owned(rewritten) = crate::semantics::view_rewrite::resolve_outer_sources(
+            &execution,
+            outer,
+            &mut |source, subqueries, scope| {
+                super::sources::bind_source_input_schema(
+                    routines,
+                    source,
+                    params,
+                    &BindingContext {
+                        scalar_subqueries: subqueries,
+                        ..context.clone()
+                    },
+                    scope,
+                )
+            },
+        )? {
+            execution = rewritten;
+        }
+        let source_context = BindingContext {
+            scalar_subqueries: &execution.subqueries,
+            ..context.clone()
+        };
         let source = execution.from.as_mut().map_or_else(
             || Ok(RowSchema::default()),
             |source| {
-                bind_source_plan_schema_for_execution(routines, source, params, context, outer)
+                bind_source_plan_schema_for_execution(
+                    routines,
+                    source,
+                    params,
+                    &source_context,
+                    outer,
+                )
             },
         )?;
+        if let Cow::Owned(rewritten) =
+            crate::semantics::view_rewrite::resolve_outer_rewrites(&execution, &source)
+        {
+            execution = rewritten;
+        }
         return Ok((Cow::Owned(execution), source));
     }
     let source = block.from.as_ref().map_or_else(
         || Ok(RowSchema::default()),
         |source| bind_source_plan_schema(routines, source, params, context, outer),
     )?;
-    Ok((Cow::Borrowed(block), source))
+    Ok((
+        crate::semantics::view_rewrite::resolve_outer_rewrites(block, &source),
+        source,
+    ))
 }
 
 fn source_binds_routines(source: &SourcePlan) -> bool {

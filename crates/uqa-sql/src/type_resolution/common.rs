@@ -32,6 +32,23 @@ pub(super) fn unknown_input(mut expression: &ScalarExpr) -> bool {
     )
 }
 
+/// A column or callback whose type is unavailable remains a runtime carrier; it cannot participate in overload selection as an unknown string or NULL literal.
+pub(crate) fn function_arguments_have_runtime_types(
+    arguments: &[ScalarExpr],
+    types: &[Option<ColumnType>],
+) -> Result<bool, SQLError> {
+    let arguments = scalar_call_arguments(arguments)?;
+    assert_eq!(arguments.len(), types.len());
+    Ok(arguments
+        .iter()
+        .zip(types)
+        .any(|(argument, ty)| runtime_input(argument.value, ty.as_ref())))
+}
+
+pub(crate) fn runtime_input(expression: &ScalarExpr, ty: Option<&ColumnType>) -> bool {
+    ty.is_none() && !unknown_input(expression)
+}
+
 /// Decoded function-call argument names, effective overload types, and whether the call used explicit `VARIADIC` syntax.
 #[doc(hidden)]
 pub type FunctionCallArgumentSignature = (Vec<Option<String>>, Vec<Option<ColumnType>>, bool);

@@ -4,37 +4,52 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Static JOIN predicate binding before either input produces rows.
+//! JOIN predicates bind to the input descriptors and retain their lexical outer values.
 
 use super::{CteScope, RowSchema, SQLError, SQLParam, ScalarExpr, SourceContext};
 
-pub(super) fn validate_join_on_schema<S: Clone + 'static>(
-    context: &SourceContext<'_, S>,
+pub(super) fn bind_join_on_schema<'a, S: Clone + 'static>(
+    context: &SourceContext<'a, S>,
     on: Option<&ScalarExpr>,
     left: &RowSchema,
     right: &RowSchema,
-    params: &[SQLParam],
+    params: &'a [SQLParam],
     ctes: &CteScope<S>,
-) -> Result<(), SQLError> {
+) -> Result<(Option<ScalarExpr>, crate::SharedExpressionEvaluator<'a>), SQLError> {
     let Some(on) = on else {
-        return Ok(());
+        return Ok((
+            None,
+            crate::query::expression::with_outer_row(
+                context.relational.evaluator(params, ctes),
+                ctes.row_lock_outer_row(),
+            ),
+        ));
     };
-    let mut schema = RowSchema::join(left, right, std::iter::empty::<String>());
-    if let Some(outer) = ctes.row_lock_outer_row() {
-        let identities = outer
-            .schema
-            .identities()
-            .iter()
-            .enumerate()
-            .map(|(position, identity)| {
-                (
-                    identity.clone(),
-                    outer.schema.column_type(position).cloned(),
-                )
-            })
-            .collect::<Vec<_>>();
-        schema = RowSchema::with_typed_outer_identities(&schema, &identities);
-    }
-    crate::scalar_type_with_resolver(on, &schema, params, context.types)?;
-    Ok(())
+    let schema = RowSchema::join(left, right, std::iter::empty::<String>());
+    let mut on = on.clone();
+    let mut rewritten_scope;
+    let mut arena_scope;
+    let ctes = if let Some(rewrites) = &ctes.source_outer_rewrites {
+        let mut subqueries = ctes.scalar_subqueries.to_vec();
+        uqa_sql::semantics::view_rewrite::resolve_outer_expression_rewrites(
+            &mut on,
+            rewrites,
+            &schema,
+            &mut subqueries,
+        );
+        rewritten_scope = ctes.clone();
+        arena_scope = rewritten_scope.enter_scalar_subqueries(&subqueries);
+        &mut *arena_scope
+    } else {
+        ctes
+    };
+    let evaluator = crate::query::expression::with_outer_row(
+        context.relational.evaluator(params, ctes),
+        ctes.row_lock_outer_row(),
+    );
+    evaluator.expression_type(&on, &schema)?;
+    Ok((
+        Some(evaluator.bind_type_introspection(on, &schema)),
+        evaluator,
+    ))
 }

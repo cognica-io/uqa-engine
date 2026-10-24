@@ -9,6 +9,8 @@ use uqa_engine::SQLRowSource;
 
 #[path = "stream_cleanup/cte.rs"]
 mod cte;
+#[path = "stream_cleanup/view_binding.rs"]
+mod view_binding;
 
 #[derive(Default)]
 struct Counts {
@@ -24,6 +26,7 @@ enum Shape {
     Normal,
     NoColumns,
     WrongWidth,
+    Named(&'static str),
 }
 
 #[derive(Clone, Default)]
@@ -56,10 +59,10 @@ impl SQLTableFunction for Factory {
         };
         self.counts.created.fetch_add(1, Ordering::SeqCst);
         Ok(SQLTableFunctionStream::from_source(
-            if matches!(self.behavior.shape, Shape::NoColumns) {
-                Vec::new()
-            } else {
-                vec!["n"]
+            match self.behavior.shape {
+                Shape::NoColumns => Vec::new(),
+                Shape::Named(name) => vec![name],
+                _ => vec!["n"],
             },
             Source {
                 counts: self.counts.clone(),

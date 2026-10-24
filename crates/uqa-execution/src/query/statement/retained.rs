@@ -159,6 +159,7 @@ fn build_set_operator<'a, S: Clone + Send + Sync + 'static>(
         return Ok(Some(operator));
     }
     let statement = QueryBlockPlan {
+        deferred_outer_rewrites: Vec::new(),
         privilege_columns: std::collections::BTreeSet::default(),
         projections: Vec::new(),
         from: None,

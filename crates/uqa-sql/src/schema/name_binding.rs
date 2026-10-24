@@ -284,14 +284,69 @@ impl RowSchema {
         input: &Self,
         aliases: &[(InternalColumnRef, usize, Option<ColumnType>)],
     ) -> Self {
-        let mut collations = input.index.cold.collations.clone();
-        let mut internal = input.index.executor_attributes.clone();
-        let mut internal_types = input.index.cold.executor_attribute_types.clone();
-        for (column, slot, ty) in aliases {
+        for (_, slot, _) in aliases {
             assert!(
                 *slot < input.physical_width(),
                 "physical internal alias is outside row width"
             );
+        }
+        Self::with_internal_alias_slots(input, aliases)
+    }
+
+    /// Capture named attributes under structural identities before a descendant namespace can shadow their SQL spelling. Typed virtual attributes retain their type and absence of a physical slot.
+    pub fn with_named_internal_aliases(
+        input: &Self,
+        aliases: &[(InternalColumnRef, ColumnIdentity)],
+    ) -> Self {
+        let slots: Vec<_> = aliases
+            .iter()
+            .filter_map(|(column, identity)| {
+                if input.has_internal_column(*column) {
+                    return None;
+                }
+                let qualifier = identity.qualifier()?;
+                if !input.has_qualified_column(qualifier, identity.column()) {
+                    return None;
+                }
+                Some((
+                    *column,
+                    input
+                        .qualified_slot(qualifier, identity.column())
+                        .unwrap_or(NULL_SLOT),
+                    input.qualified_type(qualifier, identity.column()).cloned(),
+                ))
+            })
+            .collect();
+        let mut result = Self::with_internal_alias_slots(input, &slots);
+        for (column, identity) in aliases {
+            if input.has_internal_column(*column) {
+                continue;
+            }
+            if let Some(qualifier) = identity.qualifier() {
+                let collation = input.qualified_collation(qualifier, identity.column());
+                let ty = input.qualified_type(qualifier, identity.column());
+                std::sync::Arc::make_mut(&mut result.index)
+                    .cold
+                    .collations
+                    .internal(*column, collation, ty);
+            }
+        }
+        result
+    }
+
+    /// Whether a physical or typed virtual attribute has already been captured.
+    pub fn has_internal_column(&self, column: InternalColumnRef) -> bool {
+        self.index.executor_attributes.contains_key(&column)
+    }
+
+    fn with_internal_alias_slots(
+        input: &Self,
+        aliases: &[(InternalColumnRef, usize, Option<ColumnType>)],
+    ) -> Self {
+        let mut collations = input.index.cold.collations.clone();
+        let mut internal = input.index.executor_attributes.clone();
+        let mut internal_types = input.index.cold.executor_attribute_types.clone();
+        for (column, slot, ty) in aliases {
             collations.internal(
                 *column,
                 input.inherited_physical_collation(*slot),
@@ -317,6 +372,7 @@ impl RowSchema {
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
                 lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
+                local_width: input.index.cold.local_width,
                 row_types: input.index.cold.row_types.clone(),
                 row_presence: input.index.cold.row_presence.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
