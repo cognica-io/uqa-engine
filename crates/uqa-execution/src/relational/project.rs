@@ -392,6 +392,18 @@ impl PhysicalOperator for Project<'_> {
         self.computed.is_empty() && self.child.supports_batched_consumption()
     }
 
+    fn collect_materialized(
+        &mut self,
+        sink: &mut crate::query::output::MaterializedResultSink<'_>,
+    ) -> ExecResult<bool> {
+        if !self.computed.is_empty()
+            || self.schema.physical_width() != self.child.row_schema().physical_width()
+        {
+            return Ok(false);
+        }
+        self.child.collect_materialized(sink)
+    }
+
     fn output_ordering(&self) -> &[crate::PhysicalOrder] {
         &self.ordering
     }

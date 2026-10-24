@@ -35,6 +35,7 @@ struct PublicRows(RefCell<Option<State>>);
 
 struct State {
     columns: Vec<String>,
+    schema: RowSchema,
     rows: ResultRows,
 }
 
@@ -54,9 +55,25 @@ impl QueryRowConsumer for PublicRows {
         rows.prepare(columns, schema);
         *state = Some(State {
             columns: columns.to_vec(),
+            schema: schema.clone(),
             rows,
         });
         Ok(())
+    }
+
+    fn collect_native_materialized(
+        &self,
+        operator: &mut dyn crate::PhysicalOperator,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> crate::ExecResult<bool> {
+        let mut state = self.0.borrow_mut();
+        let state = state.as_mut().ok_or_else(not_begun)?;
+        let mut sink = crate::query::output::MaterializedResultSink::new(
+            &state.schema,
+            &mut state.rows,
+            cancellation,
+        );
+        operator.collect_materialized(&mut sink)
     }
 
     fn consume(&self, row: OwnedPhysicalRow) -> Result<QueryConsumerControl, SQLError> {

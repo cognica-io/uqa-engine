@@ -13,6 +13,70 @@ use crate::{
 use uqa_core::Value;
 use uqa_sql::ResultRow;
 
+/// Native final-result accumulator. Its only row operation copies selected values into the public result and cannot invoke a host callback or reenter storage.
+pub struct MaterializedResultSink<'a> {
+    schema: &'a RowSchema,
+    rows: &'a mut ResultRows,
+    cancellation: &'a uqa_core::CancellationToken,
+}
+
+impl<'a> MaterializedResultSink<'a> {
+    pub(crate) fn new(
+        schema: &'a RowSchema,
+        rows: &'a mut ResultRows,
+        cancellation: &'a uqa_core::CancellationToken,
+    ) -> Self {
+        Self {
+            schema,
+            rows,
+            cancellation,
+        }
+    }
+
+    /// Check the original statement token between bounded input pages, including pages rejected by the predicate.
+    pub fn check_cancelled(&self) -> crate::ExecResult<()> {
+        self.cancellation.check().map_err(uqa_sql::SQLError::from)?;
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn physical_width(&self) -> usize {
+        self.schema.physical_width()
+    }
+
+    /// Consume one complete physical row during its storage borrow. No borrowed value survives this call.
+    pub fn append(&mut self, values: &[&Value]) -> crate::ExecResult<()> {
+        if values.len() != self.physical_width() {
+            return Err(crate::ExecError::Other(
+                "borrowed materialized row has an incompatible physical width".into(),
+            ));
+        }
+        if let Some(positional) = &mut self.rows.positional {
+            positional.push(
+                self.rows
+                    .positions
+                    .iter()
+                    .map(|position| {
+                        position
+                            .and_then(|logical| self.schema.physical_slot(logical))
+                            .and_then(|slot| values.get(slot).copied())
+                            .cloned()
+                            .unwrap_or(Value::Null)
+                    })
+                    .collect(),
+            );
+        }
+        self.rows.named.push(
+            self.rows
+                .materializer
+                .as_ref()
+                .expect("public result layout was prepared")
+                .materialize_borrowed(values),
+        );
+        Ok(())
+    }
+}
+
 pub(crate) struct ResultRows {
     pub(crate) named: Vec<ResultRow>,
     pub(crate) positional: Option<Vec<Vec<Value>>>,

@@ -19,7 +19,7 @@ use super::SPILL_MAGIC;
 mod binary;
 pub(super) use binary::{
     append_batches, decode_batch, encoded_batch_overhead_size, encoded_batch_size,
-    encoded_physical_row_record_size,
+    encoded_borrowed_row_record_size, encoded_physical_row_record_size,
 };
 pub(crate) use binary::{
     decode_document, decode_physical_row_record, encode_document, encode_physical_row_record,

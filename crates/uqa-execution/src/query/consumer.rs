@@ -12,6 +12,15 @@ use uqa_sql::SQLError;
 pub trait QueryRowConsumer {
     fn begin(&self, columns: &[String], schema: &RowSchema) -> Result<(), SQLError>;
 
+    /// Let a complete native result consumer collect borrowed values after `begin` and input `open`. The default declines without consuming input; arbitrary callbacks retain their ordinary row-delivery boundary.
+    fn collect_native_materialized(
+        &self,
+        _operator: &mut dyn crate::PhysicalOperator,
+        _cancellation: &uqa_core::CancellationToken,
+    ) -> crate::ExecResult<bool> {
+        Ok(false)
+    }
+
     fn consume(&self, row: OwnedPhysicalRow) -> Result<QueryConsumerControl, SQLError>;
 
     fn consume_batch(&self, batch: Batch) -> Result<QueryConsumerControl, SQLError> {

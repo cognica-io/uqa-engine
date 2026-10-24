@@ -18,6 +18,7 @@ use std::io::{BufReader, Take};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use uqa_core::Value;
 use uqa_storage::temporary_file::TemporaryFile as File;
 
 use crate::batch::{Batch, OwnedPhysicalRow, PhysicalRow, RowSchema};
@@ -35,7 +36,8 @@ pub(crate) use segments::SpillSegmentDescriptor;
 
 use format::{
     append_batches, decode_batch, encoded_batch_overhead_size, encoded_batch_size,
-    encoded_physical_row_record_size, open_spill_reader, read_bounded_spill_record, spill_error,
+    encoded_borrowed_row_record_size, encoded_physical_row_record_size, open_spill_reader,
+    read_bounded_spill_record, spill_error,
 };
 pub(crate) use format::{
     decode_document, decode_physical_row_record, encode_document, encode_physical_row_record,
@@ -70,17 +72,21 @@ impl EncodedBatchSizer {
     }
 
     pub(crate) fn append(&mut self, row: &PhysicalRow) -> ExecResult<()> {
-        let mut additional = encoded_physical_row_record_size(row, self.physical_width)?;
-        if row.lock_origins().is_empty() {
-            self.origin_free_rows = self.origin_free_rows.checked_add(1).ok_or_else(|| {
-                spill_error("incremental spill batch origin-free row count overflow")
-            })?;
-            if self.lock_origin_rows != 0 {
-                additional = additional.checked_add(8).ok_or_else(|| {
-                    spill_error("incremental spill batch lock-origin size overflow")
-                })?;
-            }
-        } else {
+        self.append_size(
+            encoded_physical_row_record_size(row, self.physical_width)?,
+            !row.lock_origins().is_empty(),
+        )
+    }
+
+    pub(crate) fn append_borrowed(&mut self, values: &[&Value]) -> ExecResult<()> {
+        self.append_size(
+            encoded_borrowed_row_record_size(values, self.physical_width)?,
+            false,
+        )
+    }
+
+    fn append_size(&mut self, mut additional: usize, has_origins: bool) -> ExecResult<()> {
+        if has_origins {
             if self.lock_origin_rows == 0 {
                 let preceding_metadata = self.origin_free_rows.checked_mul(8).ok_or_else(|| {
                     spill_error("incremental spill batch lock-origin metadata overflow")
@@ -92,6 +98,15 @@ impl EncodedBatchSizer {
             self.lock_origin_rows = self.lock_origin_rows.checked_add(1).ok_or_else(|| {
                 spill_error("incremental spill batch lock-origin row count overflow")
             })?;
+        } else {
+            self.origin_free_rows = self.origin_free_rows.checked_add(1).ok_or_else(|| {
+                spill_error("incremental spill batch origin-free row count overflow")
+            })?;
+            if self.lock_origin_rows != 0 {
+                additional = additional.checked_add(8).ok_or_else(|| {
+                    spill_error("incremental spill batch lock-origin size overflow")
+                })?;
+            }
         }
         self.bytes = self
             .bytes

@@ -52,6 +52,30 @@ impl ResultRowMaterializer {
         }
     }
 
+    pub(crate) fn materialize_borrowed(&self, values: &[&Value]) -> ResultRow {
+        let mut result = ResultRow::new();
+        match &self.plan {
+            Some(plan) => {
+                for entry in &plan.entries {
+                    result.insert(
+                        entry.column.clone(),
+                        values
+                            .get(entry.slot)
+                            .copied()
+                            .cloned()
+                            .unwrap_or(Value::Null),
+                    );
+                }
+            }
+            None => {
+                for (column, value) in self.schema.columns().iter().zip(values) {
+                    result.insert(column.clone(), (*value).clone());
+                }
+            }
+        }
+        result
+    }
+
     pub(crate) fn extend(&self, output: &mut Vec<ResultRow>, rows: Vec<PhysicalRow>) {
         let materializer = RowMaterializer::new(&self.schema);
         match &self.plan {

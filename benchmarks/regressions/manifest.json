@@ -23523,6 +23523,136 @@
       "capability": "Projection output demand",
       "workload": "A correlated scalar aggregate and a LATERAL aggregate whose GROUP BY output alias matches an enclosing column.",
       "invariant": "Grouping names bind to local outputs before enclosing names; streaming preserves group cardinality."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_public_materialization_avoids_shared_row_ownership_and_preserves_positions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests/borrowed.rs",
+      "capability": "Borrowed native public result collection",
+      "workload": "2,048 stored rows, a pure predicate and reordered duplicate result labels at zero, 1KiB and 64KiB scan allowances.",
+      "invariant": "All 1,024 selected rows preserve independent named and positional values; the direct consumer performs zero shared-row ownership acquisitions while visiting each input once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_public_materialization_keeps_computed_and_metadata_fallbacks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests/borrowed.rs",
+      "capability": "Borrowed native public result collection",
+      "workload": "Computed projections and attached document identities over the same memory source.",
+      "invariant": "Both keep the ordinary physical-row path and preserve complete named and positional output without visiting the opt-in borrowed cursor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_public_materialization_preserves_empty_results_and_rejects_lost_capability",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests/borrowed.rs",
+      "capability": "Borrowed native public result collection",
+      "workload": "An empty memory input and an opt-in provider that violates its stable capability after probing.",
+      "invariant": "Empty output keeps its schema without ownership acquisition; a capability violation fails explicitly without silently restarting through the fallback path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "borrowed_public_results_keep_predicate_errors_and_close_after_partial_output",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests/borrowed/failures.rs",
+      "capability": "Borrowed native public result collection",
+      "workload": "Division by zero after three selected rows, direct and ordinary inputs, with successful and failing operator cleanup.",
+      "invariant": "The original predicate error survives, cleanup errors remain visible, input closes exactly once and no partial SQLResult escapes; direct input visits no row after the failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "borrowed_public_results_observe_cancellation_between_rejected_input_pages",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests/borrowed/failures.rs",
+      "capability": "Borrowed native public result collection",
+      "workload": "Cancellation before a complete result starts and after its first rejected input page.",
+      "invariant": "The original token yields SQLSTATE 57014 before further pages, zero temporary shared-row ownership, and exactly one operator close and source release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "borrowed_batch_sizing_matches_owned_values_before_and_after_lock_origins",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/batch_layout.rs",
+      "capability": "Exact borrowed batch accounting",
+      "workload": "Variable-width Unicode and NULL values, mixed borrowed and lock-bearing rows, followed by reverse row removal.",
+      "invariant": "Borrowed append preserves exact encoded bytes and the first/last lock-origin metadata adjustments, returning to the original empty size.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "borrowed_record_sizing_preserves_bytes_depth_and_width_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/format/binary/encode.rs",
+      "capability": "Exact borrowed batch accounting",
+      "workload": "Borrowed scalar, Unicode, NULL and nested values, wrong physical widths and excessive nesting.",
+      "invariant": "Sizes equal independently emitted record bytes and preserve physical width and depth diagnostics without constructing an owned input row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stable_borrowed_shared_cursor_keeps_slots_and_never_acquires_row_ownership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/tests.rs",
+      "capability": "Stable borrowed memory projection",
+      "workload": "Sparse IDs with different stored layouts, duplicate/reordered/missing fields, empty projection, zero limit and early stop.",
+      "invariant": "Projected values preserve the shared cursor contract while each stored value vector retains its original single owner; limits and callbacks stop at the selected row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "document_adapter_keeps_stable_borrowed_projection_at_the_original_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/read_only_snapshot/tests.rs",
+      "capability": "Stable borrowed memory projection",
+      "workload": "Two nested read-only owners retain a memory snapshot after the live table is cleared; duplicate, missing and exhausted projections and a controlled owner are inspected.",
+      "invariant": "Eligible read-only owners forward the original snapshot and limits; an owner with a fallible retained control declines before any callback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "public_sql_collects_stored_values_without_per_row_shared_ownership",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/queries/table_reads/borrowed_result.rs",
+      "capability": "Native public result adapter",
+      "workload": "The actual Engine::sql statement reads 128 stored rows through a counted memory store and retained snapshots: Unicode/NULL duplicate output names, followed by the analytical scan query shape with a pure predicate and primary-key ordering.",
+      "invariant": "Values, positions, compatibility keys and declared types are preserved; each query visits exactly 128 borrowed inputs with zero shared-row ownership acquisitions, including the predicate and order-preserving path.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

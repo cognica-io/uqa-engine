@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Collect eligible complete SQL results directly from stable decoded memory fields, avoiding temporary shared-row ownership while preserving pure predicates, positional/duplicate output values, exact scan accounting, cancellation and cleanup. Computed, locking, metadata and fallible-provider paths retain ordinary physical row delivery.
+
 - Encode fragmented physical rows for spill in linear traversal order, avoiding repeated fragment searches while preserving serialized values, NULL slots and row-lock metadata.
 
 - Prepare immutable stored-scan projection decisions once, avoiding repeated column checks per page and slot checks per row while preserving generated columns, tuple metadata, locking and rechecks.

@@ -13,6 +13,7 @@ mod hierarchy;
 mod indexed;
 mod materialize;
 mod projection;
+mod public_result;
 
 pub use capture::CapturedScoredEntries;
 pub(crate) use capture::ScoredEntryCapture;
@@ -905,6 +906,13 @@ impl crate::RowSource for ScoredDocumentSource {
                 return Ok(rows);
             }
         }
+    }
+
+    fn collect_materialized(
+        &mut self,
+        sink: &mut crate::query::output::MaterializedResultSink<'_>,
+    ) -> ExecResult<bool> {
+        self.collect_shared_public_rows(sink)
     }
 
     fn consume_into_aggregate(
