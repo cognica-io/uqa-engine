@@ -19,7 +19,7 @@ pub struct SelectSourceCoverage<'a> {
     block: Option<&'a QueryBlockPlan>,
 }
 
-impl<'a> SelectSourceCoverage<'a> {
+impl SelectSourceCoverage<'_> {
     pub fn matches_source(&self, source: &SourcePlan) -> bool {
         std::ptr::eq(self.source, source)
     }
