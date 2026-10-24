@@ -30,6 +30,7 @@ arrow-export = ["dep:uqa-api"]
 uqa-core.workspace = true
 uqa-engine.workspace = true
 uqa-sql.workspace = true
+uqa-storage-redb.workspace = true
 uqa-storage-sqlite.workspace = true
 uqa-api = { workspace = true, optional = true }
 zeroize.workspace = true

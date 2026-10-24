@@ -5,6 +5,7 @@
  */
 
 #include <uqa/uqa.h>
+#include "test_database.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,7 +84,7 @@ static void independent_and_session_delivery(void) {
     int64_t sender = 0;
     int32_t actual_sender = 0;
     uint32_t state = UQA_TRANSACTION_IDLE;
-    CHECK(uqa_engine_open_memory(NULL, &engine));
+    CHECK(test_database_open(NULL, &engine));
     CHECK(uqa_result_create(&result));
     CHECK(uqa_notification_create(&value));
     CHECK(uqa_notification_create(&other));
@@ -164,7 +165,7 @@ static void validation_and_terminal_failures(void) {
     const char *channels[] = {"jobs", "jobs"};
     struct { uint32_t struct_size; uint32_t version; } prefix = {8, 1};
     struct { uqa_subscription_options known; uint64_t extension; } extended = {limits(), 0};
-    CHECK(uqa_engine_open_memory(NULL, &engine));
+    CHECK(test_database_open(NULL, &engine));
     CHECK(uqa_result_create(&result));
     CHECK(uqa_notification_create(&value));
     assert(uqa_subscription_open(engine, channels, 1, NULL, &rejected) == UQA_ERROR_INVALID_ARGUMENT);
@@ -229,7 +230,7 @@ static void failed_admission_preserves_delivery(int use_sql) {
     uint64_t sequence = 0;
     CHECK(uqa_config_create(&config));
     CHECK(uqa_config_set_ffi_memory_limit(config, 8192));
-    CHECK(uqa_engine_open_memory(config, &engine));
+    CHECK(test_database_open(config, &engine));
     CHECK(uqa_config_destroy(&config));
     CHECK(uqa_result_create(&result));
     CHECK(uqa_notification_create(&value));
@@ -280,7 +281,7 @@ static void private_detail_and_sql_failure_retention(void) {
         uqa_error original = NULL, again = NULL;
         uqa_string_view detail = {NULL, 0};
         options.max_queued_bytes = 1;
-        CHECK(uqa_engine_open_memory(NULL, &engine));
+        CHECK(test_database_open(NULL, &engine));
         CHECK(uqa_result_create(&result));
         CHECK(uqa_notification_create(&value));
         assert(uqa_engine_poll_sql_notification(engine, value) == UQA_ERROR_NOTIFICATION);

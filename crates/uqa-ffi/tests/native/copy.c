@@ -5,6 +5,7 @@
  */
 
 #include <uqa/uqa.h>
+#include "test_database.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,7 +59,7 @@ static void helpers(struct stream *stream) {
     int64_t number = 0;
     assert(uqa_engine_execute(stream->engine, "SELECT 99", stream->scratch) == UQA_ERROR_BUSY);
     assert(uqa_engine_execute(stream->other, "SELECT 99", stream->scratch) == UQA_ERROR_BUSY);
-    assert(uqa_engine_open_memory(NULL, &opened) == UQA_ERROR_BUSY && opened == NULL);
+    assert(test_database_open(NULL, &opened) == UQA_ERROR_BUSY && opened == NULL);
     assert(uqa_engine_close(&alias) == UQA_ERROR_BUSY && alias == stream->other);
     CHECK(uqa_value_create_int64(42, &value));
     CHECK(uqa_value_get_int64(value, &number));
@@ -208,9 +209,9 @@ int main(void) {
     uint64_t rows = 99;
     CHECK(uqa_config_create(&config));
     CHECK(uqa_config_set_ffi_memory_limit(config, 4096));
-    CHECK(uqa_engine_open_memory(config, &stream.engine));
+    CHECK(test_database_open(config, &stream.engine));
     CHECK(uqa_config_destroy(&config));
-    CHECK(uqa_engine_open_memory(NULL, &stream.other));
+    CHECK(test_database_open(NULL, &stream.other));
     CHECK(uqa_result_create(&stream.scratch));
     CHECK(uqa_result_create(&held));
     CHECK(uqa_result_create(&foreign_result));
@@ -319,7 +320,7 @@ int main(void) {
 
     CHECK(uqa_config_create(&config));
     CHECK(uqa_config_set_ffi_memory_limit(config, 1));
-    CHECK(uqa_engine_open_memory(config, &stream.engine));
+    CHECK(test_database_open(config, &stream.engine));
     CHECK(uqa_config_destroy(&config));
     reset(&stream, NORMAL);
     assert(uqa_engine_copy_to(stream.engine, "COPY (SELECT 1) TO STDOUT", write_bytes, NULL, &stream, &rows) == UQA_ERROR_LIMIT);

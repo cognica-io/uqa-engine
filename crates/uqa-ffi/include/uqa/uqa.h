@@ -215,6 +215,12 @@ UQA_API uqa_status UQA_CALL uqa_engine_open_memory(
 UQA_API uqa_status UQA_CALL uqa_engine_open(
     const char *path, uqa_config config,
     uqa_engine *out);
+UQA_API uqa_status UQA_CALL uqa_engine_open_sqlite_kv(
+    const char *path, uqa_config config,
+    uqa_engine *out);
+UQA_API uqa_status UQA_CALL uqa_engine_open_redb(
+    const char *path, uqa_config config,
+    uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_open_auto(
     const char *path, uqa_config config,
     uqa_engine *out);

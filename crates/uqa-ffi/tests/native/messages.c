@@ -5,6 +5,7 @@
  */
 
 #include <uqa/uqa.h>
+#include "test_database.h"
 #include <uqa/uqa_arrow.h>
 #include <uqa/uqa_log.h>
 #include <uqa/uqa_udf.h>
@@ -54,7 +55,7 @@ int main(void) {
     uint32_t columns = 99;
     uint32_t state = 99;
 
-    CHECK(uqa_engine_open_memory(NULL, &engine));
+    CHECK(test_database_open(NULL, &engine));
     CHECK(uqa_result_create(&result));
     assert(uqa_result_create(&result) == UQA_ERROR_INVALID_ARGUMENT);
     assert(uqa_result_get_row_count(result, &count) == UQA_ERROR_STATE);

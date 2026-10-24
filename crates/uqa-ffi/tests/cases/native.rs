@@ -7,43 +7,46 @@
 //! Execute actual C and C++ clients against the Cargo-built shared artifact.
 
 #[cfg(unix)]
-#[test]
-fn c_and_cpp_messages_use_the_shared_abi() {
-    native_client("messages.c");
+macro_rules! native_clients {
+    ($module:ident, $fixture:literal) => {
+        mod $module {
+            #[test]
+            fn memory() {
+                super::native_client($fixture, "memory");
+            }
+            #[test]
+            fn sqlite_native() {
+                super::native_client($fixture, "sqlite_native");
+            }
+            #[test]
+            fn sqlite_kv() {
+                super::native_client($fixture, "sqlite_kv");
+            }
+            #[test]
+            fn redb() {
+                super::native_client($fixture, "redb");
+            }
+        }
+    };
 }
 
 #[cfg(unix)]
-#[test]
-fn c_and_cpp_cursors_use_the_shared_abi() {
-    native_client("cursors.c");
-}
+native_clients!(messages, "messages.c");
+#[cfg(unix)]
+native_clients!(cursors, "cursors.c");
+#[cfg(unix)]
+native_clients!(notices, "notices.c");
+#[cfg(unix)]
+native_clients!(copy, "copy.c");
+#[cfg(unix)]
+native_clients!(notifications, "notifications.c");
+#[cfg(unix)]
+native_clients!(statements, "statements.c");
+#[cfg(unix)]
+native_clients!(storage, "storage.c");
 
 #[cfg(unix)]
-#[test]
-fn c_and_cpp_notices_use_the_shared_abi() {
-    native_client("notices.c");
-}
-
-#[cfg(unix)]
-#[test]
-fn c_and_cpp_copy_use_the_shared_abi() {
-    native_client("copy.c");
-}
-
-#[cfg(unix)]
-#[test]
-fn c_and_cpp_notifications_use_the_shared_abi() {
-    native_client("notifications.c");
-}
-
-#[cfg(unix)]
-#[test]
-fn c_and_cpp_statements_use_the_shared_abi() {
-    native_client("statements.c");
-}
-
-#[cfg(unix)]
-fn native_client(fixture: &str) {
+fn native_client(fixture: &str, backend: &str) {
     use std::{path::PathBuf, process::Command};
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -87,12 +90,16 @@ fn native_client(fixture: &str) {
             .unwrap();
         assert!(
             build.status.success(),
-            "{compiler}: {}",
+            "{fixture}, {backend}, {compiler}: {}",
             String::from_utf8_lossy(&build.stderr)
         );
         let temporary = output.path().join(format!("temporary-{compiler}"));
         std::fs::create_dir(&temporary).unwrap();
+        let databases = output.path().join(format!("databases-{compiler}"));
+        std::fs::create_dir(&databases).unwrap();
         let run = Command::new(&executable)
+            .env("UQA_TEST_STORAGE", backend)
+            .env("UQA_TEST_DATABASE_DIR", &databases)
             .env("TMPDIR", &temporary)
             .env("TMP", &temporary)
             .env("TEMP", &temporary)
@@ -101,7 +108,7 @@ fn native_client(fixture: &str) {
             .unwrap();
         assert!(
             run.status.success(),
-            "{compiler}: {}\n{}",
+            "{fixture}, {backend}, {compiler}: {}\n{}",
             String::from_utf8_lossy(&run.stdout),
             String::from_utf8_lossy(&run.stderr)
         );

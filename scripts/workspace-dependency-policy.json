@@ -94,6 +94,7 @@
       "uqa-core",
       "uqa-engine",
       "uqa-sql",
+      "uqa-storage-redb",
       "uqa-storage-sqlite"
     ],
     "uqa-fusion": [

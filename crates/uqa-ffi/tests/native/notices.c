@@ -5,6 +5,7 @@
  */
 
 #include <uqa/uqa.h>
+#include "test_database.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,7 +36,7 @@ static void fields_and_order(void) {
     uqa_notice first = NULL, second = NULL;
     uqa_string_view text = {NULL, 0};
     uqa_notice_level level = 99;
-    CHECK(uqa_engine_open_memory(NULL, &engine));
+    CHECK(test_database_open(NULL, &engine));
     CHECK(uqa_result_create(&result));
     assert(uqa_notice_create(engine, &first) == UQA_DONE && first == NULL);
     /* Independent reference: tests/parity/pg18/raise_options_oracle.expected.json. */
@@ -110,7 +111,7 @@ static void failed_admission_preserves_the_queue(void) {
     size_t filled = 0;
     CHECK(uqa_config_create(&config));
     CHECK(uqa_config_set_ffi_memory_limit(config, 4096));
-    CHECK(uqa_engine_open_memory(config, &engine));
+    CHECK(test_database_open(config, &engine));
     CHECK(uqa_config_destroy(&config));
     CHECK(uqa_result_create(&result));
     CHECK(uqa_engine_execute(engine,

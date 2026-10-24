@@ -5,6 +5,7 @@
  */
 
 #include <uqa/uqa.h>
+#include "test_database.h"
 #include <assert.h>
 #include <dirent.h>
 #include <stdio.h>
@@ -248,7 +249,7 @@ static void retention_limit(void) {
     size_t filled = 0;
     CHECK(uqa_config_create(&config));
     CHECK(uqa_config_set_ffi_memory_limit(config, 4096));
-    CHECK(uqa_engine_open_memory(config, &engine));
+    CHECK(test_database_open(config, &engine));
     CHECK(uqa_config_destroy(&config));
     CHECK(uqa_result_create(&previous));
     CHECK(uqa_engine_execute(engine, "SELECT 999", previous));
@@ -279,7 +280,7 @@ static void retention_limit(void) {
 int main(void) {
     uqa_engine engine = NULL;
     uqa_result result = NULL;
-    CHECK(uqa_engine_open_memory(NULL, &engine));
+    CHECK(test_database_open(NULL, &engine));
     CHECK(uqa_result_create(&result));
     empty_descriptor(engine, result);
     retained_slices(engine, result);

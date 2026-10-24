@@ -348,6 +348,12 @@ UQA_API uqa_status UQA_CALL uqa_engine_open_memory(
 UQA_API uqa_status UQA_CALL uqa_engine_open(
     const char *path, uqa_config config,
     uqa_engine *out);
+UQA_API uqa_status UQA_CALL uqa_engine_open_sqlite_kv(
+    const char *path, uqa_config config,
+    uqa_engine *out);
+UQA_API uqa_status UQA_CALL uqa_engine_open_redb(
+    const char *path, uqa_config config,
+    uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_open_auto(
     const char *path, uqa_config config,
     uqa_engine *out);
@@ -366,7 +372,16 @@ Configuration getters inspect the same stored settings changed by their matching
 
 Serialize config and UDF-option mutation with getters, borrowed-view use, and destruction of the same object. Setters copy borrowed inputs before replacing their storage; a key returned by `uqa_config_get_encryption_key` can be passed back through `uqa_config_set_encryption_key_n` without requiring a NUL terminator or invalidating its input before the copy completes.
 
-The default persistent backend is native SQLite. Encryption and compression combinations map to the corresponding existing `Engine::open_*` methods. Only `uqa_engine_open_auto` performs file-format detection. Validate compression codec and level through the [SQLite provider](../../crates/uqa-storage-sqlite/src/lib.rs); reject meaningless encryption/compression settings on memory open. redb and custom providers are not C backend choices until an explicit adapter is designed and qualified.
+The constructor selects the storage provider explicitly. Every successful constructor returns an owned `uqa_engine` released by `uqa_engine_close`; the same SQL, result, callback, cancellation and retained-resource contracts apply to all four backends.
+
+| Constructor | Backend | Encryption and compression |
+| --- | --- | --- |
+| `uqa_engine_open_memory` | Memory | Reject configured encryption or compression |
+| `uqa_engine_open` | Native SQLite | Existing native SQLite encryption/compression combinations |
+| `uqa_engine_open_sqlite_kv` | SQLite Key/Value | Existing SQLite connection encryption/compression combinations |
+| `uqa_engine_open_redb` | redb | Reject configured SQLite encryption or compression before opening a file |
+
+Native SQLite remains the default persistent backend. Its encryption and compression combinations map to the existing `Engine::open_*` methods. SQLite Key/Value uses `ManagedConnection` and `SQLiteKeyValueStorage`; redb uses `RedbStorage`. Both providers enter the existing `Engine::from_persistent_provider` boundary, which owns session restoration and independent sessions. Validate compression codec and level through the [SQLite provider](../../crates/uqa-storage-sqlite/src/lib.rs). `uqa_engine_open_auto` detects native SQLite file encryption/compression; it does not select between storage backends. Custom provider callbacks remain outside this interface.
 
 Trusted-anchor open and anchor extraction use separate explicit functions, with native SQLite owning anchor validation and representation. They are required wherever the C package advertises anchored compressed encryption. Encryption and compression alone do not establish rollback protection. Preserve existing wrong-key, format, and open diagnostics.
 
@@ -980,7 +995,7 @@ SQL NOTICE/WARNING delivery uses the separate notice API. Panic hooks installed 
 | `uqa-api` | Shared Arrow output conversion and policy, retaining QueryBuilder compatibility |
 | Existing analysis/scoring/graph/planner crates | Existing algorithms; no relocation into Engine or FFI |
 
-The minimal runtime workspace dependencies are `uqa-engine`, `uqa-core`, `uqa-sql`, and `uqa-storage-sqlite` for provider option types. Arrow export adds optional `uqa-api` plus the required Arrow FFI dependencies. Engine re-exports the native callback/cursor contracts, so FFI does not need a direct Execution dependency merely to name them. Add the exact inventory to `scripts/workspace-dependency-policy.json`; retain existing transitive boundaries and capability restrictions. No owner depends back on `uqa-ffi`.
+The minimal runtime workspace dependencies are `uqa-engine`, `uqa-core`, `uqa-sql`, `uqa-storage-sqlite` and `uqa-storage-redb`. FFI selects concrete providers through their public constructors; provider algorithms remain in Storage. Arrow export adds optional `uqa-api` plus the required Arrow FFI dependencies. Engine re-exports the native callback/cursor contracts, so FFI does not need a direct Execution dependency merely to name them. Add the exact inventory to `scripts/workspace-dependency-policy.json`; retain existing transitive boundaries and capability restrictions. No owner depends back on `uqa-ffi`.
 
 The initial optional `uqa-api` dependency carries its currently declared Arrow/Parquet dependencies. Do not claim that export builds exclude Parquet unless that existing crate is separately refactored and its public compatibility verified. The default C build avoids this dependency by leaving Arrow export disabled.
 
@@ -1020,7 +1035,7 @@ Implement in dependency order. Every row below is proposed work, not a completed
 | Optional Arrow | Shared conversion policy | Independent release order, moved structs, duplicate names, exact mapping or explicit rejection |
 | Packaging and parity | Completed implementation and focused checks | Actual target artifacts, five C scenarios, final-source CI results |
 
-Maintain one integration test target in `uqa-ffi` with `autotests = false`; register Rust test modules under `tests/integration.rs`. Keep C test translation units under `tests/c` and link them into one ABI harness rather than adding a test target per source. C++ compile-only checks verify inclusion, declarations, and linkage expectations. Examples remain the five public runnable scenarios.
+Maintain one integration test target in `uqa-ffi` with `autotests = false`; register Rust test modules under `tests/integration.rs`. Keep C test translation units under `tests/native`; the single Rust harness compiles each as C11 and C++17 and executes both clients against the actual shared library. Run the same client fixtures separately against Memory, native SQLite, SQLite Key/Value and redb through their public C constructors, and verify durable session, failure recovery and close/reopen behavior on all three persistent providers. Header-only checks additionally verify inclusion, declarations and linkage modes. Examples remain the five public runnable scenarios.
 
 Required verification includes:
 

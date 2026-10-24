@@ -5,6 +5,7 @@
  */
 
 #include <uqa/uqa.h>
+#include "test_database.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -454,7 +455,7 @@ int main(void) {
     uint8_t is_null = 0;
     uint64_t rows = 99;
 
-    CHECK(uqa_engine_open_memory(NULL, &engine));
+    CHECK(test_database_open(NULL, &engine));
     CHECK(uqa_result_create(&result));
     CHECK(uqa_engine_execute(engine, "SELECT 81", result));
     CHECK(uqa_statement_prepare(engine, "SELECT $1::integer AS x, $1 + 1 AS x", &statement));
