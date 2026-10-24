@@ -211,3 +211,5 @@ fn positional_compilation_resolves_duplicate_names_by_structured_qualifier() {
         None
     );
 }
+
+mod retained;
