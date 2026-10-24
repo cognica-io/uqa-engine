@@ -60,6 +60,10 @@ impl ColumnType {
     }
 
     /// Copy only owned type payloads; inline scalar identities require no reservation.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive type retention keeps every payload-bearing variant charged to its owner"
+    )]
     pub fn clone_with_control(
         &self,
         control: &ProductionControl<'_>,
@@ -127,6 +131,7 @@ impl ColumnType {
                 scale: _,
             }
             | Self::Json
+            | Self::Xml
             | Self::JsonB
             | Self::Bytea
             | Self::Bit(_)

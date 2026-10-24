@@ -37,6 +37,10 @@ crates/uqa-pg-query/src/node_structs.rs linguist-generated
 # every checkout; SHA256SUMS verifies this tree.
 crates/uqa-pg-regex/postgres/** -text -whitespace linguist-vendored
 
+# Imported XML parser bytes are checked against SHA256SUMS on every platform.
+crates/uqa-sql/vendor/libxml2/** -text -whitespace linguist-vendored
+crates/uqa-sql/THIRD-PARTY/LIBXML2-NOTICE.txt -text -whitespace linguist-vendored
+
 # Imported morphology dictionaries and notices retain their exact upstream contents.
 # The resource manifest verifies their hashes across platforms.
 crates/uqa-nori-data/data/nori.uqan binary
@@ -64,5 +68,7 @@ benchmarks/nori/**/*.json text eol=lf
 benchmarks/nori/**/*.jsonl text eol=lf
 
 # Reference-oracle fixtures are generated from pinned inputs.
+tests/parity/pg18/capture_xml_input.py text eol=lf
+tests/parity/pg18/xml_input.expected.json text eol=lf
 tests/parity/nori/*_expected.jsonl linguist-generated
 tests/parity/kuromoji/*_expected.jsonl linguist-generated

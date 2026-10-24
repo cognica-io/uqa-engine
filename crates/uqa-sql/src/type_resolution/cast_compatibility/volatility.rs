@@ -134,6 +134,7 @@ fn input_is_stable(ty: &ColumnType) -> bool {
         || matches!(
             ty,
             ColumnType::Time
+                | ColumnType::Xml
                 | ColumnType::TimePrecision(_)
                 | ColumnType::TimeTz
                 | ColumnType::TimeTzPrecision(_)

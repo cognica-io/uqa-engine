@@ -487,7 +487,7 @@ Read cells through `SQLResult::value_at` or native positional column batches. Do
 
 A `uqa_type` describes SQL identity separately from physical value representation. Additional accessors expose available OID, schema/name, modifier, nested element/field descriptors, domain base type, and collation. An optional metadata accessor returns `UQA_DONE` when the native field is absent, rather than inferring it from a first row or column name. A separate PostgreSQL client descriptor accessor may expose `postgres_result_type`, whose scalar-domain representation can use the base type.
 
-Type families include BOOL, INT16/32/64, FLOAT32/64, TEXT/CHAR/VARCHAR, BYTEA, NUMERIC, temporal types, JSON/JSONB, UUID, BIT/VARBIT, ARRAY, ROW/RECORD, ENUM, DOMAIN, RANGE/MULTIRANGE, VECTOR/TENSOR, graph/agtype, and VOID. This is an ABI representation inventory, not an assertion that additional SQL types have been implemented.
+Type families include BOOL, INT16/32/64, FLOAT32/64, TEXT/CHAR/VARCHAR, BYTEA, NUMERIC, temporal types, JSON/JSONB, XML, UUID, BIT/VARBIT, ARRAY, ROW/RECORD, ENUM, DOMAIN, RANGE/MULTIRANGE, VECTOR/TENSOR, graph/agtype, and VOID. This is an ABI representation inventory, not an assertion that additional SQL types have been implemented.
 
 ## 10. Values and exact representations
 
@@ -528,6 +528,7 @@ Owned values and borrowed value views are immutable after construction. Typed ge
 | TIME / TIMETZ | Microseconds since midnight; TIMETZ retains seconds-east-of-UTC offset. Preserve TIME 24:00:00 |
 | INTERVAL | Signed months, days, and microseconds plus infinity tag; do not convert months to fixed days |
 | JSON / JSONB | Distinct kinds and validated native text; preserve JSON whitespace and key order |
+| XML | Distinct kind and native SQL type identity; the text accessor preserves admitted XML bytes, while SQL result serialization applies XML declaration output rules |
 | BIT / VARBIT | MSB-first packed bytes and logical bit length; unused trailing bits are not part of the value |
 | ARRAY | Element descriptor, dimension lengths, signed lower bounds, and row-major elements; distinguish NULL array, empty array, and NULL element |
 | ROW / RECORD | Ordered field descriptors and values, including duplicate field names and present all-NULL records |

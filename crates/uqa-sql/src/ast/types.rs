@@ -60,6 +60,8 @@ pub enum ColumnType {
     },
     /// `JSON` / `JSONB` columns store typed JSON values.
     Json,
+    /// Native SQL/XML value; its textual carrier retains the original admitted input.
+    Xml,
     /// `JSONB` columns store typed JSON values with `PostgreSQL` JSONB operators.
     JsonB,
     /// `BYTEA` columns store opaque bytes.
@@ -189,6 +191,7 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
         "_record" => "record",
         "_uuid" => "uuid",
         "_json" => "json",
+        "_xml" => "xml",
         "_jsonb" => "jsonb",
         "_regtype" => "regtype",
         "_xid" => "xid",

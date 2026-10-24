@@ -156,6 +156,7 @@ impl<'a> Walker<'a> {
                 scale: _,
             }
             | ColumnType::Json
+            | ColumnType::Xml
             | ColumnType::JsonB
             | ColumnType::Bytea
             | ColumnType::Bit(_)

@@ -266,6 +266,7 @@ pub fn sql_column_type_to_fdw(column_type: &ColumnType) -> ForeignColumnType {
         },
         ColumnType::Text => ForeignColumnType::Text,
         ColumnType::RefCursor => ForeignColumnType::RefCursor,
+        ColumnType::Xml => ForeignColumnType::Xml,
         ColumnType::Name => ForeignColumnType::Name,
         ColumnType::Uuid => ForeignColumnType::Uuid,
         ColumnType::Varchar(length) => ForeignColumnType::Varchar(*length),

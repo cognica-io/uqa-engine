@@ -95,6 +95,9 @@ pub fn format_postgres_text_with_catalog_and_control(
     if let ColumnType::Domain { base, .. } = ty {
         return format_postgres_text_with_catalog_and_control(value, base, catalog, control);
     }
+    if let (ColumnType::Xml, Value::Str(text)) = (ty, value) {
+        return crate::xml::output_with_control(text, control);
+    }
     if matches!(ty, ColumnType::InternalChar) {
         let byte = crate::expr::internal_char::value_byte(value)
             .ok_or_else(|| SQLError::Internal("invalid internal char result carrier".into()))?;

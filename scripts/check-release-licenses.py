@@ -53,6 +53,7 @@ NPM_PACKAGES = (
 )
 BINDING_PACKAGES = (*NPM_PACKAGES, ROOT / "python" / "uqa")
 SQL_SORT_NOTICE = "THIRD-PARTY/POSTGRESQL-SORT-NOTICE.txt"
+LIBXML2_NOTICE = "THIRD-PARTY/LIBXML2-NOTICE.txt"
 # Bindings ship the PostgreSQL regular expression engine with a notice that reproduces its upstream license files unchanged.
 POSTGRESQL_REGEX_NOTICE = "THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt"
 POSTGRESQL_REGEX_LICENSES = ("postgres/COPYRIGHT", "postgres/src/backend/regex/COPYRIGHT")
@@ -210,6 +211,10 @@ def binding_dictionary_payloads() -> dict[str, bytes]:
     payloads["THIRD-PARTY/LUCENE-SOURCE.md"] = (ROOT / "crates/uqa-analysis/THIRD-PARTY/LUCENE-SOURCE.md").read_bytes()
     payloads[SQL_SORT_NOTICE] = (ROOT / "crates/uqa-sql" / SQL_SORT_NOTICE).read_bytes()
     payloads[POSTGRESQL_REGEX_NOTICE] = postgresql_regex_notice()
+    notice = (ROOT / "crates/uqa-sql" / LIBXML2_NOTICE).read_bytes()
+    if (ROOT / "crates/uqa-sql/vendor/libxml2/Copyright").read_bytes() not in notice:
+        raise RuntimeError("libxml2 notice must reproduce its upstream Copyright unchanged")
+    payloads[LIBXML2_NOTICE] = notice
     return payloads
 
 
@@ -441,10 +446,11 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: 
             if not matches or any(payload != expected for _, payload in matches):
                 raise RuntimeError(f"{path} omits or changes attribution or source-resource identity: {relative}")
     if path.name.startswith("uqa-sql-") and path.name.endswith(".crate"):
-        matches = matching_members(members, SQL_SORT_NOTICE)
-        expected = (ROOT / "crates/uqa-sql" / SQL_SORT_NOTICE).read_bytes()
-        if len(matches) != 1 or matches[0][1] != expected:
-            raise RuntimeError(f"{path} omits or changes {SQL_SORT_NOTICE}")
+        for relative in (SQL_SORT_NOTICE, LIBXML2_NOTICE, "vendor/libxml2/Copyright"):
+            matches = matching_members(members, relative)
+            expected = (ROOT / "crates/uqa-sql" / relative).read_bytes()
+            if len(matches) != 1 or matches[0][1] != expected:
+                raise RuntimeError(f"{path} omits or changes {relative}")
     for language, required in (("nori", require_nori), ("kuromoji", require_kuromoji)):
         if required:
             check_embedded_dictionary(path, members, language)

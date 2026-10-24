@@ -31,6 +31,7 @@ UQA Engine maps PostgreSQL 18 type identities to the value carriers implemented 
 | `INTERVAL [fields] [(p)]` | Calendar/time interval with optional stored-field restriction and fractional-second precision |
 | `JSON` | Validated JSON value |
 | `JSONB` | Canonical JSON value with JSONB operations |
+| `XML` | Validated XML document or content with its original stored spelling and a distinct SQL type identity |
 | `BYTEA` | Byte string |
 | `BIT(n)`, `BIT VARYING(n)`, `VARBIT(n)` | Packed bit sequence with an exact logical length; [bit-string support](#bit-strings) |
 | `REFCURSOR` | PostgreSQL cursor-name identity over a text-compatible carrier for PL/pgSQL session portals |
@@ -297,6 +298,20 @@ FROM records;
 ```
 
 Object key order and formatting are not an application contract for JSONB. Use JSON text only when original textual representation matters. JSONB numeric comparisons use numeric magnitude, so zero precedes positive fractions and follows negative values regardless of scale or exponent spelling. The same rule applies to numeric members of arrays and objects. Equality, grouping, uniqueness and ordered index lookups agree on these numeric values.
+
+## XML
+
+`CAST(text AS xml)` and `'literal'::xml` read XML using the current `xmloption` setting. `SET xmloption TO CONTENT` accepts XML content, including empty text, text mixed with elements and multiple top-level elements. `SET xmloption TO DOCUMENT` requires one XML document. A content input with a document type declaration is parsed as a document. Input is UTF-8; external entities and document type references do not read files or fetch network resources.
+
+The result has XML type OID 142; XML arrays have OID 143. Stored values retain the admitted bytes. XML-to-TEXT casts preserve those bytes, while PostgreSQL text result serialization removes the encoding declaration and an unnecessary default version declaration. Array-to-text output serializes each element through its own SQL output function. XML has no equality or ordering operators.
+
+An unknown literal is read during analysis and a prepared definition retains that admitted value. A runtime TEXT-to-XML cast reads the invoking session's current setting. Assignment of an already typed XML value preserves it across setting changes. `SET LOCAL xmloption` follows the ordinary transaction and savepoint restoration rules. Invalid document and content inputs report `2200M` and `2200N`, respectively, with parser details; malformed content declarations have a distinct primary diagnostic. Parser warnings enter the session notice queue.
+
+```sql execute
+SET xmloption TO CONTENT;
+SELECT 'text<item/>'::xml AS fragment,
+       ARRAY['<item/>'::xml, NULL] AS items;
+```
 
 ## BYTEA
 

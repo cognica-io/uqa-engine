@@ -145,6 +145,41 @@ static void procedure_statements(uqa_engine engine, uqa_result result) {
     CHECK(uqa_statement_finalize(&statement));
 }
 
+static void xml_values(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    uqa_type type = NULL;
+    uqa_type_kind kind = 0;
+    uqa_value_view value = NULL;
+    uqa_string_view text = {NULL, 0};
+    uint32_t oid = 0;
+    uint8_t is_null = 0;
+    CHECK(uqa_engine_execute(engine, "SET xmloption TO content", result));
+    CHECK(uqa_statement_prepare(engine, "SELECT '<?xml version=\"1.0\"?><a/>'::xml, NULL::xml", &statement));
+    CHECK(uqa_statement_get_column_type(statement, 0, &type));
+    CHECK(uqa_type_get_kind(type, &kind));
+    CHECK(uqa_type_get_oid(type, &oid));
+    assert(kind == UQA_TYPE_XML && oid == 142);
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_result_get_column_type(result, 0, &type));
+    CHECK(uqa_type_get_kind(type, &kind));
+    assert(kind == UQA_TYPE_XML);
+    CHECK(uqa_result_get_value(result, 0, 0, &value));
+    CHECK(uqa_value_get_text(value, &text));
+    assert(equal(text, "<?xml version=\"1.0\"?><a/>"));
+    CHECK(uqa_result_get_value(result, 0, 1, &value));
+    CHECK(uqa_value_get_is_null(value, &is_null));
+    assert(is_null == 1);
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine, "BEGIN; SAVEPOINT xml_retry; SET LOCAL xmloption TO document", result));
+    assert(uqa_engine_execute(engine, "SELECT 'text'::xml", result) == UQA_ERROR_SQL);
+    sqlstate("2200M");
+    CHECK(uqa_engine_execute(engine, "ROLLBACK TO xml_retry; SELECT 'text'::xml", result));
+    CHECK(uqa_result_get_value(result, 0, 0, &value));
+    CHECK(uqa_value_get_text(value, &text));
+    assert(equal(text, "text"));
+    CHECK(uqa_engine_execute(engine, "ROLLBACK", result));
+}
+
 static void explained_inputs(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_value value = NULL;
@@ -496,6 +531,7 @@ int main(void) {
     prepared_recovery(engine, result);
     procedure_statements(engine, result);
     explained_inputs(engine, result);
+    xml_values(engine, result);
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_engine_close(&engine));
     return 0;

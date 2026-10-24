@@ -119,6 +119,7 @@ pub const UQA_TYPE_INT2VECTOR: u32 = 46;
 pub const UQA_TYPE_OIDVECTOR: u32 = 47;
 pub const UQA_TYPE_ANYARRAY: u32 = 48;
 pub const UQA_TYPE_COMPOSITE: u32 = 49;
+pub const UQA_TYPE_XML: u32 = 50;
 
 pub const UQA_CAP_NORI: u64 = 1 << 0;
 pub const UQA_CAP_KUROMOJI: u64 = 1 << 1;

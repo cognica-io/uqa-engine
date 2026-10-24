@@ -170,6 +170,7 @@ impl UQAValue {
                     | ColumnType::Character(_)
                     | ColumnType::Name
                     | ColumnType::RefCursor
+                    | ColumnType::Xml
             ),
             ScalarAccess::Bytes => matches!(ty, ColumnType::Bytea),
         };

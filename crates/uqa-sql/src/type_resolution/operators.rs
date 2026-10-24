@@ -192,7 +192,7 @@ pub fn require_ordering_operator(ty: &ColumnType) -> Result<(), SQLError> {
 
 fn equality_operator_available(ty: &ColumnType) -> bool {
     match base_type(ty) {
-        ColumnType::Void | ColumnType::Json | ColumnType::RefCursor => false,
+        ColumnType::Void | ColumnType::Json | ColumnType::Xml | ColumnType::RefCursor => false,
         ColumnType::Array(element) => equality_operator_available(element),
         _ => true,
     }
@@ -202,6 +202,7 @@ fn ordering_operator_available(ty: &ColumnType) -> bool {
     match base_type(ty) {
         ColumnType::Void
         | ColumnType::Json
+        | ColumnType::Xml
         | ColumnType::RefCursor
         | ColumnType::Xid
         | ColumnType::AclItem => false,

@@ -114,6 +114,7 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::Regproc => "regproc".into(),
         ColumnType::Regprocedure => "regprocedure".into(),
         ColumnType::RefCursor => "refcursor".into(),
+        ColumnType::Xml => "xml".into(),
         ColumnType::Regclass => "regclass".into(),
         ColumnType::Regcollation => "regcollation".into(),
         ColumnType::Regnamespace => "regnamespace".into(),

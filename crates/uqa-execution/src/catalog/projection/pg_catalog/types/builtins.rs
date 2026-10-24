@@ -28,6 +28,7 @@ pub(super) const CATALOG_TYPES: &[(ColumnType, &str, bool, &str)] = &[
     (ColumnType::Xid, "U", false, "b"),
     (ColumnType::OidVector, "A", false, "b"),
     (ColumnType::Json, "U", false, "b"),
+    (ColumnType::Xml, "U", false, "b"),
     (ColumnType::PgNodeTree, "Z", false, "b"),
     (ColumnType::Real, "N", false, "b"),
     (ColumnType::DoublePrecision, "N", true, "b"),

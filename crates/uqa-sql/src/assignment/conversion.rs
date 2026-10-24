@@ -51,6 +51,7 @@ fn same_catalog_value_type(source: &ColumnType, target: &ColumnType) -> bool {
         }
         (ColumnType::Composite(source), ColumnType::Composite(target)) => source.oid == target.oid,
         (ColumnType::InternalChar, ColumnType::InternalChar)
+        | (ColumnType::Xml, ColumnType::Xml)
         | (ColumnType::PgNodeTree, ColumnType::PgNodeTree) => true,
         (ColumnType::Domain { base, .. }, _) => same_catalog_value_type(base, target),
         (ColumnType::Array(source), ColumnType::Array(target)) => {
@@ -169,6 +170,7 @@ pub(crate) fn type_requires_catalog_resolution(ty: &ColumnType) -> bool {
     match ty {
         // The OID alias types read a name through the catalog, so an assigned text value becomes the object's OID, as `regclassin` and its siblings read it.
         ColumnType::Regrole
+        | ColumnType::Xml
         | ColumnType::Regclass
         | ColumnType::Regtype
         | ColumnType::Regproc

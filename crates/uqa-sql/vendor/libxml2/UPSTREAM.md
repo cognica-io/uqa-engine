@@ -1,0 +1,5 @@
+# XML parser source
+
+This directory contains the unmodified parser sources and build inputs selected from libxml2 2.15.4. SQL owns XML type interpretation and input validation; this library supplies XML syntax parsing. The build links the parser statically with private symbol visibility and uses a separate parser context for each operation. Optional document-processing tools, network loading, external encoding libraries and unrelated XML query facilities are disabled.
+
+Source archive: [libxml2-2.15.4.tar.xz](https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.4.tar.xz). Its [published SHA-256](https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.4.sha256sum) is `98087fd181d9070724f3fbc65c7377db03038eb92bd882374daff44940138821`. The upstream license remains in `Copyright`; every imported file retains its upstream header. `SHA256SUMS` records the selected files. Run `python3 scripts/sync-libxml2.py --check` from the repository root to verify the import, or supply the pinned archive with `--archive` when refreshing it.

@@ -133,6 +133,7 @@ pub fn convert_value_to_column_type_with_control(
             numeric_value(value, *precision, *scale, control)
         }
         ColumnType::Json => cast_value_from_with_control(&value, "json", None, control),
+        ColumnType::Xml => cast_value_from_with_control(&value, "xml", None, control),
         ColumnType::JsonB => cast_value_from_with_control(&value, "jsonb", None, control),
         ColumnType::Bit(length) | ColumnType::VarBit(length) => {
             use crate::expr::bit_string::{input_with_control, BitStringKind};

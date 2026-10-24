@@ -104,6 +104,10 @@ impl EngineExpressionEvaluator {
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
+    fn sql_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.engine.push_sql_notice(notice);
+    }
+
     fn read_range_input(
         &self,
         oid: u32,

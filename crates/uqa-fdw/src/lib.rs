@@ -73,6 +73,7 @@ pub enum ColumnType {
     },
     Text,
     RefCursor,
+    Xml,
     Name,
     Uuid,
     Varchar(Option<u32>),

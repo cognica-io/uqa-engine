@@ -155,6 +155,7 @@ typedef struct uqa_bytes_view {
 #define UQA_TYPE_OIDVECTOR UINT32_C(47)
 #define UQA_TYPE_ANYARRAY UINT32_C(48)
 #define UQA_TYPE_COMPOSITE UINT32_C(49)
+#define UQA_TYPE_XML UINT32_C(50)
 
 #define UQA_CAP_NORI (UINT64_C(1) << 0)
 #define UQA_CAP_KUROMOJI (UINT64_C(1) << 1)

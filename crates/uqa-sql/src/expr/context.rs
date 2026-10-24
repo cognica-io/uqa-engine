@@ -35,6 +35,9 @@ pub use regtype::{
 /// accepted here: lowering assigns them physical query-plan slots executed by
 /// `uqa-execution::ScalarSubqueryRunner`.
 pub trait EngineHook {
+    /// Retain a diagnostic reported by a type input or scalar operation without failing it.
+    fn sql_notice(&self, _notice: crate::SQLNotice) {}
+
     /// Enforce EXECUTE on a selected built-in at an execution boundary. Catalog-free embedders have no mutable routine ACLs.
     fn require_builtin_execute(&self, _binding: &crate::ast::FunctionBinding) -> Result<()> {
         Ok(())
