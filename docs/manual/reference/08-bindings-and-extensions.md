@@ -81,6 +81,8 @@ Execution binds retained catalog types against the executing session, including 
 
 `uqa_value_create_vector_f32` copies a positive, 32-bit-representable number of finite float32 elements into a dedicated vector parameter. SQL owns its dimension and element validation; the returned descriptor retains the vector dimension. Scalar floating NaN/infinity support does not make those values valid vector elements. The source ABI tests exercise scalar widths, exact numeric and JSON observations, memory rejection and recovery, and scalar persistence through Memory, native SQLite, SQLite Key/Value and redb; all three persistent backends also close and reopen before checking stored values.
 
+Create reusable function options with `uqa_udf_options_create(&options)` from [uqa_udf.h](../../../crates/uqa-ffi/include/uqa/uqa_udf.h), then release them with `uqa_udf_options_destroy(&options)`. Paired `uqa_udf_options_get_volatility` / `uqa_udf_options_set_volatility` use the fixed codes `UQA_VOLATILITY_IMMUTABLE` (0), `UQA_VOLATILITY_STABLE` (1) and `UQA_VOLATILITY_VOLATILE` (2). Paired `uqa_udf_options_get_may_mutate_engine` / `uqa_udf_options_set_may_mutate_engine` use 0 or 1. Defaults are VOLATILE and may-mutate; each setter validates its own property and preserves the prior value on error. Options are independent of Engine lifetime, and invalid option operations do not enter or fail a SQL transaction. Runtime C registration, result callbacks and explicit fallible cleanup remain in the implementation ledger.
+
 ## Rust QueryBuilder
 
 `uqa_api::QueryBuilder` builds SQL-shaped plans fluently:

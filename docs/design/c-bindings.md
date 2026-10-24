@@ -885,6 +885,10 @@ typedef struct uqa_udf_context_t *uqa_udf_context;
 typedef struct uqa_udf_row_sink_t *uqa_udf_row_sink;
 typedef struct uqa_udf_options_t *uqa_udf_options;
 
+#define UQA_VOLATILITY_IMMUTABLE UINT32_C(0)
+#define UQA_VOLATILITY_STABLE    UINT32_C(1)
+#define UQA_VOLATILITY_VOLATILE  UINT32_C(2)
+
 UQA_API uqa_status UQA_CALL uqa_udf_options_create(uqa_udf_options *out);
 UQA_API uqa_status UQA_CALL uqa_udf_options_get_volatility(
     uqa_udf_options options, uint32_t *out);
@@ -937,7 +941,7 @@ Implement the adapter through the existing `SQLTableFunction::call_stream` and `
 
 Use `uqa_udf_register_aggregate` with `create_state`, `observe`, `finish`, and `destroy_state`. Each group has independent state. `finish` reports status and writes its result through the callback context while reading state without consuming it, matching `SQLAggregateState::finish(&self)`; destruction occurs exactly once even when no rows were observed or execution fails. Execution also needs explicit fallible state finalization to propagate `destroy_state` failures before statement completion; a Rust `Drop` implementation cannot replace that error channel.
 
-C state creation can fail. The current native factory is infallible, so Execution needs a fallible creation interface, with compatibility adaptation for existing Rust implementations, before this C API is complete. Do not postpone initialization errors until the first row, which would lose them for empty groups. Merge/serialize/deserialize and incremental window callbacks are not advertised until their native execution contracts exist.
+C state creation can fail. The adapter implements Execution's `SQLAggregateFactory::try_create_state`, which returns a state or the original SQL error. Existing Rust `SQLAggregateFunction` implementations retain their infallible interface through its blanket adapter. Do not postpone initialization errors until the first row, which would lose them for empty groups. A window factory starts when its frame is evaluated, including an empty frame; a window input with no rows creates no state. Explicit fallible state finalization remains required before this C API is complete. Merge/serialize/deserialize and incremental window callbacks are not advertised until their native execution contracts exist.
 
 Shared `user_data` may be used concurrently across sessions. Per-scan and per-group states have serialized invocation but may move between workers. Document these requirements explicitly; do not infer single-threaded callbacks from a synchronous C query function.
 

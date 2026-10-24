@@ -23,6 +23,7 @@ mod session;
 mod statement;
 mod subscription;
 mod types;
+mod udf;
 mod value;
 
 pub use abi::*;
@@ -45,4 +46,5 @@ pub use session::*;
 pub use statement::*;
 pub use subscription::*;
 pub use types::*;
+pub use udf::*;
 pub use value::*;

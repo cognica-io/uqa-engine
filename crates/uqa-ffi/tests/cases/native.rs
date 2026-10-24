@@ -50,6 +50,8 @@ native_clients!(values, "values.c");
 native_clients!(typed_values, "typed_values.c");
 #[cfg(unix)]
 native_clients!(packed_values, "packed_values.c");
+#[cfg(unix)]
+native_clients!(udf_options, "udf_options.c");
 
 #[cfg(unix)]
 fn native_client(fixture: &str, backend: &str) {

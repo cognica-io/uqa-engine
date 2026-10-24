@@ -18,6 +18,13 @@ typedef struct uqa_udf_context_t *uqa_udf_context;
 typedef struct uqa_udf_row_sink_t *uqa_udf_row_sink;
 typedef struct uqa_udf_options_t *uqa_udf_options;
 
+#define UQA_VOLATILITY_IMMUTABLE UINT32_C(0)
+#define UQA_VOLATILITY_STABLE    UINT32_C(1)
+#define UQA_VOLATILITY_VOLATILE  UINT32_C(2)
+
+/* Defaults: VOLATILE and may_mutate_engine = 1. Setters validate each
+ * property; registration validates the complete combination and copies it.
+ * Invalid setters preserve the previous value. */
 UQA_API uqa_status UQA_CALL uqa_udf_options_create(uqa_udf_options *out);
 UQA_API uqa_status UQA_CALL uqa_udf_options_get_volatility(
     uqa_udf_options options, uint32_t *out);

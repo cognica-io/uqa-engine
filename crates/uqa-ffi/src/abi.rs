@@ -54,6 +54,10 @@ pub const UQA_COMPRESSION_NONE: u32 = 0;
 pub const UQA_COMPRESSION_ZSTD: u32 = 1;
 pub const UQA_COMPRESSION_LZ4: u32 = 2;
 
+pub const UQA_VOLATILITY_IMMUTABLE: u32 = 0;
+pub const UQA_VOLATILITY_STABLE: u32 = 1;
+pub const UQA_VOLATILITY_VOLATILE: u32 = 2;
+
 pub type UQAOpenFlags = u32;
 pub const UQA_OPEN_MEMORY: UQAOpenFlags = 1 << 0;
 pub const UQA_OPEN_SQLITE_NATIVE: UQAOpenFlags = 1 << 1;
