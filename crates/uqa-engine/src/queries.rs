@@ -11,7 +11,7 @@ use uqa_execution::ColumnarBatch;
 use crate::{Engine, SQLCursor, SQLCursorSummary};
 use uqa_sql::{SQLError, SQLParam, SQLResult};
 
-struct SQLExecutionScope<'a> {
+pub(crate) struct SQLExecutionScope<'a> {
     engine: &'a Engine,
     depth: &'a std::sync::atomic::AtomicUsize,
     statement_clock: &'a std::sync::atomic::AtomicI64,
@@ -21,7 +21,7 @@ struct SQLExecutionScope<'a> {
 }
 
 impl<'a> SQLExecutionScope<'a> {
-    fn enter(engine: &'a Engine) -> (Self, bool) {
+    pub(crate) fn enter(engine: &'a Engine) -> (Self, bool) {
         let depth = &engine.runtime.sql_execution_depth;
         let statement_clock = &engine.session.statement_started_at_micros;
         let nested = depth.fetch_add(1, std::sync::atomic::Ordering::Relaxed) != 0;

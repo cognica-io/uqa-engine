@@ -7,6 +7,7 @@
 use crate::Engine;
 
 mod admission;
+mod calls;
 
 #[test]
 fn prepared_temporal_constants_keep_the_preparation_clock() {

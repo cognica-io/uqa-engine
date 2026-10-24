@@ -1,0 +1,1208 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "action": "sql",
+      "sql": "CREATE SCHEMA prepared_call_reference",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE SCHEMA",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SET search_path = prepared_call_reference",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SET",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE TABLE effects (value integer)",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE TABLE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE PROCEDURE change_value(IN amount integer, INOUT value integer, OUT label text) LANGUAGE plpgsql AS $$ BEGIN value := value + amount; label := 'changed'; INSERT INTO effects VALUES (value); END $$",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE PROCEDURE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE PROCEDURE record_value(value integer DEFAULT 8) LANGUAGE plpgsql AS $$ BEGIN INSERT INTO effects VALUES (value); END $$",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE PROCEDURE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE PROCEDURE choose(IN value integer, OUT result integer) LANGUAGE plpgsql AS $$ BEGIN result := value + 1; END $$",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE PROCEDURE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE PROCEDURE choose(IN value text, OUT result integer) LANGUAGE plpgsql AS $$ BEGIN result := 99; END $$",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE PROCEDURE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE PROCEDURE read_date(IN value date, OUT result date) LANGUAGE plpgsql AS $$ BEGIN result := value; END $$",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE PROCEDURE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "inferred",
+      "sql": "CALL change_value($1, $2, NULL)",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "inferred",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "value",
+            23
+          ],
+          [
+            "label",
+            25
+          ]
+        ],
+        "parameters": [
+          23,
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "inferred",
+      "parameters": [
+        "3",
+        "7"
+      ],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [
+          [
+            "value",
+            23
+          ],
+          [
+            "label",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "10",
+            "changed"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "named",
+      "sql": "CALL change_value(label => NULL, value => $1, amount => $2)",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "named",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "value",
+            23
+          ],
+          [
+            "label",
+            25
+          ]
+        ],
+        "parameters": [
+          23,
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "named",
+      "parameters": [
+        "11",
+        "2"
+      ],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [
+          [
+            "value",
+            23
+          ],
+          [
+            "label",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "13",
+            "changed"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "output",
+      "sql": "CALL change_value(1, 2, $1)",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "output",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "value",
+            23
+          ],
+          [
+            "label",
+            25
+          ]
+        ],
+        "parameters": [
+          25
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "output",
+      "parameters": [
+        null
+      ],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [
+          [
+            "value",
+            23
+          ],
+          [
+            "label",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "3",
+            "changed"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "defaulted",
+      "sql": "CALL record_value()",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "defaulted",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "defaulted",
+      "parameters": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "plain",
+      "sql": "CALL record_value($1)",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "plain",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "plain",
+      "parameters": [
+        "17"
+      ],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "text_overload",
+      "sql": "CALL choose('7', NULL)",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "text_overload",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "result",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "text_overload",
+      "parameters": [],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [
+          [
+            "result",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "99"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "integer_overload",
+      "sql": "CALL choose($1::integer, NULL)",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "integer_overload",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "result",
+            23
+          ]
+        ],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "integer_overload",
+      "parameters": [
+        "21"
+      ],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [
+          [
+            "result",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "22"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "literal",
+      "sql": "CALL change_value('2', '9', NULL)",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "literal",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "value",
+            23
+          ],
+          [
+            "label",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "literal",
+      "parameters": [],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [
+          [
+            "value",
+            23
+          ],
+          [
+            "label",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "11",
+            "changed"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "date_input",
+      "sql": "CALL read_date('01/02/2026', NULL)",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "date_input",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "result",
+            1082
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "date_input",
+      "parameters": [],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [
+          [
+            "result",
+            1082
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "2026-01-02"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT value FROM effects ORDER BY value",
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 6",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "3"
+          ],
+          [
+            "8"
+          ],
+          [
+            "10"
+          ],
+          [
+            "11"
+          ],
+          [
+            "13"
+          ],
+          [
+            "17"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SET DateStyle = 'ISO, DMY'",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SET",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DISCARD PLANS",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DISCARD PLANS",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "date_input",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "result",
+            1082
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT generic_plans, custom_plans FROM pg_prepared_statements WHERE statement = 'CALL read_date(''01/02/2026'', NULL)'",
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "generic_plans",
+            20
+          ],
+          [
+            "custom_plans",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "0"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "date_input",
+      "parameters": [],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [
+          [
+            "result",
+            1082
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "2026-02-01"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT generic_plans, custom_plans FROM pg_prepared_statements WHERE statement = 'CALL change_value($1, $2, NULL)'",
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "generic_plans",
+            20
+          ],
+          [
+            "custom_plans",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "0",
+            "1"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "missing",
+      "sql": "CALL missing_procedure($1)",
+      "types": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "42883",
+        "message": "procedure missing_procedure(unknown) does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "subquery",
+      "sql": "CALL record_value((SELECT 1))",
+      "types": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "0A000",
+        "message": "cannot use subquery in CALL argument",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "set_argument",
+      "sql": "CALL record_value(generate_series(1, 2))",
+      "types": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in CALL arguments",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "bad_literal",
+      "sql": "CALL record_value('bad')",
+      "types": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "conflicting",
+      "sql": "CALL change_value($1, 1, $1)",
+      "types": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "42P08",
+        "message": "inconsistent types deduced for parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE OR REPLACE PROCEDURE record_value(value integer DEFAULT 8) LANGUAGE plpgsql AS $$ BEGIN INSERT INTO effects VALUES (value + 100); END $$",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE PROCEDURE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "plain",
+      "parameters": [
+        "2"
+      ],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT value FROM effects ORDER BY value",
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 7",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "3"
+          ],
+          [
+            "8"
+          ],
+          [
+            "10"
+          ],
+          [
+            "11"
+          ],
+          [
+            "13"
+          ],
+          [
+            "17"
+          ],
+          [
+            "102"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SAVEPOINT retry",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SAVEPOINT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "bad_transaction",
+      "sql": "CALL record_value('bad')",
+      "types": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK TO retry",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "execute",
+      "name": "inferred",
+      "parameters": [
+        "1",
+        "1"
+      ],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CALL",
+        "columns": [
+          [
+            "value",
+            23
+          ],
+          [
+            "label",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "2",
+            "changed"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DROP PROCEDURE change_value(integer, integer)",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DROP PROCEDURE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "inferred",
+      "result": {
+        "status": 7,
+        "sqlstate": "42883",
+        "message": "procedure change_value(integer, integer, unknown) does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "inferred",
+      "parameters": [
+        "1",
+        "2"
+      ],
+      "result": {
+        "status": 7,
+        "sqlstate": "42883",
+        "message": "procedure change_value(integer, integer, unknown) does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DROP PROCEDURE record_value(integer)",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DROP PROCEDURE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "plain",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "plain",
+      "parameters": [
+        "1"
+      ],
+      "result": {
+        "status": 7,
+        "sqlstate": "42883",
+        "message": "procedure record_value(integer) does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DROP SCHEMA prepared_call_reference CASCADE",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DROP SCHEMA",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    }
+  ]
+}

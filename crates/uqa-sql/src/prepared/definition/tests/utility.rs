@@ -70,6 +70,7 @@ fn session_utilities_read_only_their_existing_descriptors() {
         let context = PreparedDefinitionContext {
             types: &NoRoutines,
             routines: &NoRoutines,
+            procedures: &NoRoutines,
             scopes: &scopes,
             session: &session,
             aliases: &NoRoutines,
@@ -102,6 +103,7 @@ fn utility_errors_and_explicit_parameters_do_not_capture_binding_scopes() {
     let context = PreparedDefinitionContext {
         types: &NoRoutines,
         routines: &NoRoutines,
+        procedures: &NoRoutines,
         scopes: &scopes,
         session: &session,
         aliases: &NoRoutines,

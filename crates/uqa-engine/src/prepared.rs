@@ -110,6 +110,8 @@ impl Engine {
         &self,
         statement: &PreparedStatement,
     ) -> Result<PreparedStatementDescription, SQLError> {
+        let _statement = self.lock_statement_gate();
+        let (_execution, nested) = crate::queries::SQLExecutionScope::enter(self);
         self.run_prepared_operation(
             || {
                 let registry = self.session.prepared.read();
@@ -120,14 +122,35 @@ impl Engine {
                 Ok((
                     PreparedOperation::Describe {
                         returns_rows: entry.result_schema.is_some(),
+                        outermost: !nested,
+                        requires_analysis: uqa_sql::prepared::utility::requires_analysis(
+                            &entry.source_plan,
+                        ),
                     },
-                    PreparedStatementDescription {
-                        parameter_types: entry.parameter_types.clone(),
-                        result_schema: entry.result_schema.clone(),
-                    },
+                    entry.clone(),
                 ))
             },
-            Ok,
+            |entry| {
+                if let Some(definition) =
+                    uqa_planner::statement_planning::prepared::selection::describe_entry(
+                        &self.prepared_definition_context(),
+                        &entry,
+                    )?
+                {
+                    let mut registry = self.session.prepared.write();
+                    let current = registry
+                        .get_mut(&statement.name)
+                        .filter(|current| statement.matches(self, current))
+                        .ok_or_else(|| statement.invalid())?;
+                    if Arc::ptr_eq(&current.logical_plan, &entry.logical_plan) {
+                        current.record_analysis(definition);
+                    }
+                }
+                Ok(PreparedStatementDescription {
+                    parameter_types: entry.parameter_types,
+                    result_schema: entry.result_schema,
+                })
+            },
         )
     }
 

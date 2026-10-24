@@ -75,6 +75,19 @@ pub fn select_plan(
     Ok(Some(selected.plan))
 }
 
+/// Refresh a row description without optimizing an executable or recording plan usage. NoData descriptions do not inspect analysis dependencies.
+pub fn describe_entry(
+    context: &PreparedDefinitionContext<'_>,
+    entry: &PreparedStatementPlan,
+) -> Result<Option<PreparedDefinition>, SQLError> {
+    if entry.result_schema.is_none() || !needs_analysis(context, entry)? {
+        return Ok(None);
+    }
+    let definition = reanalyze(context, entry)?;
+    validate_result_schema(context, entry, &definition.logical_plan, Some(&definition))?;
+    Ok(Some(definition))
+}
+
 /// Select a variant for an already captured definition, including routine-owned
 /// entries that are not registered as named prepared statements.
 pub fn select_entry(
@@ -129,7 +142,7 @@ fn select(
     };
     let mut generic_cost = entry.generic_cost;
     let reanalyzed = needs_analysis
-        .then(|| reanalyze(context, entry))
+        .then(|| reanalyze(&context.analysis, entry))
         .transpose()?;
     let logical_plan = reanalyzed
         .as_ref()
@@ -167,7 +180,7 @@ fn select(
         && uqa_sql::prepared::utility::requires_analysis(logical_plan)
         && (custom || generic_plan.is_none() || reanalyzed.is_some())
     {
-        validate_result_schema(context, entry, logical_plan, reanalyzed.as_ref())?;
+        validate_result_schema(&context.analysis, entry, logical_plan, reanalyzed.as_ref())?;
     }
     if !custom && generic_plan.is_none() {
         let plan = context.optimization.optimize_plan(logical_plan.clone())?;
@@ -220,7 +233,7 @@ fn select(
 }
 
 fn validate_result_schema(
-    context: &PreparedPlanningContext<'_>,
+    context: &PreparedDefinitionContext<'_>,
     entry: &PreparedStatementPlan,
     logical_plan: &UnifiedPlan,
     reanalyzed: Option<&PreparedDefinition>,
@@ -228,7 +241,7 @@ fn validate_result_schema(
     let result_schema = match reanalyzed {
         Some(definition) => definition.result_schema.clone(),
         None => uqa_sql::prepared::definition::analyze_result_schema(
-            &context.analysis,
+            context,
             logical_plan,
             &entry.parameter_types,
         )?,
@@ -246,7 +259,7 @@ fn validate_result_schema(
 }
 
 fn reanalyze(
-    context: &PreparedPlanningContext<'_>,
+    context: &PreparedDefinitionContext<'_>,
     entry: &PreparedStatementPlan,
 ) -> Result<uqa_sql::prepared::definition::PreparedDefinition, SQLError> {
     let declared = entry
@@ -256,7 +269,7 @@ fn reanalyze(
         .cloned()
         .collect::<Vec<_>>();
     uqa_sql::prepared::definition::analyze_definition(
-        &context.analysis,
+        context,
         (*entry.source_plan).clone(),
         &declared,
     )

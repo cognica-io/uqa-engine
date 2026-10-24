@@ -106,6 +106,45 @@ static void prepared_recovery(uqa_engine engine, uqa_result result) {
     CHECK(uqa_engine_execute(engine, "DROP DOMAIN c_admission_positive", result));
 }
 
+static void procedure_statements(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    uqa_value value = NULL;
+    uqa_type type = NULL;
+    uqa_string_view name = {NULL, 0};
+    uint32_t count = 0;
+    uint32_t kind = 0;
+    CHECK(uqa_engine_execute(engine,
+        "CREATE PROCEDURE c_change_value(IN amount integer, INOUT value integer, OUT label text) "
+        "LANGUAGE plpgsql AS $$ BEGIN value := value + amount; label := 'changed'; END $$", result));
+    CHECK(uqa_statement_prepare(engine, "CALL c_change_value(label => NULL, value => $1, amount => $2)", &statement));
+    CHECK(uqa_statement_get_parameter_count(statement, &count));
+    assert(count == 2);
+    CHECK(uqa_statement_get_parameter_type(statement, 1, &type));
+    CHECK(uqa_type_get_kind(type, &kind));
+    assert(kind == UQA_TYPE_INT32);
+    CHECK(uqa_statement_get_column_count(statement, &count));
+    assert(count == 2);
+    CHECK(uqa_statement_get_column_name(statement, 0, &name));
+    assert(equal(name, "value"));
+    CHECK(uqa_statement_get_column_name(statement, 1, &name));
+    assert(equal(name, "label"));
+    CHECK(uqa_statement_get_column_type(statement, 1, &type));
+    CHECK(uqa_type_get_kind(type, &kind));
+    assert(kind == UQA_TYPE_TEXT);
+    CHECK(uqa_value_create_int64(11, &value));
+    CHECK(uqa_statement_bind(statement, 1, value));
+    CHECK(uqa_value_destroy(&value));
+    CHECK(uqa_value_create_int64(2, &value));
+    CHECK(uqa_statement_bind(statement, 2, value));
+    CHECK(uqa_value_destroy(&value));
+    CHECK(uqa_statement_execute(statement, result));
+    assert(integer(result, 0) == 13);
+    CHECK(uqa_engine_execute(engine, "DROP PROCEDURE c_change_value(integer, integer)", result));
+    assert(uqa_statement_execute(statement, result) == UQA_ERROR_SQL);
+    sqlstate("42883");
+    CHECK(uqa_statement_finalize(&statement));
+}
+
 static void utility_statements(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_type type = NULL;
@@ -416,6 +455,7 @@ int main(void) {
     }
     utility_statements(engine, result);
     prepared_recovery(engine, result);
+    procedure_statements(engine, result);
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_engine_close(&engine));
     return 0;

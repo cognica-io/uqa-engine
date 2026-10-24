@@ -52,6 +52,18 @@ impl PreparedStatementPlan {
 }
 
 impl PreparedStatementPlan {
+    /// Publish successful descriptor reanalysis without counting a plan execution.
+    pub fn record_analysis(&mut self, definition: super::definition::PreparedDefinition) {
+        self.composite_inputs = definition.composite_inputs;
+        self.logical_plan = Arc::new(definition.logical_plan);
+        self.effective_search_path = definition.effective_search_path;
+        self.dependencies = definition.dependencies;
+        self.dependency_snapshot = definition.dependency_snapshot;
+        self.needs_analysis = false;
+        self.plan = None;
+        self.generic_cost = None;
+    }
+
     pub fn invalidate(&mut self) {
         if !super::utility::requires_analysis(&self.source_plan) {
             return;

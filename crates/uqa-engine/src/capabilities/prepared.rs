@@ -42,6 +42,7 @@ impl Engine {
         uqa_sql::prepared::definition::PreparedDefinitionContext {
             types: self,
             routines: self,
+            procedures: self,
             scopes: self,
             session: self,
             aliases: self,

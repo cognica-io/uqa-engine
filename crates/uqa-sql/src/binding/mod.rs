@@ -48,11 +48,11 @@ pub use preparation::{
 };
 pub(crate) use preparation::{
     analyze_default_inputs, analyze_routine_body_argument, analyze_routine_body_inputs,
-    prepare_routine_body_inputs,
+    prepare_routine_body_inputs, read_procedure_inputs,
 };
 pub(crate) use preparation::{
     analyze_domain_check, analyze_stored_expression_inputs, analyze_table_check,
-    assign_stored_input_collations, read_prepared_inputs,
+    assign_stored_input_collations, read_prepared_inputs, retain_prepared_input_metadata,
 };
 
 #[cfg(test)]

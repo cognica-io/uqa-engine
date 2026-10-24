@@ -27,7 +27,7 @@ mod routines;
 mod rows;
 pub(crate) use routines::{
     analyze_routine_body_argument, analyze_routine_body_inputs, prepare_procedure_call,
-    prepare_routine_body_inputs,
+    prepare_routine_body_inputs, read_procedure_inputs,
 };
 mod schema_expressions;
 mod set_contexts;
@@ -85,10 +85,7 @@ pub(crate) fn read_prepared_inputs(
     let constants = analysis.parameters.take_input_constants();
     let parameters = analysis.parameters.finish()?;
     constants.apply(plan)?;
-    retain_compute_kinds(routines, plan);
-    let params = crate::prepared::analysis_parameters(&parameters);
-    super::composite_inputs::retain_composite_inputs(routines, plan, &params, ctes)?;
-    plan.normalize_window_definitions()?;
+    retain_prepared_input_metadata(routines, plan, &parameters, ctes)?;
     let mut dependencies = analysis
         .scope
         .prepared_dependencies
@@ -99,6 +96,18 @@ pub(crate) fn read_prepared_inputs(
         parameter_types: parameters,
         dependencies,
     })
+}
+
+pub(crate) fn retain_prepared_input_metadata(
+    routines: &dyn RoutineResolution,
+    plan: &mut UnifiedPlan,
+    parameters: &[Option<ColumnType>],
+    binding: &BindingContext<'_>,
+) -> Result<(), SQLError> {
+    retain_compute_kinds(routines, plan);
+    let params = crate::prepared::analysis_parameters(parameters);
+    super::composite_inputs::retain_composite_inputs(routines, plan, &params, binding)?;
+    plan.normalize_window_definitions()
 }
 
 /// Read ordinary statement inputs in prepared-analysis order and retain their

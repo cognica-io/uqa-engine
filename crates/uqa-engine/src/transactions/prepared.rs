@@ -17,6 +17,8 @@ pub(crate) enum PreparedOperation {
     },
     Describe {
         returns_rows: bool,
+        requires_analysis: bool,
+        outermost: bool,
     },
     Bind {
         statement: Arc<Statement>,
@@ -31,7 +33,7 @@ impl PreparedOperation {
                 matches!(statement.as_ref(), Statement::Empty)
                     || statement_exits_transaction(statement)
             }
-            Self::Describe { returns_rows } => !returns_rows,
+            Self::Describe { returns_rows, .. } => !returns_rows,
             Self::Bind {
                 statement,
                 parameter_count,
@@ -40,8 +42,18 @@ impl PreparedOperation {
     }
 
     fn selects_snapshot(&self) -> bool {
-        matches!(self, Self::Parse { statement, outermost: true }
-            if uqa_sql::prepared::utility::statement_requires_analysis(statement))
+        match self {
+            Self::Parse {
+                statement,
+                outermost: true,
+            } => uqa_sql::prepared::utility::statement_requires_analysis(statement),
+            Self::Describe {
+                returns_rows: true,
+                requires_analysis,
+                outermost: true,
+            } => *requires_analysis,
+            _ => false,
+        }
     }
 }
 
