@@ -41,7 +41,7 @@ fn input_record(result: Option<&AnalyzedResult>) -> Option<&[Option<ColumnType>]
         .map(AsRef::as_ref)
 }
 
-fn fixed_result(definition: &CreateFunction) -> bool {
+pub(super) fn fixed_result(definition: &CreateFunction) -> bool {
     let outputs = definition.output_params();
     if !outputs.is_empty() {
         return outputs

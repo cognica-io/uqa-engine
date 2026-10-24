@@ -27,7 +27,7 @@ pub(super) struct NativeRoutineScope {
 }
 
 impl ScopedEngineHook<'_> {
-    fn routine_description_scope(&self) -> Option<RoutineDescriptionScope> {
+    pub(super) fn routine_description_scope(&self) -> Option<RoutineDescriptionScope> {
         let revision = self.engine.runtime.regtype_output_cache.revision();
         let registry = self
             .engine

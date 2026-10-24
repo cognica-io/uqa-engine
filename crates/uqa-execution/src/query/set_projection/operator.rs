@@ -7,6 +7,7 @@
 //! Physical set-returning projection operator.
 
 use crate::RowProjectionValue;
+use uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions;
 
 use super::{
     eval_call_arguments, Arc, Batch, ColumnType, ExecResult, OwnedPhysicalRow, PhysicalOperator,
@@ -21,6 +22,7 @@ pub struct SetProjection<'a> {
     params: &'a [SQLParam],
     evaluator: SharedExpressionEvaluator<'a>,
     plan: crate::scalar::PreparedExpressions<SetProjectionPlan>,
+    routine_descriptions: Vec<RoutineCallDescriptions>,
     schema: RowSchema,
     evaluation_schema: RowSchema,
     pass_through: bool,
@@ -97,6 +99,9 @@ impl<'a> SetProjection<'a> {
         let evaluation_schema =
             RowSchema::append_internal_typed(child.row_schema(), &evaluation_columns);
         let output_batch_size = output_batch_size.max(1);
+        let routine_descriptions = (0..plan.calls.len())
+            .map(|_| RoutineCallDescriptions::default())
+            .collect();
         Self {
             child,
             runtime,
@@ -112,6 +117,7 @@ impl<'a> SetProjection<'a> {
                     visit(expression);
                 }
             }),
+            routine_descriptions,
             schema,
             evaluation_schema,
             pass_through,
@@ -142,6 +148,7 @@ impl<'a> SetProjection<'a> {
         &self,
         call: &SetFunctionCall,
         row: &OwnedPhysicalRow,
+        descriptions: &uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions,
     ) -> ExecResult<SetFunctionState> {
         let identity = call.name.to_ascii_lowercase();
         if uqa_sql::semantics::builtin_function_dispatch_name(&identity) == "unnest"
@@ -155,7 +162,8 @@ impl<'a> SetProjection<'a> {
         }
         let runtime = self.runtime.as_ref();
         let binding = call.binding.as_ref();
-        let has_sql_function = runtime.has_user_function(&call.name, binding)?;
+        let has_sql_function =
+            runtime.has_user_function_with_descriptions(&call.name, binding, descriptions)?;
         if !runtime.has_registered_table_function(&identity) && has_sql_function {
             let subqueries = PlanSubqueryArena::new(runtime.subquery_plans(), Some(runtime));
             let context = ScalarEvalContext::from_row_lookup(row, self.params)
@@ -164,33 +172,17 @@ impl<'a> SetProjection<'a> {
                 .with_subquery_runner(&subqueries)
                 .with_physical_outer_row(&row.schema, &row.row);
             let arguments = eval_call_arguments(&call.args, &context)?;
-            let returns_set = runtime
-                .user_function_returns_set(&call.name, binding, &arguments)
-                .ok_or_else(|| {
-                    crate::ExecError::Other(format!(
-                        "user function `{}` disappeared during projection",
-                        call.name
-                    ))
-                })??;
-            if !returns_set {
-                let value = runtime
-                    .call_user_scalar_function(&call.name, binding, &arguments)
-                    .ok_or_else(|| {
-                        crate::ExecError::Other(format!(
-                            "user function `{}` disappeared during scalar projection",
-                            call.name
-                        ))
-                    })??;
-                return Ok(SetFunctionState::Scalar(value));
-            }
-            let result = runtime
-                .call_user_table_function(&call.name, binding, &arguments)
-                .ok_or_else(|| {
-                    crate::ExecError::Other(format!(
-                        "user function `{}` disappeared during set projection",
-                        call.name
-                    ))
-                })??;
+            let result = match runtime.invoke_projection_function(
+                &call.name,
+                binding,
+                &arguments,
+                descriptions,
+            )? {
+                crate::routines::invocation::RoutineProjectionResult::Scalar(value) => {
+                    return Ok(SetFunctionState::Scalar(value));
+                }
+                crate::routines::invocation::RoutineProjectionResult::Table(result) => result,
+            };
             let output = super::registered_table_function_rows(&call.name, result, None, &[])?;
             return Ok(SetFunctionState::Set {
                 columns: output.columns,
@@ -205,6 +197,7 @@ impl<'a> SetProjection<'a> {
             relations: None,
             args: &call.args,
             function_states: Some(self.plan.calls()),
+            routine_descriptions: Some(descriptions),
             alias: None,
             column_aliases: &[],
             ordinality: false,
@@ -223,7 +216,8 @@ impl<'a> SetProjection<'a> {
             .plan
             .calls
             .iter()
-            .map(|call| self.call_state(call, &input))
+            .zip(&self.routine_descriptions)
+            .map(|(call, descriptions)| self.call_state(call, &input, descriptions))
             .collect::<ExecResult<Vec<_>>>()?;
         let has_set = calls
             .iter()

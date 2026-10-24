@@ -27,6 +27,7 @@ use uqa_sql::{
 };
 
 mod prepared_zero_arguments;
+mod projection;
 
 struct Catalog {
     function: Arc<SQLUserFunction>,

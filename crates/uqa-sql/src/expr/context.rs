@@ -300,6 +300,16 @@ pub trait EngineHook {
         None
     }
 
+    /// Identity for successful bound routine metadata. A mutable context must
+    /// decline reuse or change this identity when its types, registry or role change.
+    /// Returning a valid identity also admits retaining this hook for a fixed
+    /// lateral source; default/custom hooks are reconstructed at their original boundary.
+    fn routine_description_scope(
+        &self,
+    ) -> Option<crate::routines::invocation::descriptions::RoutineDescriptionScope> {
+        None
+    }
+
     /// Optional metadata belongs to this prepared expression. Mutable/custom hooks preserve their ordinary invocation unless they explicitly support native scope validation.
     fn call_bound_user_function_with_descriptions(
         &self,

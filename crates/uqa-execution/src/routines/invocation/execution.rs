@@ -42,11 +42,12 @@ pub(super) fn execute_routine(
     )
 }
 
-pub(super) fn execute_described_scalar_routine(
+pub(super) fn execute_described_routine(
     context: &RoutineInvocationContext<'_>,
     function: &SQLUserFunction,
     bound: Vec<Value>,
     invocation: &RoutineInvocationBinding,
+    record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
     descriptions: crate::routines::descriptions::RoutineBodyDescriptions<'_>,
 ) -> Result<RoutineOutcome, SQLError> {
     execute_entry(
@@ -56,7 +57,7 @@ pub(super) fn execute_described_scalar_routine(
         invocation,
         RoutineEntry::Invocation {
             allow_nonatomic: false,
-            record_target: None,
+            record_target,
             descriptions: Some(descriptions),
         },
     )
