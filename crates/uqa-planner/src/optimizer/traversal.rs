@@ -55,6 +55,14 @@ pub(super) fn optimize_query(
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
+    if let Some(grouping) = query.analyzed_grouping.take() {
+        let RelationalPlan::QueryBlock(block) = &mut query.root else {
+            return Err(SQLError::Internal(
+                "analyzed grouping belongs to a query block".into(),
+            ));
+        };
+        grouping.apply(block)?;
+    }
     super::subqueries::prune_query(query);
     if query.analyzed_output.is_none() {
         if let Some(routines) = &config.routine_inlining {

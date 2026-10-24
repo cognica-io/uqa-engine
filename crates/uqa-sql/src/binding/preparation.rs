@@ -84,9 +84,9 @@ pub(crate) fn read_prepared_inputs(
     analysis.plan(plan)?;
     let constants = analysis.parameters.take_input_constants();
     let parameters = analysis.parameters.finish()?;
-    constants.apply(plan)?;
-    retain_compute_kinds(routines, plan);
     let params = crate::prepared::analysis_parameters(&parameters);
+    constants.apply(plan, routines, &params)?;
+    retain_compute_kinds(routines, plan);
     super::composite_inputs::retain_composite_inputs(routines, plan, &params, ctes)?;
     plan.normalize_window_definitions()?;
     let mut dependencies = analysis
@@ -174,7 +174,7 @@ fn read_executable_inputs_inner(
         analysis.parameters.finish()?;
     }
     let reusable = constants.reusable_across_messages();
-    constants.apply(plan)?;
+    constants.apply(plan, routines, params)?;
     retain_compute_kinds(routines, plan);
     super::composite_inputs::retain_composite_inputs(routines, plan, params, binding)?;
     plan.normalize_window_definitions()?;
@@ -341,7 +341,12 @@ fn analyze_expression_inputs<'a>(
     analysis
         .parameters
         .take_input_constants()
-        .apply_expression_with_subqueries(&mut expression.scalar, &mut expression.subqueries)?;
+        .apply_expression_with_subqueries(
+            &mut expression.scalar,
+            &mut expression.subqueries,
+            routines,
+            &[],
+        )?;
     Ok(ty)
 }
 

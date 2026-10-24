@@ -1,0 +1,192 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "create",
+      "sql": "CREATE TABLE grouping_inputs(region text, n integer)"
+    },
+    {
+      "id": "insert",
+      "sql": "INSERT INTO grouping_inputs VALUES ('north',1), ('south',2)"
+    },
+    {
+      "id": "text",
+      "sql": "SELECT count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((lower(NULL)),(lower(NULL::text)),(region || NULL),(region || NULL::text))",
+      "owner": true
+    },
+    {
+      "id": "arithmetic",
+      "sql": "SELECT count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL),(n*NULL),(n+NULL::integer))",
+      "owner": true
+    },
+    {
+      "id": "constants",
+      "sql": "SELECT count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((1+1),(2::integer),(4/2),(1+1::integer))",
+      "owner": true
+    },
+    {
+      "id": "qualified",
+      "sql": "SELECT count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL),(grouping_inputs.n+NULL),(n*NULL))",
+      "owner": true
+    },
+    {
+      "id": "sets",
+      "sql": "SELECT count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL,n*NULL),(n*NULL,n+NULL),(n+NULL,n+NULL))",
+      "owner": true
+    },
+    {
+      "id": "empty",
+      "sql": "SELECT count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((),(),(n+NULL),(n*NULL))",
+      "owner": true
+    },
+    {
+      "id": "ordinary_duplicates",
+      "sql": "SELECT count(*) AS n FROM grouping_inputs GROUP BY GROUPING SETS ((n+NULL),(n+NULL),(n*NULL))"
+    },
+    {
+      "id": "alias",
+      "sql": "SELECT n+NULL AS key, count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((key),(n+NULL),(n*NULL))"
+    },
+    {
+      "id": "where_empty",
+      "sql": "SELECT count(*) AS n FROM grouping_inputs WHERE false GROUP BY DISTINCT GROUPING SETS ((),(n+NULL),(n*NULL))"
+    },
+    {
+      "id": "derived",
+      "sql": "SELECT count(*) AS n FROM (SELECT count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL),(n*NULL),(n+NULL))) x"
+    },
+    {
+      "id": "scalar_subquery",
+      "sql": "SELECT (SELECT count(*) FROM (SELECT count(*) FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL),(n*NULL))) x) AS n"
+    },
+    {
+      "id": "cte",
+      "sql": "WITH grouped AS (SELECT count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL),(n*NULL),(n+NULL))) SELECT count(*) AS n FROM grouped"
+    },
+    {
+      "id": "lateral",
+      "sql": "SELECT outer_row.n AS outer_n, g.k, g.c FROM (VALUES (1),(2)) outer_row(n) CROSS JOIN LATERAL (SELECT n+NULL AS k,count(*) AS c FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((k),(n+NULL),(n*NULL),(outer_row.n+NULL))) g ORDER BY outer_n,k,c"
+    },
+    {
+      "id": "membership_copies",
+      "sql": "SELECT n, (SELECT count(*) FROM (SELECT count(*) FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL),(n*NULL))) g) IN (n,n+1) AS matched FROM grouping_inputs ORDER BY n"
+    },
+    {
+      "id": "outer_projection",
+      "sql": "SELECT o.n,g.k,g.c FROM (VALUES (1),(2)) o(n) CROSS JOIN LATERAL (SELECT o.n AS k,count(*) AS c FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL),(n*NULL))) g ORDER BY o.n,g.k,g.c"
+    },
+    {
+      "id": "ungrouped_local",
+      "sql": "SELECT * FROM (VALUES (1)) o(n) CROSS JOIN LATERAL (SELECT n,count(*) FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((o.n))) g"
+    },
+    {
+      "id": "input_precedence",
+      "sql": "SELECT o.n,g.n FROM (VALUES (1),(2)) o(n) CROSS JOIN LATERAL (SELECT count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n),(n))) g ORDER BY o.n,g.n"
+    },
+    {
+      "id": "outer_grouped_input",
+      "sql": "SELECT o.n,g.k,g.c FROM (VALUES (1),(2)) o(n) CROSS JOIN LATERAL (SELECT o.n AS k,count(*) AS c FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((grouping_inputs.n),())) g ORDER BY o.n,g.k,g.c"
+    },
+    {
+      "id": "outer_empty_input",
+      "sql": "SELECT o.n,g.k,g.c FROM (VALUES (1),(2)) o(n) CROSS JOIN LATERAL (SELECT o.n AS k,count(*) AS c FROM grouping_inputs WHERE false GROUP BY DISTINCT GROUPING SETS ((),())) g ORDER BY o.n,g.k,g.c"
+    },
+    {
+      "id": "outer_having",
+      "sql": "SELECT o.n,g.k,g.c FROM (VALUES (1),(2)) o(n) CROSS JOIN LATERAL (SELECT o.n AS k,count(*) AS c FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL),(n*NULL)) HAVING count(*)>o.n) g ORDER BY o.n,g.k,g.c"
+    },
+    {
+      "id": "outer_local_name",
+      "sql": "SELECT o.n,g.k,g.c FROM (VALUES (3),(4)) o(n) CROSS JOIN LATERAL (SELECT o.n AS k,count(*) AS c FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n),())) g ORDER BY o.n,g.k,g.c"
+    },
+    {
+      "id": "outer_set_projection",
+      "sql": "SELECT o.n,g.k,g.u,g.c FROM (VALUES (1),(2)) o(n) CROSS JOIN LATERAL (SELECT o.n AS k,unnest(ARRAY[10,20]) AS u,count(*) AS c FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((u),())) g ORDER BY o.n,g.k,g.u,g.c"
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE grouped(integer,integer) AS SELECT count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS (($1),($2),($1))"
+    },
+    {
+      "id": "force_generic_plan",
+      "sql": "SET plan_cache_mode = force_generic_plan"
+    },
+    {
+      "id": "force_generic_planNULLNULL",
+      "sql": "EXECUTE grouped(NULL,NULL)"
+    },
+    {
+      "id": "force_generic_plan11",
+      "sql": "EXECUTE grouped(1,1)"
+    },
+    {
+      "id": "force_generic_plan12",
+      "sql": "EXECUTE grouped(1,2)"
+    },
+    {
+      "id": "force_custom_plan",
+      "sql": "SET plan_cache_mode = force_custom_plan"
+    },
+    {
+      "id": "force_custom_planNULLNULL",
+      "sql": "EXECUTE grouped(NULL,NULL)"
+    },
+    {
+      "id": "force_custom_plan11",
+      "sql": "EXECUTE grouped(1,1)"
+    },
+    {
+      "id": "force_custom_plan12",
+      "sql": "EXECUTE grouped(1,2)"
+    },
+    {
+      "id": "view",
+      "sql": "CREATE VIEW grouped_view AS SELECT count(*) AS n FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL),(n*NULL),(n+NULL))"
+    },
+    {
+      "id": "view_read",
+      "sql": "SELECT * FROM grouped_view",
+      "reopen": true
+    },
+    {
+      "id": "view_definition",
+      "sql": "SELECT pg_get_viewdef('grouped_view'::regclass) AS definition"
+    },
+    {
+      "id": "routine",
+      "sql": "CREATE FUNCTION grouped_routine() RETURNS TABLE(n bigint) LANGUAGE sql AS $$SELECT count(*) FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL),(n*NULL),(n+NULL))$$"
+    },
+    {
+      "id": "routine_read",
+      "sql": "SELECT * FROM grouped_routine()",
+      "reopen": true
+    },
+    {
+      "id": "rollback_begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "delete_inputs",
+      "sql": "DELETE FROM grouping_inputs"
+    },
+    {
+      "id": "transaction_empty",
+      "sql": "SELECT * FROM grouped_view"
+    },
+    {
+      "id": "rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "rollback_rows",
+      "sql": "SELECT * FROM grouped_view"
+    },
+    {
+      "id": "constant_error",
+      "sql": "SELECT count(*) FROM grouping_inputs GROUP BY DISTINCT GROUPING SETS ((n+NULL),(1/0))"
+    }
+  ]
+}

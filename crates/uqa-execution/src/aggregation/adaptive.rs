@@ -80,6 +80,7 @@ impl AdaptiveAggregateSet {
         work_mem_bytes: usize,
         input_schema: &RowSchema,
         params: &[SQLParam],
+        outer: Option<&super::AggregateOuterRow>,
     ) -> Result<Self, SQLError> {
         let aggregate_targets = aggregate_targets(context, &statement)
             .into_iter()
@@ -101,6 +102,7 @@ impl AdaptiveAggregateSet {
             relaxed,
             input_schema,
             params,
+            outer,
         )?;
         let target_count = aggregate_targets.len().max(1);
         let state_budget = work_mem_bytes
@@ -181,6 +183,10 @@ impl AdaptiveAggregateSet {
     /// input is retained by the executor. If the hash state reaches its own
     /// budget, the executor drops it and replays the bounded input through the
     /// canonical sort aggregate.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "preserves the same input scope through bounded hash-to-sort fallback"
+    )]
     pub(super) fn new_optimistic(
         context: &dyn QueryExpressionContext,
         statement: QueryBlockPlan,
@@ -189,6 +195,7 @@ impl AdaptiveAggregateSet {
         output_budget: usize,
         input_schema: &RowSchema,
         params: &[SQLParam],
+        outer: Option<&super::AggregateOuterRow>,
     ) -> Result<Self, SQLError> {
         let mut set = Self::new(
             context,
@@ -197,6 +204,7 @@ impl AdaptiveAggregateSet {
             state_budget,
             input_schema,
             params,
+            outer,
         )?;
         set.state_budget = state_budget.max(1);
         set.spill_budget = output_budget.max(1);

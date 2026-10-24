@@ -272,7 +272,7 @@ impl Preparation<'_> {
                     self.routines,
                     expression,
                     &block.projections,
-                    source,
+                    &input,
                     outer,
                     &self.parameters.values(),
                 )?;
@@ -321,10 +321,12 @@ impl Preparation<'_> {
         crate::semantics::grouping_sets::validate_grouped_expressions(
             self.routines,
             block,
-            source,
+            &input,
             outer,
             &self.parameters.values(),
         )?;
+        self.parameters
+            .retain_distinct_grouping(block, &input, outer);
         if !preserve_unknown {
             self.resolve_targets(&mut output)?;
         }

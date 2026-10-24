@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::super::tests::NoRoutines;
 use super::*;
 use crate::expr::enums::{EnumLabelCatalog, EnumTypeLabel, EnumTypeLabels};
 use std::sync::Arc;
@@ -139,7 +140,10 @@ fn retained_enum_inputs_keep_label_identity_and_array_bounds_after_rename() {
                 )
                 .unwrap();
         });
-        parameters.take_input_constants().apply(&mut plan).unwrap();
+        parameters
+            .take_input_constants()
+            .apply(&mut plan, &NoRoutines, &[])
+            .unwrap();
         plan.visit_scalar_expressions(&mut |expression| {
             let ScalarExpr::TypedLiteral { value, .. } = expression else {
                 panic!("typed input");
@@ -200,7 +204,10 @@ fn domain_array_input_is_read_once_and_retains_element_identity_and_bounds() {
         }
     });
     assert_eq!(inputs.0.get(), 1);
-    parameters.take_input_constants().apply(&mut plan).unwrap();
+    parameters
+        .take_input_constants()
+        .apply(&mut plan, &NoRoutines, &[])
+        .unwrap();
     plan.visit_scalar_expressions(&mut |expression| {
         let ScalarExpr::TypedLiteral {
             value: Value::Array(array),
