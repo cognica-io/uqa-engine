@@ -145,6 +145,45 @@ static void procedure_statements(uqa_engine engine, uqa_result result) {
     CHECK(uqa_statement_finalize(&statement));
 }
 
+static void explained_inputs(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    uqa_value value = NULL;
+    uqa_type type = NULL;
+    uint32_t count = 0;
+    uint32_t kind = 0;
+    uint32_t state = 0;
+    CHECK(uqa_engine_execute(engine, "CREATE TABLE c_explain_inputs (amount integer)", result));
+    CHECK(uqa_statement_prepare(engine, "EXPLAIN ANALYZE INSERT INTO c_explain_inputs VALUES ($1)", &statement));
+    CHECK(uqa_statement_get_parameter_count(statement, &count));
+    assert(count == 1);
+    CHECK(uqa_statement_get_parameter_type(statement, 1, &type));
+    CHECK(uqa_type_get_kind(type, &kind));
+    assert(kind == UQA_TYPE_INT32);
+    CHECK(uqa_engine_execute(engine, "SELECT count(*) FROM c_explain_inputs", result));
+    assert(integer(result, 0) == 0);
+    CHECK(uqa_value_create_int64(7, &value));
+    CHECK(uqa_statement_bind(statement, 1, value));
+    CHECK(uqa_value_destroy(&value));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine, "SELECT amount FROM c_explain_inputs", result));
+    assert(integer(result, 0) == 7);
+
+    CHECK(uqa_engine_execute(engine, "BEGIN; SAVEPOINT explain_retry", result));
+    assert(uqa_statement_prepare(engine, "EXPLAIN UPDATE c_explain_inputs SET amount = 'bad'", &statement) == UQA_ERROR_SQL);
+    assert(statement == NULL);
+    sqlstate("22P02");
+    CHECK(uqa_transaction_get_state(engine, &state));
+    assert(state == UQA_TRANSACTION_FAILED);
+    CHECK(uqa_engine_execute(engine, "ROLLBACK TO explain_retry", result));
+    CHECK(uqa_transaction_get_state(engine, &state));
+    assert(state == UQA_TRANSACTION_ACTIVE);
+    CHECK(uqa_engine_execute(engine, "UPDATE c_explain_inputs SET amount = 9; ROLLBACK", result));
+    CHECK(uqa_engine_execute(engine, "SELECT amount FROM c_explain_inputs", result));
+    assert(integer(result, 0) == 7);
+    CHECK(uqa_engine_execute(engine, "DROP TABLE c_explain_inputs", result));
+}
+
 static void utility_statements(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_type type = NULL;
@@ -456,6 +495,7 @@ int main(void) {
     utility_statements(engine, result);
     prepared_recovery(engine, result);
     procedure_statements(engine, result);
+    explained_inputs(engine, result);
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_engine_close(&engine));
     return 0;

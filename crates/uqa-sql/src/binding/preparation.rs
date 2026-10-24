@@ -162,11 +162,11 @@ fn read_executable_inputs_inner(
     let result = match &*plan {
         UnifiedPlan::Query(query) => AnalyzedResult::Schema(analysis.query(query, None)?),
         UnifiedPlan::Command(command) => match command.as_ref() {
-            crate::plan::CommandPlan::CreateView { query, .. }
-            | crate::plan::CommandPlan::CreateTableAs { query, .. }
-            | crate::plan::CommandPlan::CreateMaterializedView { query, .. }
-            | crate::plan::CommandPlan::DeclareCursor { query, .. } => {
-                analysis.query(query, None)?;
+            crate::plan::CommandPlan::CreateView { .. }
+            | crate::plan::CommandPlan::CreateTableAs { .. }
+            | crate::plan::CommandPlan::CreateMaterializedView { .. }
+            | crate::plan::CommandPlan::DeclareCursor { .. } => {
+                analysis.command(command)?;
                 AnalyzedResult::Command
             }
             _ if command.mutation_target().is_some() => {

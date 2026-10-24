@@ -8,6 +8,7 @@ use crate::Engine;
 
 mod admission;
 mod calls;
+mod explain_inputs;
 
 #[test]
 fn prepared_temporal_constants_keep_the_preparation_clock() {
