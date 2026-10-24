@@ -3930,6 +3930,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "uqa-ffi"
+version = "0.6.1"
+dependencies = [
+ "tempfile",
+ "uqa-api",
+ "uqa-core",
+ "uqa-engine",
+ "uqa-sql",
+ "uqa-storage-sqlite",
+ "zeroize",
+]
+
+[[package]]
 name = "uqa-fusion"
 version = "0.6.1"
 dependencies = [

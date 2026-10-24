@@ -23,6 +23,7 @@ members = [
     "crates/uqa-pg-server",
     "crates/uqa-fdw",
     "crates/uqa-engine",
+    "crates/uqa-ffi",
     "crates/uqa",
     "crates/uqa-client",
     "crates/uqa-api",

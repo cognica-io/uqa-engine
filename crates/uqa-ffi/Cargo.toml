@@ -1,0 +1,45 @@
+[package]
+name = "uqa-ffi"
+description = "Embedded UQA Engine C ABI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+publish = false
+autotests = false
+
+[lib]
+name = "uqa_ffi"
+crate-type = ["cdylib", "staticlib", "rlib"]
+test = false
+doctest = false
+
+[features]
+default = ["nori", "kuromoji"]
+nori = ["uqa-engine/nori"]
+kuromoji = ["uqa-engine/kuromoji"]
+arrow = ["uqa-engine/arrow"]
+duckdb = ["uqa-engine/duckdb"]
+arrow-export = ["dep:uqa-api"]
+
+[dependencies]
+uqa-core.workspace = true
+uqa-engine.workspace = true
+uqa-sql.workspace = true
+uqa-storage-sqlite.workspace = true
+uqa-api = { workspace = true, optional = true }
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile = "3.13"
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[lints]
+workspace = true
