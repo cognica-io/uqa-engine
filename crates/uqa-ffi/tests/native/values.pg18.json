@@ -1,0 +1,462 @@
+{
+  "provenance": {
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "captured_at": "2026-10-24T10:38:45.633636+00:00",
+    "protocol": "libpq PQexecParams, explicit parameter OIDs, UTF-8 text input/output",
+    "consumer": "values.c"
+  },
+  "cases": [
+    {
+      "sql": "SELECT $1, pg_typeof($1)::text",
+      "parameter_oids": [
+        21
+      ],
+      "parameters": [
+        "32767"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        21,
+        25
+      ],
+      "column_modifiers": [
+        -1,
+        -1
+      ],
+      "rows": [
+        [
+          "32767",
+          "smallint"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1 + $1",
+      "parameter_oids": [
+        21
+      ],
+      "parameters": [
+        "32767"
+      ],
+      "status": 7,
+      "sqlstate": "22003",
+      "message": "smallint out of range"
+    },
+    {
+      "sql": "SELECT $1, pg_typeof($1)::text",
+      "parameter_oids": [
+        23
+      ],
+      "parameters": [
+        "2147483647"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        23,
+        25
+      ],
+      "column_modifiers": [
+        -1,
+        -1
+      ],
+      "rows": [
+        [
+          "2147483647",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1 + $1",
+      "parameter_oids": [
+        23
+      ],
+      "parameters": [
+        "2147483647"
+      ],
+      "status": 7,
+      "sqlstate": "22003",
+      "message": "integer out of range"
+    },
+    {
+      "sql": "SELECT $1, pg_typeof($1)::text",
+      "parameter_oids": [
+        20
+      ],
+      "parameters": [
+        "9223372036854775807"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        20,
+        25
+      ],
+      "column_modifiers": [
+        -1,
+        -1
+      ],
+      "rows": [
+        [
+          "9223372036854775807",
+          "bigint"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1 + $1",
+      "parameter_oids": [
+        20
+      ],
+      "parameters": [
+        "9223372036854775807"
+      ],
+      "status": 7,
+      "sqlstate": "22003",
+      "message": "bigint out of range"
+    },
+    {
+      "sql": "SELECT $1, $1 + $1",
+      "parameter_oids": [
+        700
+      ],
+      "parameters": [
+        "0.1"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        700,
+        700
+      ],
+      "column_modifiers": [
+        -1,
+        -1
+      ],
+      "rows": [
+        [
+          "0.1",
+          "0.2"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1 + 1",
+      "parameter_oids": [
+        25
+      ],
+      "parameters": [
+        "42"
+      ],
+      "status": 7,
+      "sqlstate": "42883",
+      "message": "operator does not exist: text + integer"
+    },
+    {
+      "sql": "SELECT $1::smallint",
+      "parameter_oids": [
+        25
+      ],
+      "parameters": [
+        "42"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        21
+      ],
+      "column_modifiers": [
+        -1
+      ],
+      "rows": [
+        [
+          "42"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1, $1 + 0.0000001",
+      "parameter_oids": [
+        1700
+      ],
+      "parameters": [
+        "123456789012345678901234567890.0012300"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        1700,
+        1700
+      ],
+      "column_modifiers": [
+        -1,
+        -1
+      ],
+      "rows": [
+        [
+          "123456789012345678901234567890.0012300",
+          "123456789012345678901234567890.0012301"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT 12.3456::numeric(5,2), 12345::numeric(2,-3)",
+      "parameter_oids": [],
+      "parameters": [],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        1700,
+        1700
+      ],
+      "column_modifiers": [
+        327686,
+        133121
+      ],
+      "rows": [
+        [
+          "12.35",
+          "12000"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1",
+      "parameter_oids": [
+        1700
+      ],
+      "parameters": [
+        "NaN"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        1700
+      ],
+      "column_modifiers": [
+        -1
+      ],
+      "rows": [
+        [
+          "NaN"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1",
+      "parameter_oids": [
+        1700
+      ],
+      "parameters": [
+        "Infinity"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        1700
+      ],
+      "column_modifiers": [
+        -1
+      ],
+      "rows": [
+        [
+          "Infinity"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1",
+      "parameter_oids": [
+        1700
+      ],
+      "parameters": [
+        "-Infinity"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        1700
+      ],
+      "column_modifiers": [
+        -1
+      ],
+      "rows": [
+        [
+          "-Infinity"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1",
+      "parameter_oids": [
+        1700
+      ],
+      "parameters": [
+        "-1.2300"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        1700
+      ],
+      "column_modifiers": [
+        -1
+      ],
+      "rows": [
+        [
+          "-1.2300"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1",
+      "parameter_oids": [
+        1700
+      ],
+      "parameters": [
+        "1.2.3"
+      ],
+      "status": 7,
+      "sqlstate": "22P02",
+      "message": "invalid input syntax for type numeric: \"1.2.3\""
+    },
+    {
+      "sql": "SELECT $1, $2, $1 ->> 'a', $2 ->> 'a'",
+      "parameter_oids": [
+        114,
+        3802
+      ],
+      "parameters": [
+        "{ \"b\": 2, \"a\": 1, \"a\": 3 }",
+        "{ \"b\": 2, \"a\": 1, \"a\": 3 }"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        114,
+        3802,
+        25,
+        25
+      ],
+      "column_modifiers": [
+        -1,
+        -1,
+        -1,
+        -1
+      ],
+      "rows": [
+        [
+          "{ \"b\": 2, \"a\": 1, \"a\": 3 }",
+          "{\"a\": 3, \"b\": 2}",
+          "3",
+          "3"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1",
+      "parameter_oids": [
+        114
+      ],
+      "parameters": [
+        "[1,]"
+      ],
+      "status": 7,
+      "sqlstate": "22P02",
+      "message": "invalid input syntax for type json"
+    },
+    {
+      "sql": "SELECT $1",
+      "parameter_oids": [
+        3802
+      ],
+      "parameters": [
+        "{"
+      ],
+      "status": 7,
+      "sqlstate": "22P02",
+      "message": "invalid input syntax for type json"
+    },
+    {
+      "sql": "SELECT $1",
+      "parameter_oids": [
+        114
+      ],
+      "parameters": [
+        "null"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        114
+      ],
+      "column_modifiers": [
+        -1
+      ],
+      "rows": [
+        [
+          "null"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT $1, $2, $3, $4, $5, $6, $7, $8",
+      "parameter_oids": [
+        21,
+        700,
+        1700,
+        114,
+        3802,
+        17,
+        25,
+        16
+      ],
+      "parameters": [
+        "-32768",
+        "0.1",
+        "123456789012345678901234567890.0012300",
+        "[1, 2, 3]",
+        "{\"n\":1.2300}",
+        "\\x0001ff",
+        "fixed text",
+        "true"
+      ],
+      "status": 2,
+      "sqlstate": "",
+      "column_oids": [
+        21,
+        700,
+        1700,
+        114,
+        3802,
+        17,
+        25,
+        16
+      ],
+      "column_modifiers": [
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1
+      ],
+      "rows": [
+        [
+          "-32768",
+          "0.1",
+          "123456789012345678901234567890.0012300",
+          "[1, 2, 3]",
+          "{\"n\": 1.2300}",
+          "\\x0001ff",
+          "fixed text",
+          "t"
+        ]
+      ]
+    }
+  ]
+}

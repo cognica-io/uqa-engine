@@ -109,6 +109,20 @@ ffi_fn!(uqa_type_get_modifier(ty: *const UQAType, out: *mut i32) {
         .map_err(|_| UQAError::new(UQA_ERROR_RANGE, "native type modifier is outside its ABI range"))?;
     Ok(UQA_OK)
 });
+ffi_fn!(uqa_type_get_numeric_precision(ty: *const UQAType, out: *mut u32) {
+    let out = boundary::output(out)?;
+    match &boundary::input(ty)?.0 {
+        ColumnType::Numeric { precision: Some(precision), .. } => { *out = *precision; Ok(UQA_OK) },
+        _ => Ok(UQA_DONE),
+    }
+});
+ffi_fn!(uqa_type_get_numeric_scale(ty: *const UQAType, out: *mut i32) {
+    let out = boundary::output(out)?;
+    match &boundary::input(ty)?.0 {
+        ColumnType::Numeric { scale: Some(scale), .. } => { *out = *scale; Ok(UQA_OK) },
+        _ => Ok(UQA_DONE),
+    }
+});
 ffi_fn!(uqa_type_get_name(ty: *const UQAType, out: *mut UQAStringView) {
     let out = boundary::output(out)?;
     *out = type_metadata::column_type_name(&boundary::input(ty)?.0).into();

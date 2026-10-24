@@ -310,20 +310,39 @@ UQA_API uqa_status UQA_CALL uqa_type_get_oid(
     uqa_type type, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_modifier(
     uqa_type type, int32_t *out);
+UQA_API uqa_status UQA_CALL uqa_type_get_numeric_precision(uqa_type type, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_type_get_numeric_scale(uqa_type type, int32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_name(uqa_type type, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_schema(uqa_type type, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_base_type(uqa_type type, uqa_type *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_element_type(uqa_type type, uqa_type *out);
 
+/* Constructors copy inputs and preserve their SQL type, including integer and
+ * floating widths. NULL from create_null has no declared type. */
 UQA_API uqa_status UQA_CALL uqa_value_create_null(uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_int16(int16_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_int32(int32_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int64(int64_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_bool(uint8_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_float32(float value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_float64(double value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_bytes(
     const uint8_t *data, size_t size, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_text(
     const char *value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_text_n(
+    const char *value, size_t size, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_numeric(
+    const char *value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_numeric_n(
+    const char *value, size_t size, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_json(
+    const char *value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_json_n(
+    const char *value, size_t size, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_jsonb(
+    const char *value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_jsonb_n(
     const char *value, size_t size, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_vector_f32(
     const float *data, size_t dimensions,
@@ -332,10 +351,26 @@ UQA_API uqa_status UQA_CALL uqa_value_create_copy(
     uqa_value_view value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_is_null(
     uqa_value_view value, uint8_t *out);
+/* The descriptor borrows the value's lifetime. Untyped NULL returns UQA_DONE
+ * with a NULL descriptor. Getters allow integer/float widening, never narrowing
+ * or text/numeric coercion; SQL NULL returns UQA_ERROR_NULL. */
+UQA_API uqa_status UQA_CALL uqa_value_get_type(
+    uqa_value_view value, uqa_type *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_int16(
+    uqa_value_view value, int16_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_int32(
+    uqa_value_view value, int32_t *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_int64(
     uqa_value_view value, int64_t *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_bool(uqa_value_view value, uint8_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_float32(uqa_value_view value, float *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_float64(uqa_value_view value, double *out);
+/* NUMERIC text is exact and keeps its display scale. Special numeric values
+ * have no display scale: get_numeric_scale returns UQA_DONE with zero output. */
+UQA_API uqa_status UQA_CALL uqa_value_get_numeric(uqa_value_view value, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_numeric_scale(uqa_value_view value, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_json(uqa_value_view value, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_jsonb(uqa_value_view value, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_bytes(uqa_value_view value, uqa_bytes_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_text(
     uqa_value_view value, uqa_string_view *out);

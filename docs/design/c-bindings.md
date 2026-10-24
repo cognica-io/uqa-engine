@@ -506,11 +506,23 @@ Type families include BOOL, INT16/32/64, FLOAT32/64, TEXT/CHAR/VARCHAR, BYTEA, N
 
 ```c
 UQA_API uqa_status UQA_CALL uqa_value_create_null(uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_int16(int16_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_int32(int32_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int64(int64_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_float32(float value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_float64(double value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_text(
     const char *value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_text_n(
     const char *value, size_t size, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_numeric(
+    const char *value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_numeric_n(
+    const char *value, size_t size, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_json(
+    const char *value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_jsonb(
+    const char *value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_vector_f32(
     const float *data, size_t dimensions,
     uqa_value *out);
@@ -518,9 +530,23 @@ UQA_API uqa_status UQA_CALL uqa_value_create_copy(
     uqa_value_view value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_is_null(
     uqa_value_view value, uint8_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_type(
+    uqa_value_view value, uqa_type *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_int16(
+    uqa_value_view value, int16_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_int32(
+    uqa_value_view value, int32_t *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_int64(
     uqa_value_view value, int64_t *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_text(
+    uqa_value_view value, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_numeric(
+    uqa_value_view value, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_numeric_scale(
+    uqa_value_view value, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_json(
+    uqa_value_view value, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_jsonb(
     uqa_value_view value, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_buffer_create(uqa_buffer *out);
 UQA_API uqa_status UQA_CALL uqa_value_format_sql(
@@ -528,7 +554,11 @@ UQA_API uqa_status UQA_CALL uqa_value_format_sql(
 UQA_API uqa_status UQA_CALL uqa_buffer_get_bytes(uqa_buffer buffer, uqa_bytes_view *out);
 ```
 
-Owned values and borrowed value views are immutable after construction. Typed getters do not hide conversions. INT16/32 can be read losslessly as int64, but FLOAT, NUMERIC, and TEXT are not implicitly converted to integers. SQL casts use the SQL owner. A typed getter on NULL returns `UQA_ERROR_NULL`; an incompatible getter returns `UQA_ERROR_TYPE`; index or representation bounds return `UQA_ERROR_RANGE`. `uqa_value_get_is_null` inspects nullness without reading a typed payload and returns `UQA_OK` with a 0/1 output. Native decoding failures retain SQL diagnostics.
+Owned values and borrowed value views are immutable after construction. Scalar constructors retain their explicit SQL type through `SQLParam::TypedScalar`, so INT16/32/64 select their own SQL overloads and overflow rules, FLOAT32 remains REAL, and TEXT remains a typed text parameter. Typed getters do not hide conversions: INT16 widens to int32/int64, INT32 widens to int64, and FLOAT32 widens to double; wider declared types cannot use narrower getters even when a particular value would fit. FLOAT, NUMERIC, and TEXT are not implicitly converted to integers. SQL casts use the SQL owner. A typed getter on NULL returns `UQA_ERROR_NULL`; an incompatible getter returns `UQA_ERROR_TYPE`; index or representation bounds return `UQA_ERROR_RANGE`. `uqa_value_get_is_null` inspects nullness without reading a typed payload and returns `UQA_OK` with a 0/1 output. Native decoding failures retain SQL diagnostics.
+
+`uqa_value_get_type` returns a descriptor borrowed from the value and with the same lifetime. `uqa_value_create_null` creates an untyped NULL, whose type getter returns `UQA_DONE` with a NULL descriptor. Copying a typed result NULL preserves its existing descriptor without reading a payload. Owned vector parameters retain their dimension descriptor; vector input passes through SQL's `SQLParam::vector_with_control`, which validates the positive 32-bit dimension and finite float32 elements before retaining the copied input.
+
+`uqa_value_create_numeric`, `uqa_value_create_json` and `uqa_value_create_jsonb`, together with their `_n` forms, run the owning SQL input conversion and preserve its diagnostics. Their matching getters return immutable borrowed text. NUMERIC output never passes through floating point and retains display scale; `uqa_value_get_numeric_scale` returns that nonnegative display scale, or `UQA_DONE` for NaN and infinities. The descriptor's `uqa_type_get_numeric_precision` and `uqa_type_get_numeric_scale` expose optional declared modifiers instead, including negative declared scales. A NUMERIC text view is cached under the value's original allowance; failed formatting publishes no view, preserves the native value and other retained objects, and permits another observation after memory is released. JSON keeps source whitespace and duplicate keys; JSONB uses SQL's normalized representation. The JSON and JSONB getters reject each other's type, and neither is an ordinary TEXT getter.
 
 | Value | C representation and requirements |
 | --- | --- |

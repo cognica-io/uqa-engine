@@ -16,11 +16,18 @@ use uqa_core::{
 use uqa_sql::{ast::ColumnType, SQLParam};
 
 use crate::{
-    abi::{UQABytesView, UQAStringView, UQA_ERROR_NULL, UQA_ERROR_RANGE, UQA_ERROR_TYPE, UQA_OK},
+    abi::{
+        UQABytesView, UQAStringView, UQA_DONE, UQA_ERROR_NULL, UQA_ERROR_RANGE, UQA_ERROR_TYPE,
+        UQA_OK,
+    },
     boundary,
     error::UQAError,
     session::Session,
+    types::UQAType,
 };
+
+mod scalars;
+pub use scalars::*;
 
 enum ValueSource {
     Owned(Produced<SQLParam>),
@@ -34,6 +41,8 @@ enum ValueSource {
 pub struct UQAValue {
     source: ValueSource,
     decoded: OnceCell<Produced<Value>>,
+    numeric_text: OnceCell<Produced<String>>,
+    parameter_type: Option<ColumnType>,
     pub(crate) session: Option<Arc<Session>>,
     _memory: Option<MemoryReservation>,
 }
@@ -51,6 +60,8 @@ impl UQAValue {
                 ty: ty.map(std::ptr::from_ref),
             },
             decoded: OnceCell::new(),
+            numeric_text: OnceCell::new(),
+            parameter_type: None,
             session: Some(Arc::clone(session)),
             _memory: Some(memory),
         })
@@ -60,6 +71,14 @@ impl UQAValue {
         value: Produced<SQLParam>,
         session: Option<Arc<Session>>,
     ) -> boundary::Result<Box<Self>> {
+        let parameter_type = match &*value {
+            SQLParam::Vector(values) => {
+                Some(ColumnType::Vector(u32::try_from(values.len()).map_err(
+                    |_| UQAError::new(UQA_ERROR_RANGE, "vector dimensions exceed the SQL range"),
+                )?))
+            }
+            _ => None,
+        };
         let memory = session
             .as_ref()
             .map(|session| session.memory.reserve(size_of::<Self>()))
@@ -67,6 +86,8 @@ impl UQAValue {
         boundary::boxed(Self {
             source: ValueSource::Owned(value),
             decoded: OnceCell::new(),
+            numeric_text: OnceCell::new(),
+            parameter_type,
             session,
             _memory: memory,
         })
@@ -93,7 +114,9 @@ impl UQAValue {
 
     pub(crate) fn ty(&self) -> Option<&ColumnType> {
         match &self.source {
-            ValueSource::Owned(parameter) => parameter.declared_scalar_type(),
+            ValueSource::Owned(parameter) => parameter
+                .declared_scalar_type()
+                .or(self.parameter_type.as_ref()),
             ValueSource::Borrowed { ty, .. } => ty.map(|ty| {
                 // Safety: the immutable descriptor belongs to the same live result as the value.
                 #[allow(unsafe_code)]
@@ -146,6 +169,8 @@ impl UQAValue {
         }
         let accepted = match access {
             ScalarAccess::Bool => matches!(ty, ColumnType::Boolean),
+            ScalarAccess::Int16 => matches!(ty, ColumnType::SmallInteger),
+            ScalarAccess::Int32 => matches!(ty, ColumnType::SmallInteger | ColumnType::Integer),
             ScalarAccess::Integer => matches!(
                 ty,
                 ColumnType::SmallInteger
@@ -162,6 +187,10 @@ impl UQAValue {
                     | ColumnType::Regtype
             ),
             ScalarAccess::Float => matches!(ty, ColumnType::Real | ColumnType::DoublePrecision),
+            ScalarAccess::Float32 => matches!(ty, ColumnType::Real),
+            ScalarAccess::Numeric => matches!(ty, ColumnType::Numeric { .. }),
+            ScalarAccess::Json => matches!(ty, ColumnType::Json),
+            ScalarAccess::JsonB => matches!(ty, ColumnType::JsonB),
             ScalarAccess::Text => matches!(
                 ty,
                 ColumnType::Text
@@ -234,40 +263,59 @@ impl UQAValue {
     }
 }
 
-fn plain(value: Value) -> boundary::Result<*mut UQAValue> {
-    let parameter = ProductionControl::uncontrolled().finish(SQLParam::Scalar(value), None)?;
+fn scalar(value: Value, ty: Option<ColumnType>) -> boundary::Result<*mut UQAValue> {
+    let parameter = match ty {
+        Some(ty) => SQLParam::typed_scalar(value, ty),
+        None => SQLParam::Scalar(value),
+    };
+    let parameter = ProductionControl::uncontrolled().finish(parameter, None)?;
     Ok(Box::into_raw(UQAValue::owned(parameter, None)?))
 }
 
 ffi_fn!(uqa_value_create_null(out: *mut *mut UQAValue) {
     let out = boundary::new_handle(out)?;
-    *out = plain(Value::Null)?;
+    *out = scalar(Value::Null, None)?;
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_value_create_int64(value: i64, out: *mut *mut UQAValue) {
     let out = boundary::new_handle(out)?;
-    *out = plain(Value::Int(value))?;
+    *out = scalar(Value::Int(value), Some(ColumnType::BigInteger))?;
+    Ok(UQA_OK)
+});
+ffi_fn!(uqa_value_create_int16(value: i16, out: *mut *mut UQAValue) {
+    let out = boundary::new_handle(out)?;
+    *out = scalar(Value::Int(i64::from(value)), Some(ColumnType::SmallInteger))?;
+    Ok(UQA_OK)
+});
+ffi_fn!(uqa_value_create_int32(value: i32, out: *mut *mut UQAValue) {
+    let out = boundary::new_handle(out)?;
+    *out = scalar(Value::Int(i64::from(value)), Some(ColumnType::Integer))?;
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_value_create_bool(value: u8, out: *mut *mut UQAValue) {
     let out = boundary::new_handle(out)?;
     if value > 1 { return Err(UQAError::invalid("boolean input must be 0 or 1")); }
-    *out = plain(Value::Bool(value != 0))?;
+    *out = scalar(Value::Bool(value != 0), Some(ColumnType::Boolean))?;
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_value_create_float64(value: f64, out: *mut *mut UQAValue) {
     let out = boundary::new_handle(out)?;
-    *out = plain(Value::Float(value))?;
+    *out = scalar(Value::Float(value), Some(ColumnType::DoublePrecision))?;
+    Ok(UQA_OK)
+});
+ffi_fn!(uqa_value_create_float32(value: f32, out: *mut *mut UQAValue) {
+    let out = boundary::new_handle(out)?;
+    *out = scalar(Value::Float(f64::from(value)), Some(ColumnType::Real))?;
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_value_create_text(value: *const c_char, out: *mut *mut UQAValue) {
     let out = boundary::new_handle(out)?;
-    *out = plain(Value::Str(boundary::copy_text(boundary::text(value)?)?))?;
+    *out = scalar(Value::Str(boundary::copy_text(boundary::text(value)?)?), Some(ColumnType::Text))?;
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_value_create_text_n(value: *const c_char, size: usize, out: *mut *mut UQAValue) {
     let out = boundary::new_handle(out)?;
-    *out = plain(Value::Str(boundary::copy_text(boundary::text_n(value, size)?)?))?;
+    *out = scalar(Value::Str(boundary::copy_text(boundary::text_n(value, size)?)?), Some(ColumnType::Text))?;
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_value_create_bytes(data: *const u8, size: usize, out: *mut *mut UQAValue) {
@@ -276,17 +324,14 @@ ffi_fn!(uqa_value_create_bytes(data: *const u8, size: usize, out: *mut *mut UQAV
     let mut bytes = ProductionVec::new(ProductionControl::uncontrolled());
     bytes.extend_from_slice(input)?;
     let (bytes, _) = bytes.finish()?.into_parts();
-    *out = plain(Value::Bytes(bytes))?;
+    *out = scalar(Value::Bytes(bytes), Some(ColumnType::Bytea))?;
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_value_create_vector_f32(data: *const f32, dimensions: usize, out: *mut *mut UQAValue) {
     let out = boundary::new_handle(out)?;
     let input = boundary::span(data, dimensions)?;
     let control = ProductionControl::uncontrolled();
-    let mut values = ProductionVec::new(control);
-    values.extend_from_slice(input)?;
-    let (values, memory) = values.finish()?.into_parts();
-    *out = Box::into_raw(UQAValue::owned(control.finish(SQLParam::Vector(values), memory)?, None)?);
+    *out = Box::into_raw(UQAValue::owned(SQLParam::vector_with_control(input, &control)?, None)?);
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_value_create_copy(value: *const UQAValue, out: *mut *mut UQAValue) {
@@ -305,6 +350,16 @@ ffi_fn!(uqa_value_get_is_null(value: *const UQAValue, out: *mut u8) {
     Ok(UQA_OK)
 });
 
+ffi_fn!(uqa_value_get_type(value: *const UQAValue, out: *mut *const UQAType) {
+    let out = boundary::output(out)?;
+    let value = boundary::input(value)?;
+    let _call = value.session.as_ref().map(|session| session.enter_value()).transpose()?;
+    match value.ty() {
+        Some(ty) => { *out = crate::types::view(ty); Ok(UQA_OK) },
+        None => Ok(UQA_DONE),
+    }
+});
+
 fn wrong_type(value: &Value) -> UQAError {
     if matches!(value, Value::Null) {
         UQAError::new(UQA_ERROR_NULL, "value is SQL NULL")
@@ -319,8 +374,14 @@ fn wrong_type(value: &Value) -> UQAError {
 #[derive(Clone, Copy)]
 enum ScalarAccess {
     Bool,
+    Int16,
+    Int32,
     Integer,
+    Float32,
     Float,
+    Numeric,
+    Json,
+    JsonB,
     Text,
     Bytes,
 }
@@ -344,6 +405,8 @@ scalar_getter!(uqa_value_get_bool, u8, Bool, Value::Bool(value) => u8::from(*val
 scalar_getter!(uqa_value_get_float64, f64, Float, Value::Float(value) => *value);
 scalar_getter!(uqa_value_get_text, UQAStringView, Text, Value::Str(value) | Value::FixedChar(value) => value.as_str().into());
 scalar_getter!(uqa_value_get_bytes, UQABytesView, Bytes, Value::Bytes(value) => UQABytesView { data: value.as_ptr(), size: value.len() });
+scalar_getter!(uqa_value_get_json, UQAStringView, Json, Value::Json(value) => value.as_str().into());
+scalar_getter!(uqa_value_get_jsonb, UQAStringView, JsonB, Value::JsonB(value) => value.as_str().into());
 
 pub struct UQABuffer {
     text: Option<Produced<String>>,

@@ -26,3 +26,6 @@ mod sessions;
 
 #[path = "cases/statements.rs"]
 mod statements;
+
+#[path = "cases/values.rs"]
+mod values;
