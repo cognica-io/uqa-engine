@@ -1,0 +1,253 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "sql": "CREATE SCHEMA uqa_correlated_sources"
+    },
+    {
+      "sql": "SET search_path = uqa_correlated_sources, pg_catalog"
+    },
+    {
+      "sql": "CREATE TABLE inputs(id integer PRIMARY KEY, v integer)"
+    },
+    {
+      "sql": "INSERT INTO inputs VALUES (1,2), (2,NULL), (3,4), (4,0)"
+    },
+    {
+      "sql": "CREATE SEQUENCE body_calls"
+    },
+    {
+      "sql": "CREATE SEQUENCE argument_calls"
+    },
+    {
+      "sql": "CREATE SEQUENCE default_calls"
+    },
+    {
+      "sql": "CREATE FUNCTION pair(a integer) RETURNS SETOF integer LANGUAGE SQL VOLATILE AS 'SELECT a WHERE a IS NOT NULL UNION ALL SELECT a+1 WHERE a IS NOT NULL'"
+    },
+    {
+      "sql": "CREATE FUNCTION one(a integer) RETURNS SETOF integer LANGUAGE SQL STRICT AS 'SELECT a*10'"
+    },
+    {
+      "sql": "CREATE FUNCTION marked(a integer) RETURNS SETOF integer LANGUAGE SQL VOLATILE AS 'SELECT a + nextval(''body_calls'')::integer'"
+    },
+    {
+      "sql": "CREATE FUNCTION argument(a integer) RETURNS integer LANGUAGE SQL VOLATILE AS 'SELECT a + nextval(''argument_calls'')::integer'"
+    },
+    {
+      "sql": "CREATE FUNCTION defaulted(a integer, b integer DEFAULT nextval('default_calls')::integer) RETURNS SETOF integer LANGUAGE SQL AS 'SELECT a+b'"
+    },
+    {
+      "sql": "CREATE FUNCTION table_values(a integer) RETURNS TABLE(n integer, label text) LANGUAGE plpgsql AS $$ BEGIN RETURN QUERY SELECT a, a::text; RETURN QUERY SELECT a+1, (a+1)::text; END $$"
+    },
+    {
+      "sql": "CREATE FUNCTION record_values(a integer) RETURNS SETOF record LANGUAGE SQL AS 'SELECT a, a::text'"
+    },
+    {
+      "sql": "CREATE DOMAIN nonnegative AS integer CHECK (VALUE >= 0)"
+    },
+    {
+      "sql": "CREATE FUNCTION checked(a nonnegative) RETURNS SETOF integer LANGUAGE SQL AS 'SELECT a::integer'"
+    },
+    {
+      "sql": "CREATE TYPE color AS ENUM ('red','blue')"
+    },
+    {
+      "sql": "SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (pair(i.v), one(i.v)) WITH ORDINALITY AS f(a,b,n) ORDER BY i.id,n",
+      "id": "changing correlated values, NULL padding and per-row ordinality"
+    },
+    {
+      "sql": "SELECT i.id, f.* FROM inputs i LEFT JOIN ROWS FROM (pair(i.v), one(i.v)) WITH ORDINALITY AS f(a,b,n) ON true ORDER BY i.id,n",
+      "id": "empty correlated group preserves left rows"
+    },
+    {
+      "sql": "SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (pair(a => i.v), one(a => i.v)) WITH ORDINALITY AS f(a,b,n) ORDER BY i.id,n",
+      "id": "named correlated arguments"
+    },
+    {
+      "sql": "SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (table_values(i.v), one(i.v)) WITH ORDINALITY AS f(a,label,b,n) ORDER BY i.id,n",
+      "id": "multi-column PLpgSQL member and NULL padding"
+    },
+    {
+      "sql": "SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (record_values(i.v) AS (a integer, label text), one(i.v)) WITH ORDINALITY AS f ORDER BY i.id,ordinality",
+      "id": "explicit record layout remains live"
+    },
+    {
+      "sql": "SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (unnest(ARRAY[i.v,i.v+1]), generate_series(1,i.id%3)) WITH ORDINALITY AS f(a,b,n) ORDER BY i.id,n",
+      "id": "streaming builtins share prepared arguments"
+    },
+    {
+      "sql": "SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (unnest(enum_range(NULL::color)), generate_series(1,i.id%3)) WITH ORDINALITY AS f(a,b,n) ORDER BY i.id,n",
+      "id": "enum argument retains selected type"
+    },
+    {
+      "sql": "WITH extra AS (SELECT 7 AS bonus) SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (pair((SELECT i.v+bonus FROM extra)), one(i.v)) WITH ORDINALITY AS f(a,b,n) ORDER BY i.id,n",
+      "id": "nested CTE argument observes current outer row"
+    },
+    {
+      "sql": "SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (pair(i.v), one(i.v)) WITH ORDINALITY AS f(same,same,n) ORDER BY i.id,n",
+      "id": "duplicate public names preserve positional values"
+    },
+    {
+      "sql": "SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (pair(i.v), one(i.v)) WITH ORDINALITY AS f(a,b,n) WHERE f.a>2 ORDER BY i.id,n",
+      "id": "qualified filters still apply after preparation"
+    },
+    {
+      "sql": "SELECT setval('body_calls',1,false),setval('argument_calls',1,false),setval('default_calls',1,false)"
+    },
+    {
+      "sql": "SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (marked(argument(i.v)), defaulted(i.v)) WITH ORDINALITY AS f(a,b,n) ORDER BY i.id,n",
+      "id": "arguments defaults and bodies run for each current row"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM body_calls"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM argument_calls"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM default_calls"
+    },
+    {
+      "sql": "SELECT setval('body_calls',1,false),setval('argument_calls',1,false)"
+    },
+    {
+      "sql": "SELECT f.* FROM inputs i CROSS JOIN ROWS FROM (marked(argument(i.v)), one(i.v)) AS f LIMIT 0",
+      "id": "limit zero keeps argument and body effects lazy"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM body_calls"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM argument_calls"
+    },
+    {
+      "sql": "SELECT setval('body_calls',1,false),setval('argument_calls',1,false)"
+    },
+    {
+      "sql": "SELECT f.* FROM inputs i CROSS JOIN ROWS FROM (marked(argument(i.v)), one(i.v)) AS f WHERE false",
+      "id": "statically removed group keeps argument and body effects lazy"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM body_calls"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM argument_calls"
+    },
+    {
+      "sql": "SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (checked(i.v), one(i.v)) WITH ORDINALITY AS f(a,b,n) ORDER BY i.id,n",
+      "id": "live domain argument conversion"
+    },
+    {
+      "sql": "SELECT f.* FROM (VALUES (1),(-1)) i(v) CROSS JOIN ROWS FROM (checked(i.v), one(i.v)) AS f",
+      "id": "later outer row domain error remains live"
+    },
+    {
+      "sql": "PREPARE grouped AS SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (pair(i.v), one(i.v)) WITH ORDINALITY AS f(a,b,n) ORDER BY i.id,n"
+    },
+    {
+      "sql": "EXECUTE grouped"
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION pair(a integer) RETURNS SETOF integer LANGUAGE SQL VOLATILE AS 'SELECT a+100 WHERE a IS NOT NULL'"
+    },
+    {
+      "sql": "EXECUTE grouped",
+      "id": "prepared query sees replaced routine"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION pair(a integer) RETURNS SETOF integer LANGUAGE SQL VOLATILE AS 'SELECT a+1000 WHERE a IS NOT NULL'"
+    },
+    {
+      "sql": "EXECUTE grouped",
+      "id": "prepared query sees transactional routine"
+    },
+    {
+      "sql": "ROLLBACK"
+    },
+    {
+      "sql": "EXECUTE grouped",
+      "id": "rollback restores routine selection"
+    },
+    {
+      "sql": "DEALLOCATE grouped"
+    },
+    {
+      "sql": "CREATE ROLE uqa_correlated_reader"
+    },
+    {
+      "sql": "GRANT USAGE ON SCHEMA uqa_correlated_sources TO uqa_correlated_reader"
+    },
+    {
+      "sql": "GRANT SELECT ON inputs TO uqa_correlated_reader"
+    },
+    {
+      "sql": "REVOKE EXECUTE ON FUNCTION one(integer) FROM PUBLIC"
+    },
+    {
+      "sql": "SELECT setval('body_calls',1,false)"
+    },
+    {
+      "sql": "SET ROLE uqa_correlated_reader"
+    },
+    {
+      "sql": "SELECT f.* FROM inputs i CROSS JOIN ROWS FROM (marked(i.v), one(i.v)) AS f",
+      "id": "later member permission fails before earlier body effects"
+    },
+    {
+      "sql": "SELECT f.* FROM inputs i CROSS JOIN ROWS FROM (marked(i.v), one(i.v)) AS f LIMIT 0",
+      "id": "unfetched surviving group checks every member"
+    },
+    {
+      "sql": "SELECT f.* FROM inputs i CROSS JOIN ROWS FROM (marked(i.v), one(i.v)) AS f WHERE false",
+      "id": "removed group preserves planner initialization rules"
+    },
+    {
+      "sql": "RESET ROLE"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM body_calls"
+    },
+    {
+      "sql": "GRANT EXECUTE ON FUNCTION one(integer) TO PUBLIC"
+    },
+    {
+      "sql": "REVOKE SELECT ON inputs FROM uqa_correlated_reader"
+    },
+    {
+      "sql": "REVOKE USAGE ON SCHEMA uqa_correlated_sources FROM uqa_correlated_reader"
+    },
+    {
+      "sql": "DROP ROLE uqa_correlated_reader"
+    },
+    {
+      "sql": "CREATE VIEW retained_groups AS SELECT i.id, f.* FROM inputs i CROSS JOIN ROWS FROM (pair(i.v), one(i.v)) WITH ORDINALITY AS f(a,b,n) ORDER BY i.id,n"
+    },
+    {
+      "sql": "CREATE TABLE saved_groups AS SELECT * FROM retained_groups"
+    },
+    {
+      "sql": "SET search_path = uqa_correlated_sources, pg_catalog",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM retained_groups ORDER BY id,n",
+      "id": "stored correlated group after provider reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM saved_groups ORDER BY id,n",
+      "id": "stored group values after provider reopen",
+      "reopen": true
+    },
+    {
+      "sql": "DROP SCHEMA uqa_correlated_sources CASCADE",
+      "final_cleanup": true
+    }
+  ]
+}

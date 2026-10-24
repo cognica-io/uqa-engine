@@ -11,12 +11,12 @@ use crate::catalog::collations::{derivation::Derivation, expression::scalar_clau
 use crate::ir::ResultCollation;
 
 #[derive(Default)]
-pub(super) struct CollationResults {
+pub(super) struct SelectedResults {
     pub(super) enabled: bool,
     selected: BTreeMap<NonNull<ScalarExpr>, (ColumnType, ResultCollation)>,
 }
 
-impl CollationResults {
+impl SelectedResults {
     pub(super) fn is_empty(&self) -> bool {
         self.selected.is_empty()
     }
@@ -44,7 +44,18 @@ impl CollationResults {
         let Some(ty) = value.ty.as_ref() else {
             return Ok(());
         };
-        if !crate::schema::composites::type_is_collatable(ty)
+        // Arithmetic result types can differ from both inputs. Keep the analyzed selection when planning discards a NULL operand and the other input's row scope.
+        let arithmetic = matches!(
+            expression,
+            ScalarExpr::Binary {
+                op: crate::ast::BinaryOp::Add
+                    | crate::ast::BinaryOp::Subtract
+                    | crate::ast::BinaryOp::Multiply
+                    | crate::ast::BinaryOp::Divide,
+                ..
+            }
+        );
+        if (!arithmetic && !crate::schema::composites::type_is_collatable(ty))
             || (matches!(
                 expression,
                 ScalarExpr::Literal(_)

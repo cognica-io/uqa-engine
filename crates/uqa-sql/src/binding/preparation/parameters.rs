@@ -13,6 +13,7 @@ use uqa_core::Value;
 
 mod call_collations;
 mod collations;
+mod grouping;
 mod results;
 pub(super) use call_collations::CallCollations;
 
@@ -174,7 +175,7 @@ pub(super) struct InputConstants(
     BTreeMap<NonNull<ScalarExpr>, crate::ast::FunctionBinding>,
     BTreeMap<NonNull<ScalarExpr>, super::membership::MembershipAnalysis>,
     collations::CollationInputs,
-    results::CollationResults,
+    results::SelectedResults,
     BTreeMap<NonNull<ScalarExpr>, ColumnType>,
     /// Each analyzed call's input collation, recorded on the binding the call keeps.
     BTreeMap<NonNull<ScalarExpr>, Option<crate::catalog::collations::CollationSelection>>,
@@ -187,6 +188,7 @@ type RowExpansions = BTreeMap<NonNull<ScalarExpr>, Vec<(usize, Vec<ScalarExpr>)>
 
 #[derive(Default)]
 struct QuerySchemas {
+    groupings: grouping::GroupingInputs,
     outputs: BTreeMap<NonNull<crate::plan::QueryPlan>, crate::RowSchema>,
     sources: BTreeMap<NonNull<crate::plan::SourcePlan>, crate::RowSchema>,
 }
@@ -295,13 +297,20 @@ impl InputConstants {
 
     #[cfg(test)]
     pub(super) fn apply_expression(self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
-        self.apply_expression_with_subqueries(expression, &mut Vec::new())
+        self.apply_expression_with_subqueries(
+            expression,
+            &mut Vec::new(),
+            &super::tests::NoRoutines,
+            &[],
+        )
     }
 
     pub(super) fn apply_expression_with_subqueries(
         mut self,
         expression: &mut ScalarExpr,
         subqueries: &mut Vec<crate::plan::QueryPlan>,
+        routines: &dyn super::RoutineResolution,
+        params: &[SQLParam],
     ) -> Result<(), SQLError> {
         for query in subqueries.iter_mut() {
             query.visit_queries_mut(&mut |query| self.apply_query(query));
@@ -318,6 +327,9 @@ impl InputConstants {
             query.rewrite_scalar_expressions(&mut apply);
         }
         result?;
+        for query in subqueries.iter_mut() {
+            self.8.groupings.apply_query(query, routines, params)?;
+        }
         if !self.2.is_empty() {
             crate::plan::subqueries::rewrite_expression_with_arena(
                 expression,
@@ -334,7 +346,12 @@ impl InputConstants {
         }
     }
 
-    pub(super) fn apply(mut self, plan: &mut UnifiedPlan) -> Result<(), SQLError> {
+    pub(super) fn apply(
+        mut self,
+        plan: &mut UnifiedPlan,
+        routines: &dyn super::RoutineResolution,
+        params: &[SQLParam],
+    ) -> Result<(), SQLError> {
         plan.visit_queries_mut(&mut |query| self.apply_query(query));
         // Source selections are consumed before expression rewrites can move their enclosing nodes.
         plan.visit_sources_mut(&mut |source| self.apply_source(source));
@@ -346,6 +363,7 @@ impl InputConstants {
             }
         });
         result?;
+        self.8.groupings.apply_plan(plan, routines, params)?;
         if !self.2.is_empty() {
             crate::plan::subqueries::rewrite_with_arenas(plan, &mut |node, arena| {
                 self.apply_membership(node, arena)
@@ -371,6 +389,7 @@ impl InputConstants {
             && self.7.is_empty()
             && self.8.outputs.is_empty()
             && self.8.sources.is_empty()
+            && self.8.groupings.is_empty()
             && self.9.is_empty()
     }
 
@@ -434,9 +453,15 @@ impl<'a> ParameterTypes<'a> {
         self
     }
 
-    pub(super) fn apply_query_schemas(self, query: &mut crate::plan::QueryPlan) {
+    pub(super) fn apply_query_schemas(
+        self,
+        query: &mut crate::plan::QueryPlan,
+        routines: &dyn super::RoutineResolution,
+        params: &[SQLParam],
+    ) -> Result<(), SQLError> {
         let mut schemas = self.query_schemas.unwrap_or_default();
         query.visit_queries_mut(&mut |query| schemas.apply_query(query));
+        schemas.groupings.apply_query(query, routines, params)
     }
 
     fn query_schemas(&self) -> Option<&QuerySchemas> {
@@ -541,14 +566,14 @@ impl<'a> ParameterTypes<'a> {
         }
     }
 
-    pub(super) fn retain_result_collations(mut self) -> Self {
+    pub(super) fn retain_result_metadata(mut self) -> Self {
         if let Some(constants) = &mut self.input_constants {
             constants.4.enabled = true;
         }
         self
     }
 
-    pub(super) fn retain_result_collation(
+    pub(super) fn retain_result_metadata_for(
         &mut self,
         expression: &ScalarExpr,
         value: &ExpressionType,
@@ -647,6 +672,9 @@ impl<'a> ParameterTypes<'a> {
                 selected.dispatch,
                 Some(crate::ast::FunctionDispatch::ArraySlicesWithBounds(_))
             )
+            || selected
+                .dispatch
+                .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
         {
             if let Some(constants) = &mut self.input_constants {
                 constants

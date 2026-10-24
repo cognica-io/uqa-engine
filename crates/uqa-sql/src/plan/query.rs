@@ -98,6 +98,7 @@ impl QueryPlan {
         let mut plan = Self {
             analyzed_output: None,
             analyzed_source: None,
+            analyzed_grouping: None,
             relations_bound: false,
             ctes,
             root,
@@ -272,6 +273,7 @@ pub(super) fn lower_relational_root(
         QueryPlan {
             analyzed_output: None,
             analyzed_source: None,
+            analyzed_grouping: None,
             relations_bound: false,
             ctes: Vec::new(),
             root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan::lower_with(

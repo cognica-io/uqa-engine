@@ -306,6 +306,7 @@ fn joined_catalog_query() -> QueryPlan {
     QueryPlan {
         analyzed_output: None,
         analyzed_source: None,
+        analyzed_grouping: None,
         relations_bound: false,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {

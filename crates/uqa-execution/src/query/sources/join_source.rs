@@ -258,6 +258,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     },
                     routine_descriptions: RoutineCallDescriptions::default(),
                     expression_runtime: std::sync::OnceLock::new(),
+                    function_group: super::function_source::PreparedFunctionGroup::default(),
                     params,
                     ctes: ctes.clone(),
                     input_schema,

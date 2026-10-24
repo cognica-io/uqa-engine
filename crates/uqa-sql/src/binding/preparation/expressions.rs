@@ -6,6 +6,7 @@
 
 //! Scalar coercion contexts used while preparing a statement.
 
+use super::function_calls::FunctionResult;
 use super::{
     error, ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr,
 };
@@ -77,7 +78,7 @@ impl Preparation<'_> {
             .collations
             .record(expression, value.derivation);
         self.parameters
-            .retain_result_collation(expression, &value)?;
+            .retain_result_metadata_for(expression, &value)?;
         Ok(value)
     }
 
@@ -477,20 +478,23 @@ impl Preparation<'_> {
         let mut selected = selected.overload;
         self.keep_call_selection(expression, &arguments, input_collation, selected.as_mut());
         // Keep the result selected from the observed occurrences: a later sibling can determine a parameter's type after an earlier COLLATE operand was admitted as unknown, so retyping that syntax loses its state.
-        let ty = match (result, &selected) {
-            (super::function_calls::FunctionResult::Selected(ty), _) => ty,
-            (_, Some(selected)) => Some(selected.return_type.clone()),
-            (super::function_calls::FunctionResult::Unselected, None) => {
-                self.observed_call_type(expression, &arguments, &additional, input, subqueries)?
-            }
+        let (ty, dispatched) = match (result, &selected) {
+            (FunctionResult::Bound(ty, binding), _) => (Some(ty), Some(binding)),
+            (FunctionResult::Selected(ty), _) => (ty, None),
+            (_, Some(selected)) => (Some(selected.return_type.clone()), None),
+            (FunctionResult::Unselected, None) => (
+                self.observed_call_type(expression, &arguments, &additional, input, subqueries)?,
+                None,
+            ),
         };
-        if let Some(selected) = &selected {
-            self.parameters.retain_call(expression, &selected.binding);
-        }
-        let selected_binding = selected
+        let retained_binding = selected
             .as_ref()
             .map(|selected| &selected.binding)
-            .or(binding);
+            .or(dispatched.as_deref());
+        if let Some(retained) = retained_binding {
+            self.parameters.retain_call(expression, retained);
+        }
+        let selected_binding = retained_binding.or(binding);
         self.check_schema_function(expression, selected_binding, input)?;
         self.check_set_inputs(name, selected_binding, calls)?;
         self.place_set_call(name, selected_binding, calls)?;

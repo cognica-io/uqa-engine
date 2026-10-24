@@ -33,6 +33,7 @@ pub(super) fn aggregate_sorted_input(
 
     phase_budget: usize,
     relaxed: bool,
+    outer: Option<&super::AggregateOuterRow>,
 ) -> Result<SpillBuffer, SQLError> {
     let scan: Box<dyn PhysicalOperator + '_> =
         Box::new(SpillScan::new(input_schema.clone(), input));
@@ -86,6 +87,7 @@ pub(super) fn aggregate_sorted_input(
         relaxed,
         input_schema,
         params,
+        outer,
     )?;
     let templates =
         aggregate_accumulator_templates(context, &aggregate_targets, input_schema, params)?;

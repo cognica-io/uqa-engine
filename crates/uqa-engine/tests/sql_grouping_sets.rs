@@ -9,6 +9,8 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_grouping_sets/identity.rs"]
+mod identity;
 #[path = "sql_grouping_sets/literals.rs"]
 mod literals;
 #[path = "sql_grouping_sets/names.rs"]

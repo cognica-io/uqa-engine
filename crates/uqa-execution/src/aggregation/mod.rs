@@ -49,6 +49,7 @@ pub use distinct::*;
 pub use executor::PhysicalAggregateExecutor;
 pub use finalize::*;
 pub use ordering::compare_extrema;
+pub(crate) use output::outer::AggregateOuterRow;
 pub use registered_buffer::*;
 pub use rewrite::*;
 pub use template::AggregateAccumulatorTemplate;
