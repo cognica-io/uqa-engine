@@ -33,6 +33,7 @@ typedef struct uqa_notice_t *uqa_notice;
 
 typedef int32_t uqa_status;
 typedef uint32_t uqa_type_kind;
+typedef uint32_t uqa_notice_level;
 
 typedef uqa_status (UQA_CALL *uqa_user_data_destroy_fn)(void *user_data);
 
@@ -81,6 +82,12 @@ typedef struct uqa_bytes_view {
 #define UQA_RESULT_COMMAND UINT32_C(0)
 #define UQA_RESULT_ROWS UINT32_C(1)
 #define UQA_RESULT_UNKNOWN UINT32_C(2)
+
+#define UQA_NOTICE_LEVEL_DEBUG UINT32_C(0)
+#define UQA_NOTICE_LEVEL_LOG UINT32_C(1)
+#define UQA_NOTICE_LEVEL_INFO UINT32_C(2)
+#define UQA_NOTICE_LEVEL_NOTICE UINT32_C(3)
+#define UQA_NOTICE_LEVEL_WARNING UINT32_C(4)
 
 #define UQA_TYPE_UNKNOWN UINT32_C(0)
 #define UQA_TYPE_BOOL UINT32_C(1)
@@ -415,6 +422,16 @@ UQA_API uqa_status UQA_CALL uqa_notification_destroy(uqa_notification *notificat
 UQA_API uqa_status UQA_CALL uqa_notice_create(
     uqa_engine engine, uqa_notice *out);
 UQA_API uqa_status UQA_CALL uqa_notice_destroy(uqa_notice *notice);
+UQA_API uqa_status UQA_CALL uqa_notice_get_level(
+    uqa_notice notice, uqa_notice_level *out);
+UQA_API uqa_status UQA_CALL uqa_notice_get_sqlstate(
+    uqa_notice notice, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_notice_get_message(
+    uqa_notice notice, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_notice_get_detail(
+    uqa_notice notice, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_notice_get_hint(
+    uqa_notice notice, uqa_string_view *out);
 
 #ifdef __cplusplus
 }

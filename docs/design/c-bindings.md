@@ -688,9 +688,26 @@ UQA_API uqa_status UQA_CALL uqa_subscription_wait(
 UQA_API uqa_status UQA_CALL uqa_subscription_close(uqa_subscription *subscription);
 UQA_API uqa_status UQA_CALL uqa_notification_destroy(uqa_notification *notification);
 
+typedef uint32_t uqa_notice_level;
+#define UQA_NOTICE_LEVEL_DEBUG UINT32_C(0)
+#define UQA_NOTICE_LEVEL_LOG UINT32_C(1)
+#define UQA_NOTICE_LEVEL_INFO UINT32_C(2)
+#define UQA_NOTICE_LEVEL_NOTICE UINT32_C(3)
+#define UQA_NOTICE_LEVEL_WARNING UINT32_C(4)
+
 UQA_API uqa_status UQA_CALL uqa_notice_create(
     uqa_engine engine, uqa_notice *out);
 UQA_API uqa_status UQA_CALL uqa_notice_destroy(uqa_notice *notice);
+UQA_API uqa_status UQA_CALL uqa_notice_get_level(
+    uqa_notice notice, uqa_notice_level *out);
+UQA_API uqa_status UQA_CALL uqa_notice_get_sqlstate(
+    uqa_notice notice, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_notice_get_message(
+    uqa_notice notice, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_notice_get_detail(
+    uqa_notice notice, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_notice_get_hint(
+    uqa_notice notice, uqa_string_view *out);
 ```
 
 All five subscription limits are required and positive. Validate duplicate/empty/NUL-containing channels and the native UTF-8 byte limit before registration. Return success only when all requested channels are ready. Preserve the original memory database or persistent provider, encryption, selected role, and shared admission limits through the native subscription owner.
@@ -703,7 +720,7 @@ Serialize consumers of one subscription. `uqa_subscription_close` takes the hand
 
 SQL LISTEN/UNLISTEN remains distinct from independent subscriptions. Provide a separately named session-notification drain over bounded `configure_sql_notifications`/`try_take_sql_notifications`; configure its limits before LISTEN. It preserves transaction-deferred delivery and native terminal errors. Never silently reroute SQL LISTEN to an independent listener. SQL notices likewise preserve level, SQLSTATE, message, detail, and hint in emission order; they are not log records.
 
-`uqa_notice_create` creates an owned handle from the next queued SQL notice. It returns `UQA_OK` with that handle, or `UQA_DONE` with NULL output when the queue is empty. Complete allocation/admission before removing the notice so a failed create leaves the queue unchanged. The caller releases the handle with `uqa_notice_destroy`, which clears the handle slot and returns `UQA_OK` for a NULL handle. Extend the native notice owner for bounded dequeue/admission as needed rather than repeatedly copying the complete native notice vector into a second C queue.
+`uqa_notice_create` creates an owned handle from the next queued SQL notice. It returns `UQA_OK` with that handle, or `UQA_DONE` with NULL output when the queue is empty. Complete allocation/admission before removing the notice so a failed create leaves the queue unchanged. Move the original notice and admit its owned string capacities against the originating session's FFI allowance; preserve emission order and the native emission-time `client_min_messages` filter. The caller releases the handle with `uqa_notice_destroy`, which clears the handle slot and returns `UQA_OK` for a NULL handle. The notice and its allowance reservation can outlive the Engine without retaining its database resources. Extend the native notice owner for bounded dequeue/admission as needed rather than repeatedly copying the complete native notice vector into a second C queue.
 
 Read-only notice accessors are `uqa_notice_get_level`, `uqa_notice_get_sqlstate`, `uqa_notice_get_message`, `uqa_notice_get_detail`, and `uqa_notice_get_hint`. String outputs borrow the notice's storage until `uqa_notice_destroy`; absent optional fields return `UQA_DONE` with empty outputs. Inspecting a notice does not dequeue another notice.
 

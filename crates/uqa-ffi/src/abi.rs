@@ -45,6 +45,12 @@ pub const UQA_RESULT_COMMAND: u32 = 0;
 pub const UQA_RESULT_ROWS: u32 = 1;
 pub const UQA_RESULT_UNKNOWN: u32 = 2;
 
+pub const UQA_NOTICE_LEVEL_DEBUG: u32 = 0;
+pub const UQA_NOTICE_LEVEL_LOG: u32 = 1;
+pub const UQA_NOTICE_LEVEL_INFO: u32 = 2;
+pub const UQA_NOTICE_LEVEL_NOTICE: u32 = 3;
+pub const UQA_NOTICE_LEVEL_WARNING: u32 = 4;
+
 pub const UQA_TYPE_UNKNOWN: u32 = 0;
 pub const UQA_TYPE_BOOL: u32 = 1;
 pub const UQA_TYPE_INT16: u32 = 2;

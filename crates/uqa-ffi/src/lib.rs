@@ -14,6 +14,7 @@ mod cursor;
 mod error;
 mod execute;
 mod library;
+mod notice;
 mod result;
 mod session;
 mod types;
@@ -29,6 +30,7 @@ pub use error::{
 };
 pub use execute::*;
 pub use library::*;
+pub use notice::*;
 pub use result::*;
 pub use session::*;
 pub use types::*;
