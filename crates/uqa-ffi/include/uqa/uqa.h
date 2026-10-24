@@ -320,6 +320,18 @@ UQA_API uqa_status UQA_CALL uqa_type_get_element_type(uqa_type type, uqa_type *o
 /* Constructors copy inputs and preserve their SQL type, including integer and
  * floating widths. NULL from create_null has no declared type. */
 UQA_API uqa_status UQA_CALL uqa_value_create_null(uqa_value *out);
+/* Catalog-aware constructors execute native type input in the Engine's
+ * statement/transaction scope and retain the session until value destruction.
+ * Type names include native SQL modifiers; NULL input still checks domains. */
+UQA_API uqa_status UQA_CALL uqa_value_create_typed_null(
+    uqa_engine engine, const char *type_name, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_typed_null_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_from_text(
+    uqa_engine engine, const char *type_name, const char *text, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_from_text_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size,
+    const char *text, size_t text_size, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int16(int16_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int32(int32_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int64(int64_t value, uqa_value *out);

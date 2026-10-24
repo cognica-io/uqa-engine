@@ -506,6 +506,15 @@ Type families include BOOL, INT16/32/64, FLOAT32/64, TEXT/CHAR/VARCHAR, BYTEA, N
 
 ```c
 UQA_API uqa_status UQA_CALL uqa_value_create_null(uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_typed_null(
+    uqa_engine engine, const char *type_name, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_typed_null_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_from_text(
+    uqa_engine engine, const char *type_name, const char *text, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_from_text_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size,
+    const char *text, size_t text_size, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int16(int16_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int32(int32_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int64(int64_t value, uqa_value *out);
@@ -557,6 +566,10 @@ UQA_API uqa_status UQA_CALL uqa_buffer_get_bytes(uqa_buffer buffer, uqa_bytes_vi
 Owned values and borrowed value views are immutable after construction. Scalar constructors retain their explicit SQL type through `SQLParam::TypedScalar`, so INT16/32/64 select their own SQL overloads and overflow rules, FLOAT32 remains REAL, and TEXT remains a typed text parameter. Typed getters do not hide conversions: INT16 widens to int32/int64, INT32 widens to int64, and FLOAT32 widens to double; wider declared types cannot use narrower getters even when a particular value would fit. FLOAT, NUMERIC, and TEXT are not implicitly converted to integers. SQL casts use the SQL owner. A typed getter on NULL returns `UQA_ERROR_NULL`; an incompatible getter returns `UQA_ERROR_TYPE`; index or representation bounds return `UQA_ERROR_RANGE`. `uqa_value_get_is_null` inspects nullness without reading a typed payload and returns `UQA_OK` with a 0/1 output. Native decoding failures retain SQL diagnostics.
 
 `uqa_value_get_type` returns a descriptor borrowed from the value and with the same lifetime. `uqa_value_create_null` creates an untyped NULL, whose type getter returns `UQA_DONE` with a NULL descriptor. Copying a typed result NULL preserves its existing descriptor without reading a payload. Owned vector parameters retain their dimension descriptor; vector input passes through SQL's `SQLParam::vector_with_control`, which validates the positive 32-bit dimension and finite float32 elements before retaining the copied input.
+
+`uqa_value_create_typed_null` resolves a native SQL type declaration, including modifiers, and validates NULL against that type. `uqa_value_create_from_text` reads UTF-8 text using the same explicit conversion as an unknown SQL input cast to that declaration. Both have `_n` variants; a NULL text pointer is invalid and does not represent SQL NULL. The SQL owner resolves catalog identities and applies input conversion, array bounds, enum labels, composite input, range canonicalization and inherited domain constraints. Type USAGE applies to object declarations and does not add an authorization requirement to these value casts. Session settings and the native input functions' own privileges still apply.
+
+These contextual constructors execute within Engine's existing statement/catalog/transaction scope because domain checks and input functions can invoke routines with effects. Successful input runs once; reusing an admitted typed parameter does not rerun its input checks. Input failure rolls back an implicit statement or aborts the active transaction frame, with ordinary savepoint recovery. FFI allocates its return handle before input begins and only transfers the produced value after native completion, so publishing a successful value introduces no further fallible allocation. Every contextual value retains its creating session and production allowance until destruction, including built-in values created this way; built-in parameters remain portable to other sessions. Contextual constructors use normal Engine admission and callback reentry rules.
 
 `uqa_value_create_numeric`, `uqa_value_create_json` and `uqa_value_create_jsonb`, together with their `_n` forms, run the owning SQL input conversion and preserve its diagnostics. Their matching getters return immutable borrowed text. NUMERIC output never passes through floating point and retains display scale; `uqa_value_get_numeric_scale` returns that nonnegative display scale, or `UQA_DONE` for NaN and infinities. The descriptor's `uqa_type_get_numeric_precision` and `uqa_type_get_numeric_scale` expose optional declared modifiers instead, including negative declared scales. A NUMERIC text view is cached under the value's original allowance; failed formatting publishes no view, preserves the native value and other retained objects, and permits another observation after memory is released. JSON keeps source whitespace and duplicate keys; JSONB uses SQL's normalized representation. The JSON and JSONB getters reject each other's type, and neither is an ordinary TEXT getter.
 

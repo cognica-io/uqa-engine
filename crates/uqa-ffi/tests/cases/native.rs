@@ -46,6 +46,8 @@ native_clients!(statements, "statements.c");
 native_clients!(storage, "storage.c");
 #[cfg(unix)]
 native_clients!(values, "values.c");
+#[cfg(unix)]
+native_clients!(typed_values, "typed_values.c");
 
 #[cfg(unix)]
 fn native_client(fixture: &str, backend: &str) {

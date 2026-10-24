@@ -28,6 +28,8 @@ use crate::{
 
 mod scalars;
 pub use scalars::*;
+mod input;
+pub use input::*;
 
 enum ValueSource {
     Owned(Produced<SQLParam>),
