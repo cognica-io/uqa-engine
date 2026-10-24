@@ -18,20 +18,75 @@ The Cargo target is `uqa_ffi` because the workspace already contains the Rust fa
 
 ## Live delivery checklist
 
-- [ ] Public headers, fixed numeric codes, C layouts, export/import modes, panic boundary, borrowed diagnostics, and checked allocation. Headers, status/type/state constants, diagnostics, and pointer helpers are implemented. Actual C11/C++17 shared-library clients pass for the implemented subset; full symbol, platform, panic and allocation qualification remains. Every new `.c` and `.h` file uses the maintainer-specified copyright block, including its separating star-only line.
-- [ ] Configuration getters/setters, persistent/memory open, sibling sessions, close/lease rules, callback guard, and cancellation. Basic constructors, admission guards, source leases, native cleanup, transaction state and cancellation are implemented. The COPY callback guard rejects Engine reentry on its thread, including other sessions and constructors, while value helpers reuse the invoking scope and unrelated threads retain ordinary admission. Persistent/session, allowance and callback-thread tests pass; UDF/logging integration, encrypted/compressed qualification and complete failure qualification remain.
-- [ ] Native multi-statement SQL, empty messages, atomic request batches, completion facts, and transaction/savepoint operations. Direct and batch paths call the whole native SQL message and preallocate publication carriers; C/C++ tests cover final results, empty input, explicit commit segments, atomic rollback and failing request indices. Native-confirmed completion facts beyond pending/in-transaction states remain to be extended; idle state alone reports UNKNOWN.
-- [ ] Positional results, duplicate labels, empty descriptors, exact scalar/nested values, immutable borrowed views, live catalog observation, and FFI retention accounting. Native rows, lazy borrowed cell wrappers, basic scalar constructors/getters, descriptor identity, owned copies and bounded SQL text buffers are implemented. Cross-database catalog values are rejected through SQL-owned type dependency inspection and Engine's existing provider identity; primitive scalars remain portable. Complete scalar/nested families, live sibling type validation and retained composite qualification remain.
-- [ ] Native prepared identity, parameter/result metadata, binding, execution, invalidation, and finalize. Extend owning interfaces rather than reconstructing SQL PREPARE/EXECUTE strings.
-- [ ] Bounded cursors, reusable destinations, retained batches, terminal failures, and spill cleanup. Native cursor open forms, immutable descriptors, shared native batch slices, reusable destinations and retained terminal diagnostics are implemented. C11/C++17 clients verify duplicate labels, empty descriptors, result lifetimes, cancellation, retention limits and actual spill release on exhaustion, cancellation and early close. Concurrent fetch and pre-/post-evaluation admission tests pass. Platform, sanitizer and injected native I/O/panic qualification remain.
-- [ ] COPY callbacks, partial transfers, flush-before-commit behavior, cancellation, and original diagnostics. Native COPY read/write/optional-flush adapters and explicit-length SQL forms are implemented. Invocation-owned failures survive helper calls and cleanup; borrowed cause inspection preserves the original callback status/message beneath native SQL diagnostics. C11/C++17 clients verify partial I/O, protocol rejection, pre-SQL admission, bounded diagnostic fallback, cancellation at data/EOF/flush boundaries, reentry restrictions and rollback after emitted bytes. Native input reading now checks cancellation between reads. Cross-platform/static/sanitizer and injected completion-failure qualification remain.
-- [ ] Bounded independent subscriptions, SQL notification draining, notice creation, exact sequences, terminal errors, and completed close. Notice create/destroy and all fields, independent subscription open/poll/wait/close, reusable notification getters and bounded SQL-session configuration/poll are implemented. Native owners admit one transfer before dequeue, preserving the original payload and sequence on allocation rejection. C retains content-free terminal kind/code separately from private detail; close wakes an admitted receiver and joins native cleanup. C/C++ and native tests cover transaction deferral, savepoint rollback, deduplication, allowance rejection/retry, retained failures, exact sequences and owned lifetimes; Rust ABI tests cover concurrent close and retained persistent-provider delivery. Platform, static/sanitizer and complete injected failure/cleanup qualification remain.
-- [ ] Scalar/table/aggregate registration, shared lifetime retirement, exactly-once cleanup, callback result access, fallible aggregate creation, and explicit fallible scan/state finalization.
-- [ ] Config/runtime log getters/setters, shared observer attribution, callback status, ownership, and retirement failures.
-- [ ] Optional Arrow conversion in its owner, explicit lossless/text policies, descriptors, independent releases, feature stubs, and feature combinations.
-- [ ] Native packaging metadata, CMake/pkg-config shared/static consumers, symbol inventory, platform CI, license inventory, and release workflow integration. The current Cargo Mach-O artifact exports 129 declared functions and 17 internal regex callbacks; 30 of the 159 declared functions and additional prose-specified value APIs remain unimplemented. Final native linkage must restrict exports to the complete installed declarations. A direct Mach-O unexport flag cannot be combined with rustc's exported-symbol list, so linker/package integration is required; the current artifact is not distribution-qualified.
-- [ ] Five C examples, example matrix and manual updates, actual shared/static C/C++ ABI tests, focused owner tests, sanitizers, and ownership/dependency checks.
-- [ ] Logical commits, draft PR/task records and repository labels, review corrections, final-source automatic Linux/macOS regression and affected FDW results, and verified delivery. Draft PR #1266 tracks the full scope with `enhancement`, `area: bindings` and `area: sql` labels; its head, labels, design/plan links and all fourteen live scope items have been read back. Final review, qualification, merge and delivery remain pending.
+Completed checks below cover the stated implementation and local evidence at the recorded product source. Remaining implementation, platform qualification and delivery stay explicit within the same fourteen original scopes.
+
+**1. Public headers, fixed numeric codes, C layouts, export/import modes, panic boundary, borrowed diagnostics, and checked allocation**
+
+- [x] Implement the current public headers, fixed status/type/state codes, opaque handles, export/calling-convention macros, panic boundary, borrowed diagnostics and checked pointer/allocation helpers. C11/C++17 header checks pass in all three linkage modes; all ten C/header files have the exact required copyright block.
+- [ ] Finish declarations for the remaining API families and qualify the complete symbol/layout surface, platform ABIs and injected panic/allocation failures.
+
+**2. Configuration getters/setters, persistent/memory open, sibling sessions, close/lease rules, callback guard, and cancellation**
+
+- [x] Implement configuration getters/setters, memory/persistent open, sibling sessions, close leases, native cleanup, transaction state and cancellation. Persistent/session lifetime and allowance tests pass.
+- [x] Implement the COPY callback guard: reject Engine reentry on the invoking thread, including other sessions and constructors; permit same-scope value helpers and ordinary execution on unrelated threads. Rust/C/C++ callback tests pass.
+- [ ] Integrate UDF/logging callback lifetimes and qualify encryption, compression and the remaining constructor/cleanup failure paths.
+
+**3. Native multi-statement SQL, empty messages, atomic request batches, completion facts, and transaction/savepoint operations**
+
+- [x] Implement whole multi-statement/empty SQL messages, native atomic request batches, transaction/savepoint operations and publication admission before SQL. C/C++ tests pass for final results, explicit commit segments, atomic rollback and failing request indices.
+- [ ] Expose additional native-confirmed completion facts. Pending/in-transaction states are reported; idle state alone still reports UNKNOWN.
+
+**4. Positional results, duplicate labels, empty descriptors, exact scalar/nested values, immutable borrowed views, live catalog observation, and FFI retention accounting**
+
+- [x] Implement positional native results, duplicate labels, empty descriptors, lazy immutable cell views, basic scalar constructors/getters, owned copies, bounded SQL formatting and FFI retention accounting. C/C++ and Rust tests pass, including rejection of catalog values from a different database.
+- [ ] Complete every scalar/nested family, structural/type metadata accessor, typed NULL and constructor, live sibling type validation and retained composite qualification.
+
+**5. Native prepared identity, parameter/result metadata, binding, execution, invalidation, and finalize**
+
+- [ ] Implement native prepared identity/generation, explicit and inferred parameter/result metadata, binding and clearing, custom/generic execution, invalidation and finalize. Reuse owning interfaces without reconstructing SQL PREPARE/EXECUTE strings.
+
+**6. Bounded cursors, reusable destinations, retained batches, terminal failures, and spill cleanup**
+
+- [x] Implement native cursor open forms, immutable descriptors, shared retained batch slices, reusable destinations, terminal diagnostics and close. C/C++ and concurrent Rust ABI tests pass for empty/duplicate descriptors, result lifetimes, cancellation, allowance rejection, admission ordering and actual spill release.
+- [ ] Qualify cursor platform/static/sanitizer behavior and injected native I/O/panic cleanup failures.
+
+**7. COPY callbacks, partial transfers, flush-before-commit behavior, cancellation, and original diagnostics**
+
+- [x] Implement COPY read/write/optional-flush callbacks and explicit-length SQL forms, retained original causes and native input cancellation between reads. C/C++ and owner tests pass for partial I/O, invalid callback protocols, first-failure retention, bounded diagnostic fallback, cancellation/reentry boundaries and rollback after output.
+- [ ] Qualify COPY across platforms and static linkage, run sanitizers and inject remaining transaction-completion/cleanup failures.
+
+**8. Bounded independent subscriptions, SQL notification draining, notice creation, exact sequences, terminal errors, and completed close**
+
+- [x] Implement notice create/destroy and level/SQLSTATE/message/detail/hint getters with native admission before dequeue. Allocation rejection, emission filtering, FIFO order and owned lifetime tests pass.
+- [x] Implement independent subscription open/poll/wait/close, notification getters and bounded SQL-session configuration/poll. Native owners preserve payload and exact sequence on rejected admission; content-free failure kind/code and private detail remain separate. C/C++ and Rust tests pass for transaction deferral, savepoints/deduplication, overflow, retry, terminal diagnostics, concurrent close and retained persistent-provider delivery.
+- [ ] Qualify notification platform/static/sanitizer behavior and the complete injected failure/cleanup surface.
+
+**9. Scalar/table/aggregate registration, shared lifetime retirement, exactly-once cleanup, callback result access, fallible aggregate creation, and explicit fallible scan/state finalization**
+
+- [ ] Implement scalar/table/aggregate UDF registration, shared lifetime retirement, exactly-once cleanup, callback result access, fallible aggregate creation and explicit fallible scan/state finalization.
+
+**10. Config/runtime log getters/setters, shared observer attribution, callback status, ownership, and retirement failures**
+
+- [ ] Implement config/runtime log getters/setters, shared observer attribution, callback status, ownership and retirement failures.
+
+**11. Optional Arrow conversion in its owner, explicit lossless/text policies, descriptors, independent releases, feature stubs, and feature combinations**
+
+- [ ] Implement optional Arrow conversion in its owner, explicit lossless/text policies, descriptors, independent releases, omitted-feature stubs and all feature combinations.
+
+**12. Native packaging metadata, CMake/pkg-config shared/static consumers, symbol inventory, platform CI, license inventory, and release workflow integration**
+
+- [x] Audit the current Mach-O artifact against the headers: product source d94a294f02adf392efcabbfb4ce6112de33653db exports 129 of 159 declared functions plus 17 internal regex callbacks.
+- [ ] Finish native packaging, CMake/pkg-config shared/static consumers, the complete declared-symbol inventory, export restriction, platform CI, license inventory and release workflow integration. Thirty declared functions and additional design-specified value APIs remain unimplemented; distribution linkage must remove the internal regex exports.
+
+**13. Five C examples, example matrix and manual updates, actual shared/static C/C++ ABI tests, focused owner tests, sanitizers, and ownership/dependency checks**
+
+- [x] Execute the current C11/C++17 shared ABI clients and focused owner tests: 17 FFI integration tests, 95 native notification tests and 5 bounded-session regressions pass. Strict Clippy, formatting, whitespace, ownership/dependency, harness and Rust-size checks pass; earlier source-scoped owner evidence remains below.
+- [ ] Implement and execute all five public C examples, update the example matrix/manual, and complete static/shared platform consumers, feature combinations, allocation/panic qualification and sanitizers.
+
+**14. Logical commits, draft PR/task records and repository labels, review corrections, final-source automatic Linux/macOS regression and affected FDW results, and verified delivery**
+
+- [x] Commit and push the implemented units to draft PR #1266, retain the original full scope and source-scoped evidence, and verify its enhancement/area: bindings/area: sql labels, head and task/design links.
+- [ ] Finish the remaining implementation and review fixes, reconcile the current main-branch merge conflict, qualify the final source through automatic Linux/macOS performance regression and affected FDW checks, then complete verified merge/delivery, issue closure and branch cleanup. Keep the PR draft until the implementation and focused review batch is complete.
 
 ## Verification record
 
