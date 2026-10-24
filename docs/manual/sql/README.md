@@ -101,7 +101,13 @@ LIMIT 20;
 
 ## Diagnostics
 
-Use `EXPLAIN` with optional `ANALYZE`, `VERBOSE`, and `FORMAT TEXT` or `FORMAT JSON`. `ANALYZE` collects optimizer statistics for all tables or one table; options and column lists are not implemented.
+Use `EXPLAIN` with optional `ANALYZE`, `VERBOSE`, and `FORMAT TEXT`, `JSON`, `XML` or `YAML`. Every format returns one column named `QUERY PLAN`. TEXT returns one text row per plan line; JSON, XML and YAML return one document row. An existing CREATE TABLE AS target skipped by IF NOT EXISTS has no TEXT rows and a format-specific marker in structured output. JSON has SQL type `json`, XML has SQL type `xml`, and TEXT/YAML have SQL type `text`. Prepared descriptions expose these identities before execution. JSON and YAML contain a sequence of query explanations; XML uses an `explain` document with a `Query` element. Each explanation contains the native UQA plan and available physical diagnostics.
+
+EXPLAIN retains option occurrences in source order. The last valid occurrence determines a setting, but an earlier invalid occurrence still fails when execution interprets it. Describing a prepared statement reads its FORMAT value without executing the body or interpreting other options. Bare format identifiers follow SQL identifier folding; quoted values preserve case. Execution checks options before optimizing or executing the analyzed body, so an invalid option cannot advance a sequence or apply an ANALYZE mutation. `EXPLAIN ANALYZE` executes its body once and has the body's ordinary transaction effects; use a transaction and rollback when those effects should be undone.
+
+`EXPLAIN ANALYZE DECLARE` executes the source query without creating a cursor. `EXPLAIN EXECUTE` binds and explains the selected prepared query. CREATE TABLE AS and materialized-view bodies plan their source query and create the destination only with ANALYZE; WITH NO DATA leaves it empty. An existing target is checked before source planning. These destinations can be created in a read-only transaction, matching PostgreSQL, while the SQL read-only characteristic remains set and subsequent ordinary INSERT, UPDATE and DELETE remain forbidden.
+
+The separate `ANALYZE` command collects optimizer statistics for all tables or one table; options and column lists are not implemented.
 
 ```sql
 ANALYZE articles;

@@ -34,6 +34,7 @@ pub mod catalog;
 pub mod compiler;
 pub mod copy;
 pub mod error;
+pub mod explain;
 pub mod expr;
 pub mod fts_query;
 pub mod ir;

@@ -403,73 +403,48 @@ pub(super) fn compile_set_constraints(
 }
 
 pub(super) fn compile_explain(stmt: &pg_query::protobuf::ExplainStmt) -> Result<Statement> {
+    use crate::explain::{ExplainOption, ExplainOptionValue, ExplainOptions};
     let body = stmt
         .query
         .as_deref()
         .ok_or_else(|| SQLError::Internal("EXPLAIN without body".into()))?;
-    let mut analyze = false;
-    let mut verbose = false;
-    let mut format: Option<String> = None;
-    for opt in &stmt.options {
-        let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
-            return Err(SQLError::Internal(
-                "EXPLAIN contains a malformed option".into(),
-            ));
-        };
-        let name = elem.defname.to_ascii_lowercase();
-        match name.as_str() {
-            "analyze" => analyze = compile_explain_bool_option(elem, "ANALYZE")?,
-            "verbose" => verbose = compile_explain_bool_option(elem, "VERBOSE")?,
-            "format" => {
-                if let Some(NodeEnum::String(s)) = elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
-                    format = Some(s.sval.clone());
-                } else {
-                    return Err(SQLError::TypeMismatch(
-                        "EXPLAIN FORMAT expects a format name".into(),
-                    ));
+    let options = stmt
+        .options
+        .iter()
+        .map(|option| {
+            let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "EXPLAIN contains a malformed option".into(),
+                ));
+            };
+            let value = match option
+                .arg
+                .as_ref()
+                .and_then(|argument| argument.node.as_ref())
+            {
+                None => None,
+                Some(NodeEnum::Boolean(value)) => Some(ExplainOptionValue::Boolean(value.boolval)),
+                Some(NodeEnum::Integer(value)) => Some(ExplainOptionValue::Integer(value.ival)),
+                Some(NodeEnum::Float(value)) => Some(ExplainOptionValue::Float(value.fval.clone())),
+                Some(NodeEnum::String(value)) => {
+                    Some(ExplainOptionValue::String(value.sval.clone()))
                 }
-            }
-            _ => {
-                return Err(SQLError::Unsupported(format!(
-                    "EXPLAIN option `{name}` is not supported"
-                )));
-            }
-        }
-    }
-    let inner = compile_stmt(body)?;
+                _ => {
+                    return Err(SQLError::Internal(
+                        "EXPLAIN contains a malformed option argument".into(),
+                    ))
+                }
+            };
+            Ok(ExplainOption {
+                name: option.defname.clone(),
+                value,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(Statement::Explain {
-        analyze,
-        verbose,
-        format,
-        body: Box::new(inner),
+        options: ExplainOptions { options },
+        body: Box::new(compile_stmt(body)?),
     })
-}
-
-pub(super) fn compile_explain_bool_option(
-    elem: &pg_query::protobuf::DefElem,
-    name: &str,
-) -> Result<bool> {
-    let Some(argument) = elem
-        .arg
-        .as_ref()
-        .and_then(|argument| argument.node.as_ref())
-    else {
-        return Ok(true);
-    };
-    match argument {
-        NodeEnum::Boolean(value) => Ok(value.boolval),
-        NodeEnum::Integer(value) => Ok(value.ival != 0),
-        NodeEnum::String(value) => match value.sval.to_ascii_lowercase().as_str() {
-            "true" | "on" | "yes" | "1" => Ok(true),
-            "false" | "off" | "no" | "0" => Ok(false),
-            _ => Err(SQLError::TypeMismatch(format!(
-                "EXPLAIN {name} expects a boolean value"
-            ))),
-        },
-        _ => Err(SQLError::TypeMismatch(format!(
-            "EXPLAIN {name} expects a boolean value"
-        ))),
-    }
 }
 
 pub(super) fn compile_truncate(stmt: &pg_query::protobuf::TruncateStmt) -> Result<Statement> {

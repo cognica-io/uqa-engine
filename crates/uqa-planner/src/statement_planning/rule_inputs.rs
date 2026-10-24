@@ -101,7 +101,7 @@ fn rewrite_command(
     command: &mut CommandPlan,
 ) -> Result<(), SQLError> {
     match command {
-        CommandPlan::Explain { body, .. } => return rewrite_plan(context, body),
+        CommandPlan::Explain { .. } => return Ok(()),
         CommandPlan::DeclareCursor { query, .. } => return rewrite_query(context, query),
         _ => {}
     }

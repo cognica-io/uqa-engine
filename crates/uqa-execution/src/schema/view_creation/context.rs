@@ -72,6 +72,7 @@ pub type ViewCreationWrite<'a> =
 pub type MaterializedViewWrite<'a> =
     Box<dyn FnOnce(&ViewCreationContext<'_>) -> Result<Option<u64>, SQLError> + 'a>;
 pub trait ViewCreationTransactions {
+    fn explain_existing_target(&self, name: &str, if_not_exists: bool) -> Result<bool, SQLError>;
     fn with_view_creation(&self, write: ViewCreationWrite<'_>) -> Result<(), SQLError>;
     fn with_materialized_view_creation(
         &self,

@@ -568,9 +568,8 @@ pub enum Statement {
     /// `EXPLAIN ...`. Carries the inner statement so the engine can
     /// emit the planner output.
     Explain {
-        analyze: bool,
-        verbose: bool,
-        format: Option<String>,
+        #[serde(flatten)]
+        options: crate::explain::ExplainOptions,
         body: Box<Statement>,
     },
     /// `ANALYZE [table]`. The engine refreshes per-column statistics

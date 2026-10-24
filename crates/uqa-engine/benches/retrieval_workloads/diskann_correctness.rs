@@ -101,11 +101,11 @@ fn route(engine: &Engine, query: &[f32], k: usize) -> Json {
             &[SQLParam::vector(query.to_vec())],
         )
         .unwrap();
-    let Value::Str(plan) = &result.rows[0]["plan"] else {
+    let Value::Json(plan) = &result.rows[0]["QUERY PLAN"] else {
         panic!("JSON plan required")
     };
     let plan: Json = serde_json::from_str(plan).unwrap();
-    let searches = plan["Vector Searches"].as_array().unwrap();
+    let searches = plan[0]["Vector Searches"].as_array().unwrap();
     assert_eq!(searches.len(), 1);
     let search = &searches[0];
     assert_eq!(search["Route"], "approximate");

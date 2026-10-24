@@ -219,6 +219,105 @@ static void explained_inputs(uqa_engine engine, uqa_result result) {
     CHECK(uqa_engine_execute(engine, "DROP TABLE c_explain_inputs", result));
 }
 
+static void explained_results(uqa_engine engine, uqa_result result) {
+    const struct { const char *name; uint32_t kind; uint32_t oid; } formats[] = {
+        {"text", UQA_TYPE_TEXT, 25},
+        {"json", UQA_TYPE_JSON, 114},
+        {"xml", UQA_TYPE_XML, 142},
+        {"yaml", UQA_TYPE_TEXT, 25}
+    };
+    for (size_t index = 0; index < sizeof(formats) / sizeof(formats[0]); index++) {
+        char sql[128];
+        uqa_statement statement = NULL;
+        uqa_type type = NULL;
+        uqa_value_view value = NULL;
+        uqa_string_view text = {NULL, 0};
+        uint32_t columns = 0, kind = 0, oid = 0;
+        uint64_t rows = 0;
+        (void)snprintf(sql, sizeof(sql), "EXPLAIN (FORMAT %s) SELECT 1", formats[index].name);
+        CHECK(uqa_statement_prepare(engine, sql, &statement));
+        CHECK(uqa_statement_get_column_count(statement, &columns));
+        assert(columns == 1);
+        CHECK(uqa_statement_get_column_name(statement, 0, &text));
+        assert(equal(text, "QUERY PLAN"));
+        CHECK(uqa_statement_get_column_type(statement, 0, &type));
+        CHECK(uqa_type_get_kind(type, &kind));
+        CHECK(uqa_type_get_oid(type, &oid));
+        assert(kind == formats[index].kind && oid == formats[index].oid);
+        CHECK(uqa_statement_execute(statement, result));
+        CHECK(uqa_result_get_column_type(result, 0, &type));
+        CHECK(uqa_type_get_kind(type, &kind));
+        CHECK(uqa_type_get_oid(type, &oid));
+        assert(kind == formats[index].kind && oid == formats[index].oid);
+        CHECK(uqa_result_get_row_count(result, &rows));
+        assert(rows > 0 && (index == 0 || rows == 1));
+        CHECK(uqa_result_get_value(result, 0, 0, &value));
+        if (kind == UQA_TYPE_JSON) {
+            uqa_buffer buffer = NULL;
+            uqa_bytes_view bytes = {NULL, 0};
+            assert(uqa_value_get_text(value, &text) == UQA_ERROR_TYPE);
+            CHECK(uqa_buffer_create(&buffer));
+            CHECK(uqa_value_format_sql(value, buffer));
+            CHECK(uqa_buffer_get_bytes(buffer, &bytes));
+            assert(bytes.size > 0 && bytes.data[0] == '[');
+            CHECK(uqa_buffer_destroy(&buffer));
+        } else {
+            CHECK(uqa_value_get_text(value, &text));
+            assert(text.size > 0);
+            if (index == 2) assert(text.data[0] == '<');
+            if (index == 3) assert(text.data[0] == '-');
+        }
+        CHECK(uqa_statement_finalize(&statement));
+    }
+    {
+        uqa_statement statement = NULL;
+        uqa_type type = NULL;
+        uint32_t kind = 0;
+        CHECK(uqa_engine_execute(engine, "CREATE TEMP SEQUENCE c_explain_effect", result));
+        CHECK(uqa_statement_prepare(engine,
+            "EXPLAIN (ANALYZE, FORMAT 'JSON') SELECT nextval('c_explain_effect')", &statement));
+        CHECK(uqa_statement_get_column_type(statement, 0, &type));
+        CHECK(uqa_type_get_kind(type, &kind));
+        assert(kind == UQA_TYPE_TEXT);
+        assert(uqa_statement_execute(statement, result) == UQA_ERROR_SQL);
+        sqlstate("22023");
+        CHECK(uqa_engine_execute(engine, "SELECT nextval('c_explain_effect')", result));
+        assert(integer(result, 0) == 1);
+        CHECK(uqa_statement_finalize(&statement));
+        CHECK(uqa_engine_execute(engine, "BEGIN; SAVEPOINT retry", result));
+        CHECK(uqa_statement_prepare(engine,
+            "EXPLAIN (ANALYZE 'yes') SELECT nextval('c_explain_effect')", &statement));
+        assert(uqa_statement_execute(statement, result) == UQA_ERROR_SQL);
+        sqlstate("42601");
+        CHECK(uqa_engine_execute(engine, "ROLLBACK TO retry", result));
+        CHECK(uqa_engine_execute(engine, "SELECT nextval('c_explain_effect')", result));
+        assert(integer(result, 0) == 2);
+        CHECK(uqa_engine_execute(engine, "ROLLBACK", result));
+        CHECK(uqa_statement_finalize(&statement));
+    }
+}
+
+static void explained_read_only_destination(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    uqa_value_view value = NULL;
+    uqa_string_view text = {NULL, 0};
+    CHECK(uqa_engine_execute(engine, "BEGIN READ ONLY", result));
+    CHECK(uqa_statement_prepare(engine,
+        "EXPLAIN ANALYZE CREATE TABLE c_explained_destination AS SELECT 1 AS id", &statement));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine, "SHOW transaction_read_only", result));
+    CHECK(uqa_result_get_value(result, 0, 0, &value));
+    CHECK(uqa_value_get_text(value, &text));
+    assert(equal(text, "on"));
+    CHECK(uqa_engine_execute(engine, "SAVEPOINT protected_destination", result));
+    assert(uqa_engine_execute(engine, "INSERT INTO c_explained_destination VALUES (2)", result) == UQA_ERROR_SQL);
+    sqlstate("25006");
+    CHECK(uqa_engine_execute(engine, "ROLLBACK TO protected_destination; COMMIT", result));
+    CHECK(uqa_engine_execute(engine, "SELECT count(*) FROM c_explained_destination", result));
+    assert(integer(result, 0) == 1);
+}
+
 static void utility_statements(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_type type = NULL;
@@ -531,6 +630,8 @@ int main(void) {
     prepared_recovery(engine, result);
     procedure_statements(engine, result);
     explained_inputs(engine, result);
+    explained_results(engine, result);
+    explained_read_only_destination(engine, result);
     xml_values(engine, result);
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_engine_close(&engine));

@@ -655,9 +655,8 @@ pub enum CommandPlan {
         library: String,
     },
     Explain {
-        analyze: bool,
-        verbose: bool,
-        format: Option<String>,
+        #[serde(flatten)]
+        options: crate::explain::ExplainOptions,
         body: Box<UnifiedPlan>,
     },
     Analyze {

@@ -18,6 +18,7 @@ use uqa_sql::{SQLError, SQLParam, SQLResult};
 use super::context::StatementExecutionContext;
 
 mod completion;
+mod explain;
 mod prepared;
 mod types;
 use crate::schema::view_creation::{self, MaterializedViewRegistration, ViewRegistration};
@@ -239,71 +240,6 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
 
     fn execute_show_variable(&self, name: &str) -> Result<SQLResult, SQLError> {
         super::show::show(self.context.validation.session, name)
-    }
-
-    fn execute_explain(
-        &self,
-        body: &UnifiedPlan,
-        analyze: bool,
-        verbose: bool,
-        format: Option<&str>,
-    ) -> Result<SQLResult, SQLError> {
-        if self.context.validation.transactions.transaction_depth() != 0 {
-            crate::query::locking::lock_explained_relations(
-                self.context.queries.row_lock_context(),
-                body,
-            )?;
-        }
-        if let UnifiedPlan::Query(query) = body {
-            let ctes = self
-                .context
-                .queries
-                .statement_scope(self.privilege_subject.as_ref());
-            crate::query::privileges::routine_calls::query(
-                &self.context.queries.query_context().source,
-                crate::query::sources::prepared_queries::prepare(
-                    &self.context.queries.query_context().source,
-                    query,
-                    self.params,
-                    &ctes,
-                )?
-                .as_ref(),
-                self.params,
-                &ctes,
-            )?;
-        }
-        if let UnifiedPlan::Command(command) = body {
-            crate::mutation::routine_calls::explain(
-                &self.context.mutations.mutation_initialization_context(),
-                self.context.mutations.mutation_context().targets,
-                command,
-                self.params,
-            )?;
-        }
-        let physical = self
-            .context
-            .physical_explain
-            .physical_explain_plan(body, self.params)?;
-        let analysis = if analyze {
-            let diagnostics = self.context.diagnostics.diagnostics_scope()?;
-            let started = std::time::Instant::now();
-            let mut executor = UnifiedPlanExecutor::new_nested(self.context.clone(), self.params);
-            executor
-                .privilege_subject
-                .clone_from(&self.privilege_subject);
-            let result = executor.execute(body)?;
-            let rows = u64::try_from(result.rows.len())
-                .map_err(|_| SQLError::Internal("EXPLAIN ANALYZE row count exceeds u64".into()))?;
-            Some(uqa_sql::result::ExplainAnalysis {
-                vector_searches: diagnostics.finish()?,
-                elapsed: started.elapsed(),
-                rows,
-                affected_rows: result.affected_rows,
-            })
-        } else {
-            None
-        };
-        (self.context.explain)(body, verbose, format, analysis.as_ref(), &physical)
     }
 
     fn execute_create_foreign_server(
@@ -597,6 +533,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                         name,
                         column_names,
                         plan: (**query).clone(),
+                        executable: None,
                         if_not_exists: *if_not_exists,
                         with_no_data: *with_no_data,
                         options,
@@ -717,12 +654,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 self.context.settings.load_library(library)?;
                 Ok(SQLResult::empty())
             }
-            CommandPlan::Explain {
-                analyze,
-                verbose,
-                format,
-                body,
-            } => self.execute_explain(body, *analyze, *verbose, format.as_deref()),
+            CommandPlan::Explain { body, options } => self.execute_explain(body, options),
             CommandPlan::Analyze { table } => {
                 let context = self.context.schemas.inputs.vacuum_execution_context();
                 let targets = if let Some(requested) = table.as_deref() {
@@ -856,6 +788,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                     persistence: *persistence,
                     on_commit: *on_commit,
                     query,
+                    executable: None,
                     params: self.params,
                 },
             ),

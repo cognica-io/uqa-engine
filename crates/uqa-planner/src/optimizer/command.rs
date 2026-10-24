@@ -10,8 +10,8 @@ use uqa_sql::SQLError;
 
 use super::{
     optimize_assignments, optimize_projections, optimize_query, optimize_scalar_slot,
-    optimize_source, optimize_unified_plan, prioritize_access_predicates, AggregateClassifier,
-    CommandPlan, ConflictActionPlan, ExpressionPlan, MergeWhenPlan, OptimizerConfig,
+    optimize_source, prioritize_access_predicates, AggregateClassifier, CommandPlan,
+    ConflictActionPlan, ExpressionPlan, MergeWhenPlan, OptimizerConfig,
 };
 
 #[expect(
@@ -151,15 +151,13 @@ pub(super) fn optimize_command(
         CommandPlan::DeclareCursor { query, .. } => {
             optimize_query(query, config, aggregates)?;
         }
-        CommandPlan::Explain { body, .. } => {
-            optimize_unified_plan(body, config, aggregates)?;
-        }
         CommandPlan::Call { args: params, .. } => {
             for expression in params {
                 optimize_expression_plan(expression, config, aggregates)?;
             }
         }
-        CommandPlan::CreateTableAs { .. }
+        CommandPlan::Explain { .. }
+        | CommandPlan::CreateTableAs { .. }
         | CommandPlan::CreateMaterializedView { .. }
         | CommandPlan::CreateView { .. }
         | CommandPlan::Execute { .. }

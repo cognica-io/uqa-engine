@@ -8,7 +8,10 @@
 
 use std::collections::BTreeMap;
 
-use super::{BackendTransactionMode, Engine, FixedTransactionSnapshot, SQLError, TransactionFrame};
+use super::{
+    BackendTransactionMode, Engine, FixedTransactionSnapshot, SQLError, TransactionFrame,
+    TransactionIntent,
+};
 
 impl Engine {
     pub(crate) fn versioned_backend_transactions(&self) -> bool {
@@ -472,13 +475,13 @@ impl Engine {
 
     fn promote_transaction_writer(&self, refresh: bool) -> Result<bool, SQLError> {
         let mut stack = self.session.transactions.lock();
-        if stack
+        let promoted = if stack
             .first()
             .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Versioned)
         {
             drop(stack);
             if refresh {
-                // Logical locks can wait while another writer commits. Refresh the storage target without replacing command caches: a compound DDL operation may have staged only part of its private catalog changes when it prepares another write. Command boundaries own catalog restoration, and retained source snapshots and the original row-change baseline stay fixed here.
+                // Keep private catalog publications and the retained source snapshot while refreshing the storage target after logical lock waits.
                 self.storage
                     .backend
                     .as_ref()
@@ -486,16 +489,22 @@ impl Engine {
                     .refresh_transaction_snapshot(&self.runtime.cancellation)
                     .map_err(|error| Self::storage_tx_error("refresh write target", &error))?;
             }
-            return Ok(false);
-        }
-        if !stack
+            stack = self.session.transactions.lock();
+            false
+        } else if stack
             .first()
             .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
         {
-            return Ok(false);
+            self.promote_deferred_transaction_frame(&mut stack)?;
+            true
+        } else {
+            false
+        };
+        // Physical writer admission does not change SQL transaction characteristics. A permitted catalog destination or maintenance operation can write while SQL remains read-only.
+        for frame in stack.iter_mut() {
+            frame.intent = TransactionIntent::ReadWrite;
         }
-        self.promote_deferred_transaction_frame(&mut stack)?;
-        Ok(true)
+        Ok(promoted)
     }
 
     pub(crate) fn backend_transaction_is_deferred(&self) -> bool {

@@ -324,15 +324,8 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Discard { target }))
             }
             Statement::Load { library } => Self::Command(Box::new(CommandPlan::Load { library })),
-            Statement::Explain {
-                analyze,
-                verbose,
-                format,
-                body,
-            } => Self::Command(Box::new(CommandPlan::Explain {
-                analyze,
-                verbose,
-                format,
+            Statement::Explain { options, body } => Self::Command(Box::new(CommandPlan::Explain {
+                options,
                 body: Box::new(Self::lower_with(*body, aggregates)),
             })),
             Statement::Analyze { table } => Self::Command(Box::new(CommandPlan::Analyze { table })),

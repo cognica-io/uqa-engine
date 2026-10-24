@@ -18,19 +18,17 @@ pub mod routines;
 pub mod schemas;
 pub mod session;
 
-pub type ExplainRenderer =
-    fn(&UnifiedPlan, bool, Option<&str>, Option<&ExplainAnalysis>) -> Result<SQLResult, SQLError>;
-
 pub type PhysicalExplainRenderer = fn(
     &UnifiedPlan,
-    bool,
-    Option<&str>,
+    &uqa_sql::explain::ExplainSettings,
     Option<&ExplainAnalysis>,
     &ExplainPhysicalPlan,
 ) -> Result<SQLResult, SQLError>;
 
 /// Capture physical facts before an optional execution without invoking the explained query.
 pub trait PhysicalExplainPlanning: Sync {
+    /// Optimize the already analyzed body only after the command has interpreted its options.
+    fn plan_explained_statement(&self, body: &UnifiedPlan) -> Result<UnifiedPlan, SQLError>;
     fn physical_explain_plan(
         &self,
         body: &UnifiedPlan,

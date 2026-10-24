@@ -98,10 +98,10 @@ fn analyze_reusable_inputs(
         result = Some(match plan {
             UnifiedPlan::Command(command) => match command.as_mut() {
                 // The explained statement retains a scope of its own.
-                CommandPlan::Explain { body, .. } => {
+                CommandPlan::Explain { body, options } => {
                     let (_, body_reusable) = analyze_reusable_inputs(context, body, params)?;
                     reusable &= body_reusable;
-                    AnalyzedResult::Command
+                    AnalyzedResult::Schema(options.result_schema()?)
                 }
                 _ => analyze_plan_result_inner(
                     context.routines,
@@ -153,9 +153,9 @@ fn analyze_plan_result_inner(
         super::preparation::read_executable_inputs(routines, plan, params, &binding, aliases)?;
     *reusable &= analysis.reusable;
     if let UnifiedPlan::Command(command) = plan {
-        if let CommandPlan::Explain { body, .. } = command.as_mut() {
+        if let CommandPlan::Explain { body, options } = command.as_mut() {
             analyze_plan_result_inner(routines, aliases, body, params, scope, reusable)?;
-            return Ok(AnalyzedResult::Command);
+            return options.result_schema().map(AnalyzedResult::Schema);
         }
     }
     Ok(analysis.result)

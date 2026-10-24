@@ -69,6 +69,13 @@ impl Engine {
 }
 
 impl context::PhysicalExplainPlanning for Engine {
+    fn plan_explained_statement(
+        &self,
+        body: &uqa_sql::plan::UnifiedPlan,
+    ) -> Result<uqa_sql::plan::UnifiedPlan, uqa_sql::SQLError> {
+        super::statement_planning::optimize_engine_plan(self, body.clone())
+    }
+
     fn physical_explain_plan(
         &self,
         body: &uqa_sql::plan::UnifiedPlan,

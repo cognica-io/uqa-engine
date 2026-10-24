@@ -138,7 +138,10 @@ fn sequence_operation_failure_and_recovery_match_pg18(
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
 #[case::redb(Provider::Redb)]
-fn read_only_rejection_is_owned_and_failed_admission_precedes_work(#[case] provider: Provider) {
+fn read_only_rejection_is_owned_and_failed_admission_precedes_work(
+    #[case] provider: Provider,
+    #[values(false, true)] physical_writer: bool,
+) {
     let directory = tempfile::tempdir().unwrap();
     let engine = provider.open(&directory.path().join("read-only-admission.db"));
     engine
@@ -161,6 +164,15 @@ fn read_only_rejection_is_owned_and_failed_admission_precedes_work(#[case] provi
         engine
             .sql("BEGIN; SAVEPOINT keep; SET TRANSACTION READ ONLY", &[])
             .unwrap();
+        if physical_writer {
+            engine
+                .sql(
+                    "EXPLAIN ANALYZE CREATE TABLE admitted_destination AS SELECT 1 AS n",
+                    &[],
+                )
+                .unwrap();
+            assert!(engine.current_transaction_is_read_only());
+        }
         let operation = || match route {
             "row" => engine.delete_document("items", 1),
             "prepared row" => engine

@@ -19,11 +19,12 @@ use crate::row_locks::{
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::RelationPersistence,
+    plan::QueryPlan,
     schema::table_creation::{
         create_table_as_columns, existing_create_as_target, validate_create_table_as_columns,
     },
     semantics::sets::placement_scope::SetPlacementScope,
-    SQLError,
+    SQLError, SQLParam,
 };
 
 fn materialized_rows(
@@ -103,6 +104,35 @@ fn skip_existing_materialized_view(
     Ok(false)
 }
 
+pub fn explain_existing_target(
+    context: &ViewCreationContext<'_>,
+    name: &str,
+    if_not_exists: bool,
+) -> Result<bool, SQLError> {
+    context.catalog.synchronize().map_err(|error| {
+        SQLError::Internal(format!("refresh materialized-view catalog: {error}"))
+    })?;
+    skip_existing_materialized_view(context, name, if_not_exists)
+}
+
+fn execute_materialized_source(
+    context: &ViewCreationContext<'_>,
+    plan: &QueryPlan,
+    executable: Option<&QueryPlan>,
+    params: &[SQLParam],
+    output_columns: &[String],
+) -> Result<Vec<uqa_sql::ResultRow>, SQLError> {
+    let optimized;
+    let executable = if let Some(executable) = executable {
+        executable
+    } else {
+        optimized = context.queries.optimize(plan)?;
+        &optimized
+    };
+    let result = context.queries.execute(executable, params)?;
+    materialized_rows(&result, output_columns)
+}
+
 pub fn register_materialized_view_plan(
     transactions: &dyn ViewCreationTransactions,
     registration: MaterializedViewRegistration<'_>,
@@ -111,6 +141,7 @@ pub fn register_materialized_view_plan(
         name,
         column_names,
         mut plan,
+        executable,
         if_not_exists,
         with_no_data,
         options,
@@ -157,9 +188,7 @@ pub fn register_materialized_view_plan(
         let materialized_rows = if with_no_data {
             Vec::new()
         } else {
-            let executable = context.queries.optimize(&plan)?;
-            let result = context.queries.execute(&executable, params)?;
-            materialized_rows(&result, &output_columns)?
+            execute_materialized_source(context, &plan, executable, params, &output_columns)?
         };
         let affected_rows = u64::try_from(materialized_rows.len())
             .map_err(|_| SQLError::Internal("materialized-view row count exceeds u64".into()))?;

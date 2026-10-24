@@ -168,6 +168,15 @@ pub(super) fn verify(engine: &Engine, reference: &Json) {
         } else {
             0
         });
+        if case["plan_output"] == true {
+            assert!(
+                actual["rows"]
+                    .as_array()
+                    .is_some_and(|rows| !rows.is_empty()),
+                "reference case {index}: {case}; actual: {actual}"
+            );
+            actual["rows"] = json!([]);
+        }
         assert_eq!(actual, case["result"], "reference case {index}: {case}");
     }
     for handle in handles.values() {

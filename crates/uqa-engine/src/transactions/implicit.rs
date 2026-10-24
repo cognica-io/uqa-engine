@@ -8,13 +8,19 @@
 
 use super::{
     panic_description, BackendTransactionMode, Engine, SQLError, SQLParam, SQLResult,
-    StorageBackendError, StorageBackendResult, TransactionIntent, TransactionScope,
+    StorageBackendError, StorageBackendResult, TransactionScope,
 };
 use uqa_sql::SQLBatchError;
 
 #[cfg(test)]
 #[path = "batch_diagnostic_tests.rs"]
 mod batch_diagnostic_tests;
+
+#[derive(Clone, Copy)]
+enum DefinitionAdmission {
+    Direct,
+    Statement,
+}
 
 impl Engine {
     /// Run `f` inside one engine transaction. An error or panic from `f` rolls back the transaction. A successful callback commits; an indeterminate commit retains its sealed attempt in the session for resolution through `commit` or `rollback`, without replaying `f`.
@@ -158,9 +164,27 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
+        self.with_definition_transaction(DefinitionAdmission::Direct, f)
+    }
+
+    /// Run an admitted SQL definition's publication under the transaction owner. Direct definition APIs apply their own admission policy through the same boundary.
+    pub(crate) fn with_definition_publication<R>(
+        &self,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        self.with_definition_transaction(DefinitionAdmission::Statement, f)
+    }
+
+    fn with_definition_transaction<R>(
+        &self,
+        admission: DefinitionAdmission,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
         let _statement = self.lock_statement_gate();
         let operation = |engine: &Self| {
-            if engine.current_transaction_is_read_only() {
+            if matches!(admission, DefinitionAdmission::Direct)
+                && engine.current_transaction_is_read_only()
+            {
                 return Err(SQLError::Routine {
                     sqlstate: "25006".into(),
                     message: "cannot execute direct mutation in a read-only transaction".into(),
@@ -264,12 +288,6 @@ impl Engine {
     pub(crate) fn prepare_storage_maintenance_writer(&self) -> StorageBackendResult<()> {
         self.prepare_explicit_transaction_writer()
             .map_err(|error| StorageBackendError::backend("maintenance transaction", error))?;
-        if self.current_transaction_is_read_only() {
-            // SQL access remains read-only. Physical maintenance admission is retained until the transaction ends, including after savepoint undo.
-            for frame in self.session.transactions.lock().iter_mut() {
-                frame.intent = TransactionIntent::ReadWrite;
-            }
-        }
         Ok(())
     }
 
@@ -305,15 +323,13 @@ impl Engine {
 
     fn with_implicit_storage_transaction_inner<R>(
         &self,
-        maintenance_can_override_default_read_only: bool,
+        maintenance: bool,
         promote_writer: bool,
         f: impl FnOnce(&Self) -> StorageBackendResult<R>,
     ) -> StorageBackendResult<R> {
         let _statement = self.lock_statement_gate();
         let operation = |engine: &Self| {
-            if !maintenance_can_override_default_read_only
-                && engine.current_transaction_is_read_only()
-            {
+            if !maintenance && engine.current_transaction_is_read_only() {
                 return Err(StorageBackendError::backend(
                     "storage mutation",
                     SQLError::Routine {
@@ -344,12 +360,6 @@ impl Engine {
         let scope = TransactionScope::begin(self).map_err(|error| {
             StorageBackendError::backend("begin implicit storage transaction", error)
         })?;
-        if maintenance_can_override_default_read_only {
-            if let Some(frame) = self.session.transactions.lock().last_mut() {
-                frame.intent = TransactionIntent::ReadWrite;
-                frame.characteristics.read_only = false;
-            }
-        }
         self.run_transaction_scope(scope, operation, |error| {
             StorageBackendError::backend("storage transaction", error)
         })

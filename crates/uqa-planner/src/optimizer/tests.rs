@@ -526,7 +526,7 @@ fn optimizes_mutation_and_cte_children() {
 }
 
 #[test]
-fn optimizes_explained_query_bodies() {
+fn explained_query_bodies_wait_for_command_execution() {
     let UnifiedPlan::Command(command) = optimized(
         "EXPLAIN SELECT id FROM docs \
          WHERE true AND text_match(body, 'rust') \
@@ -543,16 +543,7 @@ fn optimizes_explained_query_bodies() {
     let RelationalPlan::QueryBlock(block) = &query.root else {
         panic!("query block expected");
     };
-    assert!(matches!(
-        block.r#where,
-        Some(ScalarExpr::Func { ref name, .. }) if name == "text_match"
-    ));
-    assert!(matches!(
-        block.access,
-        AccessPathPlan::OperatorTree {
-            score_limit_pushdown: true
-        }
-    ));
+    assert!(matches!(block.r#where, Some(ScalarExpr::And(_))));
 }
 
 #[test]

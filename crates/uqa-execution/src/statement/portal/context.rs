@@ -9,9 +9,7 @@
 use crate::{
     catalog::services::CatalogSession,
     mutation::{command_scope::CommandScopeSource, returning::ReturningExecutionContext},
-    statement::context::{
-        queries::StatementQueryContexts, session::StatementPortals, ExplainRenderer,
-    },
+    statement::context::{queries::StatementQueryContexts, session::StatementPortals},
 };
 use uqa_sql::{
     routines::{
@@ -36,7 +34,6 @@ pub struct PortalExecutionContext<'a, S: Clone + 'static> {
     pub overloads: &'a dyn RoutineOverloadCatalog,
     pub types: &'a dyn RoutineTypeCatalog,
     pub session: &'a dyn CatalogSession,
-    pub explain: ExplainRenderer,
     pub source_sql: Option<&'a str>,
     pub created_at_micros: i64,
 }

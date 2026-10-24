@@ -403,11 +403,11 @@ fn explaining_derived_filters_keeps_output_effects_at_execution() {
         engine.sql(&format!("EXPLAIN (FORMAT JSON) {sql}"), &[]).unwrap();
         assert_eq!(engine.sql("SELECT is_called FROM explain_effect", &[]).unwrap().rows[0]["is_called"], uqa_core::Value::Bool(false));
         let result = engine.sql(&format!("EXPLAIN (ANALYZE, FORMAT JSON) {sql}"), &[]).unwrap();
-        let uqa_core::Value::Str(payload) = &result.rows[0]["plan"] else {
+        let uqa_core::Value::Json(payload) = &result.rows[0]["QUERY PLAN"] else {
             panic!("JSON plan");
         };
         let plan: serde_json::Value = serde_json::from_str(payload).unwrap();
-        assert_eq!(plan["Actual Rows"], 1, "{sql}: {plan}");
+        assert_eq!(plan[0]["Plan"]["Actual Rows"], 1, "{sql}: {plan}");
         let expected = if sql.starts_with("WITH") { 1 } else { 2 };
         assert_eq!(engine.sql("SELECT nextval('explain_effect') AS n", &[]).unwrap().rows[0]["n"], uqa_core::Value::Int(expected));
     }

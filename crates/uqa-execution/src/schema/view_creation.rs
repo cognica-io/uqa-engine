@@ -9,7 +9,9 @@ pub mod context;
 mod materialized;
 mod publication;
 mod registration;
-pub use materialized::{refresh_materialized_view, register_materialized_view_plan};
+pub use materialized::{
+    explain_existing_target, refresh_materialized_view, register_materialized_view_plan,
+};
 pub use registration::{register_view, register_view_plan};
 use uqa_sql::plan::QueryPlan;
 
@@ -27,6 +29,8 @@ pub struct MaterializedViewRegistration<'a> {
     pub name: &'a str,
     pub column_names: &'a [String],
     pub plan: QueryPlan,
+    /// EXPLAIN's selected executable; the unoptimized definition remains the stored view body.
+    pub executable: Option<&'a QueryPlan>,
     pub if_not_exists: bool,
     pub with_no_data: bool,
     pub options: &'a [(String, String)],

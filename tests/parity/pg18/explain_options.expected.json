@@ -1,0 +1,6952 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "cases": [
+    {
+      "action": "sql",
+      "sql": "CREATE TEMP SEQUENCE explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE SEQUENCE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE TEMP TABLE explain_items (id integer)",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE TABLE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_0",
+      "sql": "EXPLAIN SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_0",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_0",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_1",
+      "sql": "EXPLAIN (FORMAT TEXT) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_1",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_1",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_2",
+      "sql": "EXPLAIN (FORMAT JSON) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_2",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_2",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_3",
+      "sql": "EXPLAIN (FORMAT XML) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_3",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            142
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_3",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            142
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_4",
+      "sql": "EXPLAIN (FORMAT YAML) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_4",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_4",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_5",
+      "sql": "EXPLAIN (FORMAT 'JSON') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_5",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_5",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"JSON\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_6",
+      "sql": "EXPLAIN (FORMAT \"JSON\") SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_6",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_6",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"JSON\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_7",
+      "sql": "EXPLAIN (FORMAT bogus) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_7",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_7",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"bogus\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_8",
+      "sql": "EXPLAIN (FORMAT 1) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_8",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_8",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"1\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_9",
+      "sql": "EXPLAIN (FORMAT true) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_9",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_9",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"true\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_10",
+      "sql": "EXPLAIN (FORMAT) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "format requires a parameter",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_11",
+      "sql": "EXPLAIN (FORMAT xml, FORMAT json) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_11",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_11",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_12",
+      "sql": "EXPLAIN (FORMAT bogus, FORMAT xml) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_12",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            142
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_12",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"bogus\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_13",
+      "sql": "EXPLAIN (FORMAT xml, FORMAT bogus) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_13",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_13",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"bogus\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_14",
+      "sql": "EXPLAIN (ANALYZE false) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_14",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_14",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_15",
+      "sql": "EXPLAIN (ANALYZE 0) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_15",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_15",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "f"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_16",
+      "sql": "EXPLAIN (ANALYZE 1) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_16",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_16",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_17",
+      "sql": "EXPLAIN (ANALYZE 2) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_17",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_17",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_18",
+      "sql": "EXPLAIN (ANALYZE -1) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_18",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_18",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_19",
+      "sql": "EXPLAIN (ANALYZE 1.5) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_19",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_19",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_20",
+      "sql": "EXPLAIN (ANALYZE 'yes') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_20",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_20",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_21",
+      "sql": "EXPLAIN (ANALYZE 'no') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_21",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_21",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_22",
+      "sql": "EXPLAIN (ANALYZE 'on') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_22",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_22",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "2",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_23",
+      "sql": "EXPLAIN (ANALYZE 'off') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_23",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_23",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "2",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_24",
+      "sql": "EXPLAIN (ANALYZE '1') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_24",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_24",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "2",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_25",
+      "sql": "EXPLAIN (ANALYZE '0') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_25",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_25",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "2",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_26",
+      "sql": "EXPLAIN (ANALYZE 't') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_26",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_26",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "2",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_27",
+      "sql": "EXPLAIN (ANALYZE 'y') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_27",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_27",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "2",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_28",
+      "sql": "EXPLAIN (ANALYZE 'o') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_28",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_28",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "2",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_29",
+      "sql": "EXPLAIN (ANALYZE 'TRUE') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_29",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_29",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "3",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_30",
+      "sql": "EXPLAIN (ANALYZE ' true ') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_30",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_30",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "3",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_31",
+      "sql": "EXPLAIN (ANALYZE bogus) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_31",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_31",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "3",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_32",
+      "sql": "EXPLAIN (VERBOSE bogus) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_32",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_32",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "verbose requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "3",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_33",
+      "sql": "EXPLAIN (unknown true) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_33",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_33",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"unknown\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "3",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_34",
+      "sql": "EXPLAIN (\"ANALYZE\" true) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_34",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_34",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"ANALYZE\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "3",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_35",
+      "sql": "EXPLAIN (\"FORMAT\" xml) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_35",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_35",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"FORMAT\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "3",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_36",
+      "sql": "EXPLAIN (ANALYZE false, ANALYZE true) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_36",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_36",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_37",
+      "sql": "EXPLAIN (ANALYZE true, ANALYZE false) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_37",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_37",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_38",
+      "sql": "EXPLAIN (COSTS false) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_38",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_38",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_39",
+      "sql": "EXPLAIN (SETTINGS false) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_39",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_39",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_40",
+      "sql": "EXPLAIN (GENERIC_PLAN false) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_40",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_40",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_41",
+      "sql": "EXPLAIN (BUFFERS false) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_41",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_41",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_42",
+      "sql": "EXPLAIN (WAL false) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_42",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_42",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_43",
+      "sql": "EXPLAIN (TIMING false) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_43",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_43",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_44",
+      "sql": "EXPLAIN (SUMMARY false) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_44",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_44",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_45",
+      "sql": "EXPLAIN (MEMORY false) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_45",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_45",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_46",
+      "sql": "EXPLAIN (SERIALIZE NONE) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_46",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_46",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_47",
+      "sql": "EXPLAIN (SERIALIZE OFF) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_47",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_47",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_48",
+      "sql": "EXPLAIN (WAL true) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_48",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_48",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN option WAL requires ANALYZE",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_49",
+      "sql": "EXPLAIN (TIMING true) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_49",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_49",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN option TIMING requires ANALYZE",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_50",
+      "sql": "EXPLAIN (SERIALIZE) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_50",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_50",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN option SERIALIZE requires ANALYZE",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_51",
+      "sql": "EXPLAIN (SERIALIZE true) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_51",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_51",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"serialize\": \"true\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_52",
+      "sql": "EXPLAIN (SERIALIZE binary) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_52",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_52",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN option SERIALIZE requires ANALYZE",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_53",
+      "sql": "EXPLAIN (SERIALIZE 'TEXT') SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_53",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_53",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"serialize\": \"TEXT\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_54",
+      "sql": "EXPLAIN (ANALYZE, GENERIC_PLAN) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_54",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_54",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN options ANALYZE and GENERIC_PLAN cannot be used together",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_55",
+      "sql": "EXPLAIN (WAL, TIMING, SERIALIZE) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_55",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_55",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN option WAL requires ANALYZE",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_56",
+      "sql": "EXPLAIN (ANALYZE true, FORMAT bogus) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_56",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_56",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"bogus\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_57",
+      "sql": "EXPLAIN (ANALYZE bogus, FORMAT bogus) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_57",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_57",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "analyze requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_58",
+      "sql": "EXPLAIN (FORMAT bogus, ANALYZE bogus) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "explain_58",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "explain_58",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"bogus\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "explain_59",
+      "sql": "EXPLAIN (unknown, FORMAT) SELECT nextval('explain_effect')",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "format requires a parameter",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE OR REPLACE FUNCTION pg_temp.explain_format_type() RETURNS text LANGUAGE plpgsql AS $$DECLARE r record; BEGIN FOR r IN EXPLAIN (FORMAT text) SELECT 1 LOOP RETURN pg_typeof(r.\"QUERY PLAN\")::text; END LOOP; RETURN 'missing'; END$$",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE FUNCTION",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT pg_temp.explain_format_type()",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "explain_format_type",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "text"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE OR REPLACE FUNCTION pg_temp.explain_format_type() RETURNS text LANGUAGE plpgsql AS $$DECLARE r record; BEGIN FOR r IN EXPLAIN (FORMAT json) SELECT 1 LOOP RETURN pg_typeof(r.\"QUERY PLAN\")::text; END LOOP; RETURN 'missing'; END$$",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE FUNCTION",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT pg_temp.explain_format_type()",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "explain_format_type",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "json"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE OR REPLACE FUNCTION pg_temp.explain_format_type() RETURNS text LANGUAGE plpgsql AS $$DECLARE r record; BEGIN FOR r IN EXPLAIN (FORMAT xml) SELECT 1 LOOP RETURN pg_typeof(r.\"QUERY PLAN\")::text; END LOOP; RETURN 'missing'; END$$",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE FUNCTION",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT pg_temp.explain_format_type()",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "explain_format_type",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "xml"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE OR REPLACE FUNCTION pg_temp.explain_format_type() RETURNS text LANGUAGE plpgsql AS $$DECLARE r record; BEGIN FOR r IN EXPLAIN (FORMAT yaml) SELECT 1 LOOP RETURN pg_typeof(r.\"QUERY PLAN\")::text; END LOOP; RETURN 'missing'; END$$",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE FUNCTION",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT pg_temp.explain_format_type()",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "explain_format_type",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "text"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (FORMAT bogus) SELECT missing_column",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (ANALYZE bogus) SELECT missing_column",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (FORMAT) SELECT missing_column",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (FORMAT bogus) SELECT 1 / 0",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"bogus\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (ANALYZE, FORMAT bogus) INSERT INTO explain_items VALUES (1)",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"bogus\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT count(*) FROM explain_items",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "count",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "0"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SAVEPOINT explain_retry",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SAVEPOINT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (ANALYZE, FORMAT bogus) INSERT INTO explain_items VALUES (2)",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"bogus\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT count(*) FROM explain_items",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK TO explain_retry",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT count(*) FROM explain_items",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "count",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "0"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN READ ONLY",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SAVEPOINT explain_read_only",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SAVEPOINT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (ANALYZE, FORMAT bogus) CREATE TEMP TABLE explain_created AS SELECT 1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"bogus\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK TO explain_read_only",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN ANALYZE CREATE TEMP TABLE explain_created AS SELECT 1",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK TO explain_read_only",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN CREATE TEMP TABLE explain_created AS SELECT 1",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (ANALYZE, FORMAT bogus) CREATE TABLE explain_permanent AS SELECT 1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "unrecognized value for EXPLAIN option \"format\": \"bogus\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK TO explain_read_only",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN ANALYZE CREATE TABLE explain_permanent AS SELECT 1",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK TO explain_read_only",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE FUNCTION pg_temp.explain_planning_effect() RETURNS bigint LANGUAGE SQL IMMUTABLE AS $$SELECT nextval('explain_effect')$$",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE FUNCTION",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN ANALYZE CREATE TEMP TABLE explained_planned_once AS SELECT pg_temp.explain_planning_effect() AS id",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT * FROM explained_planned_once",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "id",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "5"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "5",
+            "t"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN ANALYZE CREATE MATERIALIZED VIEW explained_materialized_once AS SELECT pg_temp.explain_planning_effect() AS id",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT * FROM explained_materialized_once",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "id",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "6"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "6",
+            "t"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "REFRESH MATERIALIZED VIEW explained_materialized_once",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "REFRESH MATERIALIZED VIEW",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT * FROM explained_materialized_once",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "id",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "7"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "7",
+            "t"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN ANALYZE DECLARE explained_cursor CURSOR FOR SELECT nextval('explain_effect')",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "8",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT count(*) FROM pg_cursors WHERE name = 'explained_cursor'",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "count",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "0"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "PREPARE explained_execute(integer) AS SELECT nextval('explain_effect') + $1 AS value",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "PREPARE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN EXECUTE explained_execute(2)",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "8",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN ANALYZE EXECUTE explained_execute(3)",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "9",
+            "t"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DEALLOCATE explained_execute",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DEALLOCATE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SAVEPOINT destination",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SAVEPOINT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN CREATE TEMP TABLE explain_items AS SELECT 1/0",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P07",
+        "message": "relation \"explain_items\" already exists",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK TO destination",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN ANALYZE CREATE TEMP TABLE explain_no_data AS SELECT nextval('explain_effect') AS id WITH NO DATA",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT count(*) FROM explain_no_data",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "count",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "0"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT last_value, is_called FROM explain_effect",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "last_value",
+            20
+          ],
+          [
+            "is_called",
+            16
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "9",
+            "t"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN READ ONLY",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SAVEPOINT committed_destination",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SAVEPOINT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN ANALYZE CREATE TABLE explain_committed AS SELECT 1 AS id",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SHOW transaction_read_only",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SHOW",
+        "columns": [
+          [
+            "transaction_read_only",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "on"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SAVEPOINT forbidden_insert",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SAVEPOINT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "INSERT INTO explain_committed VALUES (2)",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "25006",
+        "message": "cannot execute INSERT in a read-only transaction",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK TO forbidden_insert",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT count(*) FROM explain_committed",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "count",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SHOW transaction_read_only",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SHOW",
+        "columns": [
+          [
+            "transaction_read_only",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "on"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "COMMIT",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "COMMIT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT * FROM explain_committed",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "id",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DROP TABLE explain_committed",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DROP TABLE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN READ ONLY",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SAVEPOINT materialized",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SAVEPOINT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN ANALYZE CREATE MATERIALIZED VIEW explain_materialized AS SELECT 1 AS id",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT * FROM explain_materialized",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "id",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (ANALYZE, FORMAT text) CREATE TEMP TABLE IF NOT EXISTS explain_items AS SELECT 1/0",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (ANALYZE, FORMAT json) CREATE TEMP TABLE IF NOT EXISTS explain_items AS SELECT 1/0",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "[\n  \"CREATE TABLE AS\"\n]"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (ANALYZE, FORMAT xml) CREATE TEMP TABLE IF NOT EXISTS explain_items AS SELECT 1/0",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            142
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "<explain xmlns=\"http://www.postgresql.org/2009/explain\">\n  <CREATE-TABLE-AS />\n</explain>"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (ANALYZE, FORMAT yaml) CREATE TEMP TABLE IF NOT EXISTS explain_items AS SELECT 1/0",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "- \"CREATE TABLE AS\""
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE FUNCTION pg_temp.explain_temporary() RETURNS integer LANGUAGE SQL AS 'SELECT 7'",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE FUNCTION",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT pg_temp.explain_temporary() AS value",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "7"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SAVEPOINT temporary_function",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SAVEPOINT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CREATE OR REPLACE FUNCTION pg_temp.explain_temporary() RETURNS integer LANGUAGE SQL AS 'SELECT 9'",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE FUNCTION",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT pg_temp.explain_temporary() AS value",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "9"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK TO temporary_function",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "COMMIT",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "COMMIT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT pg_temp.explain_temporary() AS value",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "7"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SET search_path = pg_temp, public",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SET",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT explain_temporary() AS value",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42883",
+        "message": "function explain_temporary() does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT pg_temp.explain_temporary() AS value",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "7"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "RESET search_path",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "RESET",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DISCARD TEMP",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DISCARD TEMP",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT pg_temp.explain_temporary() AS value",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42883",
+        "message": "function pg_temp.explain_temporary() does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT pg_temp.explain_temporary() AS value",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "7"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DISCARD TEMP",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DISCARD TEMP",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT pg_temp.explain_temporary() AS value",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42883",
+        "message": "function pg_temp.explain_temporary() does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    }
+  ]
+}
