@@ -43,26 +43,33 @@ pub(crate) unsafe fn parameters(
     output.reserve(input.len())?;
     for pointer in input {
         let value = boundary::input(*pointer)?;
-        let source = value
-            .session
-            .as_ref()
-            .filter(|source| !Arc::ptr_eq(source, session));
-        if value
-            .ty()
-            .is_some_and(uqa_sql::ast::ColumnType::is_catalog_dependent)
-            && source.is_some_and(|source| !source.native.shares_database_with(&session.native))
-        {
-            return Err(crate::error::UQAError::new(
-                UQA_ERROR_TYPE,
-                "catalog-dependent value belongs to a different database",
-            ));
-        }
-        let _source_call = source.map(|source| source.enter()).transpose()?;
-        let original = source.map_or(&session.cancellation, |source| &source.cancellation);
-        let control = ProductionControl::new(&session.memory, original, &session.cancellation);
-        output.push_produced(value.copy_parameter(&control)?)?;
+        output.push_produced(parameter(session, value)?)?;
     }
     Ok(output.finish()?)
+}
+
+pub(crate) fn parameter(
+    session: &Arc<Session>,
+    value: &UQAValue,
+) -> boundary::Result<Produced<SQLParam>> {
+    let source = value
+        .session
+        .as_ref()
+        .filter(|source| !Arc::ptr_eq(source, session));
+    if value
+        .ty()
+        .is_some_and(uqa_sql::ast::ColumnType::is_catalog_dependent)
+        && source.is_some_and(|source| !source.native.shares_database_with(&session.native))
+    {
+        return Err(crate::error::UQAError::new(
+            UQA_ERROR_TYPE,
+            "catalog-dependent value belongs to a different database",
+        ));
+    }
+    let _source_call = source.map(|source| source.enter()).transpose()?;
+    let original = source.map_or(&session.cancellation, |source| &source.cancellation);
+    let control = ProductionControl::new(&session.memory, original, &session.cancellation);
+    value.copy_parameter(&control)
 }
 
 // The SQL and parameter pointers may borrow the destination's previous contents. Copy first.

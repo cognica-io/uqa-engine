@@ -556,6 +556,22 @@ UQA_API uqa_status UQA_CALL uqa_statement_prepare(
 UQA_API uqa_status UQA_CALL uqa_statement_prepare_n(
     uqa_engine engine, const char *sql, size_t sql_size,
     uqa_statement *out);
+UQA_API uqa_status UQA_CALL uqa_statement_prepare_typed(
+    uqa_engine engine, const char *sql,
+    const char *const *parameter_types, uint32_t parameter_count,
+    uqa_statement *out);
+UQA_API uqa_status UQA_CALL uqa_statement_prepare_typed_n(
+    uqa_engine engine, const char *sql, size_t sql_size,
+    const char *const *parameter_types, const size_t *parameter_type_sizes,
+    uint32_t parameter_count, uqa_statement *out);
+UQA_API uqa_status UQA_CALL uqa_statement_get_parameter_type(
+    uqa_statement statement, uint32_t index, uqa_type *out);
+UQA_API uqa_status UQA_CALL uqa_statement_get_column_count(
+    uqa_statement statement, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_statement_get_column_name(
+    uqa_statement statement, uint32_t column, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_statement_get_column_type(
+    uqa_statement statement, uint32_t column, uqa_type *out);
 UQA_API uqa_status UQA_CALL uqa_statement_get_parameter_count(
     uqa_statement statement, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_statement_bind(
@@ -568,11 +584,11 @@ UQA_API uqa_status UQA_CALL uqa_statement_execute(
 UQA_API uqa_status UQA_CALL uqa_statement_finalize(uqa_statement *statement);
 ```
 
-Also provide parameter/result descriptor access and `uqa_statement_prepare_typed` with explicit parameter types. Indices are one-based. Initially every parameter is unbound, distinct from NULL. Execution rejects missing bindings; clear restores unbound state. A successful bind copies its input; failure preserves the previous binding. Execute retains bindings and fills the supplied `uqa_result` created by `uqa_result_create`. Results remain valid if the statement is subsequently finalized.
+Explicit parameter types are SQL type names supplied as C strings; the `_n` form takes a byte length for every name as well as for SQL. Native SQL resolves built-in and catalog-dependent types, and `unknown` requests inference for that position. Higher parameter positions are inferred by the native preparation owner. Parameter indices are one-based; result column indices are zero-based. Descriptor views remain valid until finalize, including across binding replacement, clear and execution. A type getter returns `UQA_DONE` with a NULL output when the native descriptor has no type. Initially every parameter is unbound, distinct from NULL. Execution rejects missing bindings with `UQA_ERROR_STATE`; clear restores unbound state. A successful bind copies its input; failure preserves the previous binding. Execute retains bindings and fills the supplied `uqa_result` created by `uqa_result_create`. Results remain valid if the statement is subsequently finalized.
 
 A statement belongs to its creating session; execute does not accept another Engine. Merely retaining SQL text and calling ordinary execute for each invocation is not a prepared implementation. Use native preparation-time inference and validation, custom/generic plan selection, dependency invalidation, and fixed result schemas.
 
-Engine needs a narrow session adapter to create, describe, execute, and release native prepared entries. FFI must not own plans. Track identity and generation independently of a user-supplied SQL name. `DISCARD ALL` and native deallocation invalidate the relevant C handle; subsequent use returns an explicit error rather than silently recreating a definition with different preparation-time behavior. Destruction of an already invalidated handle is harmless.
+Engine needs a narrow session adapter to create, describe, execute, and release native prepared entries. FFI must not own plans. Track identity and generation independently of a user-supplied SQL name. `DISCARD ALL` and native deallocation invalidate the relevant C handle; subsequent use reports `UQA_ERROR_SQL` with SQLSTATE `26000`, including when a definition with the same SQL name has since been created. Destruction of an already invalidated handle is harmless.
 
 ## 12. Cursors and retained resources
 

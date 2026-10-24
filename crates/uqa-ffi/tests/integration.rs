@@ -23,3 +23,6 @@ mod notifications;
 
 #[path = "cases/sessions.rs"]
 mod sessions;
+
+#[path = "cases/statements.rs"]
+mod statements;

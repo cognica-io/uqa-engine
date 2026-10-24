@@ -347,8 +347,27 @@ UQA_API uqa_status UQA_CALL uqa_statement_prepare(
 UQA_API uqa_status UQA_CALL uqa_statement_prepare_n(
     uqa_engine engine, const char *sql, size_t sql_size,
     uqa_statement *out);
+/* Explicit SQL type names are copied during prepare; "unknown" requests inference.
+ * Parameter indices start at 1; result column indices start at 0. Descriptor
+ * views remain valid until finalize. Missing bindings differ from SQL NULL. */
+UQA_API uqa_status UQA_CALL uqa_statement_prepare_typed(
+    uqa_engine engine, const char *sql,
+    const char *const *parameter_types, uint32_t parameter_count,
+    uqa_statement *out);
+UQA_API uqa_status UQA_CALL uqa_statement_prepare_typed_n(
+    uqa_engine engine, const char *sql, size_t sql_size,
+    const char *const *parameter_types, const size_t *parameter_type_sizes,
+    uint32_t parameter_count, uqa_statement *out);
 UQA_API uqa_status UQA_CALL uqa_statement_get_parameter_count(
     uqa_statement statement, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_statement_get_parameter_type(
+    uqa_statement statement, uint32_t index, uqa_type *out);
+UQA_API uqa_status UQA_CALL uqa_statement_get_column_count(
+    uqa_statement statement, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_statement_get_column_name(
+    uqa_statement statement, uint32_t column, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_statement_get_column_type(
+    uqa_statement statement, uint32_t column, uqa_type *out);
 UQA_API uqa_status UQA_CALL uqa_statement_bind(
     uqa_statement statement, uint32_t index,
     uqa_value_view value);
