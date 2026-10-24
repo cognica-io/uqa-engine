@@ -16,7 +16,9 @@ use super::{
     CteScope, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
     SingleRelation, SourceContext, SourcePlan,
 };
-use crate::query::binding::sources::{bind_query_block_with_sources, SourceBindings};
+use crate::query::binding::sources::{
+    bind_query_block_with_sources, ensure_select_with_sources, SourceBindings,
+};
 
 #[expect(
     clippy::too_many_arguments,
@@ -263,7 +265,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
         params,
         ctes,
     )?;
-    ensure_select_privileges_for_query_block(stmt, from, ctes)?;
+    let sources = ensure_select_with_sources(stmt, from, ctes, sources)?;
     let operator = {
         let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
         crate::query::sources::build_join_operator_with_bound_sources(
@@ -273,7 +275,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
             &mut scoped_ctes,
             column_prune.as_ref(),
             qualifier_filters.as_ref(),
-            sources,
+            sources.as_ref(),
         )?
     };
     let source_schema = operator.row_schema().clone();

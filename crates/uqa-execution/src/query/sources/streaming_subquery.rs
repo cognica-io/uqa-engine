@@ -11,7 +11,7 @@ use super::{
     SQLError, SQLParam, SourceContext,
 };
 use crate::query::binding::sources::{
-    bind_query_block_with_sources, BoundQueryBlock, SourceBindings,
+    bind_query_block_with_sources, ensure_select_with_sources, BoundQueryBlock, SourceBindings,
 };
 use crate::query::row_at_a_time::RowAtATime;
 
@@ -68,7 +68,7 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
     let BoundQueryBlock {
         mut block,
         schema: source_schema,
-        sources,
+        mut sources,
     } = bind_query_block_with_sources(
         context.ctes.routines,
         block,
@@ -98,7 +98,7 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
     };
     let block = block.as_ref();
     if let Some(from) = &block.from {
-        crate::query::privileges::ensure_select_privileges_for_query_block(block, from, ctes)?;
+        sources = ensure_select_with_sources(block, from, ctes, sources.as_ref())?;
     }
     crate::query::binding::validate_query_block_expression_types(
         context.ctes.routines,

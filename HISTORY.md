@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Reuse successful catalog-sensitive cast descriptions within an immutable native expression scope, avoiding repeated qualified type lookup while preserving live values, domain checks, session settings, schema changes and mutable custom hooks.
+- Reuse complete SELECT privilege coverage for unchanged direct derived sources under the same catalog, namespace and role incarnation, avoiding repeated lineage analysis while retaining column denials, view/routine authority and changed-scope checks.
 
 - Reuse successfully bound scalar-query descriptions within one clause-validation call and transfer fresh derived-source metadata into physical assembly. Avoid repeated grouping-alias and nested source analysis while preserving complete scope descriptors, routine selection and the original diagnostics.
 

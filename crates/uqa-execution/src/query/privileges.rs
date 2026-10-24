@@ -18,6 +18,11 @@ use uqa_sql::{
     plan::{CtePlan, QueryBlockPlan, QueryPlan, SourcePlan},
     SQLError, ScalarExpr,
 };
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SELECT_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 impl<S: Clone> PrivilegeCteCatalog for CteScope<S> {
     fn is_visible_cte(&self, name: &str) -> bool {
         self.is_visible_cte(name)
@@ -51,8 +56,18 @@ pub fn ensure_select_privileges_for_query_block<S: Clone>(
     source: &SourcePlan,
     ctes: &CteScope<S>,
 ) -> Result<(), SQLError> {
+    check_query_source(statement, source, ctes).map(|_| ())
+}
+
+pub(crate) fn check_query_source<'a, S: Clone>(
+    statement: &'a QueryBlockPlan,
+    source: &'a SourcePlan,
+    ctes: &CteScope<S>,
+) -> Result<logical::coverage::SelectSourceCoverage<'a>, SQLError> {
+    #[cfg(test)]
+    SELECT_CHECKS.with(|count| count.set(count.get() + 1));
     with_scope(ctes, |scope| {
-        logical::ensure_select_privileges_for_query_block(statement, source, scope)
+        logical::coverage::check_query_source(statement, source, scope)
     })
 }
 
