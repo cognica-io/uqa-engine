@@ -19,12 +19,12 @@ use super::{
 
 struct ResultMaterializationPlan {
     entries: Box<[ResultMaterializationEntry]>,
+    selected: SelectedRowMaterializer,
 }
 
 struct ResultMaterializationEntry {
     column: String,
     slot: usize,
-    take: bool,
 }
 
 /// Reuse the immutable schema's conversion plan for public result consumers.
@@ -106,35 +106,18 @@ impl<'a> RowMaterializer<'a> {
         }
         let mut logical_order = last_logical_by_label.into_values().collect::<Vec<_>>();
         logical_order.sort_unstable_by(|left, right| columns[*left].cmp(&columns[*right]));
-        let mut remaining_reads = vec![0usize; self.schema.physical_width()];
-        for logical in &logical_order {
-            let slot = self.schema.layout_slots()[*logical];
-            if slot != NULL_SLOT {
-                remaining_reads[slot] += 1;
-            }
-        }
-        let take = logical_order
-            .iter()
-            .map(|logical| {
-                let slot = self.schema.layout_slots()[*logical];
-                if slot == NULL_SLOT {
-                    return false;
-                }
-                remaining_reads[slot] -= 1;
-                remaining_reads[slot] == 0
-            })
-            .collect::<Vec<_>>();
+        let positions = logical_order.iter().copied().map(Some).collect::<Vec<_>>();
+        let selected = SelectedRowMaterializer::new(self.schema, &positions);
         let entries = logical_order
             .into_iter()
-            .zip(take)
-            .map(|(logical, take)| ResultMaterializationEntry {
+            .map(|logical| ResultMaterializationEntry {
                 column: columns[logical].clone(),
                 slot: self.schema.layout_slots()[logical],
-                take,
             })
             .collect::<Vec<_>>();
         ResultMaterializationPlan {
             entries: entries.into_boxed_slice(),
+            selected,
         }
     }
 
@@ -147,21 +130,20 @@ impl<'a> RowMaterializer<'a> {
         if row.fragments.len() == 1 && Arc::strong_count(&row.fragments[0].values) > 1 {
             return self.materialize_remapped_shared_fragment_row(&row.fragments[0], plan);
         }
-        let mut fragments = row.into_value_fragments();
         debug_assert_eq!(
             self.schema.physical_width(),
-            fragments.iter().map(Vec::len).sum::<usize>()
+            row.fragments.iter().map(RowFragment::len).sum::<usize>()
         );
+        // Missing positions stay NULL; selected transfer discards unused aliases.
         let mut result = ResultRow::new();
         for entry in &plan.entries {
-            let slot = entry.slot;
-            let value = if slot == NULL_SLOT {
-                Value::Null
-            } else {
-                materialize_fragment_slot(&mut fragments, slot, entry.take)
-            };
-            result.insert(entry.column.clone(), value);
+            result.insert(entry.column.clone(), Value::Null);
         }
+        plan.selected.materialize(row, |output, value| {
+            *result
+                .get_mut(&plan.entries[output].column)
+                .expect("selected result label was initialized") = value;
+        });
         result
     }
 
@@ -196,20 +178,6 @@ impl<'a> RowMaterializer<'a> {
         }
         result
     }
-}
-
-fn materialize_fragment_slot(fragments: &mut [Vec<Value>], mut slot: usize, take: bool) -> Value {
-    for fragment in fragments {
-        if slot < fragment.len() {
-            return if take {
-                std::mem::replace(&mut fragment[slot], Value::Null)
-            } else {
-                fragment[slot].clone()
-            };
-        }
-        slot -= fragment.len();
-    }
-    Value::Null
 }
 
 impl RowFragment {
