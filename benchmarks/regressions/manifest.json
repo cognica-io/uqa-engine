@@ -2,6 +2,32 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_record_parameters_preserve_selected_types_without_text_resolution",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/resolver/tests.rs",
+      "capability": "Procedural selected record metadata",
+      "workload": "512 changing typed procedural parameter reads through the existing resolver.",
+      "invariant": "Read current smallint/text record fields and NULLs without textual type resolution; schema changes select the current field descriptor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_scalar_parameters_do_not_resolve_the_selected_type_twice",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/resolver/tests.rs",
+      "capability": "Procedural scalar parameter handoff",
+      "workload": "512 changing typed procedural parameter reads through the existing resolver.",
+      "invariant": "Preserve current smallint values and NULLs while resolving the mutable declaration once per read, without re-resolving its selected type.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "tuple_result_targets_resolve_once_per_attribute_and_keep_each_domain_check",

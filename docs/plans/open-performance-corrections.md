@@ -316,3 +316,17 @@ Final local log SHA-256: sql `3c100d18b7aa5eb07e95316c1f6339f56b9fb8075d06f29cb1
 The original #1108 historical comparison against 613251702 and fixing-release benchmark refresh, #1117 broader binding/authorization scopes and controlled PostgreSQL planning comparison, and #653 historical instruction-throughput attribution remain open. Their accepted deliveries and original observations remain recorded above.
 
 Platform artifact SHA-256: Linux `019fe1b733b31b7ce4bd1bc36be1905bb17708985d19956e7a08035026d25dd4`, macOS `b3f6ce0ed0ccf1a45e7c438b1511d36c462b066db976d46063033a56f7253d11`. Both archives and their original manifest, source checksums, exact test cases and process histories were verified; these deterministic reports make no elapsed-time acceptance claim.
+
+## Procedural datum descriptions
+
+The next coherent #1108 correction follows #1278 and keeps PL/pgSQL datum parameter reads and assignment/return descriptions in SQL and Execution. A record field already carries its selected `ColumnType`, but `PLpgSQLVariableReference::read` currently receives a textual spelling and resolves it again. Scalar datum reads first resolve the declaration, then spell and resolve that selected result again. The mutable fallback must retain its original lookup boundary, while native guarded calls may reuse successful descriptions under the existing catalog/registry/role scope. Values, domains, record-schema changes, retained parameter diagnostics and current caller effects remain live. No new dependency, feature or plan representation is required.
+
+- [x] Inspect owner manifests/features, dependency policy, existing typed parameters, native scopes, interpreter and resolver interfaces.
+- [x] Capture owner failures for 512 changing record-field and scalar parameters. Both deterministic tests fail on the unchanged product: record fields perform 512 textual lookups against a zero-lookup requirement; scalar reads perform 1,024 lookups against the 512 mutable-declaration requirement. Values, NULLs and selected smallint/text types pass before the final work assertions. Baseline log SHA-256: `6e40db1b7cc1855ea4b48f16c9d3b8677fb7e0d42349ab4b8db65975720fa6cc`.
+- [ ] Carry concrete parameter metadata directly through the existing procedural reference interface, keeping default behavior for external variable resolvers.
+- [ ] Reuse admitted native scalar-datum and assignment/return descriptions with exact declared positions/names, live scope checks, lazy initial resolution and optional-retention fallback.
+- [ ] Verify callback/schema invalidation, live domain and current-value behavior, declaration/constant/NOT NULL error order, cancellation, bounded retention and release.
+- [ ] Verify independent PostgreSQL 18 effects and diagnostics through four providers/reopen, affected procedural/prepared consumers and all exact TPC-H outputs; complete owner tests, strict Clippy, source review and ownership/inventory checks.
+- [ ] Push logical commits with a labeled draft PR and current inherited tasks; qualify the completed batch on actual Linux/macOS before merge/branch cleanup.
+
+Original #1108 unbound/table-function activation metadata and historical/release acceptance, #1117 remaining binding/privilege scopes and controlled planning comparison, and #653 historical instruction-throughput attribution remain open. This correction does not mark those independent requirements complete.
