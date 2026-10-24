@@ -2,6 +2,84 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_datum_does_not_inspect_later_values",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "Malformed deferred integer bytes before a 4,096-element list in the same output value.",
+      "invariant": "Preserve XX001 and inspect only the container and first Datum before failing; later values remain unvisited.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "ordinary_result_values_are_inspected_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "8,192 named rows with two ordinary integer outputs each.",
+      "invariant": "Exactly one carrier inspection per scalar preserves every output without querying type metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "ordinary_nested_output_retains_payloads_with_one_carrier_walk",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "A 4,096-element ordinary list at the public result boundary.",
+      "invariant": "Inspect the container and children once, preserve the original value buffer and exact output, and allocate nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "named_and_positional_output_preserve_nested_metadata_and_decoded_enums",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "Repeated output labels with nested records, typed rows, arrays, maps and lists, plus a deferred enum OID.",
+      "invariant": "Both named and positional output render decoded enums while preserving row field types, array lower bounds, element OIDs and NULLs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "datum_failure_precedes_enum_lookup_and_preserves_the_value",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "A missing enum catalog followed by malformed deferred integer bytes in the same result value.",
+      "invariant": "The complete Datum phase fails with XX001 before enum lookup and leaves the original value representation unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enum_failure_keeps_the_completed_datum_phase",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/result/labels/tests.rs",
+      "capability": "Public SQL output observation",
+      "workload": "A missing enum catalog together with a valid deferred integer in one result value.",
+      "invariant": "Enum output retains its existing diagnostic and preserves the successfully completed Datum phase after the error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
       "test": "legacy_record_decoding_admits_shared_descriptor_conversion_and_releases_scratch",

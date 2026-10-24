@@ -397,28 +397,10 @@ pub(crate) fn has_missing_enum_oid(value: &Value) -> bool {
 }
 
 fn enum_carrier_matches(value: &Value, predicate: &dyn Fn(&EnumValue) -> bool) -> bool {
-    #[cfg(test)]
-    super::observations::record_visit();
-    match value {
-        Value::Enum(label) => predicate(label),
-        Value::Array(array) => array
-            .elements()
-            .iter()
-            .any(|value| enum_carrier_matches(value, predicate)),
-        Value::List(values) => values
-            .iter()
-            .any(|value| enum_carrier_matches(value, predicate)),
-        Value::Row(values) => values
-            .iter()
-            .any(|value| enum_carrier_matches(value, predicate)),
-        Value::Record(fields) => fields
-            .iter()
-            .any(|(_, value)| enum_carrier_matches(value, predicate)),
-        Value::Map(fields) => fields
-            .values()
-            .any(|value| enum_carrier_matches(value, predicate)),
-        _ => false,
-    }
+    super::observations::any_nested_value(
+        value,
+        &mut |value| matches!(value, Value::Enum(label) if predicate(label)),
+    )
 }
 
 /// Whether a built-in call converts its arguments with their types' output functions, so enum arguments contribute their current labels. `||` concatenates text only when neither operand is an array; with an array operand it appends or prepends the enum value itself.
