@@ -15,6 +15,9 @@ use super::{
 };
 use uqa_sql::{ast::FunctionBinding, plan::TableFunctionPlan};
 
+#[cfg(test)]
+mod tests;
+
 struct FunctionSource<'a> {
     name: &'a str,
     binding: Option<&'a FunctionBinding>,

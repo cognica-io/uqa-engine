@@ -2,6 +2,19 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_function_calls_share_immutable_inputs_and_read_current_outer_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/function_source/tests.rs",
+      "capability": "Shared correlated function inputs",
+      "workload": "512 changing outer rows reuse one immutable 64 KiB function argument; an unfetched stream is discarded.",
+      "invariant": "Keep exact current values, first-fetch-only execution and one call per consumed stream within 1 MiB cumulative allocation, independent of repeated immutable argument size.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "deferred_parameter_keeps_scalar_carriers_compact_and_errors_lazy",
