@@ -320,6 +320,7 @@ pub(super) struct SessionContext {
     /// Prepared definitions belong to the connection and survive transaction or
     /// savepoint rollback, including definitions created or removed after a boundary.
     pub(super) prepared: RwLock<BTreeMap<String, super::PreparedStatementPlan>>,
+    pub(super) next_prepared_handle: std::sync::atomic::AtomicU64,
     /// `PostgreSQL` sequence reservations are session-local and nontransactional. They are intentionally kept outside `SessionStateSnapshot` so rollback never rewinds consumption or restores blocks discarded by `ALTER SEQUENCE`.
     pub(super) sequence_caches:
         Mutex<BTreeMap<super::RelationIdentity, super::SessionSequenceCache>>,
@@ -395,6 +396,7 @@ impl SessionContext {
             query_memory_limit: std::sync::atomic::AtomicUsize::new(0),
             termination_finished: AtomicBool::new(false),
             prepared: RwLock::new(BTreeMap::new()),
+            next_prepared_handle: std::sync::atomic::AtomicU64::new(0),
             sequence_caches: Mutex::new(BTreeMap::new()),
             sequence_snapshot: Mutex::new(None),
             enum_type_comparison_states: uqa_sql::expr::enums::EnumTypeComparisonStates::default(),

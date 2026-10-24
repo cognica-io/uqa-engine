@@ -38,6 +38,49 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
     execute_with_context(context, sql, params, false, &mut None)
 }
 
+/// Execute native syntax through the same snapshot, deadline and transaction scheduler as SQL text, without reading or publishing text-cache entries.
+pub fn execute_prepared_statement<S: Clone + Send + Sync + 'static>(
+    context: &BatchExecutionContext<'_, S>,
+    statement: Arc<uqa_sql::Statement>,
+    name: &str,
+    sql: Option<&str>,
+    params: &[SQLParam],
+    nested_statement: bool,
+) -> Result<SQLResult, SQLError> {
+    context
+        .runtime
+        .cancellation
+        .check()
+        .map_err(|error| abort_explicit_statement_error(context.transactions, error.into()))?;
+    let _statement_thread =
+        super::context::statement_thread_scope(context.statements, context.runtime.cancellation);
+    let display = context
+        .statements
+        .diagnostic_search_path()
+        .map(|path| uqa_sql::ast::TypeDisplayScope::enter(&path));
+    let logical_plan = Arc::new(UnifiedPlan::lower_with(
+        statement.as_ref().clone(),
+        context.aggregates,
+    ));
+    execute_uncached_or_snapshot_scoped(
+        context,
+        StatementSource {
+            sql,
+            prepared: Some(name),
+        },
+        params,
+        nested_statement,
+        &mut None,
+        display.as_ref(),
+        Some(CachedStatement {
+            statement,
+            logical_plan,
+            optimized_plan: None,
+            parser: uqa_sql::parser::ParserMetadata::default(),
+        }),
+    )
+}
+
 pub fn execute_nested<S: Clone + Send + Sync + 'static>(
     context: &BatchExecutionContext<'_, S>,
     sql: &str,
@@ -73,7 +116,11 @@ fn execute_plan<S: Clone + Send + Sync + 'static>(
     executor: &mut UnifiedPlanExecutor<'_, '_, S>,
     plan: &UnifiedPlan,
     consumer: &mut Option<ResultConsumer<'_>>,
+    prepared: Option<&str>,
 ) -> Result<SQLResult, SQLError> {
+    if let Some(name) = prepared {
+        return executor.execute_host_prepared(name);
+    }
     if let Some(ResultConsumer::WithinStatement(consume)) = consumer {
         consume(executor.execute_for_output(plan)?)?;
         // This entry point hands off the result and returns no public row vector.
@@ -180,19 +227,28 @@ fn execute_with_context<S: Clone + Send + Sync + 'static>(
                     nested_statement,
                 )
                 .with_source_sql(sql);
-                return execute_plan(&mut executor, plan.as_ref(), consumer);
+                return execute_plan(&mut executor, plan.as_ref(), consumer, None);
             }
         }
     }
     execute_uncached_or_snapshot_scoped(
         context,
-        sql,
+        StatementSource {
+            sql: Some(sql),
+            prepared: None,
+        },
         params,
         nested_statement,
         consumer,
         display.as_ref(),
         cached,
     )
+}
+
+#[derive(Clone, Copy)]
+struct StatementSource<'a> {
+    sql: Option<&'a str>,
+    prepared: Option<&'a str>,
 }
 
 #[inline(never)]
@@ -202,13 +258,15 @@ fn execute_with_context<S: Clone + Send + Sync + 'static>(
 )]
 fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     context: &BatchExecutionContext<'_, S>,
-    sql: &str,
+    source: StatementSource<'_>,
     params: &[SQLParam],
     nested_statement: bool,
     consumer: &mut Option<ResultConsumer<'_>>,
     display: Option<&uqa_sql::ast::TypeDisplayScope>,
     cached_statement: Option<CachedStatement>,
 ) -> Result<SQLResult, SQLError> {
+    let source_sql = source.sql;
+    let sql = source_sql.unwrap_or_default();
     // Parse an uncached batch completely before executing its first statement.
     // This preserves syntax atomicity. Exact single-statement cache hits reuse
     // the parsed AST and logical plan; batches still lower each statement only
@@ -260,6 +318,8 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         return Ok(SQLResult::empty());
     }
     let is_single_statement = statements.len() == 1;
+    let cache_single_statement =
+        is_single_statement && source_sql.is_some() && source.prepared.is_none();
     let final_statement_index = statements.len() - 1;
     let simple_query_batch = !is_single_statement;
     let mut implicit_segment_open = false;
@@ -428,8 +488,13 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     params,
                     nested_statement || simple_query_batch,
                 )
-                .with_source_sql(sql);
-                last = execute_plan(&mut executor, initial_plan.as_ref(), consumer)?;
+                .with_optional_source_sql(source_sql);
+                last = execute_plan(
+                    &mut executor,
+                    initial_plan.as_ref(),
+                    consumer,
+                    source.prepared,
+                )?;
                 if simple_query_batch
                     && transaction.as_ref().is_some_and(|transaction| {
                         matches!(
@@ -475,7 +540,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 // The statement was lowered immediately above, after any earlier
                 // BEGIN or catalog-changing statement in this batch completed.
                 let mut plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
-                if is_single_statement {
+                if cache_single_statement {
                     context.cache.cache_sql_statement(
                         sql.to_string(),
                         shared_statement(),
@@ -498,7 +563,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         .map_err(|error| context.transactions.abort_after_error(error))?
                 {
                     plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
-                    if is_single_statement {
+                    if cache_single_statement {
                         context.cache.cache_sql_statement(
                             sql.to_string(),
                             shared_statement(),
@@ -512,7 +577,8 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     sql,
                     plan,
                     params,
-                    is_single_statement && !nested_statement,
+                    cache_single_statement && !nested_statement,
+                    source.prepared.is_some(),
                 ) {
                     Ok(plan) => plan,
                     Err(error) => {
@@ -524,8 +590,8 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     params,
                     nested_statement || simple_query_batch,
                 )
-                .with_source_sql(sql);
-                match execute_plan(&mut executor, &optimized, consumer) {
+                .with_optional_source_sql(source_sql);
+                match execute_plan(&mut executor, &optimized, consumer, source.prepared) {
                     Ok(result) => last = result,
                     Err(error) => return Err(context.transactions.abort_after_error(error)),
                 }
@@ -588,7 +654,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 // publishing that generation. Re-lower the parsed statement while
                 // the database snapshot is pinned, then optimize that exact plan.
                 let mut plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
-                if is_single_statement {
+                if cache_single_statement {
                     context.cache.cache_sql_statement(
                         sql.to_string(),
                         shared_statement(),
@@ -634,7 +700,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         return rollback_after_statement_error(context.transactions, error);
                     }
                     plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
-                    if is_single_statement {
+                    if cache_single_statement {
                         context.cache.cache_sql_statement(
                             sql.to_string(),
                             shared_statement(),
@@ -659,7 +725,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     match context.transactions.prepare_explicit_transaction_writer() {
                         Ok(true) => {
                             plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
-                            if is_single_statement {
+                            if cache_single_statement {
                                 context.cache.cache_sql_statement(
                                     sql.to_string(),
                                     shared_statement(),
@@ -679,7 +745,8 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     sql,
                     plan,
                     params,
-                    is_single_statement && !nested_statement,
+                    cache_single_statement && !nested_statement,
+                    source.prepared.is_some(),
                 ) {
                     Ok(plan) => plan,
                     Err(error) => {
@@ -691,8 +758,8 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     params,
                     nested_statement || simple_query_batch,
                 )
-                .with_source_sql(sql);
-                match execute_plan(&mut executor, &optimized, consumer) {
+                .with_optional_source_sql(source_sql);
+                match execute_plan(&mut executor, &optimized, consumer, source.prepared) {
                     Ok(result) => {
                         // Commit failure cleanup is owned by the transaction
                         // layer, including cache restoration and stack reset.
@@ -712,14 +779,16 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 // In-memory read-only queries run without a transaction snapshot.
                 // Catalog generations protect identity, while SQL analysis decides
                 // whether input constants also require a fresh message boundary.
-                let optimized = if let Some(plan) = cached_optimized_plan {
+                let optimized = if source.prepared.is_some() {
+                    initial_plan.clone()
+                } else if let Some(plan) = cached_optimized_plan {
                     plan
                 } else {
                     let (plan, reusable) = context
                         .planning
                         .plan_for_statement_cache(initial_plan.as_ref().clone(), params)?;
                     let plan = Arc::new(plan);
-                    if is_single_statement && reusable {
+                    if cache_single_statement && reusable {
                         context
                             .cache
                             .cache_optimized_sql_plan(sql, Arc::clone(&plan));
@@ -731,8 +800,8 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     params,
                     nested_statement || simple_query_batch,
                 )
-                .with_source_sql(sql);
-                last = execute_plan(&mut executor, optimized.as_ref(), consumer)?;
+                .with_optional_source_sql(source_sql);
+                last = execute_plan(&mut executor, optimized.as_ref(), consumer, source.prepared)?;
             }
             if statement_index != final_statement_index {
                 consume_result(context, &last, consumer)?;

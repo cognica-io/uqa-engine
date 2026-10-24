@@ -97,6 +97,7 @@ mod models;
 mod notifications;
 mod open;
 mod prepared;
+pub use prepared::{PreparedStatement, PreparedStatementDescription};
 mod relations;
 mod roles;
 mod schema_security;

@@ -181,6 +181,32 @@ impl Engine {
         }
     }
 
+    pub(crate) fn execute_compiled_prepared(
+        &self,
+        name: &str,
+        statement: std::sync::Arc<uqa_sql::Statement>,
+        sql: Option<&str>,
+        params: &[SQLParam],
+    ) -> Result<SQLResult, SQLError> {
+        let _statement = self.lock_statement_gate();
+        let (_execution, nested) = SQLExecutionScope::enter(self);
+        self.synchronize_table_catalog()
+            .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
+        self.synchronize_table_data()
+            .map_err(|err| SQLError::Internal(format!("refresh committed table data: {err}")))?;
+        self.synchronize_catalog_registries().map_err(|err| {
+            SQLError::Internal(format!("refresh durable catalog registries: {err}"))
+        })?;
+        uqa_execution::statement::batch::execute_prepared_statement(
+            &self.batch_execution_context(),
+            statement,
+            name,
+            sql,
+            params,
+            nested,
+        )
+    }
+
     /// Execute one read query into a bounded spill and return a columnar batch
     /// cursor. Unlike [`Engine::sql`], this path never retains the complete
     /// result as `Vec<ResultRow>` in memory. The statement finishes and its

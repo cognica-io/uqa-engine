@@ -53,6 +53,52 @@ pub fn register_plan(
     declared: &[ColumnType],
     source_sql: Option<&str>,
 ) -> Result<(), SQLError> {
+    register_definition(
+        context,
+        name,
+        logical_plan,
+        declared,
+        source_sql,
+        source_sql.is_some(),
+    )
+}
+
+/// Parse and analyze a host's single prepared definition under the session's parser settings. Source text is retained for catalog inspection, without marking the definition as SQL PREPARE.
+pub fn register_host_sql(
+    context: &PreparedRegistrationContext<'_>,
+    name: String,
+    sql: &str,
+    declared: &[ColumnType],
+    settings: uqa_sql::parser::ParserSettings,
+    notices: &crate::query::NoticeQueue,
+) -> Result<Arc<Statement>, SQLError> {
+    context.cancellation.check()?;
+    let (statements, parser) =
+        uqa_sql::parser::with_settings(settings, || uqa_sql::parse_statements(sql));
+    for notice in parser.notices.iter() {
+        notices.push(notice.clone());
+    }
+    let mut statements = statements?;
+    if statements.len() != 1 {
+        return Err(SQLError::Routine {
+            sqlstate: "42601".into(),
+            message: "a prepared definition must contain one statement".into(),
+        });
+    }
+    let statement = statements.pop().expect("one statement").compile()?;
+    let plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
+    register_definition(context, name, plan, declared, Some(sql), false)?;
+    Ok(Arc::new(statement))
+}
+
+fn register_definition(
+    context: &PreparedRegistrationContext<'_>,
+    name: String,
+    logical_plan: UnifiedPlan,
+    declared: &[ColumnType],
+    source_sql: Option<&str>,
+    from_sql: bool,
+) -> Result<(), SQLError> {
     let _statement_thread = super::thread_context::StatementThreadContext {
         retained_rows: crate::query::sources::retained_source::RetainedRowContext::current(),
         regex_cache: uqa_sql::expr::current_regex_cache(),
@@ -91,7 +137,7 @@ pub fn register_plan(
             result_schema: definition.result_schema,
             source_sql: source_sql.map(Arc::from),
             prepared_at_micros: (context.clock)(),
-            from_sql: source_sql.is_some(),
+            from_sql,
             generic_plans: 0,
             custom_plans: 0,
             generic_cost: None,

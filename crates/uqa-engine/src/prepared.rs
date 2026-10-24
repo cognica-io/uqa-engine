@@ -5,8 +5,165 @@
 //
 
 use super::Engine;
+use std::sync::{Arc, Weak};
+use uqa_sql::{ColumnType, RowSchema, SQLError, SQLParam, SQLResult};
+
+/// A session-owned prepared definition's identity. Removing and recreating its catalog name never rebinds this handle.
+pub struct PreparedStatement {
+    name: String,
+    source: Arc<uqa_sql::Statement>,
+    owner: Weak<crate::state::SessionContext>,
+    definition: Weak<uqa_sql::plan::UnifiedPlan>,
+}
+
+/// Preparation-time parameter and positional result descriptors.
+pub struct PreparedStatementDescription {
+    pub parameter_types: Vec<Option<ColumnType>>,
+    pub result_schema: Option<RowSchema>,
+}
+
+impl PreparedStatement {
+    fn matches(&self, engine: &Engine, entry: &super::PreparedStatementPlan) -> bool {
+        self.owner.ptr_eq(&Arc::downgrade(&engine.session))
+            && self.definition.ptr_eq(&Arc::downgrade(&entry.source_plan))
+    }
+
+    fn invalid(&self) -> SQLError {
+        uqa_sql::prepared::statement_error("26000", &self.name, "does not exist")
+    }
+}
 
 impl Engine {
+    /// Prepare native SQL with optional explicit parameter declarations. Definitions survive transaction rollback and are removed by finalize, DEALLOCATE or DISCARD ALL.
+    pub fn prepare_statement(
+        &self,
+        sql: &str,
+        declared: &[ColumnType],
+    ) -> Result<PreparedStatement, SQLError> {
+        self.with_direct_read_snapshot(|engine| {
+            let name = loop {
+                let identity = engine
+                    .session
+                    .next_prepared_handle
+                    .fetch_update(
+                        std::sync::atomic::Ordering::Relaxed,
+                        std::sync::atomic::Ordering::Relaxed,
+                        |value| value.checked_add(1),
+                    )
+                    .map_err(|_| SQLError::Routine {
+                        sqlstate: "54000".into(),
+                        message: "prepared statement identity space exhausted".into(),
+                    })?;
+                let name = format!("__uqa_prepared_{identity}");
+                if !engine.session.prepared.read().contains_key(&name) {
+                    break name;
+                }
+            };
+            let source = uqa_execution::statement::prepared::register_host_sql(
+                &engine.prepared_registration_context(),
+                name.clone(),
+                sql,
+                declared,
+                engine.parser_settings(),
+                &engine.runtime.notices,
+            )?;
+            let registry = engine.session.prepared.read();
+            let entry = registry.get(&name).expect("published prepared definition");
+            Ok(PreparedStatement {
+                name,
+                source,
+                owner: Arc::downgrade(&engine.session),
+                definition: Arc::downgrade(&entry.source_plan),
+            })
+        })
+    }
+
+    pub fn validate_prepared_statement(
+        &self,
+        statement: &PreparedStatement,
+    ) -> Result<(), SQLError> {
+        let _gate = self.lock_statement_gate();
+        if self
+            .session
+            .prepared
+            .read()
+            .get(&statement.name)
+            .is_some_and(|entry| statement.matches(self, entry))
+        {
+            Ok(())
+        } else {
+            Err(statement.invalid())
+        }
+    }
+
+    pub fn describe_prepared_statement(
+        &self,
+        statement: &PreparedStatement,
+    ) -> Result<PreparedStatementDescription, SQLError> {
+        let _gate = self.lock_statement_gate();
+        let registry = self.session.prepared.read();
+        let entry = registry
+            .get(&statement.name)
+            .filter(|entry| statement.matches(self, entry))
+            .ok_or_else(|| statement.invalid())?;
+        Ok(PreparedStatementDescription {
+            parameter_types: entry.parameter_types.clone(),
+            result_schema: entry.result_schema.clone(),
+        })
+    }
+
+    pub fn execute_prepared_statement(
+        &self,
+        statement: &PreparedStatement,
+        params: &[SQLParam],
+    ) -> Result<SQLResult, SQLError> {
+        let _gate = self.lock_statement_gate();
+        self.validate_prepared_statement(statement)?;
+        let expected = self
+            .session
+            .prepared
+            .read()
+            .get(&statement.name)
+            .expect("live definition")
+            .parameter_types
+            .len();
+        if params.len() != expected {
+            return Err(SQLError::Routine {
+                sqlstate: "42601".into(),
+                message: format!(
+                    "wrong number of parameters for prepared statement \"{}\"",
+                    statement.name
+                ),
+            });
+        }
+        let sql = self
+            .session
+            .prepared
+            .read()
+            .get(&statement.name)
+            .expect("live definition")
+            .source_sql
+            .clone();
+        self.execute_compiled_prepared(
+            &statement.name,
+            Arc::clone(&statement.source),
+            sql.as_deref(),
+            params,
+        )
+    }
+
+    /// An invalidated handle is harmless to release and cannot remove a replacement definition.
+    pub fn finalize_prepared_statement(&self, statement: &PreparedStatement) {
+        let _gate = self.lock_statement_gate();
+        let mut registry = self.session.prepared.write();
+        if registry
+            .get(&statement.name)
+            .is_some_and(|entry| statement.matches(self, entry))
+        {
+            registry.remove(&statement.name);
+        }
+    }
+
     pub fn register_prepared(
         &self,
         name: String,
@@ -60,6 +217,7 @@ impl Engine {
     }
 
     pub fn deallocate_prepared(&self, name: Option<&str>) {
+        let _gate = self.lock_statement_gate();
         match name {
             Some(name) => {
                 self.session.prepared.write().remove(name);

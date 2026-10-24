@@ -95,6 +95,11 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         self
     }
 
+    pub fn with_optional_source_sql(mut self, sql: Option<&str>) -> Self {
+        self.source_sql = sql.map(str::to_string);
+        self
+    }
+
     fn execute_query(&self, query: &QueryPlan) -> Result<SQLResult, SQLError> {
         if self.context.validation.transactions.transaction_depth() != 0 {
             crate::query::locking::lock_query_relations(
@@ -328,6 +333,28 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         name: &str,
         params: &[ExpressionPlan],
     ) -> Result<SQLResult, SQLError> {
+        self.execute_prepared_arguments(name, params, true, None)
+    }
+
+    pub(crate) fn execute_host_prepared(&self, name: &str) -> Result<SQLResult, SQLError> {
+        let arguments = (1..=self.params.len())
+            .map(|index| ExpressionPlan::lower(uqa_sql::ast::Expr::Param(index)))
+            .collect::<Vec<_>>();
+        self.execute_prepared_arguments(
+            name,
+            &arguments,
+            self.nested_statement,
+            self.source_sql.as_deref(),
+        )
+    }
+
+    fn execute_prepared_arguments(
+        &self,
+        name: &str,
+        params: &[ExpressionPlan],
+        nested: bool,
+        source_sql: Option<&str>,
+    ) -> Result<SQLResult, SQLError> {
         let bound = crate::query::prepared::bind_execute_parameters(
             self.context.prepared.arguments,
             name,
@@ -341,7 +368,9 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             .plans
             .plan_for_execution(name, &bound)?
             .ok_or_else(|| uqa_sql::prepared::statement_error("26000", name, "does not exist"))?;
-        UnifiedPlanExecutor::new_nested(self.context.clone(), &bound).execute(&plan)
+        UnifiedPlanExecutor::with_nested_statement(self.context.clone(), &bound, nested)
+            .with_optional_source_sql(source_sql)
+            .execute(&plan)
     }
 
     fn execute_deallocate(&self, name: Option<&str>) -> Result<SQLResult, SQLError> {

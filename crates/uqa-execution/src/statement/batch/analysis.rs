@@ -15,7 +15,12 @@ pub(super) fn plan<S: Clone + 'static>(
     logical: UnifiedPlan,
     params: &[SQLParam],
     cacheable: bool,
+    prepared: bool,
 ) -> Result<UnifiedPlan, SQLError> {
+    if prepared {
+        // Prepared inference, dependency checks and optimization belong to its retained definition.
+        return Ok(logical);
+    }
     if !cacheable {
         return context.planning.plan_for_execution(logical, params);
     }

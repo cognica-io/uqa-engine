@@ -286,6 +286,51 @@ fn cancellation_precedes_cache_and_parse_and_aborts_an_open_transaction() {
 }
 
 #[test]
+fn prepared_scheduling_does_not_read_or_publish_sql_cache_entries() {
+    let inputs = Inputs {
+        reject_snapshot: true,
+        ..Inputs::default()
+    };
+    let statement = Arc::new(uqa_sql::compile("DELETE FROM items").unwrap().remove(0));
+    let error = execute_prepared_statement(
+        &inputs.context(),
+        statement,
+        "saved",
+        Some("DELETE FROM items"),
+        &[],
+        false,
+    )
+    .unwrap_err();
+    assert!(matches!(error, SQLError::Cancelled(_)));
+    assert!(inputs
+        .events
+        .borrow()
+        .iter()
+        .all(|event| !event.starts_with("cache.")));
+    assert_eq!(inputs.depth.get(), 0);
+    assert!(!inputs.guarded.get());
+}
+
+#[test]
+fn prepared_cancellation_aborts_before_snapshot_or_cache_access() {
+    let inputs = Inputs::default();
+    inputs.depth.set(1);
+    inputs.cancellation.cancel();
+    let statement = Arc::new(uqa_sql::compile("SELECT 1").unwrap().remove(0));
+    let error = execute_prepared_statement(
+        &inputs.context(),
+        statement,
+        "saved",
+        Some("SELECT 1"),
+        &[],
+        false,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("canceling statement"));
+    inputs.assert_events(&["abort.false"]);
+}
+
+#[test]
 fn cancellation_after_cache_lookup_prevents_first_statement_transaction() {
     let inputs = Inputs {
         cancel_after_cache_lookup: true,

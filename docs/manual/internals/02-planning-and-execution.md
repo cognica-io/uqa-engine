@@ -38,6 +38,8 @@ A [statement thread context](../../../crates/uqa-execution/src/statement/thread_
 
 [Cypher label validation](../../../crates/uqa-graph/src/cypher/labels.rs) reads the selected graph's label catalog before traversing path, expression, and clause requirements. Missing vertex defaults are reported before missing edge defaults. Engine invokes that validator at its existing graph read and write boundaries, retaining the same selected handles, snapshot scopes, write-candidate transaction, path-index invalidation, and registry publication.
 
+Host prepared handles retain their session and original definition identities through the [Engine adapter](../../../crates/uqa-engine/src/prepared.rs). [Execution registration](../../../crates/uqa-execution/src/statement/prepared.rs) parses with the session settings and invokes SQL-owned preparation analysis; the host definition retains its source syntax for scheduling. The ordinary batch scheduler admits snapshots, deadlines and row locks from that syntax, then uses the retained prepared entry for argument binding and plan selection. This path neither constructs PREPARE/EXECUTE text nor publishes a fabricated SQL cache key. Catalog-name replacement cannot redirect an old handle, and its finalization cannot delete the replacement.
+
 ## End-to-end pipeline
 
 ```mermaid

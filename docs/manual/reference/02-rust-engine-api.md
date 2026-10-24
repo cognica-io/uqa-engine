@@ -106,6 +106,26 @@ assert_eq!(tags, [Some("SELECT 1".into()), Some("SELECT 1".into())]);
 # Ok::<(), uqa_engine::SQLError>(())
 ```
 
+## Prepared statement handles
+
+`Engine::prepare_statement(sql, declared_types)` prepares one native SQL statement and returns a `PreparedStatement` identity for that session. `declared_types` is a slice of SQL `ColumnType` declarations; an empty slice uses native inference. `describe_prepared_statement(&statement)` returns the inferred parameter types and optional positional result schema, preserving duplicate labels and empty query descriptors.
+
+`execute_prepared_statement(&statement, params)` requires the complete parameter list and returns an ordinary owned `SQLResult`. It uses native argument coercion, custom/generic plan selection, dependency invalidation and fixed result schemas. Preparation and execution enter the existing session statement boundary; prepared transaction commands retain their transaction-control behavior. Source text is available in `pg_prepared_statements`, with `from_sql = false` for these host-created entries.
+
+`finalize_prepared_statement(&statement)` removes that definition. Prepared definitions survive transaction rollback; explicit finalization, SQL `DEALLOCATE` and `DISCARD ALL` invalidate the handle. A different session or a removed/replaced definition reports SQLSTATE `26000`; finalizing such a handle is harmless and never removes its replacement. Retained results and descriptors keep their native ownership after finalization. Dropping the identity alone does not finalize its session definition.
+
+```rust
+use uqa_engine::{Engine, SQLParam};
+use uqa_core::Value;
+
+let engine = Engine::new();
+let statement = engine.prepare_statement("SELECT $1::integer AS answer", &[])?;
+let result = engine.execute_prepared_statement(&statement, &[SQLParam::scalar(Value::Int(42))])?;
+engine.finalize_prepared_statement(&statement);
+assert_eq!(result.value_at(0, 0), Some(&Value::Int(42)));
+# Ok::<(), uqa_engine::SQLError>(())
+```
+
 ## Stream results
 
 `Engine::sql_cursor` accepts one read query and returns a row cursor. The engine uses bounded spill when needed, and the read snapshot is committed before the cursor is returned. This makes the cursor suitable for large results without holding an open storage transaction for the consumer lifetime.

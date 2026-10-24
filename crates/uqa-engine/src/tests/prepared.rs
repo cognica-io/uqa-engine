@@ -201,4 +201,5 @@ fn prepared_costs_distinguish_rare_and_unknown_index_keys() {
     );
 }
 
+mod handles;
 mod ownership;
