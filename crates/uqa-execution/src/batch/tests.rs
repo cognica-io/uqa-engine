@@ -10,6 +10,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uqa_sql::ColumnType;
 
+mod materialization;
+
 #[test]
 #[cfg(target_pointer_width = "64")]
 fn physical_row_stays_within_the_pre_lineage_footprint() {

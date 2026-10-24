@@ -32,6 +32,16 @@ Let T be the ordered observable trace of SQL evaluations, effects and the first 
 
 #653 retains older inconclusive reference calibration, collected hardware/resource observations, source-provenance corrections and previous materialized-result investigations. A new accepted source-specific result must not erase those records, assert a retrospective hardware cause without evidence, widen a limit or turn an inconclusive interval into acceptance. The original records remain distinct from this live delivery state.
 
+## Selected-value transfer follow-up
+
+The current source reproduces a separate unnecessary-copy path in Execution's named result materializer. With multiple physical fragments, it first converts complete fragments into intermediate value vectors, even when the final schema selects only one scalar or no columns. Four owner-local cases fail before correction: a scalar-only result allocates 197,693 bytes while copying an unselected shared string; an empty projection allocates 327,896 bytes; a row-local alias prevents donation of a uniquely retained selected string; and two selected aliases allocate 590,938 bytes instead of copying only the one necessary 262,144-byte payload. The compact fixtures require exact output, owner release and preserved buffer donation, with an 8KiB metadata/output allowance independent of payload size. These are deterministic allocation observations, not a timing experiment or proof that this path explains the retained analytical interval.
+
+Execution already owns selected-value transfer for positional cursor output in `batch/materialization/selected.rs`. The follow-up will reuse that owner for remapped named output, retaining last-label-wins lookup, duplicate physical slots, NULL positions and immutable shared payloads. SQL's public ResultRow representation, producer/consumer scheduling, UnifiedPlan, persistent formats, dependencies and benchmark inputs remain unchanged.
+
+- [x] Preserve four failing owning-crate reproductions before changing product code.
+- [ ] Reuse the selected-value owner, review all named-output paths and complete focused local correctness/allocation verification.
+- [ ] Qualify final-source Linux/macOS work, memory and output, deliver the correction and inspect the next normal automatic controlled result under the original limits.
+
 ## Platform and delivery evidence
 
 Dependency PR #1263 qualifies source `a593ffcf8` in regression run 40042414796: each Linux/macOS result passes 1,732 checks, all 2,434 exact required cases and eight independent-process histories; both archives match all 739 source hashes with zero JUnit failures, errors or skips. FDW run 40042414831 passes all six configurations and combined-handler Clippy with final fingerprint `ad64371bc47bd131b9e86b42b06a0b2532ff729d283790dd9b8319bb6e0d30f3`. Dependency policy, both regex WASM toolchains and native/JavaScript HTTP parity pass. Squash merge `0755ae252` preserves the qualified tree exactly and closes #1262. Windows clipboard runtime execution is not claimed.
