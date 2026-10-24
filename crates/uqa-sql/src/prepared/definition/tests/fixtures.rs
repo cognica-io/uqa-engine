@@ -18,6 +18,17 @@ impl crate::FunctionTypeResolver for NoRoutines {
     }
 }
 impl crate::routines::RoutineResolution for NoRoutines {}
+impl crate::prepared::utility::PreparedSessionMetadata for NoRoutines {
+    fn show_result_schema(&self, _: &str) -> Result<crate::RowSchema, crate::SQLError> {
+        panic!("query fixture does not read session utility descriptors");
+    }
+    fn portal_result_schema(&self, _: &str) -> Option<crate::RowSchema> {
+        panic!("query fixture does not read portal descriptors");
+    }
+    fn prepared_result_schema(&self, _: &str) -> Option<crate::RowSchema> {
+        panic!("query fixture does not read prepared utility descriptors");
+    }
+}
 impl crate::catalog::analysis::AnalysisCatalog for NoRoutines {
     fn effective_search_path(
         &self,

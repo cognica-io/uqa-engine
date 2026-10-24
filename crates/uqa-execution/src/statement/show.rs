@@ -24,6 +24,15 @@ pub fn show_columns(session: &dyn CatalogSession, name: &str) -> Result<Vec<Stri
     session.show_parameter(name).map(|(column, _)| vec![column])
 }
 
+pub fn show_schema(
+    session: &dyn CatalogSession,
+    name: &str,
+) -> Result<uqa_sql::RowSchema, SQLError> {
+    let columns = show_columns(session, name)?;
+    let types = vec![Some(ColumnType::Text); columns.len()];
+    Ok(uqa_sql::RowSchema::with_types(columns, types))
+}
+
 /// The result of `SHOW name`.
 pub fn show(session: &dyn CatalogSession, name: &str) -> Result<SQLResult, SQLError> {
     let (columns, rows) = if shows_all(name) {

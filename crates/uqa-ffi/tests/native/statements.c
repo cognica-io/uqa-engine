@@ -55,6 +55,129 @@ static void empty_result(uqa_result result) {
     assert(tag.data == NULL && tag.size == 0);
 }
 
+static void utility_statements(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    uqa_type type = NULL;
+    uqa_value value = NULL;
+    uqa_value_view view = NULL;
+    uqa_string_view text = {NULL, 0};
+    uint32_t count = 0;
+    uint32_t kind = 0;
+    const char *types[] = {"integer"};
+
+    CHECK(uqa_engine_execute(engine, "SET TIME ZONE 'UTC'", result));
+    CHECK(uqa_statement_prepare(engine, "SHOW TIME ZONE", &statement));
+    CHECK(uqa_statement_get_column_count(statement, &count));
+    assert(count == 1);
+    CHECK(uqa_statement_get_column_name(statement, 0, &text));
+    assert(equal(text, "TimeZone"));
+    CHECK(uqa_statement_get_column_type(statement, 0, &type));
+    CHECK(uqa_type_get_kind(type, &kind));
+    assert(kind == UQA_TYPE_TEXT);
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_result_get_value(result, 0, 0, &view));
+    CHECK(uqa_value_get_text(view, &text));
+    assert(equal(text, "UTC"));
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_statement_prepare(engine, "SHOW ALL", &statement));
+    CHECK(uqa_statement_get_column_count(statement, &count));
+    assert(count == 3);
+    CHECK(uqa_statement_get_column_name(statement, 2, &text));
+    assert(equal(text, "description"));
+    CHECK(uqa_statement_finalize(&statement));
+
+    CHECK(uqa_engine_execute(engine, "SET plan_cache_mode = force_custom_plan", result));
+    CHECK(uqa_statement_prepare_typed(engine, "SHOW work_mem", types, 1, &statement));
+    CHECK(uqa_value_create_int64(4, &value));
+    CHECK(uqa_statement_bind(statement, 1, value));
+    CHECK(uqa_value_destroy(&value));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_engine_execute(engine,
+        "SELECT generic_plans,custom_plans FROM pg_prepared_statements WHERE statement='SHOW work_mem'", result));
+    assert(integer(result, 0) == 1 && integer(result, 1) == 0);
+    CHECK(uqa_statement_finalize(&statement));
+
+    CHECK(uqa_engine_execute(engine, "BEGIN", result));
+    CHECK(uqa_statement_prepare(engine, "SHOW work_mem", &statement));
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_statement_prepare(engine, "FETCH ALL FROM absent", &statement));
+    CHECK(uqa_statement_get_column_count(statement, &count));
+    assert(count == 0);
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", result));
+    CHECK(uqa_engine_execute(engine, "ROLLBACK", result));
+
+    CHECK(uqa_engine_execute(engine, "BEGIN; DECLARE utility_cursor CURSOR FOR SELECT 1::integer AS old", result));
+    CHECK(uqa_statement_prepare(engine, "FETCH ALL FROM utility_cursor", &statement));
+    CHECK(uqa_statement_get_column_name(statement, 0, &text));
+    assert(equal(text, "old"));
+    CHECK(uqa_engine_execute(engine,
+        "CLOSE utility_cursor; DECLARE utility_cursor CURSOR FOR SELECT 'new'::text AS different", result));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_result_get_column_name(result, 0, &text));
+    assert(equal(text, "different"));
+    CHECK(uqa_result_get_value(result, 0, 0, &view));
+    CHECK(uqa_value_get_text(view, &text));
+    assert(equal(text, "new"));
+    CHECK(uqa_engine_execute(engine, "DISCARD PLANS", result));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_statement_get_column_name(statement, 0, &text));
+    assert(equal(text, "old"));
+    CHECK(uqa_statement_get_column_type(statement, 0, &type));
+    CHECK(uqa_type_get_kind(type, &kind));
+    assert(kind == UQA_TYPE_INT32);
+    CHECK(uqa_statement_finalize(&statement));
+
+    CHECK(uqa_statement_prepare(engine, "FETCH ALL FROM late_cursor", &statement));
+    CHECK(uqa_statement_get_column_count(statement, &count));
+    assert(count == 0);
+    CHECK(uqa_engine_execute(engine, "DECLARE late_cursor CURSOR FOR SELECT 9::integer AS number", result));
+    CHECK(uqa_statement_execute(statement, result));
+    assert(integer(result, 0) == 9);
+    CHECK(uqa_statement_get_column_count(statement, &count));
+    assert(count == 0);
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_statement_prepare(engine, "MOVE ALL FROM late_cursor", &statement));
+    CHECK(uqa_statement_get_column_count(statement, &count));
+    assert(count == 0);
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine, "COMMIT", result));
+
+    CHECK(uqa_engine_execute(engine, "PREPARE utility_query AS SELECT 1::integer AS old", result));
+    CHECK(uqa_statement_prepare(engine, "EXECUTE utility_query", &statement));
+    CHECK(uqa_statement_get_column_name(statement, 0, &text));
+    assert(equal(text, "old"));
+    CHECK(uqa_engine_execute(engine,
+        "DEALLOCATE utility_query; PREPARE utility_query AS SELECT 'new'::text AS different", result));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_result_get_column_name(result, 0, &text));
+    assert(equal(text, "different"));
+    CHECK(uqa_statement_get_column_name(statement, 0, &text));
+    assert(equal(text, "old"));
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine, "DEALLOCATE utility_query", result));
+    CHECK(uqa_engine_execute(engine, "PREPARE utility_parameter(integer) AS SELECT $1 AS value", result));
+    CHECK(uqa_statement_prepare_typed(engine, "EXECUTE utility_parameter($1)", types, 1, &statement));
+    CHECK(uqa_value_create_int64(4, &value));
+    CHECK(uqa_statement_bind(statement, 1, value));
+    CHECK(uqa_value_destroy(&value));
+    assert(uqa_statement_execute(statement, result) == UQA_ERROR_SQL);
+    sqlstate("42P02");
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_statement_prepare_typed(engine, "EXECUTE utility_parameter(4)", types, 1, &statement));
+    CHECK(uqa_value_create_int64(5, &value));
+    CHECK(uqa_statement_bind(statement, 1, value));
+    CHECK(uqa_value_destroy(&value));
+    CHECK(uqa_statement_execute(statement, result));
+    assert(integer(result, 0) == 4);
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine, "DEALLOCATE utility_parameter", result));
+    assert(uqa_statement_prepare(engine, "SHOW missing_prepared_setting", &statement) == UQA_ERROR_SQL);
+    assert(statement == NULL);
+    sqlstate("42704");
+}
+
 int main(void) {
     uqa_engine engine = NULL;
     uqa_result result = NULL;
@@ -240,6 +363,7 @@ int main(void) {
         empty_result(result);
         CHECK(uqa_statement_finalize(&statement));
     }
+    utility_statements(engine, result);
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_engine_close(&engine));
     return 0;

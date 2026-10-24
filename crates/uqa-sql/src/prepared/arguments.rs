@@ -15,7 +15,7 @@ pub struct ArgumentValidationContext<'a> {
     pub cast_type: &'a dyn Fn(&str) -> Option<ColumnType>,
     /// Routine metadata that classifies set-returning calls among the arguments.
     pub routines: &'a dyn crate::routines::RoutineResolution,
-    /// The parameters of the statement that runs EXECUTE.
+    /// Values visible to this binding operation. SQL EXECUTE has no outer parameter scope.
     pub parameters: &'a [crate::SQLParam],
 }
 

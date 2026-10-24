@@ -18,6 +18,7 @@ use uqa_sql::{SQLError, SQLParam, SQLResult};
 use super::context::StatementExecutionContext;
 
 mod completion;
+mod prepared;
 mod types;
 use crate::schema::view_creation::{self, MaterializedViewRegistration, ViewRegistration};
 
@@ -303,88 +304,6 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             None
         };
         (self.context.explain)(body, verbose, format, analysis.as_ref(), &physical)
-    }
-
-    fn execute_prepare(
-        &self,
-        name: &str,
-        parameter_types: &[uqa_sql::ast::ColumnType],
-        body: &UnifiedPlan,
-    ) -> Result<SQLResult, SQLError> {
-        if self.context.prepared.state.lookup_prepared(name).is_some() {
-            return Err(uqa_sql::prepared::statement_error(
-                "42P05",
-                name,
-                "already exists",
-            ));
-        }
-        crate::statement::prepared::register_plan(
-            &self.context.prepared.definitions,
-            name.to_string(),
-            body.clone(),
-            parameter_types,
-            self.source_sql.as_deref(),
-        )?;
-        Ok(SQLResult::empty())
-    }
-
-    fn execute_prepared(
-        &self,
-        name: &str,
-        params: &[ExpressionPlan],
-    ) -> Result<SQLResult, SQLError> {
-        self.execute_prepared_arguments(name, params, true, None)
-    }
-
-    pub(crate) fn execute_host_prepared(&self, name: &str) -> Result<SQLResult, SQLError> {
-        let arguments = (1..=self.params.len())
-            .map(|index| ExpressionPlan::lower(uqa_sql::ast::Expr::Param(index)))
-            .collect::<Vec<_>>();
-        self.execute_prepared_arguments(
-            name,
-            &arguments,
-            self.nested_statement,
-            self.source_sql.as_deref(),
-        )
-    }
-
-    fn execute_prepared_arguments(
-        &self,
-        name: &str,
-        params: &[ExpressionPlan],
-        nested: bool,
-        source_sql: Option<&str>,
-    ) -> Result<SQLResult, SQLError> {
-        let bound = crate::query::prepared::bind_execute_parameters(
-            self.context.prepared.arguments,
-            name,
-            self.context.prepared.state.prepared_parameter_types(name),
-            params,
-            self.params,
-        )?;
-        let plan = self
-            .context
-            .prepared
-            .plans
-            .plan_for_execution(name, &bound)?
-            .ok_or_else(|| uqa_sql::prepared::statement_error("26000", name, "does not exist"))?;
-        UnifiedPlanExecutor::with_nested_statement(self.context.clone(), &bound, nested)
-            .with_optional_source_sql(source_sql)
-            .execute(&plan)
-    }
-
-    fn execute_deallocate(&self, name: Option<&str>) -> Result<SQLResult, SQLError> {
-        if let Some(name) = name {
-            if self.context.prepared.state.lookup_prepared(name).is_none() {
-                return Err(uqa_sql::prepared::statement_error(
-                    "26000",
-                    name,
-                    "does not exist",
-                ));
-            }
-        }
-        self.context.prepared.state.deallocate_prepared(name);
-        Ok(SQLResult::empty())
     }
 
     fn execute_create_foreign_server(

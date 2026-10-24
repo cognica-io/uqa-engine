@@ -14,6 +14,7 @@ pub mod definition;
 pub mod dependencies;
 pub mod entry;
 pub mod planning;
+pub mod utility;
 
 pub fn declared_parameter_types(
     resolver: &dyn crate::FunctionTypeResolver,
@@ -27,11 +28,13 @@ pub fn declared_parameter_types(
             _ => crate::type_resolution::resolve_declared_column_type(resolver, ty).map(Some),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    logical_plan.rewrite_scalar_expressions(&mut |expression| {
-        if let crate::ScalarExpr::Param(index) = expression {
-            parameter_types.resize(parameter_types.len().max(*index), None);
-        }
-    });
+    if utility::requires_analysis(logical_plan) {
+        logical_plan.rewrite_scalar_expressions(&mut |expression| {
+            if let crate::ScalarExpr::Param(index) = expression {
+                parameter_types.resize(parameter_types.len().max(*index), None);
+            }
+        });
+    }
     Ok(parameter_types)
 }
 

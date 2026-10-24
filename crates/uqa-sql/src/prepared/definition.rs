@@ -20,6 +20,7 @@ pub struct PreparedDefinitionContext<'a> {
     pub types: &'a dyn FunctionTypeResolver,
     pub routines: &'a dyn RoutineResolution,
     pub scopes: &'a dyn StatementAnalysisScopes,
+    pub session: &'a dyn super::utility::PreparedSessionMetadata,
     /// The catalog the `reg*` input functions read object names from when the statement is analyzed.
     pub aliases: &'a dyn crate::schema::dependencies::oid_alias::OidAliasInput,
 }
@@ -41,13 +42,13 @@ pub fn analyze_definition(
 ) -> Result<PreparedDefinition, SQLError> {
     let parameter_types =
         super::declared_parameter_types(context.types, &mut logical_plan, declared)?;
-    if matches!(&logical_plan, UnifiedPlan::Command(command) if matches!(command.as_ref(), crate::plan::CommandPlan::Empty))
-    {
+    if !super::utility::requires_analysis(&logical_plan) {
+        let result_schema = super::utility::result_schema(context.session, &logical_plan)?;
         return Ok(PreparedDefinition {
             composite_inputs: super::composites::CompositeInputs::default(),
             logical_plan,
             parameter_types,
-            result_schema: None,
+            result_schema,
             effective_search_path: None,
             dependencies: PreparedAnalysisDependencies::default(),
             dependency_snapshot: None,
@@ -140,6 +141,9 @@ pub fn analyze_result_schema(
     logical_plan: &UnifiedPlan,
     parameter_types: &[Option<ColumnType>],
 ) -> Result<Option<RowSchema>, SQLError> {
+    if !super::utility::requires_analysis(logical_plan) {
+        return super::utility::result_schema(context.session, logical_plan);
+    }
     with_scope_result(context.scopes, |scope| {
         super::analyze_prepared_plan(
             context.routines,

@@ -46,6 +46,9 @@ fn needs_analysis(
     context: &PreparedDefinitionContext<'_>,
     entry: &PreparedStatementPlan,
 ) -> Result<bool, SQLError> {
+    if !uqa_sql::prepared::utility::requires_analysis(&entry.source_plan) {
+        return Ok(false);
+    }
     if entry.needs_analysis {
         return Ok(true);
     }
@@ -144,7 +147,7 @@ fn select(
     }
     let usage = super::PreparedPlanUsage {
         has_parameters: !entry.parameter_types.is_empty()
-            && !matches!(logical_plan, UnifiedPlan::Command(command) if matches!(command.as_ref(), uqa_sql::plan::CommandPlan::Empty)),
+            && uqa_sql::prepared::utility::requires_analysis(logical_plan),
         custom_plans: entry.custom_plans,
         total_custom_cost: entry.total_custom_cost,
     };
@@ -160,7 +163,10 @@ fn select(
     };
     let logical_plan = projected.as_ref().unwrap_or(logical_plan);
     let mut composite_inputs = inputs.clone();
-    if check_analysis && (custom || generic_plan.is_none() || reanalyzed.is_some()) {
+    if check_analysis
+        && uqa_sql::prepared::utility::requires_analysis(logical_plan)
+        && (custom || generic_plan.is_none() || reanalyzed.is_some())
+    {
         validate_result_schema(context, entry, logical_plan, reanalyzed.as_ref())?;
     }
     if !custom && generic_plan.is_none() {

@@ -5,7 +5,7 @@
 //
 
 use super::{
-    bind_execute_parameters, ArgumentBindingContext, PreparedArgumentScopes,
+    bind_execute_parameters, bind_host_parameters, ArgumentBindingContext, PreparedArgumentScopes,
     ScopedArgumentOperation,
 };
 use crate::scalar::plan::PhysicalEvalContext;
@@ -25,6 +25,7 @@ use uqa_sql::{
 #[derive(Default)]
 struct Scopes {
     events: RefCell<Vec<String>>,
+    parameter_counts: RefCell<Vec<usize>>,
     domain: Option<StoredDomain>,
 }
 impl Scopes {
@@ -106,6 +107,7 @@ impl PreparedArgumentScopes for Scopes {
         operation: &mut ScopedArgumentOperation<'_>,
     ) -> Result<Vec<SQLParam>, SQLError> {
         self.record("scope");
+        self.parameter_counts.borrow_mut().push(parameters.len());
         let aggregates = |_: &str| false;
         let cast_type = |_: &str| None;
         let mut analyze_type = |argument: &ExpressionPlan| {
@@ -146,22 +148,50 @@ fn bind(
     sql: &str,
     types: Vec<Option<ColumnType>>,
 ) -> Result<Vec<SQLParam>, SQLError> {
-    bind_execute_parameters(scopes, "p", Some(types), &arguments(sql), &[])
+    bind_execute_parameters(scopes, "p", Some(types), &arguments(sql))
+}
+
+#[test]
+fn sql_execute_and_host_binding_capture_distinct_parameter_scopes() {
+    let scopes = Scopes::default();
+    assert!(bind_execute_parameters(
+        &scopes,
+        "p",
+        Some(vec![Some(ColumnType::Integer)]),
+        &arguments("EXECUTE p($1)"),
+    )
+    .is_err());
+    assert_eq!(*scopes.parameter_counts.borrow(), [0]);
+    let bound = bind_host_parameters(
+        &scopes,
+        "p",
+        Some(vec![Some(ColumnType::Integer)]),
+        &[SQLParam::Scalar(Value::Int(7))],
+    )
+    .unwrap();
+    assert_eq!(*scopes.parameter_counts.borrow(), [0, 1]);
+    assert!(matches!(
+        &bound[0],
+        SQLParam::TypedScalar {
+            value: Value::Int(7),
+            ty: ColumnType::Integer,
+        }
+    ));
 }
 
 #[test]
 fn missing_parameterless_and_wrong_arity_definitions_do_not_capture_argument_scope() {
     let scopes = Scopes::default();
     let invalid = arguments("EXECUTE p((SELECT 1))");
-    let error = bind_execute_parameters(&scopes, "p", None, &invalid, &[]).unwrap_err();
+    let error = bind_execute_parameters(&scopes, "p", None, &invalid).unwrap_err();
     assert!(matches!(error, SQLError::Routine { sqlstate, .. } if sqlstate == "26000"));
     assert!(
-        bind_execute_parameters(&scopes, "p", Some(Vec::new()), &invalid, &[])
+        bind_execute_parameters(&scopes, "p", Some(Vec::new()), &invalid)
             .unwrap()
             .is_empty()
     );
     let error =
-        bind_execute_parameters(&scopes, "p", Some(vec![None, None]), &invalid, &[]).unwrap_err();
+        bind_execute_parameters(&scopes, "p", Some(vec![None, None]), &invalid).unwrap_err();
     assert!(matches!(error, SQLError::Routine { sqlstate, .. } if sqlstate == "42601"));
     assert!(scopes.events.borrow().is_empty());
 }

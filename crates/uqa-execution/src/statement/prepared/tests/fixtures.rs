@@ -18,6 +18,17 @@ impl uqa_sql::FunctionTypeResolver for NoRoutines {
     }
 }
 impl uqa_sql::routines::RoutineResolution for NoRoutines {}
+impl uqa_sql::prepared::utility::PreparedSessionMetadata for NoRoutines {
+    fn show_result_schema(&self, _: &str) -> Result<uqa_sql::RowSchema, uqa_sql::SQLError> {
+        panic!("query fixture does not read session utility descriptors");
+    }
+    fn portal_result_schema(&self, _: &str) -> Option<uqa_sql::RowSchema> {
+        panic!("query fixture does not read portal descriptors");
+    }
+    fn prepared_result_schema(&self, _: &str) -> Option<uqa_sql::RowSchema> {
+        panic!("query fixture does not read prepared utility descriptors");
+    }
+}
 impl uqa_sql::catalog::analysis::AnalysisCatalog for NoRoutines {
     fn table_resolved(
         &self,

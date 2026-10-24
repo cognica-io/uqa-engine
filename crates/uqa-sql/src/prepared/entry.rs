@@ -53,6 +53,9 @@ impl PreparedStatementPlan {
 
 impl PreparedStatementPlan {
     pub fn invalidate(&mut self) {
+        if !super::utility::requires_analysis(&self.source_plan) {
+            return;
+        }
         self.plan = None;
         self.needs_analysis = true;
     }

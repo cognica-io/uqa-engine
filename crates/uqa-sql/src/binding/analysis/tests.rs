@@ -25,6 +25,36 @@ impl FunctionTypeResolver for Routines {
 
 impl RoutineResolution for Routines {}
 
+#[test]
+fn expression_analysis_resolves_parameters_in_its_supplied_scope() {
+    let context = empty_binding_context();
+    let parameters = [SQLParam::typed_scalar(
+        uqa_core::Value::Int(7),
+        ColumnType::Integer,
+    )];
+    for (number, supplied, expected) in [
+        (0, &parameters[..], Some("there is no parameter $0")),
+        (1, &[][..], Some("there is no parameter $1")),
+        (2, &parameters[..], Some("there is no parameter $2")),
+        (1, &parameters[..], None),
+    ] {
+        let expression = crate::plan::ExpressionPlan::lower(crate::ast::Expr::Param(number));
+        let result = crate::binding::analyze_expression_plan_type(
+            &Routines,
+            &expression,
+            supplied,
+            &context,
+        );
+        if let Some(expected) = expected {
+            let error = result.unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42P02"));
+            assert_eq!(error.to_string(), expected);
+        } else {
+            assert_eq!(result.unwrap(), Some(ColumnType::Integer));
+        }
+    }
+}
+
 fn block(sql: &str) -> Box<QueryBlockPlan> {
     let UnifiedPlan::Query(query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
     else {

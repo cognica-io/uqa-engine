@@ -110,6 +110,7 @@ fn context(scopes: &Scopes) -> PreparedDefinitionContext<'_> {
         types: &NoRoutines,
         routines: &NoRoutines,
         scopes,
+        session: &NoRoutines,
         aliases: &Aliases,
     }
 }

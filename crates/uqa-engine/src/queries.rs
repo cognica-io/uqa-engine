@@ -156,7 +156,7 @@ impl Engine {
             register(self, statement)
         } else {
             self.with_query_transaction_snapshot(
-                !nested,
+                !nested && uqa_sql::prepared::utility::statement_requires_analysis(&statement),
                 true,
                 |engine| register(engine, statement),
                 std::convert::identity,

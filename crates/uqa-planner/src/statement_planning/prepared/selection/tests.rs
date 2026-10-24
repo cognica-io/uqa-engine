@@ -14,6 +14,7 @@ use uqa_sql::{
     ColumnType, RowSchema, ScalarExpr,
 };
 mod fixtures;
+mod utility;
 use fixtures::NoRoutines;
 
 struct Inputs {
@@ -70,6 +71,7 @@ impl Inputs {
                 types: &NoRoutines,
                 routines: &NoRoutines,
                 scopes: self,
+                session: &NoRoutines,
                 aliases: &NoRoutines,
             },
             optimization: self,

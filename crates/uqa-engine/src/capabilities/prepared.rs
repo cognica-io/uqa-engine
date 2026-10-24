@@ -43,6 +43,7 @@ impl Engine {
             types: self,
             routines: self,
             scopes: self,
+            session: self,
             aliases: self,
         }
     }
@@ -62,6 +63,26 @@ impl Engine {
             cancellation: &self.runtime.cancellation,
             clock: uqa_sql::expr::clock_timestamp_micros,
         }
+    }
+}
+
+impl uqa_sql::prepared::utility::PreparedSessionMetadata for Engine {
+    fn show_result_schema(&self, name: &str) -> Result<uqa_sql::RowSchema, SQLError> {
+        uqa_execution::statement::show::show_schema(self, name)
+    }
+    fn portal_result_schema(&self, name: &str) -> Option<uqa_sql::RowSchema> {
+        self.session
+            .portals
+            .lock()
+            .get(name)
+            .map(|portal| portal.schema.clone())
+    }
+    fn prepared_result_schema(&self, name: &str) -> Option<uqa_sql::RowSchema> {
+        self.session
+            .prepared
+            .read()
+            .get(name)
+            .and_then(|entry| entry.result_schema.clone())
     }
 }
 

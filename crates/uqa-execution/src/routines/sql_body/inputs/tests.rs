@@ -26,6 +26,17 @@ impl FunctionTypeResolver for Catalog {
     }
 }
 impl RoutineResolution for Catalog {}
+impl uqa_sql::prepared::utility::PreparedSessionMetadata for Catalog {
+    fn show_result_schema(&self, _: &str) -> Result<uqa_sql::RowSchema, uqa_sql::SQLError> {
+        panic!("query fixture does not read session utility descriptors");
+    }
+    fn portal_result_schema(&self, _: &str) -> Option<uqa_sql::RowSchema> {
+        panic!("query fixture does not read portal descriptors");
+    }
+    fn prepared_result_schema(&self, _: &str) -> Option<uqa_sql::RowSchema> {
+        panic!("query fixture does not read prepared utility descriptors");
+    }
+}
 impl StatementAnalysisScopes for Catalog {
     fn with_scope(&self, _: StatementAnalysisOperation<'_>) -> Result<(), SQLError> {
         panic!("dependency-free fixture has no catalog freshness callbacks");
@@ -42,6 +53,7 @@ fn context() -> PreparedDefinitionContext<'static> {
         types: &Catalog,
         routines: &Catalog,
         scopes: &Catalog,
+        session: &Catalog,
         aliases: &Catalog,
     }
 }
