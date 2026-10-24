@@ -244,6 +244,74 @@
       "sql": "GRANT EXECUTE ON FUNCTION strict_set(integer) TO PUBLIC"
     },
     {
+      "sql": "REVOKE EXECUTE ON FUNCTION pg_catalog.abs(integer) FROM PUBLIC"
+    },
+    {
+      "sql": "SET ROLE uqa_table_reader_1282"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "eliminated lateral scan does not initialize builtin arguments"
+    },
+    {
+      "sql": "SELECT f.n FROM inputs i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n) WHERE false",
+      "id": "root false removes builtin argument initialization"
+    },
+    {
+      "sql": "SELECT i.id, f.n FROM inputs i LEFT JOIN LATERAL generate_series(1, abs(i.v)) f(n) ON false ORDER BY i.id",
+      "id": "false outer join removes builtin argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM inputs i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n) LIMIT 0",
+      "id": "limit zero preserves builtin argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE v < 0) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "runtime empty source initializes builtin arguments"
+    },
+    {
+      "sql": "SELECT abs(v) FROM inputs WHERE false",
+      "id": "surviving projection initializes despite false input"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false UNION ALL SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "empty relation append removes function initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false UNION SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "union boundary preserves argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false INTERSECT SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "intersect boundary preserves argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false EXCEPT SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "id": "except boundary preserves argument initialization"
+    },
+    {
+      "sql": "RESET ROLE"
+    },
+    {
+      "sql": "GRANT EXECUTE ON FUNCTION pg_catalog.abs(integer) TO PUBLIC"
+    },
+    {
+      "sql": "REVOKE SELECT ON inputs FROM uqa_table_reader_1282"
+    },
+    {
+      "sql": "SET ROLE uqa_table_reader_1282"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL strict_set(i.v) f(n)",
+      "id": "removed scan retains relation authorization"
+    },
+    {
+      "sql": "RESET ROLE"
+    },
+    {
+      "sql": "GRANT SELECT ON inputs TO uqa_table_reader_1282"
+    },
+    {
       "sql": "REVOKE SELECT ON inputs FROM uqa_table_reader_1282"
     },
     {

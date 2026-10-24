@@ -446,18 +446,34 @@ pub(super) fn execute_resolved_table_function(
             record_target.as_deref().unwrap_or_default(),
         );
     }
-    let mut rows = if function.def.returns_set() {
+    shape_declared_table_outcome(
+        outcome,
+        function.def.returns_set(),
+        !out_params.is_empty(),
+        columns,
+        composite_columns.map(<[SQLFunctionResultColumn]>::len),
+    )
+}
+
+fn shape_declared_table_outcome(
+    outcome: crate::routines::RoutineOutcome,
+    returns_set: bool,
+    has_output_params: bool,
+    columns: Vec<String>,
+    composite_column_count: Option<usize>,
+) -> Result<SQLTableFunctionResult, SQLError> {
+    let mut rows = if returns_set {
         outcome.set_rows
-    } else if out_params.is_empty() {
-        vec![vec![outcome.value]]
-    } else {
+    } else if has_output_params {
         vec![outcome.out_values]
+    } else {
+        vec![vec![outcome.value]]
     };
-    if let Some(columns) = &composite_columns {
+    if let Some(column_count) = composite_column_count {
         rows = rows
             .into_iter()
             .map(|mut row| {
-                super::super::sql_body::row_fields(row.pop().unwrap_or(Value::Null), columns.len())
+                super::super::sql_body::row_fields(row.pop().unwrap_or(Value::Null), column_count)
             })
             .collect::<Result<Vec<_>, _>>()?;
     }

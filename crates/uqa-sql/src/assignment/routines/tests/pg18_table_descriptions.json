@@ -1602,6 +1602,312 @@
       "notices": []
     },
     {
+      "sql": "REVOKE EXECUTE ON FUNCTION pg_catalog.abs(integer) FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE uqa_table_reader_1282",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "eliminated lateral scan does not initialize builtin arguments"
+    },
+    {
+      "sql": "SELECT f.n FROM inputs i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "root false removes builtin argument initialization"
+    },
+    {
+      "sql": "SELECT i.id, f.n FROM inputs i LEFT JOIN LATERAL generate_series(1, abs(i.v)) f(n) ON false ORDER BY i.id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              null
+            ],
+            [
+              "2",
+              null
+            ],
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "false outer join removes builtin argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM inputs i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n) LIMIT 0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function abs",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "limit zero preserves builtin argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE v < 0) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function abs",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "runtime empty source initializes builtin arguments"
+    },
+    {
+      "sql": "SELECT abs(v) FROM inputs WHERE false",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function abs",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "surviving projection initializes despite false input"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false UNION ALL SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "empty relation append removes function initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false UNION SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function abs",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "union boundary preserves argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false INTERSECT SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function abs",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "intersect boundary preserves argument initialization"
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false EXCEPT SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL generate_series(1, abs(i.v)) f(n)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for function abs",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "except boundary preserves argument initialization"
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT EXECUTE ON FUNCTION pg_catalog.abs(integer) TO PUBLIC",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "REVOKE SELECT ON inputs FROM uqa_table_reader_1282",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET ROLE uqa_table_reader_1282",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT f.n FROM (SELECT v FROM inputs WHERE false) i CROSS JOIN LATERAL strict_set(i.v) f(n)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for table inputs",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "removed scan retains relation authorization"
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "GRANT SELECT ON inputs TO uqa_table_reader_1282",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
       "sql": "REVOKE SELECT ON inputs FROM uqa_table_reader_1282",
       "command_tags": [
         "REVOKE"
@@ -1833,7 +2139,7 @@
     "reference": "PostgreSQL 18.4 in a disposable Docker database",
     "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
     "tool_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
-    "input_sha256": "fb569e30144b7dc4b82ca7158f7719cb7fc00dd2b4c20d7e17f98a5757f6dabe",
+    "input_sha256": "9ac3abc4ebcf85def1b737b03b8e1d7bcc7b4f40aa527d7d84c1e4a3bed4838a",
     "options": [
       "--rows",
       "--details",

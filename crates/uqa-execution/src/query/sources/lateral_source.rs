@@ -96,7 +96,7 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) pinned_right: Option<crate::OwnedPhysicalRow>,
 }
 
-impl<'a, S: Clone + 'static> QueryLateralSource<'a, S> {
+impl<'a, S: Clone + Send + Sync + 'static> QueryLateralSource<'a, S> {
     fn expression_runtime(
         &self,
     ) -> std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a> {
@@ -110,6 +110,104 @@ impl<'a, S: Clone + 'static> QueryLateralSource<'a, S> {
             let _ = self.expression_runtime.set(std::sync::Arc::clone(&hook));
         }
         hook
+    }
+    fn function_rows(
+        &self,
+        left_row: &crate::OwnedPhysicalRow,
+    ) -> crate::ExecResult<Option<crate::LateralRows<'a>>> {
+        let SourcePlan::Function {
+            name,
+            binding,
+            output_name,
+            relations,
+            args,
+            alias,
+            column_aliases,
+            ordinality,
+            column_types,
+        } = &self.right
+        else {
+            return Ok(None);
+        };
+        let hook = self.expression_runtime();
+        let retained_function = binding
+            .as_ref()
+            .filter(|binding| !binding.builtin && left_row.schema == self.input_schema)
+            .and_then(|binding| {
+                let scope = hook.routine_description_scope()?;
+                self.routine_descriptions.get(binding, &scope)?.function()
+            });
+        let resolved = if retained_function.is_some() {
+            None
+        } else {
+            resolve_user_table_function(
+                self.context.relational.catalog,
+                name,
+                binding.as_ref(),
+                args,
+                &left_row.schema,
+                self.params,
+                hook.as_ref(),
+            )?
+        };
+        let selected_binding = resolved
+            .as_ref()
+            .map(|resolved| &resolved.binding)
+            .or(binding.as_ref());
+        // A successful fixed-source validation precedes publication of this
+        // call's description. Explicit record definitions retain live lookup.
+        if retained_function.is_none() || !column_types.is_empty() {
+            validate_table_function_column_definition(
+                self.context.relational.catalog,
+                uqa_sql::semantics::ColumnDefinitionRequest {
+                    name,
+                    binding: binding.as_ref(),
+                    user_function: retained_function
+                        .as_deref()
+                        .or_else(|| resolved.as_ref().map(|resolved| resolved.function.as_ref())),
+                    user_invocation: selected_binding
+                        .and_then(|binding| binding.invocation.as_deref()),
+                    args,
+                    declared_types: column_types,
+                    column_names: column_aliases,
+                },
+                &left_row.schema,
+                self.params,
+                hook.as_ref(),
+            )?;
+        }
+        let call = TableFunctionCall {
+            name,
+            binding: selected_binding,
+            output_name,
+            relations: relations.as_ref(),
+            args: self
+                .function_arguments
+                .as_deref()
+                .expect("lateral function arguments are prepared"),
+            function_states: self
+                .function_arguments
+                .as_ref()
+                .map(crate::scalar::PreparedExpressions::calls),
+            routine_descriptions: Some(&self.routine_descriptions),
+            alias: alias.as_deref(),
+            column_aliases,
+            ordinality: *ordinality,
+            column_types,
+        };
+        let output = hook.table_function_rows(call, self.params, Some(left_row))?;
+        let schema = self.right_schema.clone();
+        if output.columns.len() != schema.len() {
+            return Err(SQLError::Internal(format!(
+                "lateral table function produced {} columns for a {}-column source",
+                output.columns.len(),
+                schema.len()
+            ))
+            .into());
+        }
+        Ok(Some(Box::new(output.rows.map(move |row| {
+            row.map(|row| crate::OwnedPhysicalRow::new(schema.clone(), row))
+        }))))
     }
 }
 
@@ -150,97 +248,8 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
         } else {
             left_row
         };
-        if let SourcePlan::Function {
-            name,
-            binding,
-            output_name,
-            relations,
-            args,
-            alias,
-            column_aliases,
-            ordinality,
-            column_types,
-        } = &self.right
-        {
-            let hook = self.expression_runtime();
-            let retained_function = binding
-                .as_ref()
-                .filter(|binding| !binding.builtin && left_row.schema == self.input_schema)
-                .and_then(|binding| {
-                    let scope = hook.routine_description_scope()?;
-                    self.routine_descriptions.get(binding, &scope)?.function()
-                });
-            let resolved = if retained_function.is_some() {
-                None
-            } else {
-                resolve_user_table_function(
-                    self.context.relational.catalog,
-                    name,
-                    binding.as_ref(),
-                    args,
-                    &left_row.schema,
-                    self.params,
-                    hook.as_ref(),
-                )?
-            };
-            let selected_binding = resolved
-                .as_ref()
-                .map(|resolved| &resolved.binding)
-                .or(binding.as_ref());
-            // A successful fixed-source validation precedes publication of this
-            // call's description. Explicit record definitions retain live lookup.
-            if retained_function.is_none() || !column_types.is_empty() {
-                validate_table_function_column_definition(
-                    self.context.relational.catalog,
-                    uqa_sql::semantics::ColumnDefinitionRequest {
-                        name,
-                        binding: binding.as_ref(),
-                        user_function: retained_function.as_deref().or_else(|| {
-                            resolved.as_ref().map(|resolved| resolved.function.as_ref())
-                        }),
-                        user_invocation: selected_binding
-                            .and_then(|binding| binding.invocation.as_deref()),
-                        args,
-                        declared_types: column_types,
-                        column_names: column_aliases,
-                    },
-                    &left_row.schema,
-                    self.params,
-                    hook.as_ref(),
-                )?;
-            }
-            let call = TableFunctionCall {
-                name,
-                binding: selected_binding,
-                output_name,
-                relations: relations.as_ref(),
-                args: self
-                    .function_arguments
-                    .as_deref()
-                    .expect("lateral function arguments are prepared"),
-                function_states: self
-                    .function_arguments
-                    .as_ref()
-                    .map(crate::scalar::PreparedExpressions::calls),
-                routine_descriptions: Some(&self.routine_descriptions),
-                alias: alias.as_deref(),
-                column_aliases,
-                ordinality: *ordinality,
-                column_types,
-            };
-            let output = hook.table_function_rows(call, self.params, Some(left_row))?;
-            let schema = self.right_schema.clone();
-            if output.columns.len() != schema.len() {
-                return Err(SQLError::Internal(format!(
-                    "lateral table function produced {} columns for a {}-column source",
-                    output.columns.len(),
-                    schema.len()
-                ))
-                .into());
-            }
-            return Ok(Box::new(output.rows.map(move |row| {
-                row.map(|row| crate::OwnedPhysicalRow::new(schema.clone(), row))
-            })));
+        if let Some(rows) = self.function_rows(left_row)? {
+            return Ok(rows);
         }
         let mut scoped_ctes = self.ctes.clone();
         scoped_ctes.set_row_lock_outer_row(left_row.clone());

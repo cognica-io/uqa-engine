@@ -17,6 +17,8 @@ use uqa_sql::{
     SQLError, SQLParam, ScalarExpr,
 };
 
+mod inputs;
+
 pub fn query<S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     plan: &QueryPlan,
@@ -76,7 +78,14 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
                 super::ensure_select_privileges_for_query_block(block, from, scope)?;
             }
             generated_calls(context, permissions, block, params, scope)?;
-            for expression in block.expressions() {
+            let mut expressions = Vec::new();
+            if !context.planning.block_input_is_empty(block) {
+                if let Some(from) = &block.from {
+                    inputs::collect(context.planning, from, &mut expressions);
+                }
+            }
+            expressions.extend(block.query_expressions());
+            for expression in expressions {
                 expression_calls(
                     context,
                     permissions,

@@ -24626,7 +24626,7 @@
       "cases": 4,
       "source": "crates/uqa-engine/tests/sql_routine_identity/invocation_descriptions.rs",
       "capability": "Table routine PostgreSQL semantics",
-      "workload": "78 independent PostgreSQL 18.4 statements through memory, SQLite, SQLite Key/Value and redb with persistent reopen.",
+      "workload": "97 independent PostgreSQL 18.4 statements through memory, SQLite, SQLite Key/Value and redb with persistent reopen.",
       "invariant": "Preserve values, NULLs, set projections, LATERAL/ROWS FROM/ordinality, defaults, volatile arguments, domains, record targets, replacement, rollback and permissions; eliminated scans skip initialization while LIMIT 0 and implicit aggregate groups retain it.",
       "case_names": [
         "case_1_memory",
@@ -24660,6 +24660,32 @@
       "capability": "Empty relational input initialization",
       "workload": "Folded false/NULL, runtime predicates, LIMIT 0, implicit/grouped aggregates and preserved outer-join inputs.",
       "invariant": "Eliminate only statically removed physical inputs; retain runtime-empty scan initialization, implicit aggregate rows and preserved outer-join rows."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "surviving_source_arguments_keep_order_without_initializing_removed_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/privileges/routine_calls/inputs/tests.rs",
+      "capability": "Surviving routine scan initialization",
+      "workload": "Ordered function arguments and join qualifications with complete or matching-side scan removal.",
+      "invariant": "Initialize only surviving source arguments in their original order, without evaluating an argument or dropping the preserved side."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "empty_append_requires_relation_inputs_and_identical_analyzed_types",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/empty_sources/tests.rs",
+      "capability": "Empty append initialization",
+      "workload": "Relation-backed UNION ALL, other set operators and differing analyzed output types.",
+      "invariant": "Only a flattened noncoercing append of dummy relations can lose scan initialization; distinct/intersection/difference and coercing boundaries survive."
     }
   ]
 }

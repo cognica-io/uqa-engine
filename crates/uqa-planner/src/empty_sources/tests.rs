@@ -107,3 +107,36 @@ fn empty_join_proofs_preserve_both_outer_join_sides() {
         assert_eq!(join_input_is_empty(source, true), empty_inputs.1, "{sql}");
     }
 }
+
+#[test]
+fn empty_append_requires_relation_inputs_and_identical_analyzed_types() {
+    for (operator, expected) in [
+        ("UNION ALL", true),
+        ("UNION", false),
+        ("INTERSECT", false),
+        ("EXCEPT", false),
+    ] {
+        let mut plan = query(&format!(
+            "SELECT v FROM input WHERE false {operator} SELECT v FROM input WHERE false"
+        ));
+        let schema = uqa_sql::RowSchema::with_types(
+            vec!["v".into()],
+            vec![Some(uqa_sql::ColumnType::Integer)],
+        );
+        plan.analyzed_output = Some(schema.clone());
+        let RelationalPlan::SetOp { left, right, .. } = &mut plan.root else {
+            panic!("set operator")
+        };
+        left.analyzed_output = Some(schema.clone());
+        right.analyzed_output = Some(schema);
+        assert_eq!(query_is_empty(&plan), expected, "{operator}");
+        let RelationalPlan::SetOp { right, .. } = &mut plan.root else {
+            unreachable!()
+        };
+        right.analyzed_output = Some(uqa_sql::RowSchema::with_types(
+            vec!["v".into()],
+            vec![Some(uqa_sql::ColumnType::BigInteger)],
+        ));
+        assert!(!query_is_empty(&plan), "coercing {operator}");
+    }
+}

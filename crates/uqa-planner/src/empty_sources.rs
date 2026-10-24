@@ -8,7 +8,7 @@
 
 use uqa_core::Value;
 use uqa_sql::{
-    ast::JoinKind,
+    ast::{JoinKind, SetOpKind},
     plan::{ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan},
     ScalarExpr,
 };
@@ -61,18 +61,27 @@ fn passive_slice(expression: Option<&ScalarExpr>) -> bool {
 
 /// Function expressions in a surviving result projection still initialize even when its row filter is false. A scan proof must not discard that projection along with its input, or suppress LIMIT/OFFSET evaluation errors.
 fn discardable_query_outputs(query: &QueryPlan) -> bool {
-    query.ctes.is_empty()
-        && matches!(&query.root, RelationalPlan::QueryBlock(block)
-        if block.projections.iter().all(|p| passive_output(&p.expr))
-            && block.group_by.iter().all(passive_output)
-            && block.grouping_sets.iter().flatten().all(passive_output)
-            && block.order_by.iter().all(|o| passive_output(&o.expr))
-            && block.r#where.as_ref().is_none_or(passive_output)
-            && block.having.as_ref().is_none_or(passive_output)
-            && block.distinct_on.iter().all(passive_output)
-            && block.windows.is_empty() && block.subqueries.is_empty()
-        && passive_slice(block.limit.as_ref()) && passive_slice(block.offset.as_ref())
-        && block.from.as_ref().is_none_or(discardable_outputs))
+    if !query.ctes.is_empty() {
+        return false;
+    }
+    match &query.root {
+        RelationalPlan::SetOp { .. } => query_is_empty(query),
+        RelationalPlan::QueryBlock(block) => {
+            block.projections.iter().all(|p| passive_output(&p.expr))
+                && block.group_by.iter().all(passive_output)
+                && block.grouping_sets.iter().flatten().all(passive_output)
+                && block.order_by.iter().all(|o| passive_output(&o.expr))
+                && block.r#where.as_ref().is_none_or(passive_output)
+                && block.having.as_ref().is_none_or(passive_output)
+                && block.distinct_on.iter().all(passive_output)
+                && block.windows.is_empty()
+                && block.subqueries.is_empty()
+                && passive_slice(block.limit.as_ref())
+                && passive_slice(block.offset.as_ref())
+                && block.from.as_ref().is_none_or(discardable_outputs)
+        }
+        RelationalPlan::Values { .. } => false,
+    }
 }
 
 fn discardable_outputs(source: &SourcePlan) -> bool {
@@ -106,8 +115,48 @@ fn query_is_empty(query: &QueryPlan) -> bool {
                     || block.grouping_sets.iter().any(Vec::is_empty));
             !empty_group && block_input_is_empty(block) && discardable_query_outputs(query)
         }
-        // PostgreSQL retains initialization at set-operation and VALUES boundaries even when their eventual result is empty.
+        RelationalPlan::SetOp {
+            kind: SetOpKind::Union,
+            all: true,
+            left,
+            right,
+            order_by,
+            limit,
+            offset,
+            ..
+        } if order_by.is_empty() && limit.is_none() && offset.is_none() => {
+            // A flattened append of dummy relation inputs disappears. A source-free Result, coercing append, duplicate elimination or another set operator retains its executor boundary even when its result is empty.
+            let same_types = query
+                .analyzed_output
+                .as_ref()
+                .zip(left.analyzed_output.as_ref())
+                .zip(right.analyzed_output.as_ref())
+                .is_some_and(|((output, left), right)| {
+                    output.column_types() == left.column_types()
+                        && output.column_types() == right.column_types()
+                });
+            same_types && empty_append_arm(left) && empty_append_arm(right)
+        }
         RelationalPlan::SetOp { .. } | RelationalPlan::Values { .. } => false,
+    }
+}
+
+fn empty_append_arm(query: &QueryPlan) -> bool {
+    match &query.root {
+        RelationalPlan::QueryBlock(block) => {
+            block.from.is_some()
+                && matches!(block.compute, ComputePlan::Project)
+                && block.group_by.is_empty()
+                && block.grouping_sets.is_empty()
+                && block.order_by.is_empty()
+                && !block.distinct
+                && block.distinct_on.is_empty()
+                && block.limit.is_none()
+                && block.offset.is_none()
+                && query_is_empty(query)
+        }
+        RelationalPlan::SetOp { .. } => query_is_empty(query),
+        RelationalPlan::Values { .. } => false,
     }
 }
 

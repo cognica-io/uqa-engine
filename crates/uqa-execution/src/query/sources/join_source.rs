@@ -16,6 +16,7 @@ use super::{
 };
 use crate::query::binding::sources::SourceBindings;
 use crate::{HashJoin, LateralJoin, NestedLoopJoin};
+use uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions;
 use uqa_sql::semantics::from_qualifier_set;
 
 #[expect(
@@ -255,7 +256,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         }
                         _ => None,
                     },
-                    routine_descriptions: Default::default(),
+                    routine_descriptions: RoutineCallDescriptions::default(),
                     expression_runtime: std::sync::OnceLock::new(),
                     params,
                     ctes: ctes.clone(),

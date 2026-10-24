@@ -7,6 +7,7 @@
 //! Physical set-returning projection operator.
 
 use crate::RowProjectionValue;
+use uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions;
 
 use super::{
     eval_call_arguments, Arc, Batch, ColumnType, ExecResult, OwnedPhysicalRow, PhysicalOperator,
@@ -21,7 +22,7 @@ pub struct SetProjection<'a> {
     params: &'a [SQLParam],
     evaluator: SharedExpressionEvaluator<'a>,
     plan: crate::scalar::PreparedExpressions<SetProjectionPlan>,
-    routine_descriptions: Vec<uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions>,
+    routine_descriptions: Vec<RoutineCallDescriptions>,
     schema: RowSchema,
     evaluation_schema: RowSchema,
     pass_through: bool,
@@ -98,7 +99,9 @@ impl<'a> SetProjection<'a> {
         let evaluation_schema =
             RowSchema::append_internal_typed(child.row_schema(), &evaluation_columns);
         let output_batch_size = output_batch_size.max(1);
-        let routine_descriptions = (0..plan.calls.len()).map(|_| Default::default()).collect();
+        let routine_descriptions = (0..plan.calls.len())
+            .map(|_| RoutineCallDescriptions::default())
+            .collect();
         Self {
             child,
             runtime,
