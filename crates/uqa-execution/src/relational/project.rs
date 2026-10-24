@@ -314,6 +314,10 @@ impl<'a> Project<'a> {
         else {
             return self.project_batch(batch).map(Some);
         };
+        self.project_spilled_batch(batch, budget)
+    }
+
+    fn project_spilled_batch(&mut self, batch: Batch, budget: usize) -> ExecResult<Option<Batch>> {
         // Finish every expression in this input batch before exposing its first result. Only the storage of those evaluated rows changes.
         let mut output = crate::SpillBuffer::new(budget / 2);
         let mut writer = SpillBatchWriter::new(self.schema.clone())?;
@@ -345,17 +349,16 @@ impl<'a> Project<'a> {
         schema: &RowSchema,
         row: &crate::PhysicalRow,
     ) -> ExecResult<Vec<Value>> {
-        self.computed
-            .iter()
-            .map(|expression| {
-                self.evaluator.evaluate_physical_with_function_states(
-                    expression,
-                    schema,
-                    row,
-                    self.computed.calls(),
-                )
-            })
-            .collect()
+        let mut values = Vec::with_capacity(self.computed.len());
+        for expression in self.computed.iter() {
+            values.push(self.evaluator.evaluate_physical_with_function_states(
+                expression,
+                schema,
+                row,
+                self.computed.calls(),
+            )?);
+        }
+        Ok(values)
     }
 
     fn project_batch(&self, batch: Batch) -> ExecResult<Batch> {

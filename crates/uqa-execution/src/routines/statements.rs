@@ -53,6 +53,95 @@ impl Interpreter<'_> {
                 arms,
                 else_body,
             } => self.exec_case(t_expr.as_ref(), *t_varno, arms, else_body.as_deref()),
+            PLpgSQLStmt::Loop { .. }
+            | PLpgSQLStmt::While { .. }
+            | PLpgSQLStmt::ForI { .. }
+            | PLpgSQLStmt::ForCursor { .. }
+            | PLpgSQLStmt::Exit { .. } => self.exec_loop_statement(stmt),
+            PLpgSQLStmt::ForQuery {
+                label,
+                target,
+                query,
+                source_sql,
+                body,
+            } => self.exec_query_for(label.as_deref(), target, query, source_sql, body),
+            PLpgSQLStmt::ForDynamic {
+                label,
+                target,
+                query,
+                params,
+                body,
+            } => self.exec_dynamic_for(label.as_deref(), target, query, params, body),
+            PLpgSQLStmt::ForeachArray {
+                label,
+                target,
+                slice,
+                expr,
+                body,
+            } => self.exec_foreach_array(label.as_deref(), *target, *slice, expr, body),
+            PLpgSQLStmt::Return { value } => self.exec_return(value.as_ref()),
+            PLpgSQLStmt::ReturnNext { value } => self.exec_return_next(value.as_ref()),
+            PLpgSQLStmt::ReturnQuery { query } => self.exec_return_query(query),
+            PLpgSQLStmt::ReturnQueryExecute { query, params } => {
+                self.exec_return_query_execute(query, params)
+            }
+            PLpgSQLStmt::Raise {
+                level,
+                condition,
+                message,
+                params,
+                options,
+            } => self.exec_raise(
+                *level,
+                condition.as_deref(),
+                message.as_deref(),
+                params,
+                options,
+            ),
+            PLpgSQLStmt::Assert { condition, message } => {
+                self.exec_assert(condition, message.as_ref())
+            }
+            PLpgSQLStmt::ExecSQL { stmt, into, strict } => {
+                self.exec_sql_statement(stmt, into.as_ref(), *strict)
+            }
+            PLpgSQLStmt::DynExecute {
+                query,
+                params,
+                into,
+                strict,
+            } => self.exec_dynamic_into(query, params, into.as_ref(), *strict),
+            PLpgSQLStmt::Perform { query } => self.exec_perform(query),
+            PLpgSQLStmt::OpenCursor { cursor, open } => {
+                self.exec_open_cursor(*cursor, open).map(|()| Flow::Normal)
+            }
+            PLpgSQLStmt::FetchCursor {
+                cursor,
+                target,
+                direction,
+                count,
+            } => self
+                .exec_fetch_cursor(*cursor, target, *direction, count)
+                .map(|()| Flow::Normal),
+            PLpgSQLStmt::MoveCursor {
+                cursor,
+                direction,
+                count,
+            } => self
+                .exec_move_cursor(*cursor, *direction, count)
+                .map(|()| Flow::Normal),
+            PLpgSQLStmt::CloseCursor { cursor } => {
+                self.exec_close_cursor(*cursor).map(|()| Flow::Normal)
+            }
+            PLpgSQLStmt::Commit { chain } => self.exec_procedural_transaction(true, *chain),
+            PLpgSQLStmt::Rollback { chain } => self.exec_procedural_transaction(false, *chain),
+            PLpgSQLStmt::GetDiagnostics { items } => self.exec_get_diagnostics(items),
+        }
+    }
+
+    // Loop-local bindings and control-flow scratch are not retained by RETURN
+    // expression frames that can recursively invoke another routine.
+    fn exec_loop_statement(&mut self, stmt: &PLpgSQLStmt) -> Result<Flow, SQLError> {
+        match stmt {
             PLpgSQLStmt::Loop { label, body } => loop {
                 match self.exec_loop_body(label.as_deref(), body)? {
                     LoopSignal::Continue => {}
@@ -93,20 +182,6 @@ impl Interpreter<'_> {
                 self.pop_binding(&name);
                 result
             }
-            PLpgSQLStmt::ForQuery {
-                label,
-                target,
-                query,
-                source_sql,
-                body,
-            } => self.exec_query_for(label.as_deref(), target, query, source_sql, body),
-            PLpgSQLStmt::ForDynamic {
-                label,
-                target,
-                query,
-                params,
-                body,
-            } => self.exec_dynamic_for(label.as_deref(), target, query, params, body),
             PLpgSQLStmt::ForCursor {
                 label,
                 target,
@@ -121,13 +196,6 @@ impl Interpreter<'_> {
                 self.pop_binding(&name);
                 result
             }
-            PLpgSQLStmt::ForeachArray {
-                label,
-                target,
-                slice,
-                expr,
-                body,
-            } => self.exec_foreach_array(label.as_deref(), *target, *slice, expr, body),
             PLpgSQLStmt::Exit {
                 is_exit,
                 label,
@@ -144,66 +212,7 @@ impl Interpreter<'_> {
                     Ok(Flow::Continue(label.clone()))
                 }
             }
-            PLpgSQLStmt::Return { value } => self.exec_return(value.as_ref()),
-            PLpgSQLStmt::ReturnNext { value } => self.exec_return_next(value.as_ref()),
-            PLpgSQLStmt::ReturnQuery { query } => self.exec_return_query(query),
-            PLpgSQLStmt::ReturnQueryExecute { query, params } => {
-                self.exec_return_query_execute(query, params)
-            }
-            PLpgSQLStmt::Raise {
-                level,
-                condition,
-                message,
-                params,
-                options,
-            } => self.exec_raise(
-                *level,
-                condition.as_deref(),
-                message.as_deref(),
-                params,
-                options,
-            ),
-            PLpgSQLStmt::Assert { condition, message } => {
-                self.exec_assert(condition, message.as_ref())
-            }
-            PLpgSQLStmt::ExecSQL { stmt, into, strict } => {
-                self.exec_sql_statement(stmt, into.as_ref(), *strict)
-            }
-            PLpgSQLStmt::DynExecute {
-                query,
-                params,
-                into,
-                strict,
-            } => self.exec_dynamic_into(query, params, into.as_ref(), *strict),
-            PLpgSQLStmt::Perform { query } => self.exec_perform(query),
-            PLpgSQLStmt::OpenCursor { cursor, open } => {
-                self.exec_open_cursor(*cursor, open)?;
-                Ok(Flow::Normal)
-            }
-            PLpgSQLStmt::FetchCursor {
-                cursor,
-                target,
-                direction,
-                count,
-            } => {
-                self.exec_fetch_cursor(*cursor, target, *direction, count)?;
-                Ok(Flow::Normal)
-            }
-            PLpgSQLStmt::MoveCursor {
-                cursor,
-                direction,
-                count,
-            } => {
-                self.exec_move_cursor(*cursor, *direction, count)?;
-                Ok(Flow::Normal)
-            }
-            PLpgSQLStmt::CloseCursor { cursor } => {
-                self.exec_close_cursor(*cursor)?;
-                Ok(Flow::Normal)
-            }
-            PLpgSQLStmt::Commit { chain } => self.exec_procedural_transaction(true, *chain),
-            PLpgSQLStmt::Rollback { chain } => self.exec_procedural_transaction(false, *chain),
-            PLpgSQLStmt::GetDiagnostics { items } => self.exec_get_diagnostics(items),
+            _ => unreachable!("loop statement dispatch"),
         }
     }
 

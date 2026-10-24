@@ -150,6 +150,12 @@ pub(crate) fn empty_source_operator<'a, S: Clone + Send + Sync + 'static>(
     let outer = outer.or_else(|| ctes.row_lock_outer_row().map(|row| &row.schema));
     let schema =
         super::bind_source_plan_schema(context.ctes.routines, source, params, ctes, outer)?;
+    if schema.columns_are_open(None) {
+        return Err(SQLError::Routine {
+            sqlstate: "42P18".into(),
+            message: "cannot determine runtime table-function columns from an empty input".into(),
+        });
+    }
     Ok(Box::new(crate::TableScan::from_physical_rows(
         schema,
         Vec::new(),

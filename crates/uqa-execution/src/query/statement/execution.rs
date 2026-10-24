@@ -90,19 +90,7 @@ fn execute_prepared_query_output<S: Clone + Send + Sync + 'static>(
     let mut visible_ctes =
         relation_lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     let ctes = &mut *visible_ctes;
-    if !plan.ctes.is_empty() {
-        let scheduled = schedule_plan_ctes(context.source.volatility, plan)?;
-        let filters = context.cte_filters.output_filters(plan, ctes)?;
-        install_statement_ctes(
-            context.source.ctes,
-            &plan.ctes,
-            scheduled,
-            || primary_query_cte_references(plan),
-            params,
-            ctes,
-            &filters,
-        )?;
-    }
+    install_query_ctes(context, plan, params, ctes)?;
     let output = match ctes.command_cte_snapshot() {
         Some(snapshot) => with_query_snapshot(context.snapshots, &snapshot, |selected| {
             execute_query_root(selected, plan, params, ctes, output_mode)
@@ -120,6 +108,28 @@ fn execute_prepared_query_output<S: Clone + Send + Sync + 'static>(
         }
     }
     Ok(output)
+}
+
+fn install_query_ctes<S: Clone + Send + Sync + 'static>(
+    context: &QueryContext<'_, S>,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+) -> Result<(), SQLError> {
+    if plan.ctes.is_empty() {
+        return Ok(());
+    }
+    let scheduled = schedule_plan_ctes(context.source.volatility, plan)?;
+    let filters = context.cte_filters.output_filters(plan, ctes)?;
+    install_statement_ctes(
+        context.source.ctes,
+        &plan.ctes,
+        scheduled,
+        || primary_query_cte_references(plan),
+        params,
+        ctes,
+        &filters,
+    )
 }
 fn execute_query_root<S: Clone + Send + Sync + 'static>(
     context: &QueryContext<'_, S>,
