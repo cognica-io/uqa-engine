@@ -11,6 +11,9 @@ use uqa_core::{ArrayValue, Value};
 use uqa_engine::Engine;
 use uqa_sql::{ast::ColumnType, ResultRow};
 
+#[path = "sql_information_schema/select_coverage.rs"]
+mod select_coverage;
+
 #[path = "sql_information_schema/type_metadata.rs"]
 mod type_metadata;
 

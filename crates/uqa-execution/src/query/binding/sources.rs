@@ -15,8 +15,11 @@ use uqa_sql::{
     RowSchema, SQLError, SQLParam,
 };
 
+mod privileges;
 #[cfg(test)]
 mod tests;
+pub(crate) use privileges::ensure_select_with_sources;
+use privileges::SourceAuthorization;
 
 pub(crate) struct BoundQueryBlock<'a> {
     pub(crate) block: Cow<'a, QueryBlockPlan>,
@@ -30,6 +33,7 @@ pub(crate) struct SourceBindings<'a> {
     scope: Arc<SourceBindingScope>,
     routines: &'a dyn RoutineResolution,
     params: &'a [SQLParam],
+    authorization: Option<SourceAuthorization<'a>>,
 }
 
 impl SourceBindings<'_> {
@@ -40,6 +44,10 @@ impl SourceBindings<'_> {
     pub(crate) fn join_child(&self, right: bool) -> Option<Self> {
         self.source.join_child(right).map(|source| Self {
             source,
+            authorization: self
+                .authorization
+                .as_ref()
+                .and_then(|checked| checked.join_child(right)),
             ..self.clone()
         })
     }
@@ -66,6 +74,10 @@ impl SourceBindings<'_> {
                     schema,
                     source.map(|source| Self {
                         source,
+                        authorization: self
+                            .authorization
+                            .as_ref()
+                            .and_then(|checked| checked.query_source(block, ctes)),
                         ..self.clone()
                     }),
                 )
@@ -107,6 +119,7 @@ pub(crate) fn bind_query_block_with_sources<'a, S: Clone>(
                 scope: Arc::new(SourceBindingScope::capture(ctes)?),
                 routines,
                 params,
+                authorization: None,
             })
         })
         .transpose()?;

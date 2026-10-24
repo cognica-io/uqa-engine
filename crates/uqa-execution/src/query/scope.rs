@@ -158,6 +158,14 @@ impl<S: Clone> CteScope<S> {
         })
     }
 
+    pub(crate) fn relation_lookup_mode(
+        &self,
+    ) -> Option<uqa_sql::catalog::resolution::RelationLookupMode> {
+        self.catalog_resolution
+            .as_ref()
+            .map(|resolution| resolution.lookup_mode)
+    }
+
     pub fn privilege_subject(&self) -> Result<&RoleReference, SQLError> {
         if let Some(subject) = self.privilege_subject.as_ref() {
             return Ok(subject);

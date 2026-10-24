@@ -7,6 +7,7 @@
 //! Semantic base-column privilege analysis for query sources.
 
 pub mod columns;
+pub mod coverage;
 mod enforcement;
 
 use crate::catalog::roles::RoleReference;

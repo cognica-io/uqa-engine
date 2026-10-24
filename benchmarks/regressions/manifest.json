@@ -23960,6 +23960,114 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "complete_select_coverage_borrows_only_checked_original_nodes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
+      "capability": "Complete SELECT source coverage",
+      "workload": "Original nested and joined sources, changed query objects, local CTE boundaries, unused/filter columns and foreign ACL metadata failures.",
+      "invariant": "Issue source coverage only after complete ordered authorization; preserve exact query identity, column denials and metadata errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "complete_select_coverage_preserves_unused_and_filter_column_denials",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
+      "capability": "Complete SELECT source coverage",
+      "workload": "Original nested and joined sources, changed query objects, local CTE boundaries, unused/filter columns and foreign ACL metadata failures.",
+      "invariant": "Issue source coverage only after complete ordered authorization; preserve exact query identity, column denials and metadata errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "zero_column_foreign_checks_keep_metadata_errors_after_table_grants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
+      "capability": "Complete SELECT source coverage",
+      "workload": "Original nested and joined sources, changed query objects, local CTE boundaries, unused/filter columns and foreign ACL metadata failures.",
+      "invariant": "Issue source coverage only after complete ordered authorization; preserve exact query identity, column denials and metadata errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "join_coverage_projects_only_original_children_and_declines_local_ctes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
+      "capability": "Complete SELECT source coverage",
+      "workload": "Original nested and joined sources, changed query objects, local CTE boundaries, unused/filter columns and foreign ACL metadata failures.",
+      "invariant": "Issue source coverage only after complete ordered authorization; preserve exact query identity, column denials and metadata errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nested_select_coverage_checks_complete_lineage_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/binding/sources/privileges/tests.rs",
+      "capability": "Scoped SELECT authorization work",
+      "workload": "Direct nested blocks at depths 1, 8 and 32; role incarnations, lookup modes, changed query objects and immutable catalog scopes.",
+      "invariant": "Check complete lineage once in an identical scope; recheck changed authority or syntax without suppressing independent routine or view checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "select_coverage_requires_the_same_role_incarnation_and_lookup_mode",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/binding/sources/privileges/tests.rs",
+      "capability": "Scoped SELECT authorization work",
+      "workload": "Direct nested blocks at depths 1, 8 and 32; role incarnations, lookup modes, changed query objects and immutable catalog scopes.",
+      "invariant": "Check complete lineage once in an identical scope; recheck changed authority or syntax without suppressing independent routine or view checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "changed_query_projection_and_catalog_require_new_select_checks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/binding/sources/privileges/tests.rs",
+      "capability": "Scoped SELECT authorization work",
+      "workload": "Direct nested blocks at depths 1, 8 and 32; role incarnations, lookup modes, changed query objects and immutable catalog scopes.",
+      "invariant": "Check complete lineage once in an identical scope; recheck changed authority or syntax without suppressing independent routine or view checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "derived_select_authority_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_information_schema/select_coverage.rs",
+      "capability": "PostgreSQL SELECT coverage consumers",
+      "workload": "Thirteen independent PostgreSQL column, CTE, lateral, view-owner/invoker and routine-definer/invoker observations through four providers and reopen.",
+      "invariant": "Preserve values, complete column authorization and original SQLSTATE/messages across native scopes and persistent reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }
