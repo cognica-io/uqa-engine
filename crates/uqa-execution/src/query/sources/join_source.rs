@@ -14,12 +14,17 @@ use super::{
     ColumnPrune, CteScope, JoinExecutionStrategy, PhysicalOperator, QualifierFilters,
     QueryLateralSource, RowSchemaExecution, SQLError, SQLParam, SourceContext, SourcePlan,
 };
+use crate::query::binding::sources::SourceBindings;
 use crate::{HashJoin, LateralJoin, NestedLoopJoin};
 use uqa_sql::semantics::from_qualifier_set;
 
 #[expect(
     clippy::too_many_lines,
     reason = "preserves source schema and row identity"
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "forwards source binding metadata and tuple recheck paths"
 )]
 pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
@@ -29,6 +34,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
     recheck_path: Option<Vec<u8>>,
+    bindings: Option<&SourceBindings<'_>>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     match from {
         SourcePlan::Join {
@@ -74,6 +80,9 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 prune,
                 left_filter_ref,
                 left_recheck_path,
+                bindings
+                    .and_then(|bindings| bindings.join_child(false))
+                    .as_ref(),
             )?;
             let implicit_lateral_function = match right.as_ref() {
                 SourcePlan::Function { name, .. } => {
@@ -272,6 +281,9 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 prune,
                 right_filter_ref,
                 right_recheck_path,
+                bindings
+                    .and_then(|bindings| bindings.join_child(true))
+                    .as_ref(),
             )?;
 
             let left_schema = left_operator.row_schema().clone();

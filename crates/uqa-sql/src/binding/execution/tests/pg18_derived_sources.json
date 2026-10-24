@@ -1,0 +1,241 @@
+{
+  "reference": {
+    "server": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "image": "uqa-pg18-oracle-python:18.4",
+    "captured": "2026-10-24",
+    "method": "Independent PostgreSQL queries and psql gdesc in Docker; temporary table only."
+  },
+  "setup": [
+    "CREATE TABLE source_input(id integer, label text)",
+    "INSERT INTO source_input VALUES(1, 'one'), (2, 'two')"
+  ],
+  "cases": [
+    {
+      "sql": "SELECT id, label FROM (SELECT id, label FROM (SELECT id, label FROM source_input OFFSET 0) AS inner_input OFFSET 0) AS outer_input ORDER BY id",
+      "rows": [
+        [
+          "1",
+          "one"
+        ],
+        [
+          "2",
+          "two"
+        ]
+      ],
+      "columns": [
+        [
+          "id",
+          "integer"
+        ],
+        [
+          "label",
+          "text"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT id FROM (SELECT id FROM source_input WHERE false OFFSET 0) AS empty_input",
+      "rows": [],
+      "columns": [
+        [
+          "id",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT value FROM (SELECT id + 1 AS value FROM source_input OFFSET 0) AS derived WHERE value > 2 ORDER BY value",
+      "rows": [
+        [
+          "3"
+        ]
+      ],
+      "columns": [
+        [
+          "value",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT id, n FROM (SELECT id, count(*) AS n FROM source_input GROUP BY id OFFSET 0) AS grouped ORDER BY id",
+      "rows": [
+        [
+          "1",
+          "1"
+        ],
+        [
+          "2",
+          "1"
+        ]
+      ],
+      "columns": [
+        [
+          "id",
+          "integer"
+        ],
+        [
+          "n",
+          "bigint"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT id, value FROM source_input, LATERAL (SELECT value FROM (SELECT source_input.id + 1 AS value OFFSET 0) AS nested_input OFFSET 0) AS derived ORDER BY id",
+      "rows": [
+        [
+          "1",
+          "2"
+        ],
+        [
+          "2",
+          "3"
+        ]
+      ],
+      "columns": [
+        [
+          "id",
+          "integer"
+        ],
+        [
+          "value",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 7 AS value) SELECT value FROM (SELECT value FROM (SELECT * FROM input OFFSET 0) AS nested_input OFFSET 0) AS derived",
+      "rows": [
+        [
+          "7"
+        ]
+      ],
+      "columns": [
+        [
+          "value",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 'outer'::text AS value) SELECT value FROM (WITH input AS (SELECT 7 AS value) SELECT * FROM input OFFSET 0) AS derived",
+      "rows": [
+        [
+          "7"
+        ]
+      ],
+      "columns": [
+        [
+          "value",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT value FROM (SELECT value FROM generate_series(1, 2) AS series(value) OFFSET 0) AS derived ORDER BY value",
+      "rows": [
+        [
+          "1"
+        ],
+        [
+          "2"
+        ]
+      ],
+      "columns": [
+        [
+          "value",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT value FROM (SELECT DISTINCT id AS value FROM source_input ORDER BY value LIMIT 1 OFFSET 1) AS derived",
+      "rows": [
+        [
+          "2"
+        ]
+      ],
+      "columns": [
+        [
+          "value",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT a, b FROM (SELECT id AS a FROM source_input OFFSET 0) AS left_input CROSS JOIN (SELECT id AS b FROM source_input OFFSET 0) AS right_input ORDER BY a, b",
+      "rows": [
+        [
+          "1",
+          "1"
+        ],
+        [
+          "1",
+          "2"
+        ],
+        [
+          "2",
+          "1"
+        ],
+        [
+          "2",
+          "2"
+        ]
+      ],
+      "columns": [
+        [
+          "a",
+          "integer"
+        ],
+        [
+          "b",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT value, value FROM (SELECT id AS value FROM source_input OFFSET 0) AS derived ORDER BY 1",
+      "rows": [
+        [
+          "1",
+          "1"
+        ],
+        [
+          "2",
+          "2"
+        ]
+      ],
+      "columns": [
+        [
+          "value",
+          "integer"
+        ],
+        [
+          "value",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM (SELECT * FROM missing_first, missing_second) AS derived",
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"missing_first\" does not exist"
+      }
+    },
+    {
+      "sql": "SELECT missing_outer FROM (SELECT missing_inner FROM source_input) AS derived",
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_inner\" does not exist"
+      }
+    },
+    {
+      "sql": "SELECT id FROM (SELECT id FROM source_input WHERE missing_where > 0) AS derived ORDER BY missing_order",
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_where\" does not exist"
+      }
+    }
+  ]
+}

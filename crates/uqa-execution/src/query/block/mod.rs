@@ -15,8 +15,7 @@ pub mod where_filter;
 use crate::query::privileges::ensure_select_privileges_for_query_block;
 use crate::query::{
     binding::{
-        bind_query_block_for_execution, binding_context, validate_query_block_expression_types,
-        validate_query_block_references,
+        binding_context, validate_query_block_expression_types, validate_query_block_references,
     },
     consumer::QueryOutputMode,
     output::{QueryOutput, QueryRows},

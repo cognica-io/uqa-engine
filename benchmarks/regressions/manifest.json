@@ -2,6 +2,183 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_execution_sources_are_bound_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/source_transfer.rs",
+      "capability": "Nested source binding work",
+      "workload": "Derived source chains of depth 1, 8 and 32 in the same borrowed execution tree, compared with the ordinary source-binding entry.",
+      "invariant": "Bind each source once during physical assembly; preserve descriptors without repeated descendant analysis.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "derived_source_transfer_requires_original_syntax_and_complete_outer_schema",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/source_transfer.rs",
+      "capability": "Derived binding scope validity",
+      "workload": "Original and copied syntax, changed outer types/qualifiers, missing outer scope and deferred DISTINCT slicing.",
+      "invariant": "Reuse only the original node with its exact enclosing schema and unchanged execution syntax.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_transfer_does_not_skip_local_cte_scopes_or_routine_selection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/source_transfer.rs",
+      "capability": "Source scope and routine ownership",
+      "workload": "Derived blocks with local CTE definitions and generate_series table-function sources.",
+      "invariant": "Keep independent CTE analysis and exact execution routine selection; do not replace those effects with retained descriptors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_binding_tree_keeps_join_sides_separate",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/source_transfer.rs",
+      "capability": "Structural source binding transfer",
+      "workload": "Two independently typed derived inputs under a cross join.",
+      "invariant": "Keep each retained descriptor attached to its original borrowed join side.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_metadata_requires_the_same_catalog_and_namespace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/binding/tests.rs",
+      "capability": "Immutable source namespace",
+      "workload": "Shared versus independent catalog snapshots and changed search path/temporary namespace.",
+      "invariant": "Require the original immutable catalog and complete relation namespace; child query modes remain explicitly selected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_metadata_does_not_cross_cte_definitions_or_recursive_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/binding/tests.rs",
+      "capability": "Derived CTE metadata lifetime",
+      "workload": "Changed deferred definition identity, recursive control width and non-returning CTE status.",
+      "invariant": "Decline source reuse when any active CTE binding input changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_transfer_rebinds_changed_parameters_and_cte_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/binding/sources/tests.rs",
+      "capability": "Native binding handoff",
+      "workload": "Integer/text parameter arrays and same-name CTE replacement in the actual Execution-to-SQL binding adapter.",
+      "invariant": "Changed parameters and CTE definitions rebind to their current exact types instead of inheriting stale source metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "derived_source_bindings_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_subquery/source_binding.rs",
+      "capability": "PostgreSQL derived source consumers",
+      "workload": "Four providers and reopen, 14 independent PostgreSQL nested/empty/grouped/lateral/CTE/function/error cases, duplicate labels and repeated prepared parameters.",
+      "invariant": "Preserve exact positional values, multiplicity, labels/types and first SQLSTATE/message under the public Engine boundary.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "target": "integration"
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "repeated_grouping_references_bind_a_scalar_query_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "Repeated grouping-set references",
+      "workload": "One scalar-query alias used by 1, 8 and 64 grouping sets in one clause-validation scope.",
+      "invariant": "Bind the scalar source once regardless of repeated references; preserve the full reference and grouping checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_results_require_the_complete_outer_descriptor",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "Scoped scalar-query descriptions",
+      "workload": "Repeated integer input, text input, restored integer input and a changed relation qualifier.",
+      "invariant": "Only the identical complete outer schema reuses an output; changed types rebind and missing qualifiers still fail.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "clause_results_do_not_cross_parameters_or_cte_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "Scalar-query scope lifetime",
+      "workload": "Integer/text parameters and nested shadowing CTE declarations across independent analyses.",
+      "invariant": "Each invocation observes its own parameter and lexical CTE types; retained results do not survive the clause-validation call.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "clause_query_bindings_preserve_postgresql_descriptors_and_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "PostgreSQL clause diagnostics",
+      "workload": "Eight independently captured PostgreSQL 18.4 grouping-set, nested CTE and multiple-error statements.",
+      "invariant": "Preserve all output labels/types and the first SQLSTATE/message from the independent PostgreSQL reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "repeated_scalar_query_aliases_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_grouping_sets/names.rs",
+      "capability": "Public clause-query binding",
+      "workload": "Eight independent PostgreSQL result/diagnostic cases on memory, SQLite, SQLite Key/Value and redb, including persistent reopen.",
+      "invariant": "Preserve grouping multiplicities, CTE scope types, output labels and the first exact SQLSTATE/message on every provider and after reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "shared_scan_reuses_immutable_projection_classification",
