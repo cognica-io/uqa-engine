@@ -24,10 +24,16 @@ fn binding(engine: &Engine) -> FunctionBinding {
         .binding()
 }
 
-#[test]
-fn native_routine_descriptions_follow_replacement_and_rollback() {
+#[rstest::rstest]
+#[case::plpgsql("plpgsql", "BEGIN RETURN a + 1; END", "BEGIN RETURN a + 2; END")]
+#[case::sql("sql", "SELECT a + 1", "SELECT a + 2")]
+fn native_routine_descriptions_follow_replacement_and_rollback(
+    #[case] language: &str,
+    #[case] original_body: &str,
+    #[case] replacement_body: &str,
+) {
     let engine = Engine::new();
-    engine.sql("CREATE FUNCTION public.kept(a integer) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RETURN a + 1; END $$", &[]).unwrap();
+    engine.sql(&format!("CREATE FUNCTION public.kept(a integer) RETURNS integer LANGUAGE {language} AS $${original_body}$$"), &[]).unwrap();
     let binding = binding(&engine);
     let ctes = query_scope::new_for_current_routine(&engine);
     let hook = ScopedEngineHook::new(&engine, &ctes);
@@ -51,7 +57,7 @@ fn native_routine_descriptions_follow_replacement_and_rollback() {
         descriptions.get(&binding, &original).is_some(),
         "native bindings must qualify for actual metadata reuse"
     );
-    engine.sql("BEGIN; CREATE OR REPLACE FUNCTION public.kept(a integer) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RETURN a + 2; END $$", &[]).unwrap();
+    engine.sql(&format!("BEGIN; CREATE OR REPLACE FUNCTION public.kept(a integer) RETURNS integer LANGUAGE {language} AS $${replacement_body}$$"), &[]).unwrap();
     assert!(hook.routine_description_scope().is_none());
     assert_eq!(
         hook.call_bound_user_function_with_descriptions(
@@ -93,10 +99,15 @@ fn native_routine_descriptions_follow_replacement_and_rollback() {
     );
 }
 
-#[test]
-fn native_routine_descriptions_keep_execute_checks_for_strict_null_calls() {
+#[rstest::rstest]
+#[case::plpgsql("plpgsql", "BEGIN RETURN a; END")]
+#[case::sql("sql", "SELECT a")]
+fn native_routine_descriptions_keep_execute_checks_for_strict_null_calls(
+    #[case] language: &str,
+    #[case] body: &str,
+) {
     let engine = Engine::new();
-    engine.sql("CREATE FUNCTION public.kept(a integer) RETURNS integer LANGUAGE plpgsql STRICT AS $$ BEGIN RETURN a; END $$; CREATE ROLE routine_reader; REVOKE EXECUTE ON FUNCTION public.kept(integer) FROM PUBLIC", &[]).unwrap();
+    engine.sql(&format!("CREATE FUNCTION public.kept(a integer) RETURNS integer LANGUAGE {language} STRICT AS $${body}$$; CREATE ROLE routine_reader; REVOKE EXECUTE ON FUNCTION public.kept(integer) FROM PUBLIC"), &[]).unwrap();
     let binding = binding(&engine);
     let ctes = query_scope::new_for_current_routine(&engine);
     let hook = ScopedEngineHook::new(&engine, &ctes);

@@ -21,6 +21,8 @@ use uqa_core::{
     Value, ValueRetentionError,
 };
 
+mod body;
+
 /// Identity of the native routine registry and type-resolution environment. Adapters must decline or replace it whenever a bound routine or type can resolve differently.
 #[derive(Clone, Default)]
 pub struct RoutineDescriptionScope(Arc<()>);
@@ -53,6 +55,8 @@ pub struct RoutineCallDescription {
     sources: Produced<Vec<Option<ColumnType>>>,
     arguments: Produced<Vec<OnceLock<Produced<RoutineValueDescription>>>>,
     parameters: Produced<Vec<OnceLock<Produced<RoutineValueDescription>>>>,
+    body_parameters: Produced<Vec<OnceLock<Produced<ColumnType>>>>,
+    body_result: OnceLock<Box<body::ResultDescription>>,
     _memory: Option<MemoryReservation>,
 }
 
@@ -130,10 +134,10 @@ fn fixed_name(name: &str) -> bool {
             .is_some_and(|name| name.names.len() == 2)
 }
 
-fn conversion_slots(
+fn conversion_slots<T>(
     count: usize,
     control: &ProductionControl<'_>,
-) -> Result<Produced<Vec<OnceLock<Produced<RoutineValueDescription>>>>, ValueRetentionError> {
+) -> Result<Produced<Vec<OnceLock<Produced<T>>>>, ValueRetentionError> {
     let mut slots = ProductionVec::new(*control);
     slots.reserve(count)?;
     for _ in 0..count {
@@ -155,6 +159,7 @@ impl RoutineCallDescription {
         let invocation = binding.invocation.as_ref().expect("eligible bound call");
         let arguments = conversion_slots(invocation.argument_targets.len(), control)?;
         let parameters = conversion_slots(invocation.parameter_types.len(), control)?;
+        let body_parameters = conversion_slots(invocation.parameter_types.len(), control)?;
         let mut copied = ProductionVec::new(*control);
         copied.reserve(sources.len())?;
         for source in sources {
@@ -174,6 +179,8 @@ impl RoutineCallDescription {
             sources: copied.finish()?,
             arguments,
             parameters,
+            body_parameters,
+            body_result: OnceLock::new(),
             _memory: memory,
         }))
     }

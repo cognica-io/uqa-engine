@@ -16,6 +16,7 @@ use crate::{
 };
 
 mod anonymous;
+pub(crate) mod retention;
 pub use anonymous::{
     validate_anonymous_record_result, validate_procedural_record_identity,
     validate_trigger_record_result,

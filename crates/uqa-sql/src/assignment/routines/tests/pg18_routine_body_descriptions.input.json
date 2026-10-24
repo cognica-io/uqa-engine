@@ -1,0 +1,233 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "sql": "CREATE SCHEMA uqa_routine_body_e36c1b"
+    },
+    {
+      "sql": "SET search_path = uqa_routine_body_e36c1b, pg_catalog"
+    },
+    {
+      "sql": "CREATE SEQUENCE ticks"
+    },
+    {
+      "sql": "CREATE TABLE permission(allowed boolean)"
+    },
+    {
+      "sql": "INSERT INTO permission VALUES(true)"
+    },
+    {
+      "sql": "CREATE FUNCTION accept_int(value integer) RETURNS boolean LANGUAGE sql VOLATILE AS 'SELECT allowed FROM permission'"
+    },
+    {
+      "sql": "CREATE DOMAIN held_integer AS integer CHECK (accept_int(VALUE))"
+    },
+    {
+      "sql": "CREATE TABLE retained_value(value held_integer)"
+    },
+    {
+      "sql": "INSERT INTO retained_value VALUES(7)"
+    },
+    {
+      "sql": "CREATE FUNCTION echo(value held_integer) RETURNS held_integer LANGUAGE sql VOLATILE AS 'SELECT value'"
+    },
+    {
+      "sql": "CREATE FUNCTION defaulted(value bigint DEFAULT nextval('ticks')) RETURNS bigint LANGUAGE sql VOLATILE AS 'SELECT value'"
+    },
+    {
+      "sql": "CREATE FUNCTION pair(a bigint, b bigint) RETURNS bigint LANGUAGE sql VOLATILE AS 'SELECT a * 10 + b'"
+    },
+    {
+      "sql": "CREATE FUNCTION collect(VARIADIC items integer[]) RETURNS integer[] LANGUAGE sql VOLATILE AS 'SELECT items'"
+    },
+    {
+      "sql": "CREATE FUNCTION polymorphic(value anyelement) RETURNS anyelement LANGUAGE sql VOLATILE AS 'SELECT value'"
+    },
+    {
+      "sql": "CREATE FUNCTION replacement(value integer) RETURNS integer LANGUAGE sql VOLATILE AS 'SELECT value + 1'"
+    },
+    {
+      "id": "domain rows allowed",
+      "sql": "SELECT i, echo(i) AS value FROM generate_series(1, 3) AS t(i) ORDER BY i"
+    },
+    {
+      "id": "defaults stay live",
+      "sql": "SELECT i, defaulted() AS value FROM generate_series(1, 3) AS t(i) ORDER BY i"
+    },
+    {
+      "id": "named evaluation order",
+      "sql": "SELECT pair(b => nextval('ticks'), a => nextval('ticks')) AS value"
+    },
+    {
+      "id": "variadic expanded",
+      "sql": "SELECT collect(1, 2, 3) AS value"
+    },
+    {
+      "id": "variadic explicit",
+      "sql": "SELECT collect(VARIADIC ARRAY[4, 5]) AS value"
+    },
+    {
+      "id": "polymorphic integer",
+      "sql": "SELECT i, polymorphic(i) AS value FROM generate_series(1, 3) AS t(i) ORDER BY i"
+    },
+    {
+      "id": "polymorphic text",
+      "sql": "SELECT polymorphic('text'::text) AS value"
+    },
+    {
+      "sql": "UPDATE permission SET allowed = false"
+    },
+    {
+      "id": "domain check changes",
+      "sql": "SELECT echo(9) AS value"
+    },
+    {
+      "id": "established domain membership",
+      "sql": "SELECT echo(value) AS value FROM retained_value"
+    },
+    {
+      "sql": "UPDATE permission SET allowed = true"
+    },
+    {
+      "id": "domain check recovers",
+      "sql": "SELECT echo(11) AS value"
+    },
+    {
+      "id": "before replacement",
+      "sql": "SELECT replacement(10) AS value"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "SAVEPOINT routine_replacement"
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION replacement(value integer) RETURNS integer LANGUAGE sql VOLATILE AS 'SELECT value + 2'"
+    },
+    {
+      "id": "after replacement",
+      "sql": "SELECT replacement(10) AS value"
+    },
+    {
+      "sql": "ROLLBACK TO routine_replacement"
+    },
+    {
+      "id": "replacement rollback",
+      "sql": "SELECT replacement(10) AS value"
+    },
+    {
+      "sql": "COMMIT"
+    },
+    {
+      "sql": "DROP FUNCTION replacement(integer)"
+    },
+    {
+      "id": "function dropped",
+      "sql": "SELECT replacement(10) AS value"
+    },
+    {
+      "id": "output counter",
+      "sql": "CREATE SEQUENCE output_checks"
+    },
+    {
+      "id": "output domain check",
+      "sql": "CREATE FUNCTION observe_output(value integer) RETURNS boolean LANGUAGE sql VOLATILE AS $$ SELECT nextval('output_checks') > 0 AND value >= 0 $$"
+    },
+    {
+      "id": "output domain",
+      "sql": "CREATE DOMAIN checked_output AS integer CHECK (observe_output(VALUE))"
+    },
+    {
+      "id": "output function",
+      "sql": "CREATE FUNCTION checked_body(value integer) RETURNS checked_output LANGUAGE sql VOLATILE AS 'SELECT value'"
+    },
+    {
+      "id": "every output checks",
+      "sql": "SELECT i, checked_body(i) AS value FROM generate_series(1,3) AS t(i) ORDER BY i"
+    },
+    {
+      "id": "successful output check count",
+      "sql": "SELECT last_value FROM output_checks"
+    },
+    {
+      "id": "output domain failure",
+      "sql": "SELECT checked_body(-1) AS value"
+    },
+    {
+      "id": "failed output check count",
+      "sql": "SELECT last_value FROM output_checks"
+    },
+    {
+      "id": "OUT before IN",
+      "sql": "CREATE FUNCTION body_inputs(OUT label text, IN value integer) LANGUAGE sql VOLATILE AS 'SELECT value::text'"
+    },
+    {
+      "id": "OUT before IN values",
+      "sql": "SELECT i, body_inputs(i) AS label FROM generate_series(1,3) AS t(i) ORDER BY i"
+    },
+    {
+      "id": "composite type",
+      "sql": "CREATE TYPE body_pair AS (id integer, label text)"
+    },
+    {
+      "id": "whole composite function",
+      "sql": "CREATE FUNCTION whole_pair(value integer) RETURNS body_pair LANGUAGE sql VOLATILE AS 'SELECT ROW(value, value::text)::body_pair'"
+    },
+    {
+      "id": "tuple composite function",
+      "sql": "CREATE FUNCTION tuple_pair(value integer) RETURNS body_pair LANGUAGE sql VOLATILE AS 'SELECT value, value::text'"
+    },
+    {
+      "id": "whole and tuple values",
+      "sql": "SELECT i, (whole_pair(i)).id AS whole_id, (whole_pair(i)).label AS whole_label, (tuple_pair(i)).id AS tuple_id, (tuple_pair(i)).label AS tuple_label FROM generate_series(1,3) AS t(i) ORDER BY i"
+    },
+    {
+      "id": "type transaction",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "private result attribute",
+      "sql": "ALTER TYPE body_pair ADD ATTRIBUTE extra integer"
+    },
+    {
+      "id": "changed output schema",
+      "sql": "SELECT tuple_pair(7)"
+    },
+    {
+      "id": "type rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "restored output schema",
+      "sql": "SELECT (whole_pair(7)).id AS whole_id, (tuple_pair(8)).label AS tuple_label"
+    },
+    {
+      "sql": "SET search_path = uqa_routine_body_e36c1b, pg_catalog",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT echo(value) AS value FROM retained_value",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT collect(VARIADIC ARRAY[4, 5]) AS value",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT polymorphic('text'::text) AS value",
+      "reopen": true
+    },
+    {
+      "id": "reopened SQL body outputs",
+      "sql": "SELECT body_inputs(9) AS label, (whole_pair(10)).id AS whole_id, (tuple_pair(11)).label AS tuple_label",
+      "reopen": true
+    },
+    {
+      "sql": "DROP SCHEMA uqa_routine_body_e36c1b CASCADE",
+      "final_cleanup": true
+    }
+  ]
+}
