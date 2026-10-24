@@ -73,6 +73,17 @@ pub(super) struct AdaptiveAggregateSet {
 }
 
 impl AdaptiveAggregateSet {
+    pub(super) fn close(&mut self) -> Result<(), SQLError> {
+        let mut result = Ok(());
+        for entry in &mut self.groups {
+            result = super::state::with_cleanup(
+                result,
+                super::state::close_accumulators(&mut entry.state.accumulators),
+            );
+        }
+        result
+    }
+
     pub(super) fn new(
         context: &dyn QueryExpressionContext,
         statement: QueryBlockPlan,
@@ -359,7 +370,7 @@ impl AdaptiveAggregateSet {
         if self.abandoned {
             return Ok(false);
         }
-        let accumulators = instantiate_aggregate_accumulators(
+        let mut accumulators = instantiate_aggregate_accumulators(
             &self.accumulator_templates,
             self.accumulator_budget,
         )?;
@@ -382,10 +393,13 @@ impl AdaptiveAggregateSet {
             }
         }
         let compact_text_key = self.compact_text_group_key(key);
-        self.retained_bytes = self
-            .retained_bytes
-            .checked_add(group_bytes)
-            .ok_or_else(|| SQLError::Internal("aggregate state size overflow".into()))?;
+        let Some(retained_bytes) = self.retained_bytes.checked_add(group_bytes) else {
+            return super::state::with_cleanup(
+                Err(SQLError::Internal("aggregate state size overflow".into())),
+                super::state::close_accumulators(&mut accumulators),
+            );
+        };
+        self.retained_bytes = retained_bytes;
         let index = self.groups.len();
         self.groups.push(GroupEntry {
             key: key.to_vec(),

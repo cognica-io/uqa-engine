@@ -201,6 +201,15 @@ where
 pub trait SQLAggregateState: Send {
     fn observe(&mut self, args: &[Value]) -> Result<(), SQLError>;
     fn finish(&self) -> Result<Value, SQLError>;
+
+    /// Release host resources after the last observation or value read. Execution
+    /// calls this once, including on failure, before completing the statement.
+    /// Resources must be released even when cleanup returns an error. `finish`
+    /// remains non-consuming because a window can read the same state repeatedly.
+    /// Existing Rust states may retain ordinary infallible `Drop` cleanup.
+    fn close(&mut self) -> Result<(), SQLError> {
+        Ok(())
+    }
 }
 
 /// Typed lookup of registered aggregate factories during physical plan preparation.

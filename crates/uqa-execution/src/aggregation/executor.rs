@@ -20,6 +20,17 @@ enum AggregateSet {
     },
 }
 
+impl AggregateSet {
+    fn close(&mut self) -> Result<(), SQLError> {
+        match self {
+            Self::Adaptive(set) => set.close(),
+            Self::Sorted { optimistic, .. } => {
+                optimistic.as_mut().map_or(Ok(()), |set| set.close())
+            }
+        }
+    }
+}
+
 pub struct PhysicalAggregateExecutor<'a> {
     context: std::sync::Arc<dyn QueryExpressionContext + 'a>,
     params: &'a [SQLParam],
@@ -27,7 +38,7 @@ pub struct PhysicalAggregateExecutor<'a> {
     input_row_schema: RowSchema,
     output_schema: RowSchema,
     output_budget: usize,
-    sets: Vec<AggregateSet>,
+    sets: Option<Vec<AggregateSet>>,
 }
 
 impl<'a> PhysicalAggregateExecutor<'a> {
@@ -108,7 +119,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
             input_row_schema: input_schema,
             output_schema,
             output_budget: (work_mem_bytes / 3).max(1),
-            sets,
+            sets: Some(sets),
         })
     }
 
@@ -150,7 +161,11 @@ impl<'a> PhysicalAggregateExecutor<'a> {
 
 impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
     fn consume(&mut self, batch: Batch) -> ExecResult<()> {
-        for set in &mut self.sets {
+        let sets = self
+            .sets
+            .as_mut()
+            .ok_or_else(|| crate::ExecError::Other("aggregate executor is closed".into()))?;
+        for set in sets {
             match set {
                 AggregateSet::Adaptive(set) => {
                     set.consume(self.context.as_ref(), &batch, self.params)?;
@@ -172,19 +187,27 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
     }
 
     fn supports_projected_rows(&self) -> bool {
-        self.sets.iter().all(|set| {
+        self.sets.as_ref().is_some_and(|sets| {
+            sets.iter().all(|set| {
             matches!(set, AggregateSet::Adaptive(set) if set.statement_subqueries_are_empty())
+        })
         })
     }
 
     fn supports_storage_borrowed_rows(&self) -> bool {
-        self.sets.iter().all(|set| {
+        self.sets.as_ref().is_some_and(|sets| {
+            sets.iter().all(|set| {
             matches!(set, AggregateSet::Adaptive(set) if set.supports_storage_borrowed_rows())
+        })
         })
     }
 
     fn consume_projected_row(&mut self, row: &ProjectedRow<'_, '_>) -> ExecResult<()> {
-        for set in &mut self.sets {
+        let sets = self
+            .sets
+            .as_mut()
+            .ok_or_else(|| crate::ExecError::Other("aggregate executor is closed".into()))?;
+        for set in sets {
             let AggregateSet::Adaptive(set) = set else {
                 return Err(crate::ExecError::Other(
                     "sort aggregate cannot consume a projected row".into(),
@@ -196,7 +219,10 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
     }
 
     fn finish(&mut self) -> ExecResult<SpillBuffer> {
-        let mut sets = std::mem::take(&mut self.sets);
+        let mut sets = self
+            .sets
+            .take()
+            .ok_or_else(|| crate::ExecError::Other("aggregate executor is closed".into()))?;
         if sets.len() == 1 {
             let set = sets.pop().ok_or_else(|| {
                 crate::ExecError::Other("aggregate grouping set disappeared".into())
@@ -206,22 +232,45 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
 
         let mut output = SpillBuffer::new(self.output_budget);
         let mut expected_output_rows = 0usize;
-        for set in sets {
-            let mut set_output = self.finish_set(set)?;
-            expected_output_rows = expected_output_rows
-                .checked_add(set_output.rows())
-                .ok_or_else(|| {
-                    crate::ExecError::Other("aggregate output row count overflow".into())
-                })?;
-            copy_output(&mut set_output, &mut output)?;
+        let mut remaining = sets.into_iter();
+        let execution = (|| {
+            for set in remaining.by_ref() {
+                let mut set_output = self.finish_set(set)?;
+                expected_output_rows = expected_output_rows
+                    .checked_add(set_output.rows())
+                    .ok_or_else(|| {
+                        crate::ExecError::Other("aggregate output row count overflow".into())
+                    })?;
+                copy_output(&mut set_output, &mut output)?;
+            }
+            if output.rows() != expected_output_rows {
+                return Err(crate::ExecError::Other(format!(
+                    "aggregate output retained {} rows, expected {expected_output_rows}",
+                    output.rows()
+                )));
+            }
+            Ok(output)
+        })();
+        let mut close = Ok(());
+        for mut set in remaining {
+            close = super::state::with_cleanup(close, set.close());
         }
-        if output.rows() != expected_output_rows {
-            return Err(crate::ExecError::Other(format!(
-                "aggregate output retained {} rows, expected {expected_output_rows}",
-                output.rows()
-            )));
+        crate::physical::with_cleanup(
+            execution,
+            close.map_err(Into::into),
+            "close aggregate grouping sets",
+        )
+    }
+
+    fn close(&mut self) -> ExecResult<()> {
+        let Some(sets) = self.sets.take() else {
+            return Ok(());
+        };
+        let mut result = Ok(());
+        for mut set in sets {
+            result = super::state::with_cleanup(result, set.close());
         }
-        Ok(output)
+        result.map_err(Into::into)
     }
 }
 

@@ -53,11 +53,18 @@ impl WindowAggregate {
         }
     }
 
-    pub(super) fn begin_partition(&mut self) {
-        self.accumulator = None;
+    pub(super) fn begin_partition(&mut self) -> Result<(), SQLError> {
+        self.close()?;
         self.aggregated_base = 0;
         self.aggregated_upto = 0;
         self.result = Value::Null;
+        Ok(())
+    }
+
+    pub(super) fn close(&mut self) -> Result<(), SQLError> {
+        self.accumulator
+            .take()
+            .map_or(Ok(()), |mut accumulator| accumulator.close())
     }
 
     /// The aggregate over the current row's frame.
@@ -91,6 +98,7 @@ impl WindowAggregate {
             || frame.exclusion != FrameExclusion::NoOthers
             || self.aggregated_upto <= head
         {
+            self.close()?;
             self.accumulator = Some(self.template.instantiate(self.budget_bytes)?);
             self.aggregated_upto = head;
         }

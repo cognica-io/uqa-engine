@@ -39,6 +39,7 @@ mod projected_input;
 mod registered_buffer;
 mod rewrite;
 mod sort_fallback;
+pub(crate) mod state;
 mod string_agg;
 mod template;
 mod value_buffer;

@@ -6,6 +6,7 @@
 
 //! Streaming aggregate state and registered aggregate adapters.
 
+use super::state::{with_cleanup, RegisteredAggregateState};
 use super::{
     value_as_f64, AggregateValueBuffer, Arc, DecimalValue, DistinctTracker,
     RegisteredAggregateBuffer, SQLAggregateFactory, SQLAggregateState, SQLError, Value,
@@ -16,7 +17,7 @@ use uqa_sql::expr::IntervalFields;
 
 pub struct AggregateAccumulator {
     pub(super) registered: Option<Arc<dyn SQLAggregateFactory>>,
-    pub(super) registered_state: Option<Box<dyn SQLAggregateState>>,
+    pub(super) registered_state: RegisteredAggregateState,
     pub(super) registered_ordered: RegisteredAggregateBuffer,
     pub(super) count: u64,
     pub(super) sum: f64,
@@ -171,7 +172,7 @@ impl Default for AggregateAccumulator {
     fn default() -> Self {
         Self {
             registered: None,
-            registered_state: None,
+            registered_state: RegisteredAggregateState::default(),
             registered_ordered: RegisteredAggregateBuffer::default(),
             count: 0,
             sum: 0.0,
@@ -208,7 +209,7 @@ impl AggregateAccumulator {
         let component_budget = (budget_bytes / 2).max(1);
         Self {
             registered: None,
-            registered_state: None,
+            registered_state: RegisteredAggregateState::default(),
             registered_ordered: RegisteredAggregateBuffer::new(component_budget),
             count: 0,
             sum: 0.0,
@@ -273,11 +274,30 @@ impl AggregateAccumulator {
         function: Arc<dyn SQLAggregateFactory>,
         budget_bytes: usize,
     ) -> Result<Self, SQLError> {
-        let state = function.try_create_state()?;
+        let state = RegisteredAggregateState::new(function.try_create_state()?);
+        Ok(Self::with_registered_state(function, state, budget_bytes))
+    }
+
+    fn with_registered_state(
+        function: Arc<dyn SQLAggregateFactory>,
+        state: RegisteredAggregateState,
+        budget_bytes: usize,
+    ) -> Self {
         let mut accumulator = Self::with_budget(budget_bytes);
         accumulator.registered = Some(function);
-        accumulator.registered_state = Some(state);
-        Ok(accumulator)
+        accumulator.registered_state = state;
+        accumulator
+    }
+
+    pub(super) fn replay_with_budget(&self, budget_bytes: usize) -> Result<Self, SQLError> {
+        match &self.registered {
+            Some(function) => Ok(Self::with_registered_state(
+                Arc::clone(function),
+                self.registered_state.replay(function.as_ref())?,
+                budget_bytes,
+            )),
+            None => Ok(Self::from_plan_with_budget(self.state_plan, budget_bytes)),
+        }
     }
 
     pub fn observe(&mut self, value: &Value) -> Result<(), SQLError> {
@@ -739,11 +759,7 @@ impl AggregateAccumulator {
         enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
         if sort_keys.is_empty() {
-            let state = self
-                .registered_state
-                .as_mut()
-                .ok_or_else(|| SQLError::Internal("registered aggregate state missing".into()))?;
-            state.observe(&values)?;
+            self.registered_state.observe(&values)?;
             return Ok(());
         }
         self.registered_ordered.push(values, sort_keys, enums)
@@ -755,17 +771,22 @@ impl AggregateAccumulator {
     ) -> Option<Result<Value, SQLError>> {
         let function = self.registered.as_ref()?;
         if self.registered_ordered.is_empty() {
-            let state = self
-                .registered_state
-                .as_ref()
-                .ok_or_else(|| SQLError::Internal("registered aggregate state missing".into()));
-            return Some(state.and_then(|state| state.finish()));
+            return Some(self.registered_state.finish());
         }
         Some((|| {
-            let mut state = function.try_create_state()?;
-            self.registered_ordered
-                .observe_ordered_into(state.as_mut(), enums)?;
-            state.finish()
+            let mut state = self.registered_state.replay(function.as_ref())?;
+            let result = self
+                .registered_ordered
+                .observe_ordered_into(&mut state, enums)
+                .and_then(|()| state.finish());
+            with_cleanup(result, state.close())
         })())
+    }
+
+    /// Release registered host state before reporting completion or failure.
+    /// Repeated calls do not invoke host cleanup again. Abandoned accumulators
+    /// still release their state through best-effort `Drop` cleanup.
+    pub fn close(&mut self) -> Result<(), SQLError> {
+        self.registered_state.close()
     }
 }

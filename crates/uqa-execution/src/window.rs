@@ -399,6 +399,11 @@ fn execute_window_pass(
         }
         Ok(())
     })();
+    let mut close_states = Ok(());
+    for slot in &mut slots {
+        close_states = crate::aggregation::state::with_cleanup(close_states, slot.state.close());
+    }
+    let execution = crate::aggregation::state::with_cleanup(execution, close_states);
     let close = sorted.close().map_err(exec_to_sql_error);
     combine_execution_and_close(execution, close, "window sort")?;
     Ok(output)
@@ -664,7 +669,7 @@ fn emit_partition(
         *offsets_evaluated = true;
     }
     for slot in slots.iter_mut() {
-        slot.state.begin_partition();
+        slot.state.begin_partition()?;
     }
     let mut current = CurrentRow::new();
     let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);

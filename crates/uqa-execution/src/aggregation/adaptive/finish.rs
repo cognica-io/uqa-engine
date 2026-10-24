@@ -20,19 +20,22 @@ impl AdaptiveAggregateSet {
         output_schema: &RowSchema,
         params: &[SQLParam],
     ) -> Result<SpillBuffer, SQLError> {
-        if self.partials.is_none() {
-            return self.finish_memory(context, output_schema, params);
-        }
-        self.flush_partial_groups()?;
-        let partials = self
-            .partials
-            .take()
-            .ok_or_else(|| SQLError::Internal("partial aggregate spill disappeared".into()))?;
-        self.finish_spilled(context, output_schema, params, partials)
+        let result = (|| {
+            if self.partials.is_none() {
+                return self.finish_memory(context, output_schema, params);
+            }
+            self.flush_partial_groups()?;
+            let partials = self
+                .partials
+                .take()
+                .ok_or_else(|| SQLError::Internal("partial aggregate spill disappeared".into()))?;
+            self.finish_spilled(context, output_schema, params, partials)
+        })();
+        super::super::state::with_cleanup(result, self.close())
     }
 
     fn finish_memory(
-        mut self,
+        &mut self,
         context: &dyn QueryExpressionContext,
         output_schema: &RowSchema,
         params: &[SQLParam],
@@ -42,12 +45,12 @@ impl AdaptiveAggregateSet {
         }
         let mut output = SpillBuffer::new(self.spill_budget);
         let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
-        for entry in self.groups {
+        for entry in &mut self.groups {
             if let Some(row) = super::super::output::finish_group(
                 context,
                 &self.statement,
                 &self.output_plan,
-                entry.state.accumulators,
+                std::mem::take(&mut entry.state.accumulators),
                 &entry.key,
                 output_schema.columns(),
                 params,
@@ -88,7 +91,7 @@ impl AdaptiveAggregateSet {
     }
 
     fn finish_spilled(
-        self,
+        &self,
         context: &dyn QueryExpressionContext,
         output_schema: &RowSchema,
         params: &[SQLParam],

@@ -13,13 +13,15 @@ The engine registries accept scalar, table, and aggregate implementations:
 | `SQLRowSource<T>` | Produces rows and explicitly closes a scan with a fallible result |
 | `SQLAggregateFunction` | Existing infallible Rust aggregate factory, adapted to `SQLAggregateFactory` |
 | `SQLAggregateFactory` | Creates an independent `SQLAggregateState` or returns `SQLError` |
-| `SQLAggregateState` | Observes argument rows and returns a final value |
+| `SQLAggregateState` | Observes argument rows, reads a value and explicitly closes host resources |
 
 The `register_*_function_with_options` methods attach volatility and mutation properties. The default is `VOLATILE` and may mutate, which prevents unsafe optimizer assumptions.
 
 Aggregate registration accepts `SQLAggregateFactory::try_create_state`. Existing `SQLAggregateFunction` implementations and infallible factory closures receive a blanket adapter, so they retain their source interface. Execution propagates creation errors before observing or finishing a missing state, including global aggregates over empty inputs, sorted and DISTINCT replay, and window frame restarts. Partially constructed accumulator sets release their successful states when a later creation fails. Window state starts when a frame is first evaluated; planning and empty window inputs do not invoke the factory. The owning transaction receives the original SQLSTATE, message, detail and hint.
 
 Custom native `AggregateFunctionRegistry` adapters return `Arc<dyn SQLAggregateFactory>`; shared runtime maps store that same factory interface. This owner-level change does not add a second aggregate registration name or require existing infallible callback implementations to change their state factory.
+
+`SQLAggregateState::finish` reads a value without consuming the state; a window can read the same state for multiple frames. `close` releases host resources after their final use and may return `SQLError`. Execution consumes ownership before calling `close`, so a failing cleanup is not retried. The default implementation succeeds and preserves existing Rust states that use infallible `Drop`. Explicit cleanup covers partial group construction, grouped and global aggregation, ordered and DISTINCT replay, window frame replacement, partition completion, input or expression failure and cancellation. `AggregateExecutor::close` carries cleanup through the physical operator when input ends early. Every initialized state is closed before statement completion; if both execution and cleanup fail, the original diagnostic remains primary and typed cleanup failures are attached to it. Dropping an abandoned state is a best-effort fallback and cannot report a cleanup error.
 
 ```mermaid
 flowchart LR

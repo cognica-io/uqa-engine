@@ -194,10 +194,19 @@ pub fn instantiate_aggregate_accumulators(
     templates: &[AggregateAccumulatorTemplate],
     budget_bytes: usize,
 ) -> Result<Vec<AggregateAccumulator>, SQLError> {
-    templates
-        .iter()
-        .map(|template| template.instantiate(budget_bytes))
-        .collect()
+    let mut accumulators = Vec::with_capacity(templates.len());
+    for template in templates {
+        match template.instantiate(budget_bytes) {
+            Ok(accumulator) => accumulators.push(accumulator),
+            Err(error) => {
+                return super::state::with_cleanup(
+                    Err(error),
+                    super::state::close_accumulators(&mut accumulators),
+                )
+            }
+        }
+    }
+    Ok(accumulators)
 }
 
 pub fn observe_aggregate(

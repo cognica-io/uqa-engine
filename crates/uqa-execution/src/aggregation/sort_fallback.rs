@@ -171,7 +171,7 @@ pub(super) fn aggregate_sorted_input(
                 context,
                 statement,
                 &output_plan,
-                current_accumulators,
+                std::mem::take(&mut current_accumulators),
                 &key,
                 output_schema.columns(),
                 params,
@@ -194,6 +194,10 @@ pub(super) fn aggregate_sorted_input(
         }
         super::output::flush_output_rows(&mut output, output_schema, &mut pending)
     })();
+    let execution = super::state::with_cleanup(
+        execution,
+        super::state::close_accumulators(&mut current_accumulators),
+    );
     let close = sorted.close().map_err(exec_to_sql_error);
     combine_execution_and_close(execution, close, "aggregate sort")?;
     Ok(output)

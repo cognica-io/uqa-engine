@@ -45,27 +45,24 @@ pub fn aggregate_value_with_args(
 ) -> Result<Value, SQLError> {
     if !acc.distinct.is_empty() {
         let budget = acc.distinct.values.budget_bytes;
-        let mut unique = match &acc.registered {
-            Some(function) => AggregateAccumulator::registered_with_budget(
-                std::sync::Arc::clone(function),
-                budget,
-            )?,
-            None => AggregateAccumulator::from_plan_with_budget(acc.state_plan, budget),
-        };
+        let mut unique = acc.replay_with_budget(budget)?;
         unique.enum_comparison.clone_from(&acc.enum_comparison);
-        acc.distinct.for_each(enums, |value| {
-            if acc.registered.is_some() {
-                let Value::List(arguments) = value else {
-                    return Err(SQLError::Internal(
-                        "registered DISTINCT input is not an argument tuple".into(),
-                    ));
-                };
-                unique.observe_registered(arguments.clone(), Vec::new(), enums)
-            } else {
-                unique.observe_with_enum_catalog(value, enums)
-            }
-        })?;
-        return aggregate_value_with_args(name, &unique, args, enums);
+        let result = acc
+            .distinct
+            .for_each(enums, |value| {
+                if acc.registered.is_some() {
+                    let Value::List(arguments) = value else {
+                        return Err(SQLError::Internal(
+                            "registered DISTINCT input is not an argument tuple".into(),
+                        ));
+                    };
+                    unique.observe_registered(arguments.clone(), Vec::new(), enums)
+                } else {
+                    unique.observe_with_enum_catalog(value, enums)
+                }
+            })
+            .and_then(|()| aggregate_value_with_args(name, &unique, args, enums));
+        return super::state::with_cleanup(result, unique.close());
     }
     if let Some(value) = acc.registered_value(enums) {
         return value;
