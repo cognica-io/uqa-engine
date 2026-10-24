@@ -1,0 +1,331 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "sql": "CREATE SCHEMA strict_arithmetic"
+    },
+    {
+      "sql": "CREATE SEQUENCE strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::integer + nextval('strict_arithmetic.effects')::integer",
+      "fold_expression": "NULL::integer + nextval('strict_arithmetic.effects')::integer"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::integer - nextval('strict_arithmetic.effects')::integer",
+      "fold_expression": "NULL::integer - nextval('strict_arithmetic.effects')::integer"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::integer * nextval('strict_arithmetic.effects')::integer",
+      "fold_expression": "NULL::integer * nextval('strict_arithmetic.effects')::integer"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::integer / nextval('strict_arithmetic.effects')::integer",
+      "fold_expression": "NULL::integer / nextval('strict_arithmetic.effects')::integer"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT nextval('strict_arithmetic.effects')::integer + NULL::integer",
+      "fold_expression": "nextval('strict_arithmetic.effects')::integer + NULL::integer"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT nextval('strict_arithmetic.effects')::integer - NULL::integer",
+      "fold_expression": "nextval('strict_arithmetic.effects')::integer - NULL::integer"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT nextval('strict_arithmetic.effects')::integer * NULL::integer",
+      "fold_expression": "nextval('strict_arithmetic.effects')::integer * NULL::integer"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT nextval('strict_arithmetic.effects')::integer / NULL::integer",
+      "fold_expression": "nextval('strict_arithmetic.effects')::integer / NULL::integer"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::smallint + nextval('strict_arithmetic.effects')::bigint",
+      "fold_expression": "NULL::smallint + nextval('strict_arithmetic.effects')::bigint"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::real * nextval('strict_arithmetic.effects')::real",
+      "fold_expression": "NULL::real * nextval('strict_arithmetic.effects')::real"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::double precision / nextval('strict_arithmetic.effects')::integer",
+      "fold_expression": "NULL::double precision / nextval('strict_arithmetic.effects')::integer"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::numeric - nextval('strict_arithmetic.effects')::numeric",
+      "fold_expression": "NULL::numeric - nextval('strict_arithmetic.effects')::numeric"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::pg_catalog.date + nextval('strict_arithmetic.effects')::integer",
+      "fold_expression": "NULL::pg_catalog.date + nextval('strict_arithmetic.effects')::integer"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::pg_catalog.interval * nextval('strict_arithmetic.effects')::double precision",
+      "fold_expression": "NULL::pg_catalog.interval * nextval('strict_arithmetic.effects')::double precision"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::pg_catalog.timestamp - (nextval('strict_arithmetic.effects')::text)::pg_catalog.timestamp",
+      "fold_expression": "NULL::pg_catalog.timestamp - (nextval('strict_arithmetic.effects')::text)::pg_catalog.timestamp"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::pg_catalog.timestamptz + (nextval('strict_arithmetic.effects')::text)::pg_catalog.interval",
+      "fold_expression": "NULL::pg_catalog.timestamptz + (nextval('strict_arithmetic.effects')::text)::pg_catalog.interval"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::integer / 0"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::integer + (1 / 0)"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::text || nextval('strict_arithmetic.effects')::text"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::integer[] || ARRAY[nextval('strict_arithmetic.effects')::integer]"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT NULL::double precision ^ nextval('strict_arithmetic.effects')::double precision"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "CREATE TABLE strict_arithmetic.inputs(id integer PRIMARY KEY, v bigint, d date)"
+    },
+    {
+      "sql": "INSERT INTO strict_arithmetic.inputs VALUES(1,NULL,DATE '2020-01-01'),(2,2,DATE '2020-01-02')"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT id,v+nextval('strict_arithmetic.effects') AS value FROM strict_arithmetic.inputs ORDER BY id"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT id,NULL::integer+(v+nextval('strict_arithmetic.effects')) AS value FROM strict_arithmetic.inputs ORDER BY id"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT id,NULL::interval+d AS value FROM strict_arithmetic.inputs ORDER BY id"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT id,pg_typeof(NULL::integer+v)::text AS result_type FROM strict_arithmetic.inputs ORDER BY id"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "PREPARE strict_null_parameter(integer) AS SELECT $1+nextval('strict_arithmetic.effects')::integer AS value"
+    },
+    {
+      "sql": "SET plan_cache_mode = force_generic_plan"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "EXECUTE strict_null_parameter(NULL)"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "EXECUTE strict_null_parameter(7)"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SET plan_cache_mode = force_custom_plan"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "EXECUTE strict_null_parameter(NULL)"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "EXECUTE strict_null_parameter(7)"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "DEALLOCATE strict_null_parameter"
+    },
+    {
+      "sql": "RESET plan_cache_mode"
+    },
+    {
+      "sql": "CREATE FUNCTION strict_arithmetic.marked(a integer) RETURNS SETOF integer LANGUAGE SQL VOLATILE AS 'SELECT a+nextval(''strict_arithmetic.effects'')::integer'"
+    },
+    {
+      "sql": "SELECT setval('strict_arithmetic.effects',1,false)"
+    },
+    {
+      "sql": "SELECT * FROM strict_arithmetic.marked(NULL)"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects"
+    },
+    {
+      "sql": "SELECT * FROM strict_arithmetic.marked(7)"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM strict_arithmetic.effects",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT NULL::integer + missing FROM strict_arithmetic.inputs"
+    },
+    {
+      "sql": "DROP SCHEMA strict_arithmetic CASCADE",
+      "final_cleanup": true
+    }
+  ]
+}

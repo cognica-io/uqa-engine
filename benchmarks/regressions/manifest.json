@@ -2,6 +2,114 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "strict_arithmetic_does_not_guess_a_result_for_an_unanalyzed_row",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/strict_arithmetic.rs",
+      "capability": "Selected scalar result metadata",
+      "workload": "Raw optimizer IR with NULL interval and a column whose type is unavailable.",
+      "invariant": "Do not guess a result type from an unresolved runtime operand; native analyzed plans retain their selected result separately.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "concatenation_selection_retains_strict_scalar_and_nonstrict_array_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/arithmetic_results.rs",
+      "capability": "Selected scalar result metadata",
+      "workload": "NULL text concatenation and NULL-array concatenation with volatile operands.",
+      "invariant": "Preserve selected scalar strictness and non-strict array identity before optimization.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "arithmetic_results_keep_the_analyzed_type_outside_the_input_row_scope",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/arithmetic_results.rs",
+      "capability": "Selected scalar result metadata",
+      "workload": "Prepared date/interval and mixed-width integer expressions across serialization and rebinding.",
+      "invariant": "Retain the selected result type with no collation and no runtime row dependency.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "strict_arithmetic_null_uses_the_analyzed_result_after_losing_row_types",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/strict_arithmetic.rs",
+      "capability": "Selected scalar result metadata",
+      "workload": "A retained timestamp selection for interval plus a date column outside its input row scope.",
+      "invariant": "Fold to a typed timestamp NULL without reselecting interval arithmetic or touching the discarded row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "strict_arithmetic_null_preserves_postgresql_result_types_without_effects",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/strict_arithmetic.rs",
+      "capability": "Strict NULL arithmetic semantics",
+      "workload": "Sixteen independently captured strict NULL arithmetic expressions across numeric and temporal overloads.",
+      "invariant": "Retain each PostgreSQL result OID without evaluating the volatile sibling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "strict_arithmetic_null_keeps_postgresql_child_constant_error_order",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/strict_arithmetic.rs",
+      "capability": "Strict NULL arithmetic semantics",
+      "workload": "A NULL arithmetic operand and a sibling constant division by zero.",
+      "invariant": "Report 22012 while simplifying children before discarding the strict operator.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "strict_arithmetic_does_not_eliminate_unresolved_parameter_effects",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/strict_arithmetic.rs",
+      "capability": "Strict NULL arithmetic semantics",
+      "workload": "A generic prepared parameter and a volatile arithmetic sibling.",
+      "invariant": "Retain live parameter evaluation until a constant NULL is known.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "strict_null_arithmetic_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/invocation_descriptions.rs",
+      "capability": "PostgreSQL strict NULL arithmetic",
+      "workload": "103 independent PostgreSQL statements across memory, SQLite, SQLite Key/Value and redb, including reopen.",
+      "invariant": "Preserve selected types, volatile effects, child errors, runtime variables, non-strict concatenation, generic/custom plans and routine bodies.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "deferred_function_calls_share_immutable_inputs_and_read_current_outer_rows",

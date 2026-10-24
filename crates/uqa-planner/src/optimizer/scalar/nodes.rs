@@ -25,7 +25,12 @@ pub(super) fn optimize_collated(
         unreachable!("retained collation expression");
     };
     let selected_arm = matches!(*expr, ScalarExpr::Case { .. });
-    let mut expr = optimize_scalar(*expr, config)?;
+    let mut expr = match *expr {
+        expression @ ScalarExpr::Binary { .. } => {
+            super::optimize_noncall_scalar(expression, config, Some(&ty))?
+        }
+        expression => optimize_scalar(expression, config)?,
+    };
     if let Some(oid) = collation.implicit_oid() {
         match &mut expr {
             ScalarExpr::TypedLiteral {
@@ -121,5 +126,5 @@ pub(super) fn optimize_call(
         order_by,
         filter: optimize_optional(filter, config)?,
     };
-    finish_scalar(optimized, false, false, config)
+    finish_scalar(optimized, false, false, config, None)
 }

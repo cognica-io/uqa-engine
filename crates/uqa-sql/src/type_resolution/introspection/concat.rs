@@ -6,7 +6,7 @@
 
 //! Retain `||` input conversions and its selected array operation before runtime values erase their declared types.
 
-use super::{Binder, BindingCall, FunctionBinding, SQLError};
+use super::{Binder, BindingCall, SQLError};
 use crate::ast::FunctionDispatch;
 use crate::type_resolution::concatenation;
 
@@ -48,25 +48,8 @@ impl Binder<'_, '_> {
         for (position, operand) in [left, right].into_iter().enumerate() {
             self.operand_cast(operand, selected.argument(position))?;
         }
-        let binding = FunctionBinding::dispatched_with_control(selected.dispatch(), &self.control)?;
-        let mut binding = self.retain(binding);
-        if matches!(
-            binding.dispatch,
-            Some(FunctionDispatch::Concat {
-                oid: Some(2779 | 2780)
-            })
-        ) {
-            let mut names = uqa_core::memory::ProductionVec::new(self.control);
-            names.reserve(2)?;
-            for position in 0..2 {
-                names.push_produced(
-                    selected
-                        .argument(position)
-                        .catalog_name_with_control(&self.control)?,
-                )?;
-            }
-            binding.argument_types = self.retain(names.finish()?);
-        }
+        let binding = selected.binding(&self.control)?;
+        let binding = self.retain(binding);
         crate::ast::FunctionBinding::rebind(&mut call.binding, binding);
         Ok(())
     }

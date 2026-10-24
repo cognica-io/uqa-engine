@@ -164,6 +164,7 @@ impl SelectedFunctionArguments {
 pub(super) enum FunctionResult {
     /// The original argument analysis selected a result, including a deferred UQA result.
     Selected(Option<ColumnType>),
+    Bound(ColumnType, Box<FunctionBinding>),
     Unselected,
 }
 
@@ -420,34 +421,13 @@ impl Preparation<'_> {
         {
             return self.coerce_pattern_arguments(dispatch, arguments);
         }
-        let types = arguments.types();
         if binding
             .and_then(|binding| binding.dispatch)
             .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
         {
-            let [left, right] = types.as_slice() else {
-                return Err(SQLError::Internal("invalid concatenation operands".into()));
-            };
-            if arguments.values.iter().any(ExpressionType::is_deferred) {
-                return Ok(FunctionResult::Selected(None));
-            }
-            let control = uqa_core::memory::ProductionControl::uncontrolled();
-            let selected = crate::type_resolution::concatenation::select(
-                left.as_ref(),
-                right.as_ref(),
-                &control,
-            )?;
-            for (position, value) in arguments.values.iter_mut().enumerate() {
-                self.parameters
-                    .coerce_unknown(value, selected.argument(position))?;
-            }
-            return Ok(FunctionResult::Selected(Some(
-                selected
-                    .into_result(&control)?
-                    .into_uncontrolled()
-                    .expect("ordinary concatenation selection"),
-            )));
+            return self.coerce_concatenation_arguments(arguments);
         }
+        let types = arguments.types();
         if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
             binding.and_then(|binding| binding.dispatch)
         {
@@ -495,6 +475,35 @@ impl Preparation<'_> {
             return Ok(FunctionResult::Selected(Some(ty)));
         }
         Ok(FunctionResult::Unselected)
+    }
+
+    fn coerce_concatenation_arguments(
+        &mut self,
+        arguments: &mut ObservedFunctionArguments,
+    ) -> Result<FunctionResult, SQLError> {
+        let types = arguments.types();
+        let [left, right] = types.as_slice() else {
+            return Err(SQLError::Internal("invalid concatenation operands".into()));
+        };
+        if arguments.values.iter().any(ExpressionType::is_deferred) {
+            return Ok(FunctionResult::Selected(None));
+        }
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        let selected =
+            crate::type_resolution::concatenation::select(left.as_ref(), right.as_ref(), &control)?;
+        for (position, value) in arguments.values.iter_mut().enumerate() {
+            self.parameters
+                .coerce_unknown(value, selected.argument(position))?;
+        }
+        let binding = selected
+            .binding(&control)?
+            .into_uncontrolled()
+            .expect("ordinary concatenation binding");
+        let result = selected
+            .into_result(&control)?
+            .into_uncontrolled()
+            .expect("ordinary concatenation selection");
+        Ok(FunctionResult::Bound(result, Box::new(binding)))
     }
 
     /// Record `PostgreSQL`'s `inputcollid` on the binding the call keeps: its selected overload, its existing binding, or, for a regular-expression function without a registered signature, a built-in selected by name. Type and collation observers also keep the argument metadata they observe.

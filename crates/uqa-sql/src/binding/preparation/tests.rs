@@ -8,6 +8,7 @@ use super::*;
 use crate::{ast::FunctionBinding, FunctionTypeResolver, RelationIdentity};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod arithmetic_results;
 mod array_bounds;
 mod array_transforms;
 mod body_inputs;
