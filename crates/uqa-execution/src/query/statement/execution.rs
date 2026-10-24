@@ -211,12 +211,18 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
             child_ctes.clone(),
             left_schema,
         )?;
-        let right: Box<dyn crate::PhysicalOperator + '_> = context.directional.query_operator(
-            (**right).clone(),
-            params.to_vec(),
-            child_ctes,
-            right_schema,
-        )?;
+        let (left, right) = crate::physical::construction::OperatorBuild::run(left, |_| {
+            context.directional.query_operator(
+                (**right).clone(),
+                params.to_vec(),
+                child_ctes,
+                right_schema,
+            )
+        })?;
+        let (left, right, work_mem) =
+            crate::physical::construction::OperatorBuild::pair(left, right, |_, _| {
+                physical_work_mem_bytes(context.source.relational.runtime)
+            })?;
         let mut operation: Box<dyn crate::PhysicalOperator + '_> = Box::new(
             crate::ExternalSetOperation::new_directional_with_types(
                 left,
@@ -224,30 +230,32 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
                 *kind,
                 *all,
                 set_schema.column_types().to_vec(),
-                physical_work_mem_bytes(context.source.relational.runtime)?,
+                work_mem,
             )
             .map_err(physical_exec_error)?,
         );
-        let (resolved_offset, resolved_limit) = {
-            let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
-            (
-                resolve_limit_offset_with_ctes(
-                    offset.as_deref(),
-                    context.source.relational,
-                    params,
-                    "OFFSET",
-                    &scoped_ctes,
-                )?
-                .unwrap_or(0),
-                resolve_limit_offset_with_ctes(
-                    limit.as_deref(),
-                    context.source.relational,
-                    params,
-                    "LIMIT",
-                    &scoped_ctes,
-                )?,
-            )
-        };
+        let (input, (resolved_offset, resolved_limit)) =
+            crate::physical::construction::OperatorBuild::run(operation, |_| {
+                let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+                Ok((
+                    resolve_limit_offset_with_ctes(
+                        offset.as_deref(),
+                        context.source.relational,
+                        params,
+                        "OFFSET",
+                        &scoped_ctes,
+                    )?
+                    .unwrap_or(0),
+                    resolve_limit_offset_with_ctes(
+                        limit.as_deref(),
+                        context.source.relational,
+                        params,
+                        "LIMIT",
+                        &scoped_ctes,
+                    )?,
+                ))
+            })?;
+        operation = input;
         if resolved_offset != 0 || resolved_limit.is_some() {
             operation = Box::new(crate::Limit::new(
                 operation,
@@ -413,14 +421,18 @@ pub fn collect_query_operator<'a, S: Clone + Send + Sync + 'static>(
     operator: Box<dyn crate::PhysicalOperator + 'a>,
     output_mode: QueryOutputMode<S>,
 ) -> Result<QueryOutput, SQLError> {
+    let (operator, output_mode) =
+        crate::physical::construction::OperatorBuild::run(operator, |_| {
+            bind_output_mode(
+                context.generation,
+                output_mode,
+                context.source.types.enum_labels(),
+            )
+        })?;
     crate::query::collection::collect_query_operator(
         context.source.relational.runtime,
         columns,
         operator,
-        bind_output_mode(
-            context.generation,
-            output_mode,
-            context.source.types.enum_labels(),
-        )?,
+        output_mode,
     )
 }

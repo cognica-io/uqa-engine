@@ -8,6 +8,7 @@
 
 use super::limit::attach_order_limit;
 use super::{build_set_projection, RelationalContext};
+use crate::physical::construction::OperatorBuild;
 use crate::query::projection::projection_set_batch_size;
 use crate::query::row_at_a_time::RowAtATime;
 use crate::query::runtime::QueryRuntimeView;
@@ -31,104 +32,127 @@ mod streaming;
 pub(super) use streaming::attach_streaming_order_projection;
 
 pub fn attach_final_projection_order<'a, S: Clone + 'static>(
-    mut operator: Box<dyn crate::PhysicalOperator + 'a>,
+    operator: Box<dyn crate::PhysicalOperator + 'a>,
     ordering: (&QueryBlockPlan, &[OutputColumnMapping]),
     projections: Vec<PhysicalProjection>,
     execution: FinalProjectionExecution<'a, '_, S>,
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
-    let (statement, output) = ordering;
-    let type_resolver = execution.context.expression_scope(execution.ctes.clone());
-    let returns_set = projections_may_return_set(
-        execution.context.catalog,
-        type_resolver.as_ref(),
-        &projections,
-        operator.row_schema(),
-        execution.params,
-    )?;
-    if execution.ctes.streams_command_progress() && !statement.order_by.is_empty() && !returns_set {
-        return attach_deferred_order_projection(
-            operator,
-            statement,
-            output,
-            projections,
-            execution,
-        );
-    }
-    let FinalProjectionExecution {
-        context,
-        params,
-        ctes,
-        runtime,
-        evaluator,
-    } = execution;
-    let batch_size = projection_set_batch_size(statement, ctes);
-    operator = if returns_set {
-        build_set_projection(
-            operator,
+    OperatorBuild::build(operator, |operator| {
+        let (statement, output) = ordering;
+        let type_resolver = execution.context.expression_scope(execution.ctes.clone());
+        let returns_set = projections_may_return_set(
+            execution.context.catalog,
+            type_resolver.as_ref(),
+            &projections,
+            operator.row_schema(),
+            execution.params,
+        )?;
+        if execution.ctes.streams_command_progress()
+            && !statement.order_by.is_empty()
+            && !returns_set
+        {
+            return operator.attach(|input| {
+                attach_deferred_order_projection(input, statement, output, projections, execution)
+            });
+        }
+        let FinalProjectionExecution {
             context,
             params,
             ctes,
-            Arc::clone(&evaluator),
-            crate::query::set_projection::SetProjectionOutput {
-                projections,
-                pass_through: false,
-                batch_size,
-            },
-        )?
-    } else {
-        if batch_size == 1 {
-            operator = Box::new(RowAtATime::new(operator));
+            runtime,
+            evaluator,
+        } = execution;
+        let batch_size = projection_set_batch_size(statement, ctes);
+        if returns_set {
+            operator.attach(|input| {
+                build_set_projection(
+                    input,
+                    context,
+                    params,
+                    ctes,
+                    Arc::clone(&evaluator),
+                    crate::query::set_projection::SetProjectionOutput {
+                        projections,
+                        pass_through: false,
+                        batch_size,
+                    },
+                )
+            })?;
+        } else {
+            if batch_size == 1 {
+                operator.wrap(|input| Box::new(RowAtATime::new(input)));
+            }
+            let work_mem = runtime.work_mem_bytes()?;
+            operator.wrap(|input| {
+                Box::new(
+                    crate::Project::with_target_evaluator(
+                        input,
+                        projections,
+                        Arc::clone(&evaluator),
+                    )
+                    .with_memory_budget(work_mem),
+                )
+            });
         }
-        Box::new(
-            crate::Project::with_target_evaluator(operator, projections, Arc::clone(&evaluator))
-                .with_memory_budget(runtime.work_mem_bytes()?),
-        )
-    };
-    attach_order_limit(
-        operator, statement, output, context, params, ctes, runtime, evaluator, None,
-    )
+        operator.attach(|input| {
+            attach_order_limit(
+                input, statement, output, context, params, ctes, runtime, evaluator, None,
+            )
+        })
+    })
 }
 
 fn attach_deferred_order_projection<'a, S: Clone + 'static>(
-    mut operator: Box<dyn crate::PhysicalOperator + 'a>,
+    operator: Box<dyn crate::PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     output: &[OutputColumnMapping],
     projections: Vec<PhysicalProjection>,
     execution: FinalProjectionExecution<'a, '_, S>,
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
-    let FinalProjectionExecution {
-        context,
-        params,
-        ctes,
-        runtime,
-        evaluator,
-    } = execution;
-    let (sort_statement, sort_projections, projections) =
-        prepare_deferred_order_projection(statement, output, projections)?;
-    operator = Box::new(
-        crate::Project::appending_target_evaluator(
-            operator,
-            sort_projections,
-            Arc::clone(&evaluator),
-        )
-        .with_memory_budget(runtime.work_mem_bytes()?),
-    );
-    operator = attach_order_limit(
-        operator,
-        &sort_statement,
-        &[],
-        context,
-        params,
-        ctes,
-        runtime,
-        Arc::clone(&evaluator),
-        None,
-    )?;
-    operator = Box::new(RowAtATime::new(operator));
-    Ok(Box::new(
-        crate::Project::with_target_evaluator(operator, projections, evaluator)
-            .with_memory_budget(runtime.work_mem_bytes()?),
-    ))
+    OperatorBuild::build(operator, |operator| {
+        let FinalProjectionExecution {
+            context,
+            params,
+            ctes,
+            runtime,
+            evaluator,
+        } = execution;
+        let (sort_statement, sort_projections, projections) =
+            prepare_deferred_order_projection(statement, output, projections)?;
+        let work_mem = runtime.work_mem_bytes()?;
+        operator.wrap(|input| {
+            Box::new(
+                crate::Project::appending_target_evaluator(
+                    input,
+                    sort_projections,
+                    Arc::clone(&evaluator),
+                )
+                .with_memory_budget(work_mem),
+            )
+        });
+        operator.attach(|input| {
+            attach_order_limit(
+                input,
+                &sort_statement,
+                &[],
+                context,
+                params,
+                ctes,
+                runtime,
+                Arc::clone(&evaluator),
+                None,
+            )
+        })?;
+        operator.wrap(|input| Box::new(RowAtATime::new(input)));
+        let work_mem = runtime.work_mem_bytes()?;
+        operator.wrap(|input| {
+            Box::new(
+                crate::Project::with_target_evaluator(input, projections, evaluator)
+                    .with_memory_budget(work_mem),
+            )
+        });
+        Ok(())
+    })
 }
 
 type PreparedDeferredOrderProjection = (

@@ -7,6 +7,7 @@
 //! Build a retained child using the same `UnifiedPlan` and physical operators as ordinary queries.
 
 use super::context::QueryContext;
+use crate::physical::construction::OperatorBuild;
 use crate::query::{
     binding::bind_query_plan_schema,
     cte::{install_statement_ctes, strategy::schedule_plan_ctes},
@@ -115,38 +116,30 @@ fn build_set_operator<'a, S: Clone + Send + Sync + 'static>(
     let Some(left_op) = try_build_retained_query_operator(context, left, params, scope)? else {
         return Ok(None);
     };
-    let Some(right_op) = try_build_retained_query_operator(context, right, params, scope)? else {
+    let (mut left_op, right_op) = OperatorBuild::run(left_op, |_| {
+        try_build_retained_query_operator(context, right, params, scope)
+    })?;
+    let Some(right_op) = right_op else {
+        left_op
+            .close()
+            .map_err(crate::physical::physical_exec_error)?;
         return Ok(None);
     };
-    let public = |operator: Box<dyn PhysicalOperator + 'a>,
-                  query: &QueryPlan|
-     -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-        let schema = bind_query_plan_schema(
-            context.source.ctes.routines,
-            query,
-            params,
-            scope,
-            scope.row_lock_outer_row().map(|row| &row.schema),
-        )?;
-        let positions = schema
-            .columns()
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(position, name)| (name, position))
-            .collect();
-        Ok(Box::new(ColumnSelection::with_positions(
-            operator, positions,
-        )))
-    };
+    let (left_op, right_op, work_mem) =
+        OperatorBuild::pair(left_op, right_op, |left_op, right_op| {
+            left_op.attach(|input| project_retained_output(context, input, left, params, scope))?;
+            right_op
+                .attach(|input| project_retained_output(context, input, right, params, scope))?;
+            context.source.relational.runtime.work_mem_bytes()
+        })?;
     let operator: Box<dyn PhysicalOperator + 'a> = Box::new(
         crate::ExternalSetOperation::new_with_types_and_evaluator(
-            public(left_op, left)?,
-            public(right_op, right)?,
+            left_op,
+            right_op,
             *kind,
             *all,
             schema.column_types().to_vec(),
-            context.source.relational.runtime.work_mem_bytes()?,
+            work_mem,
             context.source.relational.evaluator(params, scope),
         )
         .map_err(crate::physical::physical_exec_error)?,
@@ -190,6 +183,34 @@ fn build_set_operator<'a, S: Clone + Send + Sync + 'static>(
         None,
     )
     .map(Some)
+}
+
+fn project_retained_output<'a, S: Clone + Send + Sync + 'static>(
+    context: &QueryContext<'a, S>,
+    operator: Box<dyn PhysicalOperator + 'a>,
+    query: &QueryPlan,
+    params: &[SQLParam],
+    scope: &CteScope<S>,
+) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    let (operator, schema) = OperatorBuild::run(operator, |_| {
+        bind_query_plan_schema(
+            context.source.ctes.routines,
+            query,
+            params,
+            scope,
+            scope.row_lock_outer_row().map(|row| &row.schema),
+        )
+    })?;
+    let positions = schema
+        .columns()
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(position, name)| (name, position))
+        .collect();
+    Ok(Box::new(ColumnSelection::with_positions(
+        operator, positions,
+    )))
 }
 
 // Decide before constructing any producer: a fallback must never repeat a CTE's effects after partially assembling an unsupported root.

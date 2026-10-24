@@ -41,7 +41,11 @@ impl<'a> JoinOutput<'a> {
         columns: Vec<(String, ColumnIdentity, JoinOutputSource)>,
         aliases: Vec<(ColumnIdentity, JoinOutputSource)>,
     ) -> ExecResult<Self> {
-        let (schema, computed) = compile_layout(child.row_schema(), &columns, &aliases)?;
+        let (child, (schema, computed)) =
+            crate::physical::construction::OperatorBuild::run(child, |child| {
+                compile_layout(child.row_schema(), &columns, &aliases)
+                    .map_err(|error| crate::physical::physical_exec_error(error.into()))
+            })?;
         Ok(Self {
             child,
             input_pending: crate::physical::demand::PendingRows::default(),

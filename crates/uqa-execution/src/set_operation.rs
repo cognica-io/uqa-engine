@@ -8,7 +8,6 @@
 
 use crate::RowSchemaExecution;
 use std::cmp::Ordering;
-use std::sync::Arc;
 
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, SetOpKind};
@@ -19,10 +18,12 @@ use uqa_sql::ResultRow;
 
 use crate::batch::DEFAULT_BATCH_SIZE;
 use crate::{
-    BackwardScanSupport, Batch, ExecError, ExecResult, ExpressionEvaluator, ExternalSort,
-    PhysicalOperator, PhysicalRow, PhysicalScanDirection, RowProjectionValue, RowSchema,
-    ScalarExpr, SharedExpressionEvaluator, SortKey,
+    BackwardScanSupport, Batch, ExecError, ExecResult, ExpressionEvaluator, PhysicalOperator,
+    PhysicalRow, PhysicalScanDirection, RowProjectionValue, RowSchema, ScalarExpr,
+    SharedExpressionEvaluator,
 };
+
+mod construction;
 
 struct ColumnEvaluator;
 
@@ -79,49 +80,6 @@ struct AlignSchema<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
     schema: RowSchema,
     coercions: Vec<Option<ColumnType>>,
-}
-
-impl<'a> AlignSchema<'a> {
-    fn new(
-        child: Box<dyn PhysicalOperator + 'a>,
-        output: Vec<String>,
-        output_types: &[Option<ColumnType>],
-    ) -> ExecResult<Self> {
-        let source = child.schema().to_vec();
-        if source.len() != output.len() {
-            return Err(ExecError::Other(format!(
-                "set-operation inputs have different widths: {} and {}",
-                output.len(),
-                source.len()
-            )));
-        }
-        if output.len() != output_types.len() {
-            return Err(ExecError::Other(format!(
-                "set-operation output type width {} does not match input width {}",
-                output_types.len(),
-                output.len()
-            )));
-        }
-        let coercions = child
-            .row_schema()
-            .column_types()
-            .iter()
-            .zip(output_types)
-            .map(|(source, target)| {
-                target
-                    .as_ref()
-                    .filter(|target| source.as_ref() != Some(*target))
-                    .cloned()
-            })
-            .collect();
-        let schema = RowSchema::with_types(output, output_types.to_vec());
-        Ok(Self {
-            input_pending: crate::physical::demand::PendingRows::default(),
-            child,
-            schema,
-            coercions,
-        })
-    }
 }
 
 impl PhysicalOperator for AlignSchema<'_> {
@@ -407,129 +365,7 @@ pub struct ExternalSetOperation<'a> {
     directional_position: DirectionalAppendPosition,
 }
 
-impl<'a> ExternalSetOperation<'a> {
-    pub fn new(
-        left: Box<dyn PhysicalOperator + 'a>,
-        right: Box<dyn PhysicalOperator + 'a>,
-        kind: SetOpKind,
-        all: bool,
-        work_mem_bytes: usize,
-    ) -> ExecResult<Self> {
-        let output_types = set_operation_types(left.row_schema(), right.row_schema())?;
-        Self::new_with_types(left, right, kind, all, output_types, work_mem_bytes)
-    }
-
-    pub fn new_with_evaluator(
-        left: Box<dyn PhysicalOperator + 'a>,
-        right: Box<dyn PhysicalOperator + 'a>,
-        kind: SetOpKind,
-        all: bool,
-        work_mem_bytes: usize,
-        evaluator: SharedExpressionEvaluator<'a>,
-    ) -> ExecResult<Self> {
-        let output_types = set_operation_types(left.row_schema(), right.row_schema())?;
-        Self::new_with_types_and_evaluator(
-            left,
-            right,
-            kind,
-            all,
-            output_types,
-            work_mem_bytes,
-            evaluator,
-        )
-    }
-
-    pub fn new_with_types(
-        left: Box<dyn PhysicalOperator + 'a>,
-        right: Box<dyn PhysicalOperator + 'a>,
-        kind: SetOpKind,
-        all: bool,
-        output_types: Vec<Option<ColumnType>>,
-        work_mem_bytes: usize,
-    ) -> ExecResult<Self> {
-        Self::new_with_types_and_evaluator(
-            left,
-            right,
-            kind,
-            all,
-            output_types,
-            work_mem_bytes,
-            Arc::new(ColumnEvaluator),
-        )
-    }
-
-    /// Construct a set operation whose ordinary forward pulls remain one-row incremental when a scroll materialization boundary wraps the complete operation.
-    pub fn new_directional_with_types(
-        left: Box<dyn PhysicalOperator + 'a>,
-        right: Box<dyn PhysicalOperator + 'a>,
-        kind: SetOpKind,
-        all: bool,
-        output_types: Vec<Option<ColumnType>>,
-        work_mem_bytes: usize,
-    ) -> ExecResult<Self> {
-        let mut operation =
-            Self::new_with_types(left, right, kind, all, output_types, work_mem_bytes)?;
-        operation.incremental_union_all = true;
-        Ok(operation)
-    }
-
-    pub fn new_with_types_and_evaluator(
-        left: Box<dyn PhysicalOperator + 'a>,
-        right: Box<dyn PhysicalOperator + 'a>,
-        kind: SetOpKind,
-        all: bool,
-        output_types: Vec<Option<ColumnType>>,
-        work_mem_bytes: usize,
-        evaluator: SharedExpressionEvaluator<'a>,
-    ) -> ExecResult<Self> {
-        let output = left.schema().to_vec();
-        let left: Box<dyn PhysicalOperator + 'a> =
-            Box::new(AlignSchema::new(left, output.clone(), &output_types)?);
-        let right: Box<dyn PhysicalOperator + 'a> =
-            Box::new(AlignSchema::new(right, output.clone(), &output_types)?);
-        let (left, right) = if matches!((kind, all), (SetOpKind::Union, true)) {
-            (left, right)
-        } else {
-            let keys = output
-                .iter()
-                .map(|column| SortKey {
-                    expr: ScalarExpr::Column(column.clone().into()),
-                    descending: false,
-                    nulls_first: Some(true),
-                })
-                .collect::<Vec<_>>();
-            // Both merge inputs are live concurrently. Split the configured
-            // budget so their encoded in-memory runs cannot each claim it.
-            let per_input = (work_mem_bytes / 2).max(1);
-            (
-                Box::new(
-                    ExternalSort::new(left, keys.clone(), evaluator.clone(), None, per_input)
-                        .with_equality_keys(),
-                ) as Box<dyn PhysicalOperator + 'a>,
-                Box::new(
-                    ExternalSort::new(right, keys, Arc::clone(&evaluator), None, per_input)
-                        .with_equality_keys(),
-                ) as Box<dyn PhysicalOperator + 'a>,
-            )
-        };
-        Ok(Self {
-            left: RowCursor::new(left),
-            right: RowCursor::new(right),
-            evaluator,
-            kind,
-            all,
-            schema: RowSchema::with_types(output, output_types),
-            left_group: None,
-            right_group: None,
-            pending_row: None,
-            pending_count: 0,
-            output_bytes: work_mem_bytes,
-            union_all_left_done: false,
-            incremental_union_all: false,
-            directional_position: DirectionalAppendPosition::BeforeFirst,
-        })
-    }
-
+impl ExternalSetOperation<'_> {
     fn next_union_all(&mut self, count: usize, demanded: bool) -> ExecResult<Option<Batch>> {
         let mut rows = Vec::with_capacity(count);
         let mut size = crate::spill::EncodedBatchSizer::new(&self.schema)?;

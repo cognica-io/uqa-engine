@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use std::sync::Arc;
 use uqa_core::{ArrayValue, DatumValue};
 use uqa_sql::expr::enums::{EnumLabelCatalog, EnumTypeLabels};
 use uqa_sql::SQLError;

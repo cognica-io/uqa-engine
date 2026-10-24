@@ -328,14 +328,23 @@ impl<'a> HashJoin<'a> {
             right_nulls,
             work_mem_bytes,
         );
-        join.prepared_predicate = join
+        let prepared = join
             .predicate
             .as_ref()
             .map(|predicate| {
                 ProjectedPredicate::compile_with_schema(predicate, &join.schema, params)
             })
-            .transpose()?
-            .flatten();
+            .transpose();
+        join.prepared_predicate = match prepared {
+            Ok(prepared) => prepared.flatten(),
+            Err(error) => {
+                return crate::physical::with_cleanup(
+                    Err(error.into()),
+                    join.close(),
+                    "close hash join after predicate construction failure",
+                );
+            }
+        };
         Ok(join)
     }
 

@@ -156,13 +156,16 @@ pub fn build_set_projection<'a>(
         pass_through,
         batch_size: output_batch_size,
     } = output;
-    let plan = SetProjectionPlan::new(
-        catalog,
-        runtime.as_ref(),
-        projections,
-        operator.row_schema(),
-        params,
-    )?;
+    let (input, plan) = crate::physical::construction::OperatorBuild::run(operator, |operator| {
+        SetProjectionPlan::new(
+            catalog,
+            runtime.as_ref(),
+            projections,
+            operator.row_schema(),
+            params,
+        )
+    })?;
+    operator = input;
     let max_level = plan.calls.iter().map(|call| call.level).max().unwrap_or(0);
     for level in 0..=max_level {
         let calls = plan

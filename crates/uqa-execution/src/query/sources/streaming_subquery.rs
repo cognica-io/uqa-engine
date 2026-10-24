@@ -152,11 +152,11 @@ pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
                     qualifier_filters.as_ref(),
                 )?
             };
-            let residual =
+            crate::physical::construction::OperatorBuild::run(operator, |_| {
                 context
                     .planning
-                    .residual_filter(block, from, qualifier_filters.as_ref(), ctes)?;
-            (operator, residual)
+                    .residual_filter(block, from, qualifier_filters.as_ref(), ctes)
+            })?
         } else {
             (
                 Box::new(crate::TableScan::from_physical_rows(
@@ -176,11 +176,14 @@ pub(crate) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
         } else {
             operator
         };
-        let columns = crate::query::projection::expand_from_star_columns(
-            uqa_sql::semantics::projection_columns(&block.projections),
-            &block.projections,
-            operator.row_schema(),
-        )?;
+        let (operator, columns) =
+            crate::physical::construction::OperatorBuild::run(operator, |operator| {
+                crate::query::projection::expand_from_star_columns(
+                    uqa_sql::semantics::projection_columns(&block.projections),
+                    &block.projections,
+                    operator.row_schema(),
+                )
+            })?;
         let (operator, resjunk) = crate::query::relational::build_relational_operator(
             context.relational,
             operator,

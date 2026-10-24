@@ -234,43 +234,17 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         params,
         &mut scoped_ctes,
     )?;
-    let columns = expand_from_star_columns(
-        projection_columns(&stmt.projections),
-        &stmt.projections,
-        operator.row_schema(),
-    )?;
-    crate::query::binding::validate_query_block_expression_types(
-        context.ctes.routines,
-        stmt,
-        operator.row_schema(),
-        params,
-        &scoped_ctes,
-    )?;
-    if let (Some(from), Some(filter)) = (stmt.from.as_ref(), stmt.r#where.as_ref()) {
-        uqa_sql::semantics::text_indexes::validate_joined_expr_text_match_fields(
-            context.text_indexes,
-            from,
-            filter,
-        )?;
-    }
-    crate::query::binding::validate_query_block_references(
-        context.ctes.routines,
-        stmt,
-        operator.row_schema(),
-        params,
-        &scoped_ctes,
-        Some(&outer_row.schema),
-    )?;
-    uqa_sql::semantics::sets::validation::validate_query_set_contexts(
-        context.relational.catalog,
-        context
-            .relational
-            .expression_scope((*scoped_ctes).clone())
-            .as_ref(),
-        stmt,
-        operator.row_schema(),
-        params,
-    )?;
+    let (operator, columns) =
+        crate::physical::construction::OperatorBuild::run(operator, |operator| {
+            bind_lateral_output_columns(
+                context,
+                stmt,
+                operator.row_schema(),
+                &outer_row.schema,
+                params,
+                &scoped_ctes,
+            )
+        })?;
     crate::query::relational::output::execute_query_block_operator_output(
         context.relational,
         operator,
@@ -282,6 +256,54 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         columns,
         output_mode,
     )
+}
+
+fn bind_lateral_output_columns<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    stmt: &QueryBlockPlan,
+    schema: &crate::RowSchema,
+    outer_schema: &crate::RowSchema,
+    params: &[SQLParam],
+    scoped_ctes: &CteScope<S>,
+) -> Result<Vec<String>, SQLError> {
+    let columns = expand_from_star_columns(
+        projection_columns(&stmt.projections),
+        &stmt.projections,
+        schema,
+    )?;
+    crate::query::binding::validate_query_block_expression_types(
+        context.ctes.routines,
+        stmt,
+        schema,
+        params,
+        scoped_ctes,
+    )?;
+    if let (Some(from), Some(filter)) = (stmt.from.as_ref(), stmt.r#where.as_ref()) {
+        uqa_sql::semantics::text_indexes::validate_joined_expr_text_match_fields(
+            context.text_indexes,
+            from,
+            filter,
+        )?;
+    }
+    crate::query::binding::validate_query_block_references(
+        context.ctes.routines,
+        stmt,
+        schema,
+        params,
+        scoped_ctes,
+        Some(outer_schema),
+    )?;
+    uqa_sql::semantics::sets::validation::validate_query_set_contexts(
+        context.relational.catalog,
+        context
+            .relational
+            .expression_scope(scoped_ctes.clone())
+            .as_ref(),
+        stmt,
+        schema,
+        params,
+    )?;
+    Ok(columns)
 }
 
 /// Build the block's sources with the conjuncts this invocation can place in them, and return the remaining filter over the overlaid rows.

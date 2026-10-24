@@ -308,20 +308,22 @@ impl<'a> ColumnSelection<'a> {
         columns: &[(String, usize)],
         mut schema: RowSchema,
     ) -> ExecResult<Self> {
-        if !schema.is_identity_layout()
-            || schema.physical_width() != schema.len()
-            || columns.len() != schema.len()
-            || columns.iter().enumerate().any(|(output, (name, input))| {
-                schema.columns()[output] != *name
-                    || *input >= child.row_schema().len()
-                    || schema.column_type(output) != child.row_schema().column_type(*input)
-            })
-        {
-            return Err(uqa_sql::SQLError::Internal(
-                "query output does not match its analyzed columns and types".into(),
-            )
-            .into());
-        }
+        let (child, ()) = crate::physical::construction::OperatorBuild::run(child, |child| {
+            if !schema.is_identity_layout()
+                || schema.physical_width() != schema.len()
+                || columns.len() != schema.len()
+                || columns.iter().enumerate().any(|(output, (name, input))| {
+                    schema.columns()[output] != *name
+                        || *input >= child.row_schema().len()
+                        || schema.column_type(output) != child.row_schema().column_type(*input)
+                })
+            {
+                return Err(uqa_sql::SQLError::Internal(
+                    "query output does not match its analyzed columns and types".into(),
+                ));
+            }
+            Ok(())
+        })?;
         let input_positions = columns
             .iter()
             .map(|(_, position)| Some(*position))

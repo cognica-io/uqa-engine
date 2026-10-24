@@ -82,7 +82,10 @@ fn collect_spilled_rows(
     operator: &mut dyn crate::PhysicalOperator,
     internal_schema: crate::RowSchema,
 ) -> Result<QueryRows, SQLError> {
-    let mut buffer = crate::SpillBuffer::new(physical_work_mem_bytes(runtime)?.max(1));
+    let work_mem = physical_work_mem_bytes(runtime).map_err(|error| {
+        close_after_physical_failure(operator, error.into(), "prepare spill buffer")
+    })?;
+    let mut buffer = crate::SpillBuffer::new(work_mem.max(1));
     if let Err(error) = operator.open() {
         return Err(close_after_physical_failure(operator, error, "open"));
     }
@@ -118,11 +121,16 @@ fn collect_exists_keys(
     catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
 ) -> Result<QueryRows, SQLError> {
     if operator.row_schema().len() < columns.len() {
-        return Err(SQLError::Internal(format!(
+        let error = SQLError::Internal(format!(
             "decorrelated EXISTS result has {} columns for {} keys",
             operator.row_schema().len(),
             columns.len()
-        )));
+        ));
+        return Err(close_after_physical_failure(
+            operator,
+            error.into(),
+            "prepare EXISTS keys",
+        ));
     }
     let key_positions = (0..columns.len()).collect::<Vec<_>>();
     let types = key_positions
@@ -191,7 +199,9 @@ fn collect_consumed_rows(
         collect_directional_query_operator(columns, operator, consumer)?;
         return Ok(QueryRows::Rows(Vec::new()));
     }
-    consumer.begin(columns, internal_schema)?;
+    consumer.begin(columns, internal_schema).map_err(|error| {
+        close_after_physical_failure(operator.as_mut(), error.into(), "begin row consumer")
+    })?;
     if let Err(error) = operator.open() {
         return Err(close_after_physical_failure(
             operator.as_mut(),
@@ -249,23 +259,7 @@ fn collect_directional_query_operator(
     operator: &mut Box<dyn crate::PhysicalOperator + '_>,
     consumer: &Rc<dyn QueryRowConsumer + '_>,
 ) -> Result<(), SQLError> {
-    let support = operator.backward_scan_support();
-    consumer.directional_scan_prepared(support)?;
-    if support != crate::BackwardScanSupport::Native {
-        let placeholder: Box<dyn crate::PhysicalOperator> = Box::new(
-            crate::TableScan::from_physical_rows(operator.row_schema().clone(), Vec::new()),
-        );
-        let inner = std::mem::replace(operator, placeholder);
-        *operator = Box::new(crate::ScrollMaterialize::new(inner));
-    }
-    consumer.begin(columns, operator.row_schema())?;
-    if let Err(error) = operator.open() {
-        return Err(close_after_physical_failure(
-            operator.as_mut(),
-            error,
-            "open directional row consumer input",
-        ));
-    }
+    open_directional_consumer(columns, operator, consumer)?;
     loop {
         let batch = match operator.next_direction(consumer.scan_direction()) {
             Ok(batch) => batch,
@@ -336,4 +330,45 @@ fn collect_directional_query_operator(
             }
         }
     }
+}
+
+fn open_directional_consumer(
+    columns: &[String],
+    operator: &mut Box<dyn crate::PhysicalOperator + '_>,
+    consumer: &Rc<dyn QueryRowConsumer + '_>,
+) -> Result<(), SQLError> {
+    let support = operator.backward_scan_support();
+    consumer
+        .directional_scan_prepared(support)
+        .map_err(|error| {
+            close_after_physical_failure(
+                operator.as_mut(),
+                error.into(),
+                "prepare directional consumer",
+            )
+        })?;
+    if support != crate::BackwardScanSupport::Native {
+        let placeholder: Box<dyn crate::PhysicalOperator> = Box::new(
+            crate::TableScan::from_physical_rows(operator.row_schema().clone(), Vec::new()),
+        );
+        let inner = std::mem::replace(operator, placeholder);
+        *operator = Box::new(crate::ScrollMaterialize::new(inner));
+    }
+    consumer
+        .begin(columns, operator.row_schema())
+        .map_err(|error| {
+            close_after_physical_failure(
+                operator.as_mut(),
+                error.into(),
+                "begin directional consumer",
+            )
+        })?;
+    if let Err(error) = operator.open() {
+        return Err(close_after_physical_failure(
+            operator.as_mut(),
+            error,
+            "open directional row consumer input",
+        ));
+    }
+    Ok(())
 }

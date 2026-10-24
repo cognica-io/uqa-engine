@@ -130,32 +130,37 @@ pub fn alias_join_operator<'a>(
     alias: Option<&str>,
     column_aliases: &[String],
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
-    let Some(alias) = alias else {
-        if column_aliases.is_empty() {
-            return Ok(operator);
-        }
-        return Err(SQLError::Internal(
-            "JOIN column aliases exist without a relation alias".into(),
-        ));
-    };
-    let columns = join_alias_columns(operator.row_schema(), alias, column_aliases)?;
-    let mapping = columns
-        .into_iter()
-        .enumerate()
-        .map(|(position, column)| {
-            (
-                column.clone(),
-                crate::ColumnIdentity::qualified(alias, column),
-                position,
-            )
-        })
-        .collect();
-    let mut selection = crate::ColumnSelection::with_fresh_identities(operator, mapping)
-        .rebinding_score_sources(alias);
-    if selection.row_schema().is_empty() {
-        selection = selection.with_relation_qualifier(alias);
-    }
-    Ok(Box::new(selection))
+    crate::physical::construction::OperatorBuild::build(operator, |operator| {
+        let Some(alias) = alias else {
+            if column_aliases.is_empty() {
+                return Ok(());
+            }
+            return Err(SQLError::Internal(
+                "JOIN column aliases exist without a relation alias".into(),
+            ));
+        };
+        let columns = join_alias_columns(operator.row_schema(), alias, column_aliases)?;
+        let mapping = columns
+            .into_iter()
+            .enumerate()
+            .map(|(position, column)| {
+                (
+                    column.clone(),
+                    crate::ColumnIdentity::qualified(alias, column),
+                    position,
+                )
+            })
+            .collect();
+        operator.wrap(|input| {
+            let mut selection = crate::ColumnSelection::with_fresh_identities(input, mapping)
+                .rebinding_score_sources(alias);
+            if selection.row_schema().is_empty() {
+                selection = selection.with_relation_qualifier(alias);
+            }
+            Box::new(selection)
+        });
+        Ok(())
+    })
 }
 
 #[cfg(test)]

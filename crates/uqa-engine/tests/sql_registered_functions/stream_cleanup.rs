@@ -366,3 +366,68 @@ fn scan_cleanup_failure_reaches_prepared_and_cursor_transaction_boundaries(
         Value::Int(1)
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite_native(1)]
+#[case::sqlite_kv(2)]
+#[case::redb(3)]
+fn construction_failure_closes_created_scans_before_returning_the_primary_error(
+    #[case] provider: usize,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("construction.db"));
+    for (query, state, created) in [
+        ("SELECT missing FROM host_rows(3)", "42703", 1),
+        ("SELECT * FROM host_rows(3) LIMIT -1", "2201W", 1),
+        ("SELECT * FROM host_rows(3) OFFSET -1", "2201X", 1),
+        ("SELECT * FROM host_rows(3) ORDER BY missing", "42703", 1),
+        ("SELECT * FROM host_rows(3) WHERE missing > 0", "42703", 1),
+        (
+            "SELECT * FROM host_rows(3) a JOIN host_rows(NULL) b ON true",
+            "42804",
+            1,
+        ),
+        (
+            "SELECT * FROM host_rows(3) a JOIN host_rows(3) b ON a.missing = b.n",
+            "42703",
+            2,
+        ),
+        (
+            "SELECT * FROM (host_rows(3) a CROSS JOIN host_rows(3) b) AS j(x,y,z)",
+            "42P10",
+            0,
+        ),
+    ] {
+        for close_error in [false, true] {
+            let counts = register(
+                &engine,
+                Behavior {
+                    close_error,
+                    ..Behavior::default()
+                },
+            );
+            engine.sql("BEGIN; SAVEPOINT before_build", &[]).unwrap();
+            let error = engine.sql(query, &[]).unwrap_err();
+            assert_eq!(error.sqlstate(), Some(state), "{query}: {error:?}");
+            assert_eq!(counts.created.load(Ordering::SeqCst), created, "{query}");
+            assert_eq!(counts.closed.load(Ordering::SeqCst), created, "{query}");
+            assert_eq!(counts.dropped.load(Ordering::SeqCst), created, "{query}");
+            assert_eq!(counts.read.load(Ordering::SeqCst), 0, "{query}");
+            assert_eq!(
+                error
+                    .detail()
+                    .unwrap_or_default()
+                    .contains("host close failed"),
+                close_error && created != 0,
+                "{query}: {error:?}"
+            );
+            assert_eq!(
+                engine.sql("SELECT 1", &[]).unwrap_err().sqlstate(),
+                Some("25P02")
+            );
+            engine.sql("ROLLBACK TO before_build; COMMIT", &[]).unwrap();
+            engine.sql("SELECT 1", &[]).unwrap();
+        }
+    }
+}

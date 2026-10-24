@@ -267,27 +267,31 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
             qualifier_filters.as_ref(),
         )?
     };
-    let source_schema = operator.row_schema().clone();
-    let projection_schema = with_query_table_pseudo_columns(&source_schema);
-    let projection_schema = overlay_outer_schema(&projection_schema, outer);
-    validate_query_block_references(
-        context.ctes.routines,
-        stmt,
-        &projection_schema,
-        params,
-        ctes,
-        outer,
-    )?;
-    let physical_filter =
-        context
-            .planning
-            .residual_filter(stmt, from, qualifier_filters.as_ref(), ctes)?;
+    let (operator, (columns, physical_filter)) =
+        crate::physical::construction::OperatorBuild::run(operator, |operator| {
+            let source_schema = operator.row_schema().clone();
+            let projection_schema = with_query_table_pseudo_columns(&source_schema);
+            let projection_schema = overlay_outer_schema(&projection_schema, outer);
+            validate_query_block_references(
+                context.ctes.routines,
+                stmt,
+                &projection_schema,
+                params,
+                ctes,
+                outer,
+            )?;
+            let physical_filter =
+                context
+                    .planning
+                    .residual_filter(stmt, from, qualifier_filters.as_ref(), ctes)?;
 
-    let columns = expand_from_star_columns(
-        projection_columns(&stmt.projections),
-        &stmt.projections,
-        &source_schema,
-    )?;
+            let columns = expand_from_star_columns(
+                projection_columns(&stmt.projections),
+                &stmt.projections,
+                &source_schema,
+            )?;
+            Ok((columns, physical_filter))
+        })?;
     execute_query_block_operator_output(
         context.relational,
         operator,

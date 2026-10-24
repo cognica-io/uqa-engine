@@ -8,6 +8,7 @@
 
 use thiserror::Error;
 
+pub(crate) mod construction;
 pub(crate) mod demand;
 
 use crate::batch::{Batch, RowSchema};
