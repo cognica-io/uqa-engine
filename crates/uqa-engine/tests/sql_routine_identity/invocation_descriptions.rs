@@ -26,6 +26,31 @@ fn selected(
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn routine_invocation_descriptions_match_postgresql(#[case] provider: usize) {
+    verify_provider(
+        provider,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../uqa-sql/src/assignment/routines/tests/pg18_routine_descriptions.json"
+        )),
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn routine_sql_body_descriptions_match_postgresql(#[case] provider: usize) {
+    verify_provider(
+        provider,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../uqa-sql/src/assignment/routines/tests/pg18_routine_body_descriptions.json"
+        )),
+    );
+}
+
+fn verify_provider(provider: usize, reference: &str) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("routine-descriptions.db");
     let open = || match provider {
@@ -41,11 +66,7 @@ fn routine_invocation_descriptions_match_postgresql(#[case] provider: usize) {
         .unwrap(),
         _ => unreachable!(),
     };
-    let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../uqa-sql/src/assignment/routines/tests/pg18_routine_descriptions.json"
-    )))
-    .unwrap();
+    let reference: serde_json::Value = serde_json::from_str(reference).unwrap();
     let engine = open();
     crate::pg18_oracle::verify(
         &engine,

@@ -17,7 +17,7 @@ use crate::{
 use std::sync::Arc;
 use uqa_core::memory::ProductionControl;
 
-fn bound_call() -> (Arc<SQLUserFunction>, FunctionBinding) {
+pub(super) fn bound_call() -> (Arc<SQLUserFunction>, FunctionBinding) {
     let Statement::CreateFunction(mut definition) = crate::compile(
         "CREATE FUNCTION public.accept_pair(a integer, b integer) RETURNS integer LANGUAGE SQL AS 'SELECT a + b'",
     ).unwrap().remove(0) else { panic!("function definition") };

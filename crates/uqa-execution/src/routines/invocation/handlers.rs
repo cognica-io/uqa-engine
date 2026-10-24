@@ -7,7 +7,7 @@
 //! Invoke scalar, table, and procedure routines and materialize their physical results.
 use super::{
     context::{RoutineCallRetention, RoutineInvocationContext},
-    execution::execute_routine,
+    execution::{execute_described_scalar_routine, execute_routine},
     resolution::{
         resolve_bound_routine, resolve_described_bound_routine, resolve_routine, ResolvedRoutine,
     },
@@ -106,7 +106,7 @@ pub fn call_user_scalar_function(
         Err(e) => return Some(Err(e)),
     };
     Some(execute_resolved_scalar_function(
-        context, name, args, resolved,
+        context, name, args, resolved, None,
     ))
 }
 
@@ -138,11 +138,24 @@ fn call_bound_scalar(
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
     };
+    let descriptions = retained.and_then(|retained| {
+        let scope = (retained.scope)()?;
+        Some(crate::routines::sql_body::SQLBodyDescriptions {
+            description: retained.descriptions.get(binding, &scope)?,
+            environment:
+                uqa_sql::routines::invocation::descriptions::RoutineConversionEnvironment {
+                    values: context.runtime.expressions,
+                    scope: retained.scope,
+                    control: retained.control,
+                },
+        })
+    });
     Some(execute_resolved_scalar_function(
         context,
         &binding.name,
         args,
         resolved,
+        descriptions,
     ))
 }
 
@@ -151,6 +164,7 @@ fn execute_resolved_scalar_function(
     name: &str,
     args: &[(Option<String>, Value)],
     resolved: ResolvedRoutine<'_>,
+    descriptions: Option<crate::routines::sql_body::SQLBodyDescriptions<'_>>,
 ) -> Result<Value, SQLError> {
     let ResolvedRoutine {
         function,
@@ -176,7 +190,12 @@ fn execute_resolved_scalar_function(
         )?;
         return Ok(Value::Null);
     }
-    let outcome = execute_routine(context, &function, bound, &invocation, false, None)?;
+    let outcome = match descriptions {
+        Some(descriptions) => {
+            execute_described_scalar_routine(context, &function, bound, &invocation, descriptions)?
+        }
+        None => execute_routine(context, &function, bound, &invocation, false, None)?,
+    };
     let out_params = function.def.output_params();
     if outcome.out_values.len() != out_params.len() {
         return Err(SQLError::Internal(format!(

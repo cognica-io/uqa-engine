@@ -37,6 +37,27 @@ pub(super) fn execute_routine(
         RoutineEntry::Invocation {
             allow_nonatomic,
             record_target,
+            descriptions: None,
+        },
+    )
+}
+
+pub(super) fn execute_described_scalar_routine(
+    context: &RoutineInvocationContext<'_>,
+    function: &SQLUserFunction,
+    bound: Vec<Value>,
+    invocation: &RoutineInvocationBinding,
+    descriptions: crate::routines::sql_body::SQLBodyDescriptions<'_>,
+) -> Result<RoutineOutcome, SQLError> {
+    execute_entry(
+        context,
+        function,
+        bound,
+        invocation,
+        RoutineEntry::Invocation {
+            allow_nonatomic: false,
+            record_target: None,
+            descriptions: Some(descriptions),
         },
     )
 }
@@ -45,6 +66,7 @@ enum RoutineEntry<'a> {
     Invocation {
         allow_nonatomic: bool,
         record_target: Option<&'a [uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
+        descriptions: Option<crate::routines::sql_body::SQLBodyDescriptions<'a>>,
     },
     CatalogCallback,
 }
@@ -71,12 +93,13 @@ fn execute_entry(
     invocation: &RoutineInvocationBinding,
     entry: RoutineEntry<'_>,
 ) -> Result<RoutineOutcome, SQLError> {
-    let (allow_nonatomic, record_target, require_execute) = match entry {
+    let (allow_nonatomic, record_target, descriptions, require_execute) = match entry {
         RoutineEntry::Invocation {
             allow_nonatomic,
             record_target,
-        } => (allow_nonatomic, record_target, true),
-        RoutineEntry::CatalogCallback => (false, None, false),
+            descriptions,
+        } => (allow_nonatomic, record_target, descriptions, true),
+        RoutineEntry::CatalogCallback => (false, None, None, false),
     };
     if matches!(
         &function.def.returns,
@@ -120,7 +143,15 @@ fn execute_entry(
                 ))
             })?
         };
-        execute_compiled_body(context, function, definition, &body, bound, record_target)
+        execute_compiled_body(
+            context,
+            function,
+            definition,
+            &body,
+            bound,
+            record_target,
+            descriptions,
+        )
     })
 }
 
@@ -131,6 +162,7 @@ fn execute_compiled_body(
     compiled: &CompiledFunctionBody,
     bound: Vec<Value>,
     record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
+    descriptions: Option<crate::routines::sql_body::SQLBodyDescriptions<'_>>,
 ) -> Result<RoutineOutcome, SQLError> {
     match compiled {
         CompiledFunctionBody::PLpgSQL(parsed) => {
@@ -143,6 +175,7 @@ fn execute_compiled_body(
             statements,
             &bound,
             record_target,
+            descriptions,
         ),
     }
 }
@@ -191,8 +224,9 @@ fn execute_sql_language(
     plans: &[uqa_sql::plan::UnifiedPlan],
     bound: &[Value],
     record_target: Option<&[uqa_sql::routines::result_check::SQLFunctionResultColumn]>,
+    descriptions: Option<crate::routines::sql_body::SQLBodyDescriptions<'_>>,
 ) -> Result<RoutineOutcome, SQLError> {
-    crate::routines::sql_body::execute_sql_language(
+    crate::routines::sql_body::execute_described_sql_language(
         context.runtime,
         context.types,
         &context.overloads,
@@ -203,5 +237,6 @@ fn execute_sql_language(
         },
         bound,
         record_target,
+        descriptions,
     )
 }

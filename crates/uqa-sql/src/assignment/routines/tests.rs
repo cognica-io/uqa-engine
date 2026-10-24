@@ -15,6 +15,7 @@ use crate::{
 use std::cell::Cell;
 use uqa_core::{memory::MemoryBudget, CancellationToken, RelationIdentity};
 
+mod retained_body;
 mod retained_invocation;
 
 struct Context {
@@ -98,7 +99,7 @@ impl AssignmentContext for Context {
 impl RoutineValueContext for Context {
     fn catalog_column_type(&self, name: &str) -> Option<ColumnType> {
         self.resolutions.set(self.resolutions.get() + 1);
-        (name == "public.accepted_value")
+        (name == "public.accepted_value" || name == self.domain.column_type().catalog_name())
             .then(|| self.domain.column_type())
             .or_else(|| ColumnType::from_sql_name(name).ok())
     }

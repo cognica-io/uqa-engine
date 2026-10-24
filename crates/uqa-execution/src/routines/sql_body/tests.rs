@@ -7,6 +7,8 @@
 use super::{output_values, row_fields, Value};
 use uqa_sql::ast::{CreateFunction, Statement};
 
+mod descriptions;
+
 fn definition(sql: &str) -> CreateFunction {
     let Statement::CreateFunction(definition) = uqa_sql::compile(sql).unwrap().remove(0) else {
         panic!("routine");

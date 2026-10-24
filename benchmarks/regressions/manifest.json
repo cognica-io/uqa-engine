@@ -2,6 +2,101 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "routine_sql_body_descriptions_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/invocation_descriptions.rs",
+      "capability": "PostgreSQL SQL routine body consumers",
+      "workload": "63 independent PostgreSQL 18.4 cases across memory, SQLite, SQLite Key/Value and redb with persistent reopen: live domain output checks, defaults, OUT-before-IN, whole/tuple composites, changed output schema and rollback.",
+      "invariant": "Preserve exact values, types, command tags and SQLSTATE/message/DETAIL/HINT, including one domain check per returned value and original 42P13 diagnostics.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "repeated_sql_body_inputs_keep_all_parameter_positions_and_current_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/sql_body/tests/descriptions.rs",
+      "capability": "SQL body input scheduling",
+      "workload": "512 changing inputs with an OUT parameter before the first IN parameter.",
+      "invariant": "Preserve every typed input and all-parameter positions while reducing body type lookups from 512 to 1 under 4KiB and releasing the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "body_metadata_declines_exhausted_allowance_and_unqualified_results",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "Optional SQL body metadata retention",
+      "workload": "Exhausted 8KiB allowance, unqualified return names, renewed allowance and cancellation.",
+      "invariant": "Preserve live resolution on misses, admit only fixed result declarations, propagate cancellation and release every lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "body_parameter_descriptions_follow_exact_positions_and_current_scope",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "SQL routine body parameter work",
+      "workload": "512 resolutions followed by a changed parameter spelling, changed scope and cancellation.",
+      "invariant": "Resolve a fixed parameter once; preserve changed targets, live scope misses, cancellation and complete allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "body_results_reuse_descriptions_while_values_and_domain_checks_stay_live",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "SQL routine result description work",
+      "workload": "512 changing domain results and a final failing domain check under a 16KiB allowance.",
+      "invariant": "Resolve the layout and output target once while checking every value; preserve 23514 and release all retained payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "result_schema_changes_and_missing_results_keep_the_original_checks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "SQL routine result input identity",
+      "workload": "A successful output followed by incompatible and missing result schemas.",
+      "invariant": "Reuse only the complete analyzed input and preserve the original 42P13 errors without caching failures.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "output_callbacks_invalidate_later_values_and_do_not_publish_old_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_body.rs",
+      "capability": "SQL routine output callback invalidation",
+      "workload": "A domain callback changes the native scope before the next output.",
+      "invariant": "Resolve later targets and result metadata live; never reuse or publish the expired conversion description.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "zero_argument_calls_keep_separate_descriptions_after_owner_moves",
@@ -148,26 +243,28 @@
       "package": "uqa-engine",
       "kind": "lib",
       "test": "native_routine_descriptions_follow_replacement_and_rollback",
-      "cases": 1,
+      "cases": 2,
       "source": "crates/uqa-engine/src/capabilities/query_expressions/routine_descriptions/tests.rs",
       "capability": "Native routine scope",
-      "workload": "Repeated native calls, replacement, transaction rollback and function drop.",
+      "workload": "SQL and PL/pgSQL: Repeated native calls, replacement, transaction rollback and function drop.",
       "invariant": "Actually retain eligible native bindings and invalidate them before changed or missing definitions are observed.",
       "case_names": [
-        ""
+        "case_1_plpgsql",
+        "case_2_sql"
       ]
     },
     {
       "package": "uqa-engine",
       "kind": "lib",
       "test": "native_routine_descriptions_keep_execute_checks_for_strict_null_calls",
-      "cases": 1,
+      "cases": 2,
       "source": "crates/uqa-engine/src/capabilities/query_expressions/routine_descriptions/tests.rs",
       "capability": "Native routine authority",
-      "workload": "Retained strict function followed by EXECUTE revocation and invoking-role change.",
+      "workload": "SQL and PL/pgSQL: Retained strict function followed by EXECUTE revocation and invoking-role change.",
       "invariant": "Keep the exact 42501 privilege error even for strict NULL input.",
       "case_names": [
-        ""
+        "case_1_plpgsql",
+        "case_2_sql"
       ]
     },
     {
