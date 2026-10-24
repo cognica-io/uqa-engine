@@ -1,6 +1,6 @@
 # Embedded C binding implementation
 
-Status: implementation in progress on `feature/c-bindings`, with main `f7cf634b4db0dc56c6ecfbd11bec7b80b56dbff2` integrated at `f7f725338033396bc4e91a5e8f80c68293d6b0db`, tracked by [draft PR #1266](https://github.com/cognica-io/uqa-engine/pull/1266). The [C binding design](../design/c-bindings.md) defines the requested interface. Current product source is `728ebcb3109ec5432b1149844758c757e31093ae`; subsequent task-record changes do not qualify additional product behavior. No C runtime release, completed qualification, or delivery is claimed by this ledger.
+Status: implementation in progress on `feature/c-bindings`, with main `f7cf634b4db0dc56c6ecfbd11bec7b80b56dbff2` integrated at `f7f725338033396bc4e91a5e8f80c68293d6b0db`, tracked by [draft PR #1266](https://github.com/cognica-io/uqa-engine/pull/1266). The [C binding design](../design/c-bindings.md) defines the requested interface. Current product source is `1c3894cdb21db350dec831f0abef25ffd271f227`; subsequent task-record changes do not qualify additional product behavior. No C runtime release, completed qualification, or delivery is claimed by this ledger.
 
 ## Scope and accepted requirements
 
@@ -22,14 +22,14 @@ Completed checks below cover the stated implementation and local evidence at the
 
 **1. Public headers, fixed numeric codes, C layouts, export/import modes, panic boundary, borrowed diagnostics, and checked allocation**
 
-- [x] Implement the current public headers, fixed status/type/state codes, opaque handles, export/calling-convention macros, panic boundary, borrowed diagnostics and checked pointer/allocation helpers. C11/C++17 header checks pass in all three linkage modes; all thirteen project C/header files have the exact required copyright block.
+- [x] Implement the current public headers, fixed status/type/state codes, opaque handles, export/calling-convention macros, panic boundary, borrowed diagnostics and checked pointer/allocation helpers. C11/C++17 header checks pass in all three linkage modes; all fifteen project C/header files have the exact required copyright block.
 - [ ] Finish declarations for the remaining API families and qualify the complete symbol/layout surface, platform ABIs and injected panic/allocation failures.
 
 **2. Configuration getters/setters, persistent/memory open, sibling sessions, close/lease rules, callback guard, and cancellation**
 
-- [x] Implement configuration getters/setters, memory/persistent open, sibling sessions, close leases, native cleanup, transaction state and cancellation. Persistent/session lifetime and allowance tests pass.
+- [x] Implement configuration getters/setters, explicit Memory/native SQLite/SQLite KV/redb opens, sibling sessions, close leases, native cleanup, transaction state and cancellation. The same seven C11/C++17 fixtures pass through each public constructor. All three persistent providers pass C ABI sibling isolation, savepoint recovery, retained subscription, busy-close, committed reopen and rollback-on-close checks. Both SQLite providers pass encrypted, LZ4, Zstandard and combined-mode reopen; memory/redb reject inapplicable settings before file creation.
 - [x] Implement the COPY callback guard: reject Engine reentry on the invoking thread, including other sessions and constructors; permit same-scope value helpers and ordinary execution on unrelated threads. Rust/C/C++ callback tests pass.
-- [ ] Integrate UDF/logging callback lifetimes and qualify encryption, compression and the remaining constructor/cleanup failure paths.
+- [ ] Integrate UDF/logging callback lifetimes, trusted-anchor opens and remaining constructor/cleanup failure paths; complete encrypted/compressed platform and injected-failure qualification beyond the local C ABI combinations.
 
 **3. Native multi-statement SQL, empty messages, atomic request batches, completion facts, and transaction/savepoint operations**
 
@@ -83,12 +83,12 @@ Completed checks below cover the stated implementation and local evidence at the
 
 **12. Native packaging metadata, CMake/pkg-config shared/static consumers, symbol inventory, platform CI, license inventory, and release workflow integration**
 
-- [x] Audit the Mach-O artifact against the headers at product source 728ebcb3109ec5432b1149844758c757e31093ae: 142 of 165 declared functions are exported, together with 17 internal regex callbacks. No XML parser or private XML bridge symbols are exported.
+- [x] Audit the Mach-O artifact against the headers at product source 1c3894cdb21db350dec831f0abef25ffd271f227: 144 of 167 declared functions are exported, including both SQLite KV and redb constructors, together with 17 internal regex callbacks. No XML parser or private XML bridge symbols are exported.
 - [ ] Finish native packaging, CMake/pkg-config shared/static consumers, the complete declared-symbol inventory, export restriction, platform CI, license inventory and release workflow integration. Twenty-three declared functions and additional design-specified value APIs remain unimplemented; distribution linkage must remove the internal regex exports.
 
 **13. Five C examples, example matrix and manual updates, actual shared/static C/C++ ABI tests, focused owner tests, sanitizers, and ownership/dependency checks**
 
-- [x] Execute C11/C++17 shared ABI clients and focused owner tests. Product source 728ebcb3109ec5432b1149844758c757e31093ae passes 2,245 SQL, 223 Planner, 155 Engine unit, 100 Execution, 41 Engine integration, one QueryBuilder and 19 FFI integration tests. The Engine integration group includes the manual SQL compile/execute harness. Engine provider cases explicitly distinguish Memory, SQLite native, SQLite KV and redb; C ABI fixtures have their own memory/native SQLite scope. Independent JSON/PyYAML/ElementTree parsing agrees on actual ABI plan output. Strict FFI/Engine/SQL/Planner/Execution Clippy, formatting, whitespace, ownership/dependency, harness, Rust-size, copyright and cache checks pass. Earlier XML, pinned-source and license evidence retains its original source identity below.
+- [x] Execute C11/C++17 shared ABI clients and focused owner tests. Product source 1c3894cdb21db350dec831f0abef25ffd271f227 passes 41 FFI integration tests, including 56 actual shared-library client executions: seven identical fixtures in both C11 and C++17 on each of Memory, native SQLite, SQLite KV and redb. Durable C ABI cases cover all three persistent providers. Strict no-default-features FFI library/test Clippy, formatting, whitespace, dependency/ownership, single-harness, source-license, Rust-size, fifteen project C/header copyright blocks and cache checks pass. Earlier 2,784-test EXPLAIN/owner evidence, independent format parsing and XML evidence retain their original source identities in the history below; they are not represented as reruns at this adapter-only source.
 - [ ] Implement and execute all five public C examples, update the example matrix/manual, and complete static/shared platform consumers, feature combinations, allocation/panic qualification and sanitizers.
 
 **14. Logical commits, draft PR/task records and repository labels, review corrections, final-source automatic Linux/macOS regression and affected FDW results, and verified delivery**
@@ -98,6 +98,8 @@ Completed checks below cover the stated implementation and local evidence at the
 - [ ] Finish the remaining implementation and review fixes, qualify the final source through automatic Linux/macOS performance regression and affected FDW checks, then complete verified merge/delivery, issue closure and branch cleanup. Keep the PR draft until the implementation and focused review batch is complete.
 
 ## Verification record
+
+Each record below belongs to its named product source. Earlier records are historical evidence when superseded by later work; the live checklist above describes current scope and remaining requirements.
 
 The design's earlier extracted-declaration checks and minimal export probes do not verify this runtime. Record actual implementation commands, source identity, results, and unresolved failures here as work proceeds. Final completion requires every checklist item and final-source delivery evidence; partial implementation does not narrow the scope.
 
@@ -226,3 +228,24 @@ Actual C11/C++17 shared clients verify EXPLAIN descriptors in all four formats, 
 Strict no-default-features library/test Clippy for FFI, Engine, SQL, Planner and Execution passes. Formatting, whitespace, dependency policy (115 runtime edges across 35 crates), capability ownership (3,222 files, 124 adapters and 3,098 engine-free leaves), single-harness coverage (231 sources in 24 targets), the Rust file ceiling, thirteen project C/header copyright blocks, independent-reference hashes and the target-cache limit pass. Generated logs and parser diagnostics remain outside tracked files. Earlier XML parser pin and license evidence retains its original source identity above.
 
 The live checklist now records twenty-one completed implementation/evidence items and fourteen remaining items across the original fourteen scopes. EXPLAIN instrumentation for COSTS, SETTINGS, GENERIC_PLAN, BUFFERS, WAL, MEMORY and SERIALIZE, per-node timing, bounded/cancellable draining and rendering, and the remaining prepared/value/callback qualification remain implementation work. Native XML allocation/cancellation/fault limits, UDFs, logging, Arrow, packaging, public examples, complete static/platform/feature/sanitizer checks and final-source automatic Linux/macOS performance and affected FDW qualification remain open. This is focused local evidence on a draft PR, not completed delivery.
+
+### C ABI execution on all four storage backends
+
+Product source `1c3894cdb21db350dec831f0abef25ffd271f227` adds `uqa_engine_open_sqlite_kv` and `uqa_engine_open_redb`, both paired with `uqa_engine_close`. FFI selects concrete public provider constructors and delegates session ownership to `Engine::from_persistent_provider`; it does not duplicate storage or transaction algorithms. Native SQLite remains `uqa_engine_open`, and `uqa_engine_open_auto` detects native SQLite encoding rather than choosing a backend. The design, source README and canonical manual now describe all four choices.
+
+The single FFI integration target compiles each of `messages.c`, `statements.c`, `cursors.c`, `copy.c`, `notices.c`, `notifications.c` and `storage.c` as both C11 and C++17 with `-Wall -Wextra -Werror`. Every client links and executes against the actual Cargo-built shared library. Provider names are explicit test cases, with separate persistent database and spill directories for every compiler invocation.
+
+| Backend | Public C constructor | C11 executions | C++17 executions | Durable session and reopen |
+| --- | --- | --- | --- | --- |
+| Memory | `uqa_engine_open_memory` | 7 passed | 7 passed | Not persistent; sibling creation is explicitly rejected |
+| Native SQLite | `uqa_engine_open` | 7 passed | 7 passed | Passed |
+| SQLite KV | `uqa_engine_open_sqlite_kv` | 7 passed | 7 passed | Passed |
+| redb | `uqa_engine_open_redb` | 7 passed | 7 passed | Passed |
+
+All three persistent paths verify committed/private sibling visibility, failed SQL followed by savepoint recovery, capability flags, busy close with a retained result, notification delivery after closing its creating Engine, committed close/reopen and rollback of uncommitted rows on close. Both SQLite paths additionally create, write, close and reopen encrypted, LZ4, Zstandard and combined encrypted/compressed files; a wrong key fails with IO status and a NULL handle. Memory/redb reject every inapplicable encryption/compression combination without creating a database file. Existing SQL/XML/EXPLAIN, prepared statement, cursor, COPY, notice and notification assertions now execute on all four C backend paths.
+
+On macOS arm64 with Rust 1.95.0, `cargo test -p uqa-ffi --no-default-features --test integration` passes 41 tests with zero failures or ignored cases: 28 provider/fixture cases containing 56 actual native client executions, one installed-header check and 12 Rust ABI tests. The header check covers C11/C++17 static, shared-producer and shared-consumer modes and conflicting shared-mode rejection. `cargo clippy -p uqa-ffi --no-default-features --lib --test integration -- -D warnings` passes.
+
+The verified Mach-O library SHA-256 is `95aba5fcab9806e4da7661602876db5ba47c79ded3f8b2520c650fd4e8428d4f`. It exports 144 of 167 declared C functions, including both new constructors; the same 23 unimplemented declarations and 17 internal regex exports remain tracked in the live scope. No XML parser or private XML bridge exports appear. The dependency policy passes with 116 runtime edges across 35 crates; capability ownership passes with 3,222 files, 124 adapters and 3,098 engine-free leaves. The single-harness check passes for 231 sources in 24 targets. Source licenses, formatting, whitespace, the Rust file ceiling, fifteen exact project C/header copyright blocks, local documentation links and the target-cache limit pass. Upstream vendor copyright notices are preserved.
+
+The original fourteen scopes remain intact, with twenty-one checked items and fourteen remaining items. This record replaces the earlier memory/native-SQLite-only C ABI evidence for current source. Static runtime consumers, other platforms, feature combinations, sanitizers, remaining implementation families and final-source automatic Linux/macOS performance and affected FDW results remain required. The PR stays draft; no workflow is manually dispatched, rerun or cancelled.
