@@ -14,6 +14,24 @@ use crate::ast::{
     FunctionBinding, FunctionResolutionError, OperatorResolutionError, RoutineInvocationBinding,
 };
 
+impl FunctionBinding {
+    /// Copy the complete bound identity with the scalar lowerer's existing allocation admission.
+    pub fn clone_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>> {
+        control.check()?;
+        if control.budget().is_none() {
+            return Ok(control.finish(self.clone(), None)?);
+        }
+        let mut copying = Lowering {
+            control: Some(super::resources::Control::from_production(*control)),
+        };
+        let binding = copying.binding(Source::Borrowed(self))?;
+        Ok(copying.finish(binding)?.into())
+    }
+}
+
 impl Lowering<'_> {
     pub(super) fn binding(
         &mut self,

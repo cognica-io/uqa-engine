@@ -15,11 +15,14 @@ use crate::{
 use std::cell::Cell;
 use uqa_core::{memory::MemoryBudget, CancellationToken, RelationIdentity};
 
+mod retained_invocation;
+
 struct Context {
     domain: StoredDomain,
     resolutions: Cell<usize>,
     checks: Cell<usize>,
     accept: Cell<bool>,
+    after_check: std::cell::RefCell<Option<Box<dyn Fn()>>>,
 }
 
 impl Context {
@@ -51,6 +54,7 @@ impl Context {
             resolutions: Cell::new(0),
             checks: Cell::new(0),
             accept: Cell::new(true),
+            after_check: std::cell::RefCell::new(None),
         }
     }
 }
@@ -84,6 +88,9 @@ impl AssignmentContext for Context {
         _: &RowSchema,
     ) -> Result<Value, SQLError> {
         self.checks.set(self.checks.get() + 1);
+        if let Some(callback) = self.after_check.borrow().as_ref() {
+            callback();
+        }
         Ok(Value::Bool(self.accept.get()))
     }
 }

@@ -17,6 +17,7 @@ use uqa_core::{memory::Produced, Value};
 use uqa_sql::{
     ast::{BinaryOp, FunctionBinding, FunctionDispatch},
     expr::enums::EnumComparisonState,
+    routines::invocation::descriptions::RoutineCallDescriptions,
     ScalarExpr,
 };
 
@@ -89,9 +90,10 @@ pub(crate) struct ColumnSlot {
 }
 
 /// Read-only lookup into the function state owned by a prepared expression set.
-/// The state has one fixed-size entry per logical ordering comparison, numeric operator, literal/row cast, column reference or composite constructor, never per input row.
+/// The state has one fixed-size entry per logical routine call, ordering comparison, numeric operator, literal/row cast, column reference or composite constructor, never per input row.
 #[derive(Debug, Default)]
 pub struct FunctionCallStates {
+    routines: Vec<(usize, RoutineCallDescriptions)>,
     enums: Vec<((usize, u8), EnumComparisonState)>,
     constant_casts: Vec<(usize, OnceLock<ConstantCast>)>,
     columns: Vec<(usize, OnceLock<ColumnSlot>)>,
@@ -109,6 +111,9 @@ impl FunctionCallStates {
         expression.visit(&mut |expression| match expression {
             ScalarExpr::Func { name, binding, args, .. } => {
                 self.add(args.as_ptr() as usize, function_slots(name, binding.as_ref(), args));
+                if let Some(invocation) = binding.as_ref().filter(|binding| !binding.builtin).and_then(|binding| binding.invocation.as_deref()) {
+                    self.routines.push((std::ptr::from_ref(invocation) as usize, RoutineCallDescriptions::default()));
+                }
                 if binding.as_ref().is_some_and(|binding| binding.builtin
                     && matches!(binding.dispatch, Some(FunctionDispatch::NumericOperator(operator)) if args.len() == operator.arity())) {
                     self.numeric_operators.push((args.as_ptr() as usize, OnceLock::new()));
@@ -148,13 +153,22 @@ impl FunctionCallStates {
     }
 
     fn is_empty(&self) -> bool {
-        self.enums.is_empty()
+        self.routines.is_empty()
+            && self.enums.is_empty()
             && self.constant_casts.is_empty()
             && self.columns.is_empty()
             && self.row_casts.is_empty()
             && self.numeric_operators.is_empty()
             && self.row_constructors.is_empty()
             && self.composite_constructors.is_empty()
+    }
+
+    pub(crate) fn routine(&self, binding: &FunctionBinding) -> Option<&RoutineCallDescriptions> {
+        let address = std::ptr::from_ref(binding.invocation.as_deref()?) as usize;
+        self.routines
+            .binary_search_by_key(&address, |(key, _)| *key)
+            .ok()
+            .map(|index| &self.routines[index].1)
     }
 
     /// The retained key of the column reference `expression`.
@@ -286,6 +300,7 @@ struct PreparedCallStates<T> {
 }
 
 static EMPTY_CALL_STATES: FunctionCallStates = FunctionCallStates {
+    routines: Vec::new(),
     enums: Vec::new(),
     constant_casts: Vec::new(),
     columns: Vec::new(),
@@ -299,6 +314,8 @@ impl<T> PreparedExpressions<T> {
     pub(crate) fn new(expressions: T, visit_roots: VisitRoots<T>) -> Self {
         let mut calls = FunctionCallStates::default();
         visit_roots(&expressions, &mut |expression| calls.register(expression));
+        calls.routines.sort_unstable_by_key(|(address, _)| *address);
+        calls.routines.dedup_by_key(|(address, _)| *address);
         calls.enums.sort_unstable_by_key(|(address, _)| *address);
         calls.enums.dedup_by_key(|(address, _)| *address);
         calls

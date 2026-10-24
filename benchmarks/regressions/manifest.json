@@ -2,6 +2,192 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "zero_argument_calls_keep_separate_descriptions_after_owner_moves",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/invocation/resolution/tests/prepared_zero_arguments.rs",
+      "capability": "Zero-argument routine identity",
+      "workload": "Two zero-argument calls evaluated repeatedly after their prepared owner moves, followed by a cloned owner.",
+      "invariant": "Keep one distinct description per owned invocation even when empty argument arrays share an address; clones resolve independently and release all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "invocation_descriptions_do_not_retain_retired_function_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_invocation.rs",
+      "capability": "Routine catalog payload lifetime",
+      "workload": "Retained description after the catalog owner drops the selected function.",
+      "invariant": "Keep only a weak function reference so retired body payload is released, and release all admitted metadata on owner drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_scalar_calls_reuse_invocation_metadata_and_clones_start_fresh",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/invocation/resolution/tests.rs",
+      "capability": "Prepared routine metadata delivery",
+      "workload": "512 changing rows through scalar evaluation followed by a cloned prepared owner.",
+      "invariant": "Use the descriptor hook and one lookup per metadata kind across rows; cloned preparation must resolve independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_descriptions_keep_domain_checks_live_and_preserve_membership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests.rs",
+      "capability": "Routine conversion observations",
+      "workload": "Changing valid and invalid values with existing domain membership.",
+      "invariant": "Reuse target description while retaining every required live domain check.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_pseudotype_descriptions_keep_values_and_reject_each_invalid_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests.rs",
+      "capability": "Routine pseudotype conversion",
+      "workload": "Record, trigger, anyarray, refcursor and void assignments.",
+      "invariant": "Preserve original carrier values and conversion errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_descriptions_admit_owned_payload_and_release_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests.rs",
+      "capability": "Routine type retention",
+      "workload": "Controlled copied descriptions with small memory allowance and cancellation.",
+      "invariant": "Account for owned type payload and release every reservation on failure or drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_invocation_resolves_each_target_once_and_checks_every_value",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_invocation.rs",
+      "capability": "Routine target resolution work",
+      "workload": "Two domain targets, 512 changing argument pairs and a final rejected value.",
+      "invariant": "Resolve each target once while preserving all 1,025 value checks within the existing 16KiB allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_invocation_rejects_changed_bindings_scopes_and_unqualified_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_invocation.rs",
+      "capability": "Routine description validity",
+      "workload": "Changed routine identity, argument mapping, catalog scope and unqualified names.",
+      "invariant": "Reuse only the complete fixed binding and original immutable scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "optional_invocation_retention_declines_small_allowance_and_preserves_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_invocation.rs",
+      "capability": "Optional routine retention",
+      "workload": "One-byte allowance and cancelled admission.",
+      "invariant": "Decline optional retention without changing live invocation; preserve 57014 and release all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "conversion_callbacks_invalidate_later_arguments_and_prevent_stale_publication",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/routines/tests/retained_invocation.rs",
+      "capability": "Routine callback invalidation",
+      "workload": "First domain callback changes the catalog scope before a later argument.",
+      "invariant": "Resolve later arguments live and do not publish the earlier stale target description.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "repeated_bound_calls_resolve_identity_sources_and_targets_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/invocation/resolution/tests.rs",
+      "capability": "Bound routine invocation work",
+      "workload": "512 changing values through ordinary and retained invocation with a 4KiB allowance.",
+      "invariant": "Preserve every result while reducing function/source/target lookups from 512/1024/512 to 1/1/1 and releasing retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_routine_descriptions_follow_replacement_and_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/query_expressions/routine_descriptions/tests.rs",
+      "capability": "Native routine scope",
+      "workload": "Repeated native calls, replacement, transaction rollback and function drop.",
+      "invariant": "Actually retain eligible native bindings and invalidate them before changed or missing definitions are observed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_routine_descriptions_keep_execute_checks_for_strict_null_calls",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/query_expressions/routine_descriptions/tests.rs",
+      "capability": "Native routine authority",
+      "workload": "Retained strict function followed by EXECUTE revocation and invoking-role change.",
+      "invariant": "Keep the exact 42501 privilege error even for strict NULL input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "routine_invocation_descriptions_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/invocation_descriptions.rs",
+      "capability": "PostgreSQL routine invocation consumers",
+      "workload": "Four providers and persistent reopen against 43 independent PostgreSQL statements: named/default/variadic/polymorphic calls, live side effects, domain failures, replacement/drop and rollback.",
+      "invariant": "Preserve exact values, types, tags and SQLSTATE/message/DETAIL/HINT.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "nested_execution_sources_are_bound_once",

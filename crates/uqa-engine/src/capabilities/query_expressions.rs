@@ -25,6 +25,7 @@ pub(crate) struct ScopedEngineHook<'a> {
     ctes: std::borrow::Cow<'a, CteScope>,
     catalog: catalog::ScopedCatalog,
     cast_scope: std::sync::OnceLock<uqa_sql::expr::CatalogCastScope>,
+    routine_scope: std::sync::OnceLock<routine_descriptions::NativeRoutineScope>,
 }
 
 impl<'a> ScopedEngineHook<'a> {
@@ -35,6 +36,7 @@ impl<'a> ScopedEngineHook<'a> {
             ctes: std::borrow::Cow::Borrowed(ctes),
             catalog: catalog::ScopedCatalog::new(engine, ctes),
             cast_scope: std::sync::OnceLock::new(),
+            routine_scope: std::sync::OnceLock::new(),
         }
     }
 }
@@ -59,6 +61,7 @@ impl<'a> ScopedEngineHook<'a> {
             runtime: engine.query_runtime_view(),
             catalog: catalog::ScopedCatalog::new(engine, &ctes),
             cast_scope: std::sync::OnceLock::new(),
+            routine_scope: std::sync::OnceLock::new(),
             ctes: std::borrow::Cow::Owned(ctes),
         }
     }
@@ -396,6 +399,16 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
             args,
         )
     }
+
+    fn call_bound_user_function_with_descriptions(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+        descriptions: &uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Option<Result<Value, SQLError>> {
+        self.call_described_routine(binding, args, descriptions, control)
+    }
 }
 
 impl uqa_execution::query::expression::ScalarExpressionContext for ScopedEngineHook<'_> {
@@ -418,6 +431,7 @@ impl uqa_execution::query::expression::ScalarExpressionContext for ScopedEngineH
 
 mod catalog;
 mod function_invocation;
+mod routine_descriptions;
 mod type_resolution;
 
 use uqa_execution::{PhysicalRow, RowSchema};

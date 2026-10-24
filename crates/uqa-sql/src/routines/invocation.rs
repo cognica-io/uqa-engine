@@ -5,6 +5,7 @@
 //
 
 //! Routine invocation metadata, concrete signatures, and anonymous-record assignment rules.
+pub mod descriptions;
 use crate::{
     assignment::routines::RoutineValueContext,
     ast::{
